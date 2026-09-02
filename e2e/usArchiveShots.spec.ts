@@ -51,11 +51,25 @@ for (const width of [320, 390]) {
     await expect(page.getByTestId('post-grid').locator('[data-kind="text"]')).toHaveCount(0);
     await page.screenshot({ path: `${OUT}/us-${width}.png`, fullPage: true });
 
-    await page.getByTestId('post-tile-rec-shared').click();
+    const postTile = page.getByTestId('post-tile-rec-shared');
+    await postTile.click();
     await expect(page.getByTestId('photo-post-viewer')).toBeVisible();
     await page.screenshot({ path: `${OUT}/us-post-detail-${width}.png`, fullPage: true });
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('photo-post-viewer')).toHaveCount(0);
+    await expect(postTile).toBeFocused();
+
+    const highlightTrigger = page.getByRole('button', { name: '하이라이트 만들기' });
+    await highlightTrigger.click();
+    const highlightDialog = page.getByRole('dialog', { name: '새 하이라이트' });
+    await expect(highlightDialog).toBeVisible();
+    await highlightDialog.getByRole('button', { name: /사진 선택$/ }).first().click();
+    const coverTarget = await highlightDialog.getByRole('button', { name: /커버/ }).boundingBox();
+    expect(coverTarget?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(coverTarget?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: '새 하이라이트' })).toHaveCount(0);
+    await expect(highlightTrigger).toBeFocused();
 
     const photoTab = page.getByRole('button', { name: '사진', exact: true });
     await photoTab.click();

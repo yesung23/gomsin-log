@@ -375,6 +375,33 @@ describe('PaperProfile (우리 화면)', () => {
     })));
   });
 
+  it('하이라이트 편집기는 Escape로 닫고 열었던 버튼으로 포커스를 돌려준다', () => {
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    const trigger = screen.getByRole('button', { name: '하이라이트 만들기' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(screen.getByPlaceholderText('예: 우리의 봄')).toHaveFocus();
+
+    const first = screen.getByRole('button', { name: '하이라이트 편집 닫기' });
+    const last = screen.getByRole('button', { name: '저장' });
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(first).toHaveFocus();
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('dialog', { name: '새 하이라이트' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it('스토리에서 돌아온 사진 id로 하이라이트 편집기를 연다', async () => {
     const record = makeRecord({
       id: 'story-photo',
@@ -436,14 +463,17 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.queryByTestId('post-tile-rec-normal')).not.toBeInTheDocument();
     expect(screen.getByTestId('post-tile-rec-travel')).toHaveAttribute('data-kind', 'photo');
 
-    fireEvent.click(screen.getByTestId('post-tile-rec-travel'));
+    const tile = screen.getByTestId('post-tile-rec-travel');
+    tile.focus();
+    fireEvent.click(tile);
     const viewer = screen.getByTestId('photo-post-viewer');
     expect(viewer).toBeInTheDocument();
     expect(viewer.querySelector('[data-testid="record-attachment"] img[alt="제주도.jpg"]')).not.toBeNull();
     expect(within(viewer).getByText('제주도 바다 도착!')).toHaveClass('record-copy');
 
-    fireEvent.click(screen.getByRole('button', { name: '사진 게시물 닫기' }));
+    fireEvent.keyDown(document, { key: 'Escape' });
     expect(screen.queryByTestId('photo-post-viewer')).not.toBeInTheDocument();
+    expect(tile).toHaveFocus();
   });
 
   it('여행 기록이 없으면 여행 안내 문구가 격자에 노출된다', () => {

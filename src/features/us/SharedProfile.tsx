@@ -31,6 +31,22 @@ type ProfileTab = 'grid' | 'photo' | 'trip';
 export type PostRetryPhase = 'media' | 'publication';
 
 const POST_RETRY_KEY_PREFIX = 'gomsinlog.post-retry.v1';
+const DIALOG_FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function keepDialogFocus(event: KeyboardEvent, panel: HTMLElement | null): void {
+  if (event.key !== 'Tab' || !panel) return;
+  const focusable = panel.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 interface StoredPostRetry {
   recordId: string;
@@ -97,7 +113,9 @@ export function SharedProfile() {
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const selectedPostTriggerRef = useRef<HTMLElement | null>(null);
   const [editingHighlightId, setEditingHighlightId] = useState<string | null | undefined>(undefined);
+  const highlightTriggerRef = useRef<HTMLElement | null>(null);
   const [highlightTitle, setHighlightTitle] = useState('');
   const [highlightRecordIds, setHighlightRecordIds] = useState<string[]>([]);
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
@@ -452,12 +470,18 @@ export function SharedProfile() {
   );
 
   const openCreateHighlight = () => {
+    highlightTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     setEditingHighlightId(null);
     setHighlightTitle('');
     setHighlightRecordIds([]);
     setHighlightCoverId(undefined);
   };
   const openEditHighlight = (highlight: CoupleHighlight) => {
+    highlightTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const visibleIds = new Set(photoRecords.map((record) => record.id));
     const recordIds = highlight.recordIds.filter((id) => visibleIds.has(id));
     setEditingHighlightId(highlight.id);
@@ -648,6 +672,7 @@ export function SharedProfile() {
           onClose={closeHighlightEditor}
           onSave={() => void saveHighlight()}
           onDelete={editingHighlightId ? () => void removeHighlight() : undefined}
+          restoreFocusTo={highlightTriggerRef.current}
         />
       ) : null}
 
@@ -671,14 +696,19 @@ export function SharedProfile() {
         <PostGrid
           records={profilePostRecords}
           coupleId={profile.couple.coupleId}
-          onOpen={setSelectedPostId}
+          onOpen={(recordId) => {
+            selectedPostTriggerRef.current = document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null;
+            setSelectedPostId(recordId);
+          }}
           emptyMessage="아직 게시물이 없어요."
           ariaLabel="사진 게시물 격자"
         />
       )}
 
       {selectedPost ? (
-        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
+        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} restoreFocusTo={selectedPostTriggerRef.current} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
       ) : null}
 
       {composingPost ? (
@@ -816,6 +846,7 @@ function HighlightEditor({
   onClose,
   onSave,
   onDelete,
+  restoreFocusTo,
 }: {
   title: string;
   setTitle: (value: string) => void;
@@ -830,13 +861,35 @@ function HighlightEditor({
   onClose: () => void;
   onSave: () => void;
   onDelete?: () => void;
+  restoreFocusTo: HTMLElement | null;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+  const busyRef = useRef(busy);
+  onCloseRef.current = onClose;
+  busyRef.current = busy;
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (!busyRef.current) onCloseRef.current();
+        return;
+      }
+      keepDialogFocus(event, panelRef.current);
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      restoreFocusTo?.focus();
+    };
+  }, [restoreFocusTo]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-foreground/35 p-3" role="dialog" aria-modal="true" aria-labelledby="highlight-editor-title" data-testid="highlight-editor">
-      <section className="relative w-full rounded-surface border border-border bg-card p-4 shadow-xl">
+      <section ref={panelRef} className="relative w-full rounded-surface border border-border bg-card p-4 shadow-xl">
         <div className="flex items-center justify-between gap-3">
           <h2 id="highlight-editor-title" className="text-heading font-semibold text-foreground">{editing ? '하이라이트 편집' : '새 하이라이트'}</h2>
-          <button type="button" aria-label="하이라이트 편집 닫기" onClick={onClose} disabled={busy} className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button>
+          <button type="button" aria-label="하이라이트 편집 닫기" onClick={onClose} disabled={busy} className="press-response flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button>
         </div>
         <label className="mt-4 block text-label font-semibold text-foreground">
           이름
@@ -869,7 +922,7 @@ function HighlightPickerTile({ record, coupleId, selected, cover, onToggle, onSe
         {photo ? <HighlightPickerMedia photo={photo} coupleId={coupleId} recordId={record.id} /> : <span className="flex h-full items-center justify-center"><ImageIcon size={20} color="var(--ink-soft)" /></span>}
         <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-black/40 text-caption text-white">{selected ? '✓' : ''}</span>
       </button>
-      {selected ? <button type="button" onClick={onSetCover} className="absolute bottom-1 left-1 rounded-full bg-black/55 px-2 py-1 text-caption font-semibold text-white">{cover ? '커버' : '커버로'}</button> : null}
+      {selected ? <button type="button" onClick={onSetCover} className="press-response-row absolute bottom-1 left-1 min-h-11 min-w-11 rounded-full bg-black/55 px-2 text-caption font-semibold text-white">{cover ? '커버' : '커버로'}</button> : null}
     </div>
   );
 }
@@ -898,15 +951,27 @@ function TripRow({ trip, phase, onOpen }: { trip: Trip; phase: TripPhase; onOpen
   return <button type="button" data-testid={`profile-trip-${trip.id}`} aria-label={`${trip.title} 열기`} onClick={() => onOpen(trip.id)} className="press-response flex min-h-16 w-full items-center gap-3 rounded-control px-3 text-left" style={{ background: 'var(--paper)', border: 'var(--stroke-thin) solid var(--ink-faint)' }}><CalendarDays size={18} className="shrink-0" color="var(--ink-soft)" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-label font-semibold" style={{ color: 'var(--ink)' }}>{trip.title}</span><span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>{TRIP_PHASE_PILL[phase]}</span></span><span className="mt-0.5 block truncate text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>{dateLabel}</span></span></button>;
 }
 
-function PhotoPostViewer({ record, coupleId, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; onClose: () => void; onOpenRecord: (id: string) => void }) {
+function PhotoPostViewer({ record, coupleId, restoreFocusTo, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; restoreFocusTo: HTMLElement | null; onClose: () => void; onOpenRecord: (id: string) => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const photos = getPhotoAttachments(record);
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      keepDialogFocus(event, panelRef.current);
+    };
     document.addEventListener('keydown', onKey);
     closeRef.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      restoreFocusTo?.focus();
+    };
+  }, [restoreFocusTo]);
   if (photos.length === 0) return null;
-  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="ink-chip min-h-9 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
+  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="press-response-row ink-chip min-h-11 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
 }

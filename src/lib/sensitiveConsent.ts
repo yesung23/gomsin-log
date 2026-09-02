@@ -73,15 +73,16 @@ export function revokeCycleSensitiveConsent(userId?: string): void {
  * cache entry alone must never unlock the feature, because clearing the server
  * row (or revoking on another device) would otherwise be silently ignored.
  *
- * When Supabase is not configured at all there is no authority to consult, so
- * the cached answer is returned rather than inventing a verdict.
+ * When Supabase is not configured there is no authority to consult. That is a
+ * failure, not permission: a local cache entry can improve copy or recovery,
+ * but it must never authorize health-data processing by itself.
  */
 export async function syncCycleConsentWithDB(
   userId?: string,
 ): Promise<SensitiveConsentWriteResult> {
   if (!userId) return { ok: true, granted: false };
   if (!isSupabaseConfigured || !supabase) {
-    return { ok: true, granted: hasCycleSensitiveConsent(userId) };
+    return { ok: false, reason: 'server' };
   }
 
   try {

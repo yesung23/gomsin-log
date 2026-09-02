@@ -959,3 +959,19 @@ supabase functions deploy delete-account
 - **원격 적용 상태: NOT APPLIED.** Production Supabase에는 이 작업에서 접근하거나
   적용하지 않았습니다. 로컬 fresh-chain과 독립 보안 검토를 통과한 뒤에도 원격 적용은
   별도 action-time 승인과 사전 상태 확인이 필요합니다.
+
+## 069 — 현재 버전의 주기 민감정보 동의 강제 (2026-09-03)
+
+- `069_require_current_cycle_consent.sql`은 파트너용 주기 projection이 건강 데이터나 공유
+  설정을 읽기 전에 소유자의 `cycle` 동의 행 존재, 현재 버전 `2026-08-09`, 미철회를
+  모두 확인하도록 최종 함수를 교체합니다.
+- 동의 누락·구버전·철회는 기존 호환 형태인 `false/null` 1행으로 닫힙니다. 현재 버전의
+  유효한 동의와 명시적으로 켠 공유 토글을 모두 만족한 경우에만 최소 projection을
+  반환합니다. 원본 주기 테이블, RLS, 데이터, 8열 API와 권한은 변경하지 않습니다.
+- 클라이언트와 SQL의 동의 버전 parity를 단위 테스트로 고정하고, 로컬 PostgreSQL 실제
+  actor harness가 정상 동의, 누락·구버전·철회, all-off, anon/NULL subject/unrelated/former
+  partner, 원본 5개 테이블 격리와 version/revocation mutation proof를 검증합니다.
+- rollback은 취약한 `026`을 복원하지 않습니다. 문제가 있으면 새 forward migration으로
+  projection을 전부 비공유 상태로 잠근 뒤 원인을 수정합니다.
+- **원격 적용 상태: NOT APPLIED.** 이 작업은 로컬 fresh chain만 사용했으며 Production
+  Supabase에는 접근하거나 적용하지 않았습니다.

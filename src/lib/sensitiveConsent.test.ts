@@ -4,7 +4,13 @@ import {
   grantCycleSensitiveConsent,
   hasCycleSensitiveConsent,
   revokeCycleSensitiveConsent,
+  syncCycleConsentWithDB,
 } from '@/lib/sensitiveConsent';
+
+vi.mock('@/lib/supabase', () => ({
+  isSupabaseConfigured: false,
+  supabase: null,
+}));
 
 describe('cycle sensitive-information consent', () => {
   beforeEach(() => window.localStorage.clear());
@@ -44,5 +50,15 @@ describe('cycle sensitive-information consent', () => {
     expect(grantCycleSensitiveConsent('user-a')).toBe(false);
     expect(hasCycleSensitiveConsent('user-a')).toBe(false);
     setItem.mockRestore();
+  });
+
+  it('never treats a local cache entry as authority when the server is unavailable', async () => {
+    grantCycleSensitiveConsent('user-a');
+
+    await expect(syncCycleConsentWithDB('user-a')).resolves.toEqual({
+      ok: false,
+      reason: 'server',
+    });
+    expect(hasCycleSensitiveConsent('user-a')).toBe(true);
   });
 });

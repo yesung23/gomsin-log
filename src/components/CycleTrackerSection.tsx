@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { HeartPulse, Loader2, Lock, Settings2 } from 'lucide-react';
+import { App } from '@capacitor/app';
 import { toast } from 'sonner';
 import {
   activePeriodOnDate,
@@ -25,7 +26,6 @@ import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import {
   grantCycleConsentInDB,
-  hasCycleSensitiveConsent,
   revokeCycleConsentInDB,
   syncCycleConsentWithDB,
 } from '@/lib/sensitiveConsent';
@@ -47,6 +47,7 @@ import { CycleStatusHero } from '@/components/cycle/CycleStatusHero';
 import { CycleSummary } from '@/components/cycle/CycleSummary';
 import { formatKoreanDate } from '@/components/cycle/cycleFormatting';
 import { Card } from '@/components/ui/Card';
+import { isNativePlatform } from '@/lib/platform';
 
 type LoadState = 'loading' | 'ready' | CycleFetchFailureReason;
 type ShareKey = 'shareCurrentPeriod' | 'sharePredictionWindow' | 'shareFertilityWindow';
@@ -168,6 +169,35 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [sharingPendingKey, setSharingPendingKey] = useState<ShareKey | null>(null);
   const [sharingError, setSharingError] = useState<string | null>(null);
 
+  /**
+   * Remove every health-derived value before consent is rechecked.
+   *
+   * A foreground/reconnect check can discover a revoke made on another device.
+   * Keeping the old values painted while that authority check runs would expose
+   * data after its permission became uncertain, so uncertainty immediately
+   * returns this component to an empty, locked state.
+   */
+  const clearSensitiveState = useCallback(() => {
+    setLoadState('loading');
+    setPeriods([]);
+    setDailyLogs([]);
+    setCycleLength(28);
+    setPeriodLength(5);
+    setPreferences(EMPTY_PREFERENCES);
+    setSheet({ kind: 'none' });
+    setPeriodPending(false);
+    setPeriodDeletePending(false);
+    setPeriodError(null);
+    setQuickSymptomPending(null);
+    setDailyLogPending(false);
+    setDailyLogDeletePending(false);
+    setDailyLogError(null);
+    setSettingsPending(false);
+    setSettingsError(null);
+    setSharingPendingKey(null);
+    setSharingError(null);
+  }, []);
+
   /*
    * Daily-log writes are serialised through this promise chain.
    *
@@ -191,6 +221,12 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     key: string;
     queued: boolean;
     promise: Promise<void>;
+  } | null>(null);
+
+  const consentCoordinatorRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<boolean>;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -223,29 +259,76 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   /*
    * Consent is verified against the SERVER before any cycle data is fetched.
    *
-   * A cached `localStorage` flag is not sufficient authority to read health data:
-   * consent revoked on another device, or a row that never persisted, must both
-   * keep the feature locked here.
+   * Rechecking also advances the identity generation. That invalidates any
+   * older load or write callback before it can repaint sensitive data after a
+   * remote revoke. The cache is deliberately absent from this decision.
    */
-  useEffect(() => {
-    if (!userId) return;
-    const identity = captureIdentity();
-    let cancelled = false;
-    setConsentChecking(true);
-    void syncCycleConsentWithDB(userId).then((result) => {
-      if (cancelled || !isCurrentIdentity(identity)) return;
-      if (!result.ok) {
-        // Could not reach the authority. Fall back to the cached answer rather
-        // than inventing consent, and surface the reason.
-        setConsentVerdict({ userId, granted: hasCycleSensitiveConsent(userId) });
-        setConsentError(serverErrorMessage(result.reason));
-      } else {
-        setConsentVerdict({ userId, granted: result.granted });
-      }
+  const performConsentCheck = useCallback(async (): Promise<boolean> => {
+    if (!userId) {
       setConsentChecking(false);
+      return false;
+    }
+
+    generationRef.current += 1;
+    const identity = captureIdentity();
+    setConsentChecking(true);
+    setConsentVerdict(null);
+    setConsentError(null);
+    clearSensitiveState();
+
+    try {
+      const result = await syncCycleConsentWithDB(userId);
+      if (!isCurrentIdentity(identity)) return false;
+
+      if (!result.ok) {
+        setConsentVerdict({ userId, granted: false });
+        setConsentError(serverErrorMessage(result.reason));
+        return false;
+      }
+
+      setConsentVerdict({ userId, granted: result.granted });
+      return result.granted;
+    } catch (error) {
+      if (!isCurrentIdentity(identity)) return false;
+      setConsentVerdict({ userId, granted: false });
+      setConsentError(classifyServerError(error).message);
+      return false;
+    } finally {
+      if (isCurrentIdentity(identity)) setConsentChecking(false);
+    }
+  }, [captureIdentity, clearSensitiveState, isCurrentIdentity, userId]);
+
+  const verifyConsent = useCallback((): Promise<boolean> => {
+    const key = userId || '';
+    if (!key) return Promise.resolve(false);
+
+    const active = consentCoordinatorRef.current;
+    if (active?.key === key) {
+      active.queued = true;
+      return active.promise;
+    }
+
+    const coordinator = { key, queued: false, promise: Promise.resolve(false) };
+    const run = async () => {
+      let granted = false;
+      do {
+        coordinator.queued = false;
+        granted = await performConsentCheck();
+      } while (coordinator.queued && identityRef.current === userId);
+      return granted;
+    };
+    coordinator.promise = run().finally(() => {
+      if (consentCoordinatorRef.current === coordinator) {
+        consentCoordinatorRef.current = null;
+      }
     });
-    return () => { cancelled = true; };
-  }, [captureIdentity, isCurrentIdentity, userId]);
+    consentCoordinatorRef.current = coordinator;
+    return coordinator.promise;
+  }, [performConsentCheck, userId]);
+
+  useEffect(() => {
+    void verifyConsent();
+  }, [verifyConsent]);
 
   const performLoad = useCallback(async () => {
     const identity = captureIdentity();
@@ -323,16 +406,32 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
 
   useEffect(() => {
     const recoverVisible = () => {
-      if (document.visibilityState === 'visible') void load();
+      if (document.visibilityState === 'visible') void verifyConsent();
     };
-    const recoverOnline = () => void load();
+    const recoverOnline = () => void verifyConsent();
+    let disposed = false;
+    let removeNativeListener: (() => Promise<void>) | null = null;
+
     document.addEventListener('visibilitychange', recoverVisible);
     window.addEventListener('online', recoverOnline);
+    if (isNativePlatform()) {
+      void App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) void verifyConsent();
+      }).then((handle) => {
+        if (disposed) void handle.remove();
+        else removeNativeListener = () => handle.remove();
+      }).catch(() => {
+        console.error('[gomsinlog] Could not observe native app state for consent recovery.');
+      });
+    }
+
     return () => {
+      disposed = true;
       document.removeEventListener('visibilitychange', recoverVisible);
       window.removeEventListener('online', recoverOnline);
+      if (removeNativeListener) void removeNativeListener();
     };
-  }, [load]);
+  }, [verifyConsent]);
 
   /*
    * Prediction reads `periods` ONLY.
@@ -500,6 +599,9 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     // Serialised so a burst of taps cannot overwrite each other's symptom array.
     dailyLogQueueRef.current = dailyLogQueueRef.current.then(async () => {
       try {
+        // A consent recheck advances the generation before clearing the UI. Do
+        // not let a queued tap cross that boundary and issue a late health write.
+        if (!isCurrentIdentity(identity)) return;
         // Re-read from the latest state inside the queue, not from the closure.
         const existing = dailyLogOnDate(dailyLogsRef.current, targetDate);
         const nextSymptoms = existing?.symptoms.includes(symptom)

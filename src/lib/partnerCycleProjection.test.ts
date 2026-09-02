@@ -19,13 +19,17 @@ const read = (file: string) =>
   readFileSync(resolve(process.cwd(), 'supabase/migrations', file), 'utf8');
 
 /**
- * 026 redefines `get_partner_cycle_projection` in full, so it — not 025 — is the
+ * 069 redefines `get_partner_cycle_projection` in full, so it — not 026 — is the
  * definition that actually runs. Assertions about the partner-facing function
  * must read the winning file, or they pass while describing dead SQL.
  */
-const migration = read('026_projection_requires_consent.sql');
-/** 025 still owns the internal prediction helper; 026 does not touch it. */
+const migration = read('069_require_current_cycle_consent.sql');
+/** 025 still owns the internal prediction helper; 069 does not touch it. */
 const helperMigration = read('025_partner_cycle_projection.sql');
+const consentClient = readFileSync(
+  resolve(process.cwd(), 'src/lib/sensitiveConsent.ts'),
+  'utf8',
+);
 
 /** The RETURNS TABLE block of the partner-facing function, and nothing else. */
 const projectionSignature = migration.slice(
@@ -129,7 +133,7 @@ describe('the projection is reachable only by a connected partner', () => {
   });
 });
 
-describe('revoking consent stops partner sharing', () => {
+describe('only explicit, current consent permits partner sharing', () => {
   /**
    * 025 checked only the toggles, so revoking sensitive consent left any
    * enabled toggle running: the live project returned
@@ -137,32 +141,28 @@ describe('revoking consent stops partner sharing', () => {
    * Revoking means stop using this data this way, and partner sharing is one of
    * those ways.
    */
-  it('reads the partner\'s consent row before anything else', () => {
+  it('requires an existing current-version, non-revoked partner consent row', () => {
     expect(migration).toContain("AND consent_type = 'cycle'");
-    expect(migration).toContain('SELECT (revoked_at IS NOT NULL)');
-    // The consent check must come BEFORE the preferences read, so a revoked
+    expect(migration).toContain('SELECT EXISTS (');
+    expect(migration).toContain('AND version = v_required_consent_version');
+    expect(migration).toContain('AND revoked_at IS NULL');
+    // The consent gate must come BEFORE the preferences read, so an invalid
     // owner's toggles are never even consulted.
-    expect(migration.indexOf('v_consent_revoked'))
+    expect(migration.indexOf('INTO v_consent_valid'))
       .toBeLessThan(migration.indexOf('FROM public.cycle_sharing_preferences'));
   });
 
-  it('returns an all-false row once consent is revoked', () => {
+  it('returns an all-false row for missing, stale, or revoked consent', () => {
     expect(migration).toMatch(
-      /IF COALESCE\(v_consent_revoked, false\) THEN\s+RETURN QUERY SELECT false, false, false, NULL::DATE, NULL::DATE, false, NULL::DATE, NULL::DATE;/,
+      /IF NOT v_consent_valid THEN\s+RETURN QUERY SELECT false, false, false, NULL::DATE, NULL::DATE, false, NULL::DATE, NULL::DATE;/,
     );
   });
 
-  it('treats a missing consent row as not-revoked, because the toggles gate it', () => {
-    // A user who never opened the feature has no consent row and no preferences
-    // row either, so nothing is shared. Defaulting to "revoked" here would be
-    // harmless but would hide a real bug behind a second guard.
-    expect(migration).toContain('COALESCE(v_consent_revoked, false)');
-  });
-
-  it('does not gate on consent VERSION, only on explicit revocation', () => {
-    // Bumping the consent version means asking again; silently switching off
-    // sharing the owner deliberately enabled would be a change they never made.
-    expect(migration).not.toMatch(/v_consent[^\n]*version/i);
+  it('pins the exact same current consent version in TypeScript and SQL', () => {
+    const clientVersion = consentClient.match(/CYCLE_CONSENT_VERSION = '([^']+)'/)?.[1];
+    const sqlVersion = migration.match(/v_required_consent_version CONSTANT TEXT := '([^']+)'/)?.[1];
+    expect(clientVersion).toBeTruthy();
+    expect(sqlVersion).toBe(clientVersion);
   });
 });
 

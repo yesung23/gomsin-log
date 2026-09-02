@@ -125,6 +125,7 @@ const ORDER = [
   '066_atomic_push_delivery_claims.sql',
   '067_profile_post_intent.sql',
   '068_allow_story_product_event_screen.sql',
+  '069_require_current_cycle_consent.sql',
 ];
 
 /**
@@ -4162,6 +4163,198 @@ check(
              AND screen = 'story' AND occurred_on = DATE '2026-05-03'`, '068 retained Story event') === '1',
   '068 the owner cannot delete a Story event',
 );
+
+// ---------------------------------------------------------------------------
+// 069 — current sensitive consent is mandatory for partner cycle projection
+// ---------------------------------------------------------------------------
+
+function cycleProjectionFlags(actor) {
+  return asUser(actor, `
+    SELECT concat_ws('|',
+      has_current_period_status::text,
+      current_period_active::text,
+      has_prediction_window::text,
+      has_fertility_window::text
+    )
+    FROM public.get_partner_cycle_projection()
+  `);
+}
+
+function checkCycleProjection(actor, expected, label) {
+  const result = cycleProjectionFlags(actor);
+  check(result.ok && result.stdout.trim() === expected, label);
+}
+
+mustSql(`
+  DELETE FROM public.user_sensitive_consents WHERE user_id = '${A}';
+  DELETE FROM public.cycle_sharing_preferences WHERE user_id = '${A}';
+  DELETE FROM public.cycle_daily_logs WHERE user_id = '${A}';
+  DELETE FROM public.cycle_periods WHERE user_id = '${A}';
+  DELETE FROM public.cycle_settings WHERE user_id = '${A}';
+  INSERT INTO public.cycle_periods (user_id, start_date)
+  VALUES ('${A}', CURRENT_DATE);
+  INSERT INTO public.cycle_daily_logs (user_id, log_date, symptoms, note)
+  VALUES ('${A}', CURRENT_DATE, ARRAY['headache'], 'owner-only health note');
+  INSERT INTO public.cycle_settings (user_id, average_cycle_length, average_period_length)
+  VALUES ('${A}', 28, 5);
+  INSERT INTO public.cycle_sharing_preferences (
+    user_id, share_current_period, share_prediction_window, share_fertility_window
+  ) VALUES ('${A}', true, true, true);
+`, '069 cycle projection fixture');
+
+checkCycleProjection(
+  B,
+  'false|false|false|false',
+  '069 missing consent shares no health-derived value even when every old toggle is on',
+);
+
+mustSql(`INSERT INTO public.user_sensitive_consents (
+           user_id, consent_type, version, granted_at, revoked_at
+         ) VALUES ('${A}', 'cycle', 'obsolete-version', now(), NULL)`, '069 stale consent');
+checkCycleProjection(
+  B,
+  'false|false|false|false',
+  '069 stale consent shares no health-derived value',
+);
+
+mustSql(`UPDATE public.user_sensitive_consents
+         SET version = '2026-08-09', revoked_at = now(), updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 revoked consent');
+checkCycleProjection(
+  B,
+  'false|false|false|false',
+  '069 revoked current consent shares no health-derived value',
+);
+
+mustSql(`UPDATE public.user_sensitive_consents
+         SET revoked_at = NULL, updated_at = now()
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 valid consent');
+checkCycleProjection(
+  B,
+  'true|true|true|true',
+  '069 current consent plus active couple and explicit toggles returns only the allowed projection',
+);
+
+mustSql(`UPDATE public.cycle_sharing_preferences
+         SET share_current_period = false,
+             share_prediction_window = false,
+             share_fertility_window = false
+         WHERE user_id = '${A}'`, '069 disable all sharing');
+checkCycleProjection(
+  B,
+  'false|false|false|false',
+  '069 valid consent never overrides all-off sharing preferences',
+);
+
+check(
+  !asAnon(`SELECT * FROM public.get_partner_cycle_projection()`).ok,
+  '069 anon cannot execute the partner cycle projection',
+);
+const nullCycleProjection = asAuthenticatedWithoutSubject(
+  `SELECT count(*) FROM public.get_partner_cycle_projection()`,
+);
+check(
+  nullCycleProjection.ok && nullCycleProjection.stdout.trim() === '0',
+  '069 an authenticated role without a JWT subject receives no projection',
+);
+const unrelatedCycleProjection = asUser(
+  C,
+  `SELECT count(*) FROM public.get_partner_cycle_projection()`,
+);
+check(
+  unrelatedCycleProjection.ok && unrelatedCycleProjection.stdout.trim() === '0',
+  '069 an unrelated user with no active partner receives no projection',
+);
+
+mustSql(`UPDATE public.couple_members SET status = 'disconnected'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '069 disconnect partner');
+const formerCycleProjection = asUser(
+  B,
+  `SELECT count(*) FROM public.get_partner_cycle_projection()`,
+);
+check(
+  formerCycleProjection.ok && formerCycleProjection.stdout.trim() === '0',
+  '069 a former partner receives no projection through stale membership',
+);
+mustSql(`UPDATE public.couple_members SET status = 'active'
+         WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'`, '069 restore partner');
+
+for (const table of [
+  'cycle_periods',
+  'cycle_daily_logs',
+  'cycle_settings',
+  'cycle_sharing_preferences',
+  'user_sensitive_consents',
+]) {
+  const partnerRead = asUser(B, `SELECT count(*) FROM public.${table} WHERE user_id = '${A}'`);
+  const outsiderRead = asUser(C, `SELECT count(*) FROM public.${table} WHERE user_id = '${A}'`);
+  check(
+    partnerRead.ok && partnerRead.stdout.trim() === '0'
+      && outsiderRead.ok && outsiderRead.stdout.trim() === '0',
+    `069 partner and unrelated users cannot read the owner's raw ${table}`,
+  );
+}
+
+check(
+  mustSql(`SELECT prosecdef::text || '|' || provolatile::text || '|' ||
+                  array_to_string(proconfig, ',')
+           FROM pg_proc
+           WHERE oid = 'public.get_partner_cycle_projection()'::regprocedure`, '069 function flags')
+    === 'true|s|search_path=public, pg_temp',
+  '069 projection remains SECURITY DEFINER, STABLE, with a pinned search_path',
+);
+
+// Natural tests can stay green when another predicate denies the same fixture.
+// Mutate each consent predicate in isolation and prove the forbidden projection
+// becomes visible, then restore the exact 069 definition.
+const cycleConsentMigration = readFileSync(
+  join(MIGRATIONS, '069_require_current_cycle_consent.sql'),
+  'utf8',
+);
+
+function proveCycleConsentMutation({ label, find, replace, prepare }) {
+  const occurrences = cycleConsentMigration.split(find).length - 1;
+  if (!check(occurrences === 1, `069 mutation "${label}" matches exactly one predicate`)) return;
+  prepare();
+  const applied = psqlScript(cycleConsentMigration.replace(find, replace));
+  if (!applied.ok) {
+    failures.push(`069 mutation "${label}" failed to apply:\n    ${applied.stderr.trim()}`);
+    return;
+  }
+  checkCycleProjection(B, 'true|true|true|true', `069 mutation "${label}" exposes the forbidden projection`);
+  const restored = psqlScript(cycleConsentMigration);
+  if (!restored.ok) {
+    throw new Error(`069 restore after mutation "${label}" failed:\n${restored.stderr.trim()}`);
+  }
+}
+
+mustSql(`UPDATE public.cycle_sharing_preferences
+         SET share_current_period = true,
+             share_prediction_window = true,
+             share_fertility_window = true
+         WHERE user_id = '${A}'`, '069 restore sharing for mutations');
+
+proveCycleConsentMutation({
+  label: 'current consent version',
+  find: '      AND version = v_required_consent_version',
+  replace: '      AND true',
+  prepare: () => mustSql(`UPDATE public.user_sensitive_consents
+                          SET version = 'obsolete-version', revoked_at = NULL
+                          WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 mutation stale consent'),
+});
+
+proveCycleConsentMutation({
+  label: 'non-revoked consent',
+  find: '      AND revoked_at IS NULL',
+  replace: '      AND true',
+  prepare: () => mustSql(`UPDATE public.user_sensitive_consents
+                          SET version = '2026-08-09', revoked_at = now()
+                          WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 mutation revoked consent'),
+});
+
+mustSql(`UPDATE public.user_sensitive_consents
+         SET version = '2026-08-09', revoked_at = NULL
+         WHERE user_id = '${A}' AND consent_type = 'cycle'`, '069 final valid consent');
 
 // ---------------------------------------------------------------------------
 // Report

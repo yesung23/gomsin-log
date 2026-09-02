@@ -7,6 +7,31 @@ import type {
 } from '@/lib/cycle';
 import { grantCycleSensitiveConsent, revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
 
+type NativeStateListener = (state: { isActive: boolean }) => void;
+const nativeLifecycle = vi.hoisted(() => {
+  const state: { isNative: boolean; listener: NativeStateListener | null } = {
+    isNative: false,
+    listener: null,
+  };
+  const remove = vi.fn(async () => undefined);
+  return {
+    state,
+    remove,
+    addListener: vi.fn(async (_eventName: string, listener: NativeStateListener) => {
+      state.listener = listener;
+      return { remove };
+    }),
+  };
+});
+
+vi.mock('@/lib/platform', () => ({
+  isNativePlatform: () => nativeLifecycle.state.isNative,
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: { addListener: nativeLifecycle.addListener },
+}));
+
 /**
  * Consent gating, identity isolation and error-copy honesty for the V3 tracker.
  *
@@ -74,6 +99,10 @@ vi.mock('@/lib/sensitiveConsent', async (importOriginal) => {
 const { CycleTrackerSection } = await import('@/components/CycleTrackerSection');
 
 beforeEach(() => {
+  nativeLifecycle.state.isNative = false;
+  nativeLifecycle.state.listener = null;
+  nativeLifecycle.addListener.mockClear();
+  nativeLifecycle.remove.mockClear();
   window.localStorage.clear();
   periodLoads.length = 0;
   dailyLogLoads.length = 0;
@@ -160,8 +189,9 @@ describe('CycleTrackerSection sensitive-information gate', () => {
   });
 
   it('keeps the feature locked when the server consent check itself fails', async () => {
-    // An unreachable authority must not be read as "yes".
-    revokeCycleSensitiveConsent('user-d');
+    // An unreachable authority must not be read as "yes", even when an old
+    // local cache entry says this account consented on a previous visit.
+    grantCycleSensitiveConsent('user-d');
     syncConsent.mockResolvedValue({ ok: false, reason: 'offline' });
     render(<CycleTrackerSection userId="user-d" />);
 
@@ -178,6 +208,69 @@ describe('CycleTrackerSection sensitive-information gate', () => {
 
     expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
     expect(periodLoads).toHaveLength(0);
+  });
+
+  it('revalidates on foreground and clears already rendered health data after remote revocation', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+
+    await act(async () => {
+      periodLoads[0].resolve({
+        ok: true,
+        periods: [{ id: 'visible-period', userId: 'user-a', startDate: '2026-08-13' }],
+      });
+      dailyLogLoads[0].resolve({
+        ok: true,
+        logs: [{
+          id: 'visible-log',
+          userId: 'user-a',
+          logDate: '2026-08-14',
+          symptoms: [],
+          note: '기기 밖에서 철회하면 즉시 숨겨질 내용',
+        }],
+      });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByText(/생리 2일째/)).toBeInTheDocument();
+
+    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.queryByText(/생리 2일째/)).not.toBeInTheDocument();
+    expect(screen.queryByText('기기 밖에서 철회하면 즉시 숨겨질 내용')).not.toBeInTheDocument();
+    expect(periodLoads).toHaveLength(1);
+    expect(syncConsent).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the native app-state signal to revalidate consent on iOS foreground', async () => {
+    nativeLifecycle.state.isNative = true;
+    const view = render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await waitFor(() => expect(nativeLifecycle.state.listener).not.toBeNull());
+
+    await act(async () => {
+      periodLoads[0].resolve({ ok: true, periods: [] });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+
+    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    await act(async () => {
+      nativeLifecycle.state.listener?.({ isActive: true });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(1);
+    expect(syncConsent).toHaveBeenCalledTimes(2);
+
+    view.unmount();
+    await waitFor(() => expect(nativeLifecycle.remove).toHaveBeenCalledTimes(1));
   });
 });
 

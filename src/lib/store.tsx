@@ -108,6 +108,7 @@ import type {
   RecordMutationReason,
   RecordMutationResult,
   SharedSyncStatus,
+  TalkAboutSyncStatus,
   TalkAboutMutationResult,
 } from '@/lib/storeContext';
 import {
@@ -517,6 +518,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * authorization check, not user data, and must never be persisted.
    */
   const [sharedSyncStatus, setSharedSyncStatus] = useState<SharedSyncStatus>('live');
+  /** Orders every bookmark read, including full, realtime and post-write refreshes. */
+  const talkAboutRefreshSequenceRef = useRef(0);
+  /** Current value for mutation guards that must close before the next render. */
+  const talkAboutSyncStatusRef = useRef<TalkAboutSyncStatus>('ready');
+  const [talkAboutSyncStatusState, setTalkAboutSyncStatusState] =
+    useState<TalkAboutSyncStatus>('ready');
+  const setTalkAboutSyncStatus = useCallback((next: TalkAboutSyncStatus) => {
+    talkAboutSyncStatusRef.current = next;
+    setTalkAboutSyncStatusState(next);
+  }, []);
   /** Lets a recovery attempt started from the UI reuse the effect's retry path. */
   const retrySharedAccessRef = useRef<(() => Promise<boolean>) | null>(null);
   /** False once the couple channel reports a terminal transport failure. */
@@ -872,9 +883,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!isCurrentIdentity(expected)) return false;
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
     retrySharedAccessRef.current = null;
+    setTalkAboutSyncStatus('ready');
     // Deliberately NOT bumping `sessionGenerationRef`: the session is kept.
     localStorage.removeItem(STORE_KEY_V1);
     purgeDiaryLocalStateForUser(expected.userId);
@@ -893,7 +906,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     hydratedUserIdRef.current = expected.userId;
     replaceStateImmediately(nextState);
     return true;
-  }, [isCurrentIdentity, replaceStateImmediately]);
+  }, [isCurrentIdentity, replaceStateImmediately, setTalkAboutSyncStatus]);
 
   /**
    * Resolve the tri-state deletion status for `userId`.
@@ -1191,11 +1204,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         clearE2eeRuntime();
         sessionGenerationRef.current += 1;
         membershipReconciliationRef.current += 1;
+        talkAboutRefreshSequenceRef.current += 1;
         quarantinedWorkspaceRef.current = null;
         pendingDisconnectRef.current = null;
         retrySharedAccessRef.current = null;
         realtimeHealthyRef.current = true;
         setSharedSyncStatus('live');
+        setTalkAboutSyncStatus('ready');
         setAuthSyncUnavailable(false);
         setAuthSyncReason(null);
         setAuthSyncStage(null);
@@ -1530,6 +1545,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     isHydrated,
     refreshCoupleLifecycle,
     replaceStateImmediately,
+    setTalkAboutSyncStatus,
     verifyDeletionStatus,
   ]);
 
@@ -1578,8 +1594,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!matchesCurrentWorkspace(expected)) return false;
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = expected;
     setSharedSyncStatus('unavailable');
+    setTalkAboutSyncStatus('unavailable');
     const nextState: AppState = {
       ...current,
       profile: {
@@ -1605,7 +1623,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     replaceStateImmediately(nextState);
     return true;
-  }, [matchesCurrentWorkspace, replaceStateImmediately]);
+  }, [matchesCurrentWorkspace, replaceStateImmediately, setTalkAboutSyncStatus]);
 
   const purgeSharedAccess = useCallback((expected?: ActiveWorkspace): boolean => {
     const current = stateRef.current;
@@ -1620,12 +1638,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) return false;
 
     membershipReconciliationRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
     retrySharedAccessRef.current = null;
     realtimeHealthyRef.current = true;
     // There is no shared workspace left to be out of sync with.
     setSharedSyncStatus('live');
+    setTalkAboutSyncStatus('ready');
     // The lifecycle is what every banner reads, and it renders NOTHING for
     // `connected`. Leaving it stale here is what emptied the timeline with no
     // explanation and no reconnect route until the app was reloaded.
@@ -1673,7 +1693,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     replaceStateImmediately(nextState);
     return true;
-  }, [replaceStateImmediately]);
+  }, [replaceStateImmediately, setTalkAboutSyncStatus]);
 
   const reconcileSharedAccess = useCallback(async (
     workspace: ActiveWorkspace,
@@ -1714,6 +1734,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
+      const talkAboutRefreshSequence = ++talkAboutRefreshSequenceRef.current;
       const [recordsResult, eventsResult, tripsResult, talkAboutResult, highlightsResult] = await Promise.all([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
@@ -1729,6 +1750,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       const current = stateRef.current;
+      const talkAboutResultIsLatest =
+        talkAboutRefreshSequenceRef.current === talkAboutRefreshSequence;
       const role = current.profile.role;
       const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
       const records = visibleRecordsForViewer(
@@ -1746,13 +1769,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // A coordination read failure is not evidence that every topic was
         // removed. Preserve the last authorized list and let the next
         // invalidation/manual refresh retry it.
-        talkAboutMarks: talkAboutResult.ok ? talkAboutResult.marks : current.talkAboutMarks,
+        talkAboutMarks: talkAboutResultIsLatest && talkAboutResult.ok
+          ? talkAboutResult.marks
+          : current.talkAboutMarks,
         coupleHighlights: highlightsResult.ok ? highlightsResult.highlights : current.coupleHighlights,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
       // date depends on the channel, which the caller tracks separately.
       setSharedSyncStatus(realtimeHealthyRef.current ? 'live' : 'delayed');
+      if (talkAboutResultIsLatest) {
+        setTalkAboutSyncStatus(talkAboutResult.ok ? 'ready' : 'unavailable');
+      }
       replaceStateImmediately(nextState);
       return true;
     } catch (error) {
@@ -1768,6 +1796,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     purgeSharedAccess,
     quarantineSharedAccess,
     replaceStateImmediately,
+    setTalkAboutSyncStatus,
   ]);
 
   useEffect(() => {
@@ -1821,6 +1850,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const isCurrentRefresh = () => isCurrentActiveCouple()
         && !isWorkspaceQuarantined()
         && membershipReconciliationRef.current === authorizationRevision;
+      const talkAboutRequestSequence = slice === 'talk-about'
+        ? ++talkAboutRefreshSequenceRef.current
+        : null;
+      const isLatestTalkAboutRefresh = () => isCurrentRefresh()
+        && talkAboutRequestSequence !== null
+        && talkAboutRefreshSequenceRef.current === talkAboutRequestSequence;
       try {
         if (slice === 'profile') {
           const result = await fetchFullStateResultFromDB(authUserId);
@@ -1883,8 +1918,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         if (slice === 'talk-about') {
           const result = await fetchTalkAboutMarksResultFromDB(coupleId);
-          if (!isCurrentRefresh()) return;
-          if (!result.ok) return;
+          if (!isLatestTalkAboutRefresh()) return;
+          if (!result.ok) {
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          setTalkAboutSyncStatus('ready');
           const marks = result.marks;
           if (notificationsArmed) {
             unseenPartnerTalkAboutMarks(stateRef.current.talkAboutMarks, marks, authUserId)
@@ -1899,7 +1938,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               });
           }
           updateStateImmediately((current) =>
-            isCurrentRefresh() ? { ...current, talkAboutMarks: marks } : current,
+            isLatestTalkAboutRefresh() ? { ...current, talkAboutMarks: marks } : current,
           );
           return;
         }
@@ -1928,9 +1967,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : current,
         );
       } catch (error) {
-        if (!isCurrentRefresh()) return;
+        if (slice === 'talk-about') {
+          if (!isLatestTalkAboutRefresh()) return;
+        } else if (!isCurrentRefresh()) return;
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed.`);
-        quarantineSharedAccess(workspace);
+        if (slice === 'talk-about') {
+          setTalkAboutSyncStatus('unavailable');
+        } else {
+          quarantineSharedAccess(workspace);
+        }
       }
     };
 
@@ -2105,6 +2150,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     isAuthChecked,
     quarantineSharedAccess,
     reconcileSharedAccess,
+    setTalkAboutSyncStatus,
     updateStateImmediately,
   ]);
 
@@ -3802,9 +3848,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     clearE2eeRuntime();
     hydratedUserIdRef.current = null;
     membershipReconciliationRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     if (sessionUserIdRef.current !== null) sessionGenerationRef.current += 1;
     sessionUserIdRef.current = null;
+    setTalkAboutSyncStatus('ready');
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
@@ -3961,16 +4009,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const workspace = expected ?? captureActiveWorkspace();
     if (!workspace || !isCurrentWorkspace(workspace)) return false;
     const authorizationRevision = membershipReconciliationRef.current;
+    const requestSequence = ++talkAboutRefreshSequenceRef.current;
     const canCommit = () => isCurrentWorkspace(workspace)
-      && membershipReconciliationRef.current === authorizationRevision;
+      && membershipReconciliationRef.current === authorizationRevision
+      && talkAboutRefreshSequenceRef.current === requestSequence;
     let result;
     try {
       result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
     } catch {
+      if (canCommit()) setTalkAboutSyncStatus('unavailable');
       console.error('[gomsinlog] Failed to reconcile talk-about marks.');
       return false;
     }
-    if (!canCommit() || !result.ok) return false;
+    if (!canCommit()) return false;
+    if (!result.ok) {
+      setTalkAboutSyncStatus('unavailable');
+      return false;
+    }
+    setTalkAboutSyncStatus('ready');
     updateStateImmediately((prev) => canCommit()
       ? { ...prev, talkAboutMarks: result.marks }
       : prev);
@@ -3986,8 +4042,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '커플 연결이 확인되지 않아 표시할 수 없어요.' };
     }
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    if (!isCurrentWorkspace(workspace)) {
-      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await markTalkAboutInDB(recordId, coupleId, userId);
     if (result.ok) {
@@ -4008,8 +4064,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const coupleId = current.profile.couple.coupleId;
     if (!userId || !coupleId) return { ok: false, error: '해제할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    if (!isCurrentWorkspace(workspace)) {
-      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await unmarkTalkAboutInDB(recordId, userId);
     if (result.ok) {
@@ -4026,8 +4082,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const userId = current.authenticatedUser?.id || current.profile.id;
     if (!coupleId || !userId) return { ok: false, error: '커플 연결이 확인되지 않아 처리할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    if (!isCurrentWorkspace(workspace)) {
-      return { ok: false, error: '공유 정보를 확인한 뒤 다시 시도해 주세요.' };
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
     const result = await resolveTalkAboutInDB(recordId, coupleId);
     if (result.ok) {
@@ -4089,6 +4145,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authSyncReason,
         authSyncStage,
         sharedSyncStatus,
+        talkAboutSyncStatus: talkAboutSyncStatusState,
         coupleLifecycle,
         invitationExpiresAt,
         refreshCoupleLifecycle,

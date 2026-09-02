@@ -30,11 +30,13 @@ vi.mock('sonner', () => ({
 }));
 
 let currentState: AppState;
+let talkAboutSyncStatus: 'ready' | 'unavailable' = 'ready';
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: currentState,
     isReady: true,
+    talkAboutSyncStatus,
     resolveTalkAbout,
     setHighlightedRecordId,
   }),
@@ -107,6 +109,7 @@ beforeEach(() => {
   resolveTalkAbout.mockClear();
   setHighlightedRecordId.mockClear();
   navigate.mockClear();
+  talkAboutSyncStatus = 'ready';
 });
 
 describe('오늘 이야기할 것', () => {
@@ -123,6 +126,13 @@ describe('오늘 이야기할 것', () => {
   it('is empty and says so when nothing is marked', () => {
     renderWidget([record()], []);
     expect(screen.getByText(/아직 표시한 기록이 없어요/)).toBeInTheDocument();
+  });
+
+  it('does not call a failed coordination slice empty', () => {
+    talkAboutSyncStatus = 'unavailable';
+    renderWidget([], []);
+    expect(screen.getByText(/책갈피를 확인하는 중/)).toBeInTheDocument();
+    expect(screen.queryByText(/아직 표시한 기록이 없어요/)).not.toBeInTheDocument();
   });
 
   /**

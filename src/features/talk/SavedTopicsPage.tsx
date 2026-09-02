@@ -34,13 +34,21 @@ import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 export function SavedTopicsPage() {
   const navigate = useNavigate();
-  const { state, sharedSyncStatus, markTalkAbout, unmarkTalkAbout } = useStore();
+  const {
+    state,
+    sharedSyncStatus,
+    talkAboutSyncStatus,
+    markTalkAbout,
+    unmarkTalkAbout,
+  } = useStore();
   const { profile, talkAboutMarks } = state;
   const isOnline = useOnlineStatus();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const pendingRecordIdRef = useRef<string | null>(null);
   const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState('');
+  const coordinationUnavailable =
+    sharedSyncStatus === 'unavailable' || talkAboutSyncStatus === 'unavailable';
 
   /*
     표시된 기록을 원본과 이어 붙인다.
@@ -124,9 +132,11 @@ export function SavedTopicsPage() {
         <p role="status" aria-live="polite" className="sr-only">
           {statusMessage}
         </p>
-        {sharedSyncStatus === 'unavailable' ? (
+        {coordinationUnavailable ? (
           <p className="pt-12 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
-            공유 정보를 아직 확인하지 못했어요. 확인되면 책갈피를 다시 보여드려요.
+            {sharedSyncStatus === 'unavailable'
+              ? '공유 정보를 아직 확인하지 못했어요. 확인되면 책갈피를 다시 보여드려요.'
+              : '책갈피를 아직 확인하지 못했어요. 확인되면 다시 보여드려요.'}
           </p>
         ) : topics.length === 0 ? (
           <p className="pt-12 text-center text-label" style={{ color: 'var(--ink-soft)' }}>
@@ -156,7 +166,7 @@ export function SavedTopicsPage() {
         )}
 
         {/* 남은 것이 없으면 통화 모드로 보내지 않는다 -- 빈 화면으로 들어가게 된다(§8). */}
-        {sharedSyncStatus !== 'unavailable' && topics.length > 0 ? (
+        {!coordinationUnavailable && topics.length > 0 ? (
           <button
             type="button"
             /*

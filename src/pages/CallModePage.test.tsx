@@ -31,6 +31,7 @@ vi.mock('sonner', () => ({
 
 let online = true;
 let sharedSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
+let talkAboutSyncStatus: 'ready' | 'unavailable' = 'ready';
 vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
   return { ...actual, useOnlineStatus: () => online };
@@ -42,6 +43,7 @@ vi.mock('@/lib/useStore', () => ({
     state: currentState,
     isReady: true,
     sharedSyncStatus,
+    talkAboutSyncStatus,
     resolveTalkAbout,
     setHighlightedRecordId,
   }),
@@ -149,6 +151,7 @@ beforeEach(() => {
   navigate.mockClear();
   online = true;
   sharedSyncStatus = 'live';
+  talkAboutSyncStatus = 'ready';
 });
 
 describe('what 통화 모드 must never do', () => {
@@ -282,6 +285,27 @@ describe('one topic at a time', () => {
     expect(screen.getByText('둘째')).toBeInTheDocument();
     await userEvent.click(screen.getByTestId('call-mode-complete'));
     expect(resolveTalkAbout).toHaveBeenCalledWith('rec-b');
+  });
+
+  it('does not silently replace the current topic when its source disappears', async () => {
+    const { records, marks } = three();
+    const { rerender } = renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+    expect(screen.getByText('둘째')).toBeInTheDocument();
+
+    currentState = makeState(
+      records.filter((entry) => entry.id !== 'rec-b'),
+      marks.filter((entry) => entry.recordId !== 'rec-b'),
+    );
+    rerender(<CallModePage />);
+
+    expect(screen.getByTestId('call-mode-current-unavailable')).toBeInTheDocument();
+    expect(screen.queryByText('셋째')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-complete')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+    expect(screen.getByText('셋째')).toBeInTheDocument();
   });
 
   it('advances without skipping when a previously skipped topic resolves elsewhere', async () => {
@@ -444,6 +468,40 @@ describe('the states either side of a topic', () => {
     expect(screen.getByTestId('call-mode-unavailable')).toBeInTheDocument();
     expect(screen.queryByTestId('call-mode-done')).not.toBeInTheDocument();
     expect(screen.queryByTestId('call-mode-complete')).not.toBeInTheDocument();
+  });
+
+  it('does not call a failed talk-about slice done while shared records remain live', () => {
+    talkAboutSyncStatus = 'unavailable';
+    renderPage([], []);
+
+    expect(screen.getByTestId('call-mode-unavailable')).toBeInTheDocument();
+    expect(screen.getByText(/책갈피 목록을 아직 확인하지 못했어요/)).toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-done')).not.toBeInTheDocument();
+  });
+
+  it('does not call a disappeared final topic resolved after an explicit next action', async () => {
+    const onlyRecord = record({ id: 'only', log: '마지막 이야기' });
+    const onlyMark = mark({ id: 'only-mark', recordId: 'only' });
+    const { rerender } = renderPage([onlyRecord], [onlyMark]);
+
+    currentState = makeState([], []);
+    rerender(<CallModePage />);
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+
+    expect(screen.getByTestId('call-mode-changed')).toBeInTheDocument();
+    expect(screen.queryByTestId('call-mode-done')).not.toBeInTheDocument();
+    expect(resolveTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('moves focus and announces the exact topic after an explicit transition', async () => {
+    const { records, marks } = three();
+    renderPage(records, marks);
+
+    await userEvent.click(screen.getByTestId('call-mode-skip'));
+
+    const heading = screen.getByRole('heading', { name: '둘째' });
+    expect(heading).toHaveFocus();
+    expect(screen.getByRole('status')).toHaveTextContent(/둘째|2번째/);
   });
 
   it('reaches the exact original through the durable route', async () => {

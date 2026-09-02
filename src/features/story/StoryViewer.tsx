@@ -78,6 +78,13 @@ function formatStoryTime(time: string): string {
   return match ? `${match[1].padStart(2, '0')}:${match[2]}` : time;
 }
 
+/** Stable identity for realtime-safe navigation. Moment and missing share an exact source id. */
+function storyCardIdentity(card: StoryCard): string {
+  if (card.kind === 'cover') return 'cover';
+  if (card.kind === 'closing') return 'closing';
+  return `record:${card.kind === 'moment' ? card.record.id : card.recordId}`;
+}
+
 export function StoryViewer({
   cards,
   initialIndex,
@@ -98,20 +105,27 @@ export function StoryViewer({
   bookmarkDisabledReason,
   coupleId,
 }: StoryViewerProps) {
-  const [index, setIndex] = useState(
-    () => Math.min(Math.max(initialIndex, 0), Math.max(cards.length - 1, 0)),
-  );
+  const [activeCardIdentity, setActiveCardIdentity] = useState<string | null>(() => {
+    const index = Math.min(Math.max(initialIndex, 0), Math.max(cards.length - 1, 0));
+    return cards[index] ? storyCardIdentity(cards[index]) : null;
+  });
   /** 홀드하면 UI를 감추고 사진만 남긴다. 멈출 타이머가 없으므로 용도가 이것뿐이다. */
   const [bare, setBare] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const card = cards[index];
   const total = cards.length;
+  const index = activeCardIdentity === null
+    ? -1
+    : cards.findIndex((candidate) => storyCardIdentity(candidate) === activeCardIdentity);
+  const card = index >= 0 ? cards[index] : undefined;
+  const currentUnavailable = activeCardIdentity !== null && index < 0;
 
   const go = useCallback((target: number) => {
-    setIndex(Math.min(Math.max(target, 0), total - 1));
-  }, [total]);
+    if (cards.length === 0) return;
+    const nextCard = cards[Math.min(Math.max(target, 0), cards.length - 1)];
+    setActiveCardIdentity(storyCardIdentity(nextCard));
+  }, [cards]);
 
   /*
     마지막에서는 넘어가지 않는다.
@@ -122,8 +136,12 @@ export function StoryViewer({
 
     끝에서 나가는 길은 닫는 카드가 소유한다 -- `다 읽었어요`이거나 `닫기`이거나.
   */
-  const next = useCallback(() => go(index + 1), [index, go]);
-  const previous = useCallback(() => go(index - 1), [index, go]);
+  const next = useCallback(() => {
+    if (index >= 0) go(index + 1);
+  }, [index, go]);
+  const previous = useCallback(() => {
+    if (index >= 0) go(index - 1);
+  }, [index, go]);
 
   /*
     키보드만으로 전 구간을 돌 수 있어야 한다.
@@ -151,13 +169,14 @@ export function StoryViewer({
 
   /** 카드가 바뀌면 무엇이 보이는지 말한다. SC 4.1.3. */
   const announcement = useMemo(() => {
+    if (currentUnavailable) return '현재 보던 기록을 더 이상 볼 수 없어요';
     if (!card) return '';
     const position = `${total}개 중 ${index + 1}번째`;
     if (card.kind === 'cover') return `${position}, 목차`;
     if (card.kind === 'missing') return `${position}, 볼 수 없는 기록`;
     if (card.kind === 'closing') return `${position}, 마지막`;
     return `${position}, ${formatStoryTime(card.record.time)}`;
-  }, [card, index, total]);
+  }, [card, currentUnavailable, index, total]);
 
   const startHold = () => { holdTimer.current = setTimeout(() => setBare(true), 400); };
   const endHold = () => {
@@ -166,9 +185,9 @@ export function StoryViewer({
     setBare(false);
   };
 
-  if (!card) return null;
+  if (!card && !currentUnavailable) return null;
 
-  const talkAboutState = card.kind === 'moment'
+  const talkAboutState = card?.kind === 'moment'
     ? talkAboutStateByRecordId?.get(card.record.id) ?? 'none'
     : 'none';
   const marked = talkAboutState === 'mine' || talkAboutState === 'both';
@@ -193,9 +212,9 @@ export function StoryViewer({
         보이면 사용자가 서두른다.
       */}
       <div className={cn('flex gap-1 px-4 pt-3 transition-opacity', bare && 'opacity-0')}>
-        {cards.map((_, position) => (
+        {cards.map((progressCard, position) => (
           <span
-            key={position}
+            key={storyCardIdentity(progressCard)}
             className={cn('h-0.5 flex-1 rounded-full', position <= index ? 'bg-coral-strong' : 'bg-border')}
           />
         ))}
@@ -204,7 +223,7 @@ export function StoryViewer({
       <div className={cn('flex items-center justify-between gap-2 px-4 py-3 transition-opacity', bare && 'opacity-0')}>
         <div className="min-w-0">
           <p className="text-emphasis text-foreground truncate">
-            {card.kind === 'moment' ? formatStoryTime(card.record.time) : title}
+            {card?.kind === 'moment' ? formatStoryTime(card.record.time) : title}
           </p>
         </div>
         <button
@@ -224,7 +243,12 @@ export function StoryViewer({
         onPointerCancel={endHold}
         onPointerLeave={endHold}
       >
-        {card.kind === 'cover' ? (
+        {currentUnavailable ? (
+          <StoryCurrentUnavailable
+            canRestart={cards.length > 0}
+            onRestart={() => go(0)}
+          />
+        ) : card?.kind === 'cover' ? (
           <CoverCard
             card={card}
             onJump={onJumpToRecord}
@@ -232,9 +256,9 @@ export function StoryViewer({
             refinementStatus={coverRefinementStatus}
             refinementReason={coverRefinementReason}
           />
-        ) : card.kind === 'missing' ? (
+        ) : card?.kind === 'missing' ? (
           <MissingCard />
-        ) : card.kind === 'closing' ? (
+        ) : card?.kind === 'closing' ? (
           <ClosingCard
             card={card}
             mode={mode}
@@ -243,7 +267,7 @@ export function StoryViewer({
             disabledReason={acknowledgeDisabledReason}
             onClose={onClose}
           />
-        ) : (
+        ) : card?.kind === 'moment' ? (
           <>
             <MomentCard record={card.record} coupleId={coupleId} />
             <div
@@ -286,7 +310,7 @@ export function StoryViewer({
               </button>
             </div>
           </>
-        )}
+        ) : null}
       </div>
 
       {/*
@@ -300,19 +324,19 @@ export function StoryViewer({
         <button
           type="button"
           onClick={previous}
-          disabled={index === 0}
+          disabled={currentUnavailable || index <= 0}
           aria-label="이전 순간"
           className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground disabled:opacity-30"
         >
           <ChevronLeft size={20} aria-hidden="true" />
         </button>
         <span className="text-caption text-muted-foreground" aria-hidden="true">
-          {index + 1} / {total}
+          {currentUnavailable ? '–' : index + 1} / {total}
         </span>
         <button
           type="button"
           onClick={next}
-          disabled={index >= total - 1}
+          disabled={currentUnavailable || index < 0 || index >= total - 1}
           aria-label="다음 순간"
           className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground disabled:opacity-30"
         >
@@ -479,6 +503,31 @@ function MissingCard() {
       */}
       <p className="text-body text-muted-foreground">이 기록은 더 이상 볼 수 없어요</p>
     </PaperCard>
+  );
+}
+
+function StoryCurrentUnavailable({
+  canRestart,
+  onRestart,
+}: {
+  canRestart: boolean;
+  onRestart: () => void;
+}) {
+  return (
+    <div data-testid="story-current-unavailable">
+      <PaperCard className="mt-2 text-center">
+        <p className="text-body text-muted-foreground">이 기록은 더 이상 볼 수 없어요</p>
+        {canRestart ? (
+          <button
+            type="button"
+            onClick={onRestart}
+            className="press-response mt-5 inline-flex min-h-11 items-center justify-center rounded-control border border-border px-5 text-label font-semibold text-foreground"
+          >
+            현재 목록 처음부터 보기
+          </button>
+        ) : null}
+      </PaperCard>
+    </div>
   );
 }
 

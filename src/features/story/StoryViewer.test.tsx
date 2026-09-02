@@ -115,6 +115,56 @@ describe('이동', () => {
     view({ initialIndex: 1 });
     expect(screen.getByText('2 / 3')).toBeTruthy();
   });
+
+  it('실시간 선행 추가와 재정렬에도 읽던 정확한 원본에 머문다', async () => {
+    const onOpenRecord = vi.fn();
+    const { rerender } = view({ initialIndex: 1, onOpenRecord });
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+
+    const changedCards: StoryCard[] = [
+      { kind: 'moment', record: record({ id: 'new', time: '08:00', log: '새로 도착한 기록' }) },
+      CARDS[0],
+      CARDS[1],
+      CARDS[2],
+    ];
+    rerender(
+      <StoryViewer
+        cards={changedCards}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={onOpenRecord}
+      />,
+    );
+
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+    expect(screen.queryByText('오늘 시험 끝났어')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(onOpenRecord).toHaveBeenCalledWith('b');
+  });
+
+  it('읽던 원본이 사라지면 옆 카드를 대신 열지 않는다', () => {
+    const { rerender } = view({ initialIndex: 1 });
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+
+    rerender(
+      <StoryViewer
+        cards={[CARDS[0], CARDS[2]]}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('story-current-unavailable')).toBeInTheDocument();
+    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.queryByText('오늘 시험 끝났어')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('story-acknowledge')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '원본 보기' })).not.toBeInTheDocument();
+  });
 });
 
 describe('확인은 읽기의 끝에서만 일어난다', () => {

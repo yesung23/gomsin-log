@@ -216,6 +216,14 @@ let lastMediaResult: {
 let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
 let lastTalkAboutResult: { ok: boolean; error?: string; syncPending?: boolean } | null = null;
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
 function Probe({
   files = [] as File[],
   allOrNothingMedia = false,
@@ -225,6 +233,7 @@ function Probe({
     isReady,
     authSyncUnavailable,
     sharedSyncStatus,
+    talkAboutSyncStatus,
     signOut,
     disconnect,
     updateProfile,
@@ -243,6 +252,7 @@ function Probe({
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
       <span data-testid="authSync">{authSyncUnavailable ? 'unavailable' : 'available'}</span>
       <span data-testid="syncStatus">{sharedSyncStatus}</span>
+      <span data-testid="talkSyncStatus">{talkAboutSyncStatus}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
@@ -707,6 +717,106 @@ describe('StoreProvider auth lifecycle', () => {
     }));
 
     await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+  });
+
+  it('does not let an older talk-about refresh overwrite the newest response', async () => {
+    const first = deferred<{ ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }>();
+    const second = deferred<{ ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(fetchTalkAboutMarksResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => second.resolve({
+      ok: true,
+      marks: [{
+        id: 'mark-newest', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T02:00:00.000Z', isCompleted: false,
+      }],
+    }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest');
+
+    await act(async () => first.resolve({
+      ok: true,
+      marks: [{
+        id: 'mark-older', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest');
+    expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-older');
+  });
+
+  it('separates a talk-about slice outage from an authoritative empty list', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      error: new Error('talk slice unavailable'),
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'talk_about' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({ ok: true, marks: [] });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'talk_about' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('ready');
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
   });
 

@@ -11,6 +11,7 @@ const resolveTalkAbout = vi.fn(async () => ({ ok: true }));
 let currentState: AppState;
 let online = true;
 let sharedSyncStatus: 'live' | 'delayed' | 'unavailable' = 'live';
+let talkAboutSyncStatus: 'ready' | 'unavailable' = 'ready';
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom');
@@ -21,6 +22,7 @@ vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: currentState,
     sharedSyncStatus,
+    talkAboutSyncStatus,
     markTalkAbout,
     unmarkTalkAbout,
     resolveTalkAbout,
@@ -106,6 +108,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   online = true;
   sharedSyncStatus = 'live';
+  talkAboutSyncStatus = 'ready';
   markTalkAbout.mockResolvedValue({ ok: true });
   unmarkTalkAbout.mockResolvedValue({ ok: true });
   resolveTalkAbout.mockResolvedValue({ ok: true });
@@ -176,6 +179,14 @@ describe('SavedTopicsPage actor-aware topics', () => {
     expect(screen.getByText(/공유 정보를 아직 확인하지 못했어요/)).toBeInTheDocument();
     expect(screen.queryByText('책갈피가 비었어요')).not.toBeInTheDocument();
     expect(screen.queryByTestId('talk-about-call-mode')).not.toBeInTheDocument();
+  });
+
+  it('does not call a failed talk-about slice empty while the rest of sync is live', () => {
+    talkAboutSyncStatus = 'unavailable';
+    view([], []);
+
+    expect(screen.getByText(/책갈피를 아직 확인하지 못했어요/)).toBeInTheDocument();
+    expect(screen.queryByText('책갈피가 비었어요')).not.toBeInTheDocument();
   });
 
   it('opens only the exact source id represented by the topic', async () => {

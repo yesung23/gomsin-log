@@ -12,11 +12,12 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
  * `live` needs no explanation to the user. `delayed` and `unavailable` both do,
  * because in one case the data is real but frozen and in the other it is hidden.
  *
- * This is ONE OF THREE ORTHOGONAL AVAILABILITY AXES and must not be conflated
+ * This is ONE OF FOUR ORTHOGONAL AVAILABILITY AXES and must not be conflated
  * with the others, because reusing either of them for deletion status is exactly
  * how a failed check becomes indistinguishable from an authoritative negative:
  *
  *  - `SharedSyncStatus`  - how fresh the shared couple workspace on screen is.
+ *  - `TalkAboutSyncStatus` - whether the bookmark slice has an authoritative answer.
  *  - `authSyncUnavailable` - whether initial account hydration succeeded.
  *  - `DeletionStatus`    - whether this account is being deleted.
  *
@@ -27,6 +28,16 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
  * precedence, where the recovery gate takes priority over the sync-outage gate.
  */
 export type SharedSyncStatus = 'live' | 'delayed' | 'unavailable';
+
+/**
+ * Whether the tiny conversation-bookmark slice has an authoritative answer.
+ *
+ * This is intentionally narrower than `SharedSyncStatus`: records can remain
+ * current and readable while this one coordination query fails. Treating that
+ * failure as an empty array would falsely claim that the couple has no saved
+ * topics. Like the transport status, it is runtime-only and never persisted.
+ */
+export type TalkAboutSyncStatus = 'ready' | 'unavailable';
 
 /**
  * Why a record mutation did not happen.
@@ -102,6 +113,8 @@ export interface StoreContextType {
   authSyncStage: AuthSyncStage | null;
   /** Sanitized PostgREST/PostgreSQL code; never a raw server message. */
   sharedSyncStatus: SharedSyncStatus;
+  /** A failed bookmark read is unavailable, never an authoritative empty list. */
+  talkAboutSyncStatus: TalkAboutSyncStatus;
   /**
    * Server-authoritative couple lifecycle.
    *

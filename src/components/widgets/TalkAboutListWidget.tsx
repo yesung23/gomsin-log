@@ -23,7 +23,13 @@ import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 const VISIBLE_LIMIT = 5;
 
 export function TalkAboutListWidget() {
-  const { state, sharedSyncStatus, resolveTalkAbout, setHighlightedRecordId } = useStore();
+  const {
+    state,
+    sharedSyncStatus,
+    talkAboutSyncStatus,
+    resolveTalkAbout,
+    setHighlightedRecordId,
+  } = useStore();
   /*
     Quarantine empties `records` -- one's OWN records included (`store.tsx`, the
     `nextState` that assigns `records: []`). A surface that reads only the length
@@ -64,19 +70,25 @@ export function TalkAboutListWidget() {
 
   const visible = expanded ? topics : topics.slice(0, VISIBLE_LIMIT);
   const hiddenCount = topics.length - visible.length;
+  const coordinationUnavailable =
+    sharedSyncStatus === 'unavailable' || talkAboutSyncStatus === 'unavailable';
 
   return (
     <div data-testid="widget-talk-about-list">
       <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         <MessageCircle size={14} className="text-coral" aria-hidden="true" />
-        오늘 이야기할 것 · {topics.length}
+        오늘 이야기할 것{coordinationUnavailable ? null : <> · {topics.length}</>}
       </h3>
 
-      {topics.length === 0 ? (
+      {coordinationUnavailable ? (
         <p className="text-caption text-muted-foreground py-2 break-keep">
           {sharedSyncStatus === 'unavailable'
-            ? '기록을 확인하는 중이에요.'
-            : <>아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.</>}
+            ? '공유 기록을 확인하는 중이에요.'
+            : '책갈피를 확인하는 중이에요. 확인되면 다시 보여드려요.'}
+        </p>
+      ) : topics.length === 0 ? (
+        <p className="text-caption text-muted-foreground py-2 break-keep">
+          아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.
         </p>
       ) : (
         <ul className="divide-y divide-border">
@@ -171,7 +183,7 @@ export function TalkAboutListWidget() {
         what someone came here to read; this is what they do next, and only
         sometimes.
       */}
-      {topics.length > 0 && (
+      {!coordinationUnavailable && topics.length > 0 && (
         <button
           type="button"
           onClick={() => navigate('/call')}
@@ -183,7 +195,7 @@ export function TalkAboutListWidget() {
         </button>
       )}
 
-      {(hiddenCount > 0 || expanded) && (
+      {!coordinationUnavailable && (hiddenCount > 0 || expanded) && (
         <button
           type="button"
           onClick={() => setExpanded((open) => !open)}

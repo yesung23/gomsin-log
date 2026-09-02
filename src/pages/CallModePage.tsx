@@ -15,6 +15,8 @@ interface CallSession {
   skipped: string[];
   /** Resolved locally this visit, even while realtime reconciliation catches up. */
   settled: string[];
+  /** Sources that disappeared while current and were explicitly skipped, never resolved. */
+  unavailable: string[];
 }
 
 function sameIds(left: string[], right: string[]): boolean {
@@ -53,7 +55,13 @@ function sameIds(left: string[], right: string[]): boolean {
  * on its own, so leaving after three topics keeps three.
  */
 export function CallModePage() {
-  const { state, sharedSyncStatus, resolveTalkAbout, setHighlightedRecordId } = useStore();
+  const {
+    state,
+    sharedSyncStatus,
+    talkAboutSyncStatus,
+    resolveTalkAbout,
+    setHighlightedRecordId,
+  } = useStore();
   const navigate = useNavigate();
   const isOffline = !useOnlineStatus();
   const { profile } = state;
@@ -76,18 +84,28 @@ export function CallModePage() {
     remaining: topics.map((topic) => topic.recordId),
     skipped: [],
     settled: [],
+    unavailable: [],
   }));
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  const contentHeadingRef = useRef<HTMLHeadingElement>(null);
+  const coordinationUnavailable =
+    sharedSyncStatus === 'unavailable' || talkAboutSyncStatus === 'unavailable';
 
   useEffect(() => {
+    if (coordinationUnavailable) return;
     const activeIds = topics.map((topic) => topic.recordId);
     const active = new Set(activeIds);
     setSession((previous) => {
       const settled = new Set(previous.settled);
-      const remaining = previous.remaining.filter((id) => active.has(id) && !settled.has(id));
+      const [pinnedCurrent, ...queued] = previous.remaining;
+      const remaining = [
+        ...(pinnedCurrent && !settled.has(pinnedCurrent) ? [pinnedCurrent] : []),
+        ...queued.filter((id) => active.has(id) && !settled.has(id)),
+      ];
       const skipped = previous.skipped.filter((id) => active.has(id) && !settled.has(id));
-      const known = new Set([...remaining, ...skipped, ...previous.settled]);
+      const unavailable = previous.unavailable.filter((id) => !settled.has(id));
+      const known = new Set([...remaining, ...skipped, ...unavailable, ...previous.settled]);
 
       // New realtime topics wait behind the current session instead of jumping
       // in front of the sentence already on screen.
@@ -98,12 +116,16 @@ export function CallModePage() {
         }
       }
 
-      if (sameIds(remaining, previous.remaining) && sameIds(skipped, previous.skipped)) {
+      if (
+        sameIds(remaining, previous.remaining)
+        && sameIds(skipped, previous.skipped)
+        && sameIds(unavailable, previous.unavailable)
+      ) {
         return previous;
       }
-      return { ...previous, remaining, skipped };
+      return { ...previous, remaining, skipped, unavailable };
     });
-  }, [topics]);
+  }, [coordinationUnavailable, topics]);
 
   /*
     Opening the call screen, once per visit. This is the step the strategy needs
@@ -124,9 +146,46 @@ export function CallModePage() {
   );
   const currentId = session.remaining[0];
   const current = currentId ? topicsById.get(currentId) : undefined;
+  const currentUnavailable = Boolean(currentId) && !current;
   /** Skipped past the end with topics still unfinished -- not the same as done. */
   const wrapped = session.remaining.length === 0 && session.skipped.length > 0;
-  const done = session.remaining.length === 0 && session.skipped.length === 0;
+  const changedOnly = session.remaining.length === 0
+    && session.skipped.length === 0
+    && session.unavailable.length > 0;
+  const done = session.remaining.length === 0
+    && session.skipped.length === 0
+    && session.unavailable.length === 0;
+
+  const viewKey = coordinationUnavailable
+    ? 'sync-unavailable'
+    : currentUnavailable
+      ? `unavailable:${currentId}`
+      : current
+        ? `topic:${current.recordId}`
+        : wrapped
+          ? 'wrapped'
+          : changedOnly
+            ? 'changed'
+            : done
+              ? 'done'
+              : 'matching';
+  const announcement = coordinationUnavailable
+    ? '이야기거리 목록을 확인하고 있어요'
+    : current
+      ? `${session.skipped.length + 1}번째 이야기거리, ${current.record.log || '남긴 순간'}`
+      : currentUnavailable
+        ? '현재 보던 이야기거리를 더 이상 볼 수 없어요'
+        : wrapped
+          ? '건너뛴 이야기거리가 남았어요'
+          : changedOnly
+            ? '목록이 바뀐 이야기거리가 있어요'
+            : done
+              ? '남은 이야기거리가 없어요'
+              : '이야기거리 목록을 맞추는 중이에요';
+
+  useEffect(() => {
+    contentHeadingRef.current?.focus();
+  }, [viewKey]);
 
   const leave = () => navigate('/');
 
@@ -153,6 +212,7 @@ export function CallModePage() {
         settled: previous.settled.includes(recordId)
           ? previous.settled
           : [...previous.settled, recordId],
+        unavailable: previous.unavailable.filter((id) => id !== recordId),
       }));
       /*
         The loop's last arrow, measured. §19 permits the event kind and an opaque
@@ -183,7 +243,15 @@ export function CallModePage() {
     setSession((previous) => {
       const [id, ...remaining] = previous.remaining;
       if (!id) return previous;
-      return { ...previous, remaining, skipped: [...previous.skipped, id] };
+      return currentUnavailable
+        ? {
+            ...previous,
+            remaining,
+            unavailable: previous.unavailable.includes(id)
+              ? previous.unavailable
+              : [...previous.unavailable, id],
+          }
+        : { ...previous, remaining, skipped: [...previous.skipped, id] };
     });
   };
 
@@ -207,14 +275,24 @@ export function CallModePage() {
         </button>
       </header>
 
-      {sharedSyncStatus === 'unavailable' ? (
+      <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
+
+      {coordinationUnavailable ? (
         <section
           data-testid="call-mode-unavailable"
           className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
         >
-          <p className="text-heading text-foreground break-keep">이야기거리를 확인하고 있어요</p>
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-heading text-foreground break-keep outline-none"
+          >
+            이야기거리를 확인하고 있어요
+          </h2>
           <p className="text-body text-muted-foreground break-keep">
-            공유 정보를 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.
+            {sharedSyncStatus === 'unavailable'
+              ? '공유 정보를 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.'
+              : '책갈피 목록을 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.'}
           </p>
           <button
             type="button"
@@ -229,7 +307,13 @@ export function CallModePage() {
           data-testid="call-mode-done"
           className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
         >
-          <p className="text-heading text-foreground break-keep">이야기거리를 다 정리했어요</p>
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-heading text-foreground break-keep outline-none"
+          >
+            이야기거리를 다 정리했어요
+          </h2>
           <p className="text-body text-muted-foreground break-keep">
             남은 게 없어요. 통화는 계속하셔도 돼요.
           </p>
@@ -251,7 +335,13 @@ export function CallModePage() {
             are still open would be the app claiming something untrue about the
             conversation -- §3.2, the app states facts and does not interpret.
           */}
-          <p className="text-heading text-foreground break-keep">건너뛴 이야기거리가 남았어요</p>
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-heading text-foreground break-keep outline-none"
+          >
+            건너뛴 이야기거리가 남았어요
+          </h2>
           <p className="text-body text-muted-foreground break-keep">
               아직 {session.skipped.length}개가 그대로 있어요.
           </p>
@@ -276,12 +366,74 @@ export function CallModePage() {
             </button>
           </div>
         </section>
+      ) : changedOnly ? (
+        <section
+          data-testid="call-mode-changed"
+          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        >
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-heading text-foreground break-keep outline-none"
+          >
+            현재 볼 수 있는 이야기거리는 여기까지예요
+          </h2>
+          <p className="text-body text-muted-foreground break-keep">
+            목록이 바뀐 항목은 이야기했다고 표시하지 않았어요.
+          </p>
+          <button
+            type="button"
+            onClick={leave}
+            className="press-response mt-2 min-h-12 px-6 rounded-control bg-muted text-label font-bold text-foreground"
+          >
+            홈으로
+          </button>
+        </section>
+      ) : currentUnavailable ? (
+        <section
+          data-testid="call-mode-current-unavailable"
+          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        >
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-heading text-foreground break-keep outline-none"
+          >
+            현재 보던 이야기거리를 더 이상 볼 수 없어요
+          </h2>
+          <p className="text-body text-muted-foreground break-keep">
+            다른 기록으로 바꾸지 않았어요. 다음 이야기거리로 직접 넘어갈 수 있어요.
+          </p>
+          <div className="mt-2 flex w-full max-w-xs flex-col gap-2">
+            <button
+              type="button"
+              data-testid="call-mode-skip"
+              onClick={skip}
+              className="press-response min-h-12 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
+            >
+              다음 이야기거리
+            </button>
+            <button
+              type="button"
+              onClick={leave}
+              className="press-response min-h-12 rounded-control bg-muted text-label font-bold text-foreground"
+            >
+              끝내기
+            </button>
+          </div>
+        </section>
       ) : !current ? (
         <section
           aria-live="polite"
           className="flex-1 flex items-center justify-center px-6 text-center"
         >
-          <p className="text-body text-muted-foreground">이야기거리 목록을 맞추는 중이에요.</p>
+          <h2
+            ref={contentHeadingRef}
+            tabIndex={-1}
+            className="text-body text-muted-foreground outline-none"
+          >
+            이야기거리 목록을 맞추는 중이에요.
+          </h2>
         </section>
       ) : (
         <>
@@ -299,10 +451,14 @@ export function CallModePage() {
               {session.skipped.length + 1} / {session.remaining.length + session.skipped.length}
             </p>
 
-            <p className="text-heading text-foreground break-keep leading-relaxed">
+            <h2
+              ref={contentHeadingRef}
+              tabIndex={-1}
+              className="text-heading text-foreground break-keep leading-relaxed outline-none"
+            >
               {current.record.log
                 || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
-            </p>
+            </h2>
 
             <p className="text-caption text-muted-foreground break-keep">
               {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}

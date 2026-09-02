@@ -428,6 +428,7 @@ describe('검색 입력 및 네비게이션', () => {
     expect(screen.getByPlaceholderText('쓴 말이나 날짜로 찾기')).toBeInTheDocument();
     const composeBtn = screen.getByRole('button', { name: '기록 남기기' });
     expect(composeBtn).toBeInTheDocument();
+    expect(composeBtn).toHaveClass('press-response', 'h-11', 'w-11');
 
     fireEvent.click(composeBtn);
     expect(mockNavigate).toHaveBeenCalledWith('/compose');
@@ -461,6 +462,7 @@ describe('검색 입력 및 네비게이션', () => {
 
     const item = screen.getByText('면회').closest('button');
     expect(item).not.toBeNull();
+    expect(item).toHaveClass('press-response-row');
     fireEvent.click(item!);
 
     expect(mockNavigate).toHaveBeenCalledWith('/record?record=rec-special-123');
@@ -495,6 +497,7 @@ describe('검색 입력 및 네비게이션', () => {
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
 
     const clearBtn = screen.getByRole('button', { name: '지우기' });
+    expect(clearBtn).toHaveClass('press-response', 'h-11', 'w-11');
     fireEvent.click(clearBtn);
 
     expect(screen.getByTestId('soldier-search-surface')).toBeInTheDocument();

@@ -479,7 +479,7 @@ function InlineServiceInfo({
         <button
           type="button"
           onClick={onOpenService}
-          className="min-h-11 text-caption font-semibold text-coral-strong"
+          className="press-response min-h-11 text-caption font-semibold text-coral-strong"
         >
           복무 정보 수정
         </button>
@@ -699,7 +699,7 @@ function SearchPageBody() {
                 type="button"
                 aria-label="지우기"
                 onClick={() => setQuery('')}
-                className="flex h-11 w-8 items-center justify-center"
+                className="press-response flex h-11 w-11 items-center justify-center"
               >
                 <X size={16} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
               </button>
@@ -711,7 +711,7 @@ function SearchPageBody() {
             type="button"
             aria-label="기록 남기기"
             onClick={() => navigate('/compose')}
-            className="ink-chip flex h-11 w-11 items-center justify-center"
+            className="press-response ink-chip flex h-11 w-11 items-center justify-center"
           >
             <SquarePen size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
           </button>
@@ -790,7 +790,7 @@ function Results({
               <button
                 type="button"
                 onClick={() => onOpen(match.record)}
-                className="flex w-full flex-col items-start gap-1 py-3 text-left"
+                className="press-response-row flex min-h-11 w-full flex-col items-start gap-1 py-3 text-left"
               >
                 <span className="text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
                   {Number(month)}월 {Number(day)}일 {match.record.time}

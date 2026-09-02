@@ -16,6 +16,7 @@ import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
+import { AppLoadingState } from '@/components/ui/AppLoadingState';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
 import { authSyncFailureCopy } from '@/lib/authSyncFailureCopy';
@@ -90,9 +91,10 @@ const HomePage = lazy(() =>
 
 function PageLoader() {
   return (
-    <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-      <div className="w-8 h-8 border-3 border-coral border-t-transparent rounded-full animate-spin" />
-    </div>
+    <AppLoadingState
+      label="화면을 불러오고 있어요"
+      description="잠시만 기다려 주세요."
+    />
   );
 }
 
@@ -319,9 +321,10 @@ export function App() {
 
   if (!isReady) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-coral border-t-transparent rounded-full animate-spin" />
-      </div>
+      <AppLoadingState
+        label="곰신로그를 준비하고 있어요"
+        description="계정과 기록을 확인하는 중이에요."
+      />
     );
   }
 

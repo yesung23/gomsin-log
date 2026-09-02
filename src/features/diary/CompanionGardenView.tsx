@@ -552,8 +552,14 @@ export function CompanionGardenView({
           className="m-4 my-auto rounded-surface border border-border bg-card p-8 text-center"
           aria-label={unavailableReason === 'shared_unavailable' ? '정원 확인 중' : '정원 준비 안내'}
         >
-          <Sprout size={32} className="mx-auto text-muted-foreground" aria-hidden="true" />
-          <p className="mt-4 text-body font-semibold text-foreground">{unavailableCopy}</p>
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <Sprout size={32} className="mx-auto text-muted-foreground" aria-hidden="true" />
+            <p className="mt-4 text-body font-semibold text-foreground">{unavailableCopy}</p>
+          </div>
         </section>
       )}
     </div>

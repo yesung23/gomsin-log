@@ -49,9 +49,15 @@ export interface TodayLogWidgetProps {
    * 기록 tab's always-available composer sheet uses it to close itself.
    */
   onSaved?: () => void;
+  /**
+   * Reports the real composer write boundary to a containing sheet. A parent
+   * must not dismiss the sheet while an in-memory photo is being admitted to
+   * the record or the offline outbox.
+   */
+  onBusyChange?: (busy: boolean) => void;
 }
 
-export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
+export function TodayLogWidget({ onSaved, onBusyChange }: TodayLogWidgetProps = {}) {
   const { state, sharedSyncStatus, addRecordWithMedia, queueRecordForLater } = useStore();
   /*
     Quarantine empties `records` -- one's OWN records included (`store.tsx`, the
@@ -125,6 +131,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
    */
   const composerOpenedAt = React.useRef<number | null>(restoredDraft ? Date.now() : null);
   const [isSaving, setIsSaving] = useState(false);
+  const setSaving = React.useCallback((busy: boolean) => {
+    setIsSaving(busy);
+    onBusyChange?.(busy);
+  }, [onBusyChange]);
   const isOffline = !useOnlineStatus();
 
   // State for rule-suggested confirmed IDs
@@ -170,6 +180,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   const review = useEmotionCandidatesAtBoundary();
   const analyseLog = review.analyse;
   const settleComposition = React.useCallback(() => {
+    if (saveInFlightRef.current) return;
     analyseLog(log);
   }, [analyseLog, log]);
 
@@ -205,6 +216,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   });
 
   const handleOpenInput = (type: 'text' | 'photo' | 'instant') => {
+    if (saveInFlightRef.current) return;
     openComposer();
     if (type === 'text') return;
 
@@ -246,6 +258,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     const selected = Array.from(e.target.files || []);
     // Reset immediately so picking the same file twice still fires onChange.
     if (fileInputRef.current) fileInputRef.current.value = '';
+    if (saveInFlightRef.current) return;
     if (selected.length === 0) return;
 
     const accepted: File[] = [];
@@ -268,6 +281,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
   };
 
   const removePendingFile = (index: number) => {
+    if (saveInFlightRef.current) return;
     setPendingFiles((prev) => prev.filter((_, i) => i !== index));
   };
 
@@ -299,6 +313,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
   /** Opening the composer starts the one timer §19 permits. */
   const openComposer = () => {
+    if (saveInFlightRef.current) return;
     if (composerOpenedAt.current === null) composerOpenedAt.current = Date.now();
     setShowInputCard(true);
   };
@@ -364,12 +379,12 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       delivers them when the connection returns.
     */
     if (isOffline) {
-      setIsSaving(true);
+      setSaving(true);
       let queueResult: { queued: boolean; error?: string };
       try {
         queueResult = await queueRecordForLater(draft, pendingFiles);
       } finally {
-        setIsSaving(false);
+        setSaving(false);
       }
       if (!queueResult.queued) {
         // Could not even store it. Say so, and keep everything in the composer.
@@ -384,7 +399,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       return;
     }
 
-    setIsSaving(true);
+    setSaving(true);
     let result: {
       ok: boolean;
       failedFiles: string[];
@@ -395,7 +410,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
     try {
       result = await addRecordWithMedia(draft, pendingFiles);
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
 
     if (result.queued) {
@@ -520,6 +535,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       */}
       <div className="flex items-center gap-2 flex-wrap">
         <button
+          disabled={isSaving}
           onClick={() => handleOpenInput('instant')}
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-coral/10 border border-coral/20 text-coral-strong text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
@@ -528,6 +544,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         </button>
 
         <button
+          disabled={isSaving}
           onClick={() => handleOpenInput('photo')}
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
@@ -536,6 +553,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         </button>
 
         <button
+          disabled={isSaving}
           onClick={() => handleOpenInput('text')}
           className="press-response relative flex items-center gap-1 px-3 rounded-control bg-muted border border-border text-foreground text-label font-semibold h-9 before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']"
         >
@@ -548,6 +566,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
         type="file"
         ref={fileInputRef}
         multiple
+        disabled={isSaving}
         accept={MEDIA_ACCEPT}
         className="hidden"
         onChange={handleFileSelect}
@@ -557,6 +576,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
       {!showInputCard && restoredDraft && restoredDraft.log && (
         <button
           type="button"
+          disabled={isSaving}
           onClick={() => openComposer()}
           className="press-response-row mt-2 w-full text-left text-caption text-muted-foreground min-h-11 flex items-center"
         >
@@ -588,7 +608,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             </span>
             <span className="flex-1" />
             <button
-              onClick={() => setShowInputCard(false)}
+              disabled={isSaving}
+              onClick={() => {
+                if (!saveInFlightRef.current) setShowInputCard(false);
+              }}
               className="press-response min-h-11 min-w-11 flex items-center justify-center text-caption"
               style={{ color: 'var(--ink-soft)' }}
             >
@@ -603,7 +626,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           */}
           <textarea
             value={log}
-            onChange={(e) => setLog(e.target.value)}
+            readOnly={isSaving}
+            onChange={(e) => {
+              if (!saveInFlightRef.current) setLog(e.target.value);
+            }}
             /*
               Leaving the field is the composition boundary the analyser waits for.
               A blur means a thought is finished, which a 300 ms pause does not --
@@ -613,7 +639,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             aria-label="오늘의 기록"
             placeholder="오늘 어땠어?"
             rows={6}
-            className="hand-text w-full resize-none bg-transparent text-heading outline-none placeholder:opacity-40"
+            className="hand-text w-full resize-none bg-transparent text-heading placeholder:opacity-40"
             style={{ color: 'var(--ink)', lineHeight: '30px' }}
           />
 
@@ -630,7 +656,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                 <button
                   key={tag.value}
                   type="button"
-                  onClick={() => setReaction(selected ? undefined : tag.value)}
+                  disabled={isSaving}
+                  onClick={() => {
+                    if (!saveInFlightRef.current) setReaction(selected ? undefined : tag.value);
+                  }}
                   aria-pressed={selected}
                   className={`press-response min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 border ${ selected ? 'bg-coral/10 border-coral/30 text-coral-strong' : 'bg-muted border-border text-muted-foreground' }`}
                 >
@@ -653,7 +682,7 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                   return (
                     <span
                       key={`${file.name}-${index}`}
-                      className="flex items-center gap-1.5 max-w-full px-2 py-1 rounded-control bg-muted border border-border text-caption font-semibold text-foreground"
+                      className="flex min-h-11 items-center gap-1.5 max-w-full pl-2 rounded-control bg-muted border border-border text-caption font-semibold text-foreground"
                     >
                       {kind === 'photo' && <ImageIcon size={13} className="text-coral shrink-0" />}
                       {kind === 'video' && <Film size={13} className="text-info shrink-0" />}
@@ -661,11 +690,12 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                       <span className="truncate max-w-[130px]">{file.name}</span>
                       <button
                         type="button"
+                        disabled={isSaving}
                         onClick={() => removePendingFile(index)}
                         aria-label={`${file.name} 첨부 제거`}
-                        className="text-muted-foreground hover:text-destructive shrink-0"
+                        className="press-response inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-control text-muted-foreground hover:text-destructive"
                       >
-                        <X size={13} />
+                        <X size={13} aria-hidden="true" />
                       </button>
                     </span>
                   );
@@ -688,11 +718,21 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
             candidates={review.candidates}
             removed={review.removed}
             confirmedIds={review.confirmedIds}
-            onConfirm={review.confirm}
-            onConfirmAll={review.confirmAll}
-            onChangeEmotion={review.changeEmotion}
-            onRemove={review.remove}
-            onRestore={review.restore}
+            onConfirm={(id) => {
+              if (!saveInFlightRef.current) review.confirm(id);
+            }}
+            onConfirmAll={() => {
+              if (!saveInFlightRef.current) review.confirmAll();
+            }}
+            onChangeEmotion={(id, basic) => {
+              if (!saveInFlightRef.current) review.changeEmotion(id, basic);
+            }}
+            onRemove={(id) => {
+              if (!saveInFlightRef.current) review.remove(id);
+            }}
+            onRestore={(id) => {
+              if (!saveInFlightRef.current) review.restore(id);
+            }}
             visibilityNote={
               isPrivate
                 ? '🔒 나만 보기 기록이라 확인한 마음도 나만 볼 수 있어요.'
@@ -701,7 +741,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
                   : `기록은 공유해도 이 마음은 나만 볼 수 있어요. ${partnerName}에게도 보여주려면 아래에서 켜주세요.`
             }
             shareWithPartner={isPrivate ? undefined : shareEmotion}
-            onToggleShareWithPartner={isPrivate ? undefined : setShareEmotion}
+            onToggleShareWithPartner={isPrivate ? undefined : (value) => {
+              if (!saveInFlightRef.current) setShareEmotion(value);
+            }}
+            disabled={isSaving}
             className="animate-fade-in"
           />
 
@@ -733,7 +776,10 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
           <div className="pt-2 flex items-center justify-between gap-2">
             {hasPartner && (
             <button
-              onClick={() => setIsPrivate(!isPrivate)}
+              disabled={isSaving}
+              onClick={() => {
+                if (!saveInFlightRef.current) setIsPrivate(!isPrivate);
+              }}
               className={`press-response min-h-11 px-3 rounded-control text-label font-semibold flex items-center gap-1 ${ isPrivate ? 'bg-warning-surface text-warning-foreground' : 'bg-muted text-muted-foreground' }`}
             >
               {isPrivate ? <Lock size={12} /> : <Unlock size={12} />}
@@ -743,7 +789,15 @@ export function TodayLogWidget({ onSaved }: TodayLogWidgetProps = {}) {
 
             {hasPartner && !isPrivate && (
               <label className="min-h-11 px-3 rounded-control bg-coral/10 text-coral-strong text-label font-semibold flex items-center gap-1 cursor-pointer">
-                <input type="checkbox" checked={talkAbout} onChange={(event) => setTalkAbout(event.target.checked)} className="accent-coral" />
+                <input
+                  type="checkbox"
+                  disabled={isSaving}
+                  checked={talkAbout}
+                  onChange={(event) => {
+                    if (!saveInFlightRef.current) setTalkAbout(event.target.checked);
+                  }}
+                  className="accent-coral"
+                />
                 통화 때 꼭 얘기
               </label>
             )}

@@ -380,7 +380,7 @@ export function ComposePage() {
           onBlur={() => review.analyse(log)}
           aria-label="오늘 남길 글"
           rows={6}
-          className="hand-text w-full resize-none bg-transparent text-heading outline-none placeholder:opacity-40"
+          className="hand-text w-full resize-none bg-transparent text-heading placeholder:opacity-40"
           style={{ color: 'var(--ink)', lineHeight: '30px' }}
         />
 

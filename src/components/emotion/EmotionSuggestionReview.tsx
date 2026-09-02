@@ -61,6 +61,8 @@ export interface EmotionSuggestionReviewProps {
    */
   shareWithPartner?: boolean;
   onToggleShareWithPartner?: (value: boolean) => void;
+  /** Freezes every answer while the enclosing record write is in flight. */
+  disabled?: boolean;
   className?: string;
 }
 
@@ -76,6 +78,7 @@ export function EmotionSuggestionReview({
   visibilityNote,
   shareWithPartner,
   onToggleShareWithPartner,
+  disabled = false,
   className,
 }: EmotionSuggestionReviewProps) {
   /** Which row has its six-character picker open. Only ever one. */
@@ -157,6 +160,7 @@ export function EmotionSuggestionReview({
                   </div>
                   <button
                     type="button"
+                    disabled={disabled}
                     onClick={() => onRemove(candidate.id)}
                     aria-label={`${label} 빼기`}
                     className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-lg text-muted-foreground shrink-0"
@@ -172,7 +176,7 @@ export function EmotionSuggestionReview({
                       onConfirm(candidate.id);
                       setPickerFor(null);
                     }}
-                    disabled={answered}
+                    disabled={disabled || answered}
                     data-testid={`emotion-suggestion-confirm-${candidate.id}`}
                     aria-label={`${label} 맞아요`}
                     className={`press-response-row flex-1 min-h-11 rounded-control text-label font-bold flex items-center justify-center gap-1 border ${
@@ -186,7 +190,10 @@ export function EmotionSuggestionReview({
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPickerFor(picking ? null : candidate.id)}
+                    disabled={disabled}
+                    onClick={() => {
+                      if (!disabled) setPickerFor(picking ? null : candidate.id);
+                    }}
                     aria-expanded={picking}
                     data-testid={`emotion-suggestion-change-${candidate.id}`}
                     className="press-response-row ink-chip flex-1 min-h-11 text-label font-bold" style={{ color: 'var(--ink)' }}
@@ -207,7 +214,9 @@ export function EmotionSuggestionReview({
                         <li key={basic}>
                           <button
                             type="button"
+                            disabled={disabled}
                             onClick={() => {
+                              if (disabled) return;
                               onChangeEmotion(candidate.id, basic);
                               setPickerFor(null);
                             }}
@@ -244,6 +253,7 @@ export function EmotionSuggestionReview({
       {unanswered > 1 && (
         <button
           type="button"
+          disabled={disabled}
           onClick={onConfirmAll}
           data-testid="emotion-suggestion-confirm-all"
           className="press-response-row ink-fill w-full min-h-11 text-label font-bold"
@@ -260,6 +270,7 @@ export function EmotionSuggestionReview({
               <button
                 key={candidate.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => onRestore(candidate.id)}
                 aria-label={`${BASIC_EMOTION_LABEL[candidate.basic]} 다시 넣기`}
                 className="press-response ink-chip min-h-11 px-3 text-caption font-bold flex items-center gap-1" style={{ color: 'var(--ink-soft)' }}
@@ -280,6 +291,7 @@ export function EmotionSuggestionReview({
         <label className="ink-chip flex items-center gap-1.5 min-h-11 px-3 text-label font-semibold cursor-pointer w-fit" style={{ color: 'var(--ink)' }}>
           <input
             type="checkbox"
+            disabled={disabled}
             checked={!!shareWithPartner}
             onChange={(event) => onToggleShareWithPartner(event.target.checked)}
             className="accent-coral"

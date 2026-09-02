@@ -11,7 +11,11 @@ const FOCUSABLE_SELECTOR = [
 
 function focusableElements(panel: HTMLElement): HTMLElement[] {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    .filter((element) => element.closest('[hidden], [aria-hidden="true"], [inert]') === null);
+    .filter((element) => {
+      if (element.closest('[hidden], [aria-hidden="true"], [inert], .hidden')) return false;
+      const style = window.getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden';
+    });
 }
 
 interface DialogFocusOptions {
@@ -45,7 +49,9 @@ export function useDialogFocus({
 
     const panel = panelRef.current;
     const restoreTarget = restoreFocusRef.current;
-    (initialFocusRef?.current ?? (panel ? focusableElements(panel)[0] : undefined))?.focus();
+    const suppliedTabIndex = panel?.getAttribute('tabindex') ?? null;
+    if (panel && suppliedTabIndex === null) panel.setAttribute('tabindex', '-1');
+    (initialFocusRef?.current ?? (panel ? focusableElements(panel)[0] ?? panel : undefined))?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -55,10 +61,17 @@ export function useDialogFocus({
       if (event.key !== 'Tab' || !panel) return;
 
       const focusable = focusableElements(panel);
-      if (focusable.length === 0) return;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        panel.focus();
+        return;
+      }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
+      if (!panel.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -70,6 +83,7 @@ export function useDialogFocus({
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
+      if (panel && suppliedTabIndex === null) panel.removeAttribute('tabindex');
       if (restoreTarget?.isConnected) restoreTarget.focus();
     };
   }, [active, initialFocusRef, panelRef, restoreFocusRef]);

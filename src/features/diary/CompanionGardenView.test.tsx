@@ -413,6 +413,37 @@ describe('interactive companion garden characters', () => {
   });
 });
 
+describe('garden availability announcements', () => {
+  it('announces shared-workspace checking immediately without deferring the live message', () => {
+    render(
+      <CompanionGardenView
+        state={{ ...AVAILABLE, isAvailable: false }}
+        unavailableReason="shared_unavailable"
+      />,
+    );
+
+    const status = screen.getByRole('status');
+    expect(screen.getByRole('region', { name: '정원 확인 중' })).toContainElement(status);
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).toHaveAttribute('aria-atomic', 'true');
+    expect(status).not.toHaveAttribute('aria-busy');
+  });
+
+  it('announces a settled unavailable reason without claiming work is still busy', () => {
+    render(
+      <CompanionGardenView
+        state={{ ...AVAILABLE, isAvailable: false }}
+        unavailableReason="inactive_couple"
+      />,
+    );
+
+    const status = screen.getByRole('status');
+    expect(status).toHaveTextContent('커플 연결이 확인되면 정원이 자라기 시작해요.');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).not.toHaveAttribute('aria-busy');
+  });
+});
+
 describe('autonomous companion wandering', () => {
   it('moves both companions after short independent startup delays', () => {
     vi.useFakeTimers();

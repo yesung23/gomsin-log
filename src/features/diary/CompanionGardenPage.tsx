@@ -12,6 +12,7 @@ import {
   type GardenAccessory,
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
+import { loadCompanionShopState } from '@/lib/companionShopLocalState';
 import { CompanionGardenView } from './CompanionGardenView';
 
 function CompanionGardenPageBody() {
@@ -21,9 +22,13 @@ function CompanionGardenPageBody() {
   const anniversaryDate = couple.anniversaryDate;
   const userId = state.authenticatedUser?.id || state.profile.id || '';
   const [accessories, setAccessories] = useState(() => loadGardenAccessories(userId));
+  const [ownedAccessories, setOwnedAccessories] = useState(
+    () => loadCompanionShopState(userId).ownedAccessories,
+  );
 
   useEffect(() => {
     setAccessories(loadGardenAccessories(userId));
+    setOwnedAccessories(loadCompanionShopState(userId).ownedAccessories);
   }, [userId]);
 
   const changeAccessory = (companion: GardenCompanionId, accessory: GardenAccessory) => {
@@ -61,15 +66,17 @@ function CompanionGardenPageBody() {
       state={gardenState}
       unavailableReason={unavailableReason}
       accessories={accessories}
+      ownedAccessories={ownedAccessories}
       onAccessoryChange={changeAccessory}
       onBack={() => navigate('/diary')}
+      onOpenShop={() => navigate('/shop')}
     />
   );
 }
 
 export function CompanionGardenPage() {
   return (
-    <MobileShell>
+    <MobileShell hideNav>
       <CompanionGardenPageBody />
     </MobileShell>
   );

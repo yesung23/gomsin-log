@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, Palette, Sprout } from 'lucide-react';
-import { AppBar } from '@/components/ui/AppBar';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
+import { ChevronDown, Palette, ShoppingBag, Sprout } from 'lucide-react';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { cn } from '@/lib/utils';
+import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
 import {
   DEFAULT_GARDEN_ACCESSORIES,
   GARDEN_ACCESSORY_OPTIONS,
@@ -9,8 +19,12 @@ import {
   type GardenAccessoryState,
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
+import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import type { CompanionGardenStageLevel, CompanionGardenState } from './companionGarden';
 import {
+  GARDEN_BOUNDS,
+  constrainCompanionPoint,
+  getPhysicalGardenBounds,
   gardenFirstMoveDelay,
   gardenMoveDuration,
   gardenPauseDuration,
@@ -22,8 +36,10 @@ export interface CompanionGardenViewProps {
   state: CompanionGardenState;
   unavailableReason?: 'missing_date' | 'shared_unavailable' | 'inactive_couple';
   accessories?: GardenAccessoryState;
+  ownedAccessories?: readonly CollectibleGardenAccessory[];
   onAccessoryChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => void;
   onBack?: () => void;
+  onOpenShop?: () => void;
 }
 
 type CompanionMotion = GardenPoint & {
@@ -37,6 +53,33 @@ type MotionMap = Record<GardenCompanionId, CompanionMotion>;
 const INITIAL_MOTION: MotionMap = {
   peach: { x: 26, y: 78, moving: false, moveCount: 0, transitionMs: 0 },
   sage: { x: 74, y: 74, moving: false, moveCount: 0, transitionMs: 0 },
+};
+
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_MOVE_TOLERANCE = 8;
+const KEYBOARD_PICKUP_MS = 900;
+
+const CHARACTER_CROPS: Record<GardenCompanionId, string> = {
+  peach: '20 515 136 155',
+  sage: '156 514 138 155',
+};
+
+export const GARDEN_OBJECT_REGISTRY = [
+  { id: 'growth-tree', kind: 'tree', interaction: 'growth-stage' },
+] as const;
+
+type PressSession = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  activated: boolean;
+  token: number;
+  timer?: ReturnType<typeof setTimeout>;
+};
+
+type FinitePickupSession = {
+  token: number;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 function usePrefersReducedMotion(): boolean {
@@ -61,6 +104,17 @@ function usePrefersReducedMotion(): boolean {
   }, []);
 
   return reduced;
+}
+
+function renderedGardenPoint(
+  position: DOMRect,
+  scene: DOMRect,
+): GardenPoint | null {
+  if (scene.width <= 0 || scene.height <= 0 || position.width <= 0 || position.height <= 0) return null;
+  return {
+    x: ((position.left + position.width / 2 - scene.left) / scene.width) * 100,
+    y: ((position.bottom - scene.top) / scene.height) * 100,
+  };
 }
 
 function GardenPlant({ level }: { level: CompanionGardenStageLevel }) {
@@ -136,55 +190,68 @@ function GardenAccessoryGlyph({
 
 function CompanionGlyph({
   companion,
-  tone,
   accessory,
   moving,
   lifted,
 }: {
   companion: GardenCompanionId;
-  tone: 'peach' | 'sage';
   accessory: GardenAccessory;
   moving: boolean;
   lifted: boolean;
 }) {
-  const fill = tone === 'peach' ? 'var(--coral-fill)' : 'var(--color-background-green)';
   return (
-    <svg
-      viewBox="0 0 72 82"
-      className={cn('h-[72px] w-[64px] drop-shadow-sm', moving && !lifted && 'garden-companion-walking')}
-      aria-hidden="true"
-    >
-      <path d="M17 69 Q13 51 18 30 Q21 13 36 12 Q52 13 55 31 Q58 52 53 69 Q44 77 35 77 Q25 77 17 69Z" fill={fill} stroke="var(--ink)" strokeWidth="2" />
-      <circle cx="29" cy="40" r="2.2" fill="var(--ink)" />
-      <circle cx="44" cy="40" r="2.2" fill="var(--ink)" />
-      <path d="M31 50 Q36 54 41 50" stroke="var(--ink)" strokeWidth="1.8" strokeLinecap="round" fill="none" />
-      <path d="M22 66 Q17 75 13 70" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-      <path d="M50 66 Q55 75 59 70" stroke="var(--ink)" strokeWidth="2.5" strokeLinecap="round" fill="none" />
-      <GardenAccessoryGlyph companion={companion} accessory={accessory} />
-    </svg>
+    <span className={cn('relative block h-[112px] w-[98px] drop-shadow-sm', moving && !lifted && 'garden-companion-walking')}>
+      <svg
+        data-testid={`garden-exact-character-${companion}`}
+        viewBox={CHARACTER_CROPS[companion]}
+        className="garden-exact-character h-full w-full"
+        aria-hidden="true"
+      >
+        <image href={paperPairAsset} width="1254" height="1254" pointerEvents="none" />
+      </svg>
+      <svg viewBox="0 0 72 82" className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true">
+        <GardenAccessoryGlyph companion={companion} accessory={accessory} />
+      </svg>
+    </span>
   );
 }
 
 function GardenCompanion({
   id,
   label,
-  tone,
   motion,
   accessory,
+  pressed,
   lifted,
-  onLift,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+  onPointerCancel,
+  onLostPointerCapture,
+  onKeyDown,
+  onClick,
+  positionRef,
 }: {
   id: GardenCompanionId;
   label: string;
-  tone: 'peach' | 'sage';
   motion: CompanionMotion;
   accessory: GardenAccessory;
+  pressed: boolean;
   lifted: boolean;
-  onLift: (id: GardenCompanionId) => void;
+  onPointerDown: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPointerCancel: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onLostPointerCapture: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onKeyDown: (id: GardenCompanionId, event: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  onClick: (id: GardenCompanionId, event: ReactMouseEvent<HTMLButtonElement>) => void;
+  positionRef: (node: HTMLDivElement | null) => void;
 }) {
   return (
     <div
+      ref={positionRef}
       className="garden-companion-position absolute z-10"
+      data-testid={`garden-companion-position-${id}`}
       style={{
         left: `${motion.x}%`,
         top: `${motion.y}%`,
@@ -196,8 +263,15 @@ function GardenCompanion({
     >
       <button
         type="button"
-        onClick={() => onLift(id)}
-        aria-label={`${label} 친구 들어올리기`}
+        onPointerDown={(event) => onPointerDown(id, event)}
+        onPointerMove={(event) => onPointerMove(id, event)}
+        onPointerUp={(event) => onPointerUp(id, event)}
+        onPointerCancel={(event) => onPointerCancel(id, event)}
+        onLostPointerCapture={(event) => onLostPointerCapture(id, event)}
+        onKeyDown={(event) => onKeyDown(id, event)}
+        onClick={(event) => onClick(id, event)}
+        onContextMenu={(event) => event.preventDefault()}
+        aria-label={`${label} 친구 길게 눌러 잡기`}
         data-testid={`garden-companion-${id}`}
         data-companion={id}
         data-accessory={accessory}
@@ -205,13 +279,15 @@ function GardenCompanion({
         data-y={motion.y.toFixed(2)}
         data-move-count={motion.moveCount}
         data-wandering={String(motion.moving)}
+        data-pressed={String(pressed)}
         data-lifted={String(lifted)}
         className={cn(
-          'press-response inline-flex min-h-11 min-w-11 items-end justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          'garden-companion-control inline-flex min-h-11 min-w-11 touch-none select-none items-end justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          pressed && 'garden-companion-pressed',
           lifted && 'garden-companion-lifted',
         )}
       >
-        <CompanionGlyph companion={id} tone={tone} accessory={accessory} moving={motion.moving} lifted={lifted} />
+        <CompanionGlyph companion={id} accessory={accessory} moving={motion.moving} lifted={lifted} />
       </button>
     </div>
   );
@@ -221,18 +297,22 @@ function AccessoryGroup({
   companion,
   label,
   value,
+  ownedAccessories,
   onChange,
 }: {
   companion: GardenCompanionId;
   label: string;
   value: GardenAccessory;
+  ownedAccessories: readonly CollectibleGardenAccessory[];
   onChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => void;
 }) {
   return (
     <div role="radiogroup" aria-label={`${label} 친구 액세서리`} className="space-y-2">
       <p className="text-caption font-semibold text-foreground">{label} 친구</p>
       <div className="flex flex-wrap gap-2">
-        {GARDEN_ACCESSORY_OPTIONS.map((option) => (
+        {GARDEN_ACCESSORY_OPTIONS
+          .filter(({ id }) => id === 'none' || ownedAccessories.includes(id))
+          .map((option) => (
           <button
             key={option.id}
             type="button"
@@ -249,7 +329,7 @@ function AccessoryGroup({
           >
             {option.label}
           </button>
-        ))}
+          ))}
       </div>
     </div>
   );
@@ -259,19 +339,49 @@ export function CompanionGardenView({
   state,
   unavailableReason = 'missing_date',
   accessories = DEFAULT_GARDEN_ACCESSORIES,
+  ownedAccessories = [],
   onAccessoryChange,
   onBack,
+  onOpenShop,
 }: CompanionGardenViewProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [motion, setMotion] = useState<MotionMap>(INITIAL_MOTION);
   const motionRef = useRef<MotionMap>(INITIAL_MOTION);
+  const sceneRef = useRef<HTMLDivElement | null>(null);
+  const companionPositionRefs = useRef<Partial<Record<GardenCompanionId, HTMLDivElement>>>({});
+  const [pressed, setPressed] = useState<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
+  const pressedRef = useRef<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
   const [lifted, setLifted] = useState<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
-  const liftTimers = useRef<Partial<Record<GardenCompanionId, ReturnType<typeof setTimeout>>>>({});
+  const liftedRef = useRef<Record<GardenCompanionId, boolean>>({ peach: false, sage: false });
+  const pressSessions = useRef<Partial<Record<GardenCompanionId, PressSession>>>({});
+  const keyboardTimers = useRef<Partial<Record<GardenCompanionId, FinitePickupSession>>>({});
+  const interactionTokens = useRef<Record<GardenCompanionId, number>>({ peach: 0, sage: 0 });
   const [decorating, setDecorating] = useState(false);
 
   useEffect(() => {
     motionRef.current = motion;
   }, [motion]);
+
+  useLayoutEffect(() => {
+    if (!state.isAvailable) return;
+    const scene = sceneRef.current?.getBoundingClientRect();
+    if (!scene || scene.width <= 0 || scene.height <= 0) return;
+    const bounds = getPhysicalGardenBounds(scene.width, scene.height, GARDEN_BOUNDS);
+    setMotion((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const id of ['peach', 'sage'] as const) {
+        const x = Math.max(bounds.minX, Math.min(bounds.maxX, current[id].x));
+        const y = Math.max(bounds.minY, Math.min(bounds.maxY, current[id].y));
+        if (x !== current[id].x || y !== current[id].y) {
+          next[id] = { ...current[id], x, y };
+          changed = true;
+        }
+      }
+      if (changed) motionRef.current = next;
+      return changed ? next : current;
+    });
+  }, [state.isAvailable]);
 
   useEffect(() => {
     if (!state.isAvailable || reducedMotion) {
@@ -295,10 +405,20 @@ export function CompanionGardenView({
     const schedule = (id: GardenCompanionId, delay: number) => {
       register(() => {
         if (cancelled) return;
+        if (pressedRef.current[id] || liftedRef.current[id]) {
+          schedule(id, 300);
+          return;
+        }
         const otherId: GardenCompanionId = id === 'peach' ? 'sage' : 'peach';
         const current = motionRef.current[id];
         const other = motionRef.current[otherId];
-        const destination = pickGardenDestination(current, other);
+        const scene = sceneRef.current?.getBoundingClientRect();
+        const destination = pickGardenDestination(
+          current,
+          other,
+          Math.random,
+          scene ? { width: scene.width, height: scene.height } : undefined,
+        );
         const duration = gardenMoveDuration();
         const nextMotion: CompanionMotion = {
           ...destination,
@@ -329,20 +449,145 @@ export function CompanionGardenView({
   }, [reducedMotion, state.isAvailable]);
 
   useEffect(() => () => {
-    for (const timer of Object.values(liftTimers.current)) {
-      if (timer) clearTimeout(timer);
+    for (const session of Object.values(pressSessions.current)) {
+      if (session?.timer) clearTimeout(session.timer);
+    }
+    for (const session of Object.values(keyboardTimers.current)) {
+      if (session) clearTimeout(session.timer);
     }
   }, []);
 
-  const liftCompanion = useCallback((id: GardenCompanionId) => {
-    const previous = liftTimers.current[id];
-    if (previous) clearTimeout(previous);
-    setLifted((current) => ({ ...current, [id]: true }));
-    liftTimers.current[id] = setTimeout(() => {
-      setLifted((current) => ({ ...current, [id]: false }));
-      delete liftTimers.current[id];
-    }, 900);
+  const setCompanionPressed = useCallback((id: GardenCompanionId, value: boolean) => {
+    pressedRef.current = { ...pressedRef.current, [id]: value };
+    setPressed((current) => ({ ...current, [id]: value }));
   }, []);
+
+  const setCompanionLifted = useCallback((id: GardenCompanionId, value: boolean) => {
+    liftedRef.current = { ...liftedRef.current, [id]: value };
+    setLifted((current) => ({ ...current, [id]: value }));
+  }, []);
+
+  const stopCompanionMotion = useCallback((id: GardenCompanionId) => {
+    const current = motionRef.current[id];
+    const scene = sceneRef.current?.getBoundingClientRect();
+    const position = companionPositionRefs.current[id]?.getBoundingClientRect();
+    const rendered = scene && position ? renderedGardenPoint(position, scene) : null;
+    const bounds = scene ? getPhysicalGardenBounds(scene.width, scene.height) : null;
+    const stopped = {
+      ...current,
+      ...(rendered && bounds ? {
+        x: Math.max(bounds.minX, Math.min(bounds.maxX, rendered.x)),
+        y: Math.max(bounds.minY, Math.min(bounds.maxY, rendered.y)),
+      } : {}),
+      moving: false,
+      transitionMs: 0,
+    };
+    motionRef.current = { ...motionRef.current, [id]: stopped };
+    setMotion((current) => ({ ...current, [id]: stopped }));
+  }, []);
+
+  const cancelInteraction = useCallback((
+    id: GardenCompanionId,
+    event?: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    const session = pressSessions.current[id];
+    if (session?.timer) clearTimeout(session.timer);
+    delete pressSessions.current[id];
+    const finiteSession = keyboardTimers.current[id];
+    if (finiteSession) clearTimeout(finiteSession.timer);
+    delete keyboardTimers.current[id];
+    interactionTokens.current[id] += 1;
+    setCompanionPressed(id, false);
+    setCompanionLifted(id, false);
+    if (event && event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+  }, [setCompanionLifted, setCompanionPressed]);
+
+  const startFinitePickup = useCallback((id: GardenCompanionId) => {
+    cancelInteraction(id);
+    stopCompanionMotion(id);
+    setCompanionPressed(id, true);
+    setCompanionLifted(id, true);
+    const token = interactionTokens.current[id];
+    const timer = setTimeout(() => {
+      if (interactionTokens.current[id] !== token || keyboardTimers.current[id]?.token !== token) return;
+      delete keyboardTimers.current[id];
+      setCompanionPressed(id, false);
+      setCompanionLifted(id, false);
+    }, KEYBOARD_PICKUP_MS);
+    keyboardTimers.current[id] = { token, timer };
+  }, [cancelInteraction, setCompanionLifted, setCompanionPressed, stopCompanionMotion]);
+
+  const beginPointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    cancelInteraction(id);
+    stopCompanionMotion(id);
+    setCompanionPressed(id, true);
+    const session: PressSession = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      activated: false,
+      token: interactionTokens.current[id],
+    };
+    session.timer = setTimeout(() => {
+      if (pressSessions.current[id] !== session || interactionTokens.current[id] !== session.token) return;
+      session.activated = true;
+      setCompanionLifted(id, true);
+    }, LONG_PRESS_MS);
+    pressSessions.current[id] = session;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, [cancelInteraction, setCompanionLifted, setCompanionPressed, stopCompanionMotion]);
+
+  const movePointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    const session = pressSessions.current[id];
+    if (!session || session.pointerId !== event.pointerId) return;
+    if (!session.activated) {
+      const distance = Math.hypot(event.clientX - session.startX, event.clientY - session.startY);
+      if (distance > LONG_PRESS_MOVE_TOLERANCE) cancelInteraction(id, event);
+      return;
+    }
+
+    const bounds = sceneRef.current?.getBoundingClientRect();
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+    event.preventDefault();
+    const sceneSize = { width: bounds.width, height: bounds.height };
+    const physicalBounds = getPhysicalGardenBounds(bounds.width, bounds.height);
+    const point = {
+      x: ((event.clientX - bounds.left) / bounds.width) * 100,
+      y: ((event.clientY - bounds.top) / bounds.height) * 100,
+    };
+    const otherId: GardenCompanionId = id === 'peach' ? 'sage' : 'peach';
+    const otherRendered = companionPositionRefs.current[otherId]?.getBoundingClientRect();
+    const other = (otherRendered ? renderedGardenPoint(otherRendered, bounds) : null) ?? motionRef.current[otherId];
+    const constrained = constrainCompanionPoint(point, other, sceneSize, physicalBounds);
+    const dragged = { ...motionRef.current[id], ...constrained, moving: false, transitionMs: 0 };
+    motionRef.current = { ...motionRef.current, [id]: dragged };
+    setMotion((current) => ({ ...current, [id]: dragged }));
+  }, [cancelInteraction]);
+
+  const endPointerPickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    cancelInteraction(id, event);
+  }, [cancelInteraction]);
+
+  const keyboardPickup = useCallback((id: GardenCompanionId, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    if (event.repeat) return;
+    startFinitePickup(id);
+  }, [startFinitePickup]);
+
+  const semanticPickup = useCallback((id: GardenCompanionId, event: ReactMouseEvent<HTMLButtonElement>) => {
+    if (event.detail !== 0) return;
+    startFinitePickup(id);
+  }, [startFinitePickup]);
+
+  useEffect(() => {
+    if (state.isAvailable) return;
+    cancelInteraction('peach');
+    cancelInteraction('sage');
+  }, [cancelInteraction, state.isAvailable]);
 
   const unavailableCopy = unavailableReason === 'shared_unavailable'
     ? '공유 정보를 확인하는 중이에요. 확인되면 정원을 다시 보여드려요.'
@@ -351,85 +596,127 @@ export function CompanionGardenView({
       : '함께한 날을 설정하면 정원이 자라기 시작해요.';
 
   return (
-    <div className="min-h-full pb-24">
-      <AppBar title="우리 정원" onBack={onBack} backLabel="이전 화면으로" />
-      <div className="mx-auto flex w-full max-w-lg flex-col gap-5 px-4 py-4">
-        {state.isAvailable ? (
-          <section className="space-y-4" aria-label="정원 현황">
-            <div className="space-y-1.5">
-              <p className="text-caption font-medium text-muted-foreground">함께한 {state.togetherDays}일</p>
-              <h2 className="text-title font-bold text-foreground">{state.stage.name}</h2>
-              <p className="text-body leading-relaxed text-muted-foreground">{state.stage.copy}</p>
-            </div>
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      <AppBar
+        title="우리 정원"
+        onBack={onBack}
+        backLabel="이전 화면으로"
+        actions={onOpenShop ? (
+          <AppBarAction aria-label="상점 열기" onClick={onOpenShop}>
+            <ShoppingBag size={20} aria-hidden="true" />
+          </AppBarAction>
+        ) : undefined}
+      />
 
-            <div
-              data-testid="garden-scene"
-              className="relative aspect-[4/3] w-full overflow-hidden rounded-surface border border-border bg-card"
-            >
-              <div className="absolute inset-x-[28%] bottom-[22%] top-[8%]">
-                <GardenPlant level={state.stage.level} />
+      {state.isAvailable ? (
+        <section className="flex min-h-0 flex-1 flex-col" aria-label="정원 현황">
+          <div className="garden-landscape-summary px-4 pb-3 pt-4">
+            <p className="text-caption font-medium text-muted-foreground">함께한 {state.togetherDays}일</p>
+            <div className="mt-1 flex items-end justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-title font-bold text-foreground">{state.stage.name}</h2>
+                <p className="garden-landscape-stage-copy mt-1 text-body leading-relaxed text-muted-foreground">{state.stage.copy}</p>
               </div>
-              <div className="absolute inset-x-0 bottom-0 h-[32%] border-t border-border bg-secondary/40" aria-hidden="true" />
-              <GardenCompanion
-                id="peach"
-                label="분홍"
-                tone="peach"
-                motion={motion.peach}
-                accessory={accessories.peach}
-                lifted={lifted.peach}
-                onLift={liftCompanion}
-              />
-              <GardenCompanion
-                id="sage"
-                label="초록"
-                tone="sage"
-                motion={motion.sage}
-                accessory={accessories.sage}
-                lifted={lifted.sage}
-                onLift={liftCompanion}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-caption text-muted-foreground">두 친구를 눌러 보면 들어 올려져 버둥대요.</p>
               <button
                 type="button"
                 onClick={() => setDecorating((value) => !value)}
                 aria-expanded={decorating}
                 aria-controls="garden-decoration-panel"
-                className="press-response inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control border border-border bg-card px-3 text-caption font-semibold text-foreground"
+                className="press-response inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground"
               >
                 <Palette size={15} aria-hidden="true" />
                 정원 꾸미기
                 <ChevronDown size={15} className={cn('transition-transform', decorating && 'rotate-180')} aria-hidden="true" />
               </button>
             </div>
+          </div>
 
-            {decorating ? (
-              <div
-                id="garden-decoration-panel"
-                role="region"
-                aria-label="정원 꾸미기"
-                className="space-y-4 rounded-surface border border-border bg-card p-4"
-              >
-                <p className="text-caption text-muted-foreground">무료 장식이에요. 선택은 이 계정의 이 기기에만 저장돼요.</p>
-                <AccessoryGroup companion="peach" label="분홍" value={accessories.peach} onChange={onAccessoryChange} />
-                <AccessoryGroup companion="sage" label="초록" value={accessories.sage} onChange={onAccessoryChange} />
-              </div>
-            ) : null}
-
-            <p className="text-caption text-muted-foreground">정원은 점수나 미션 없이 함께한 시간만 따라 자라요.</p>
-          </section>
-        ) : (
-          <section
-            className="my-auto rounded-surface border border-border bg-card p-8 text-center"
-            aria-label={unavailableReason === 'shared_unavailable' ? '정원 확인 중' : '정원 준비 안내'}
+          <div
+            ref={sceneRef}
+            data-testid="garden-scene"
+            className="garden-landscape-scene relative min-h-0 flex-1 overflow-hidden border-y border-border bg-card"
           >
-            <Sprout size={32} className="mx-auto text-muted-foreground" aria-hidden="true" />
-            <p className="mt-4 text-body font-semibold text-foreground">{unavailableCopy}</p>
-          </section>
-        )}
-      </div>
+            <div className="absolute inset-x-[28%] bottom-[20%] top-[7%]" data-scene-object={GARDEN_OBJECT_REGISTRY[0].id}>
+              <GardenPlant level={state.stage.level} />
+            </div>
+            <div className="absolute inset-x-0 bottom-0 h-[34%] border-t border-border bg-secondary/40" aria-hidden="true" />
+            <GardenCompanion
+              id="peach"
+              label="첫째"
+              motion={motion.peach}
+              accessory={accessories.peach}
+              pressed={pressed.peach}
+              lifted={lifted.peach}
+              onPointerDown={beginPointerPickup}
+              onPointerMove={movePointerPickup}
+              onPointerUp={endPointerPickup}
+              onPointerCancel={endPointerPickup}
+              onLostPointerCapture={endPointerPickup}
+              onKeyDown={keyboardPickup}
+              onClick={semanticPickup}
+              positionRef={(node) => {
+                if (node) companionPositionRefs.current.peach = node;
+                else delete companionPositionRefs.current.peach;
+              }}
+            />
+            <GardenCompanion
+              id="sage"
+              label="둘째"
+              motion={motion.sage}
+              accessory={accessories.sage}
+              pressed={pressed.sage}
+              lifted={lifted.sage}
+              onPointerDown={beginPointerPickup}
+              onPointerMove={movePointerPickup}
+              onPointerUp={endPointerPickup}
+              onPointerCancel={endPointerPickup}
+              onLostPointerCapture={endPointerPickup}
+              onKeyDown={keyboardPickup}
+              onClick={semanticPickup}
+              positionRef={(node) => {
+                if (node) companionPositionRefs.current.sage = node;
+                else delete companionPositionRefs.current.sage;
+              }}
+            />
+            <p className="pointer-events-none absolute inset-x-4 bottom-3 text-center text-caption text-muted-foreground">
+              길게 누르면 친구를 들어 올려 움직일 수 있어요.
+            </p>
+          </div>
+
+          {decorating ? (
+            <div
+              id="garden-decoration-panel"
+              role="region"
+              aria-label="정원 꾸미기"
+              className="space-y-4 border-b border-border bg-background px-4 py-4"
+            >
+              <p className="text-caption text-muted-foreground">가지고 있는 무료 장식만 보여요. 선택은 이 계정의 이 기기에 저장돼요.</p>
+              <AccessoryGroup companion="peach" label="첫째" value={accessories.peach} ownedAccessories={ownedAccessories} onChange={onAccessoryChange} />
+              <AccessoryGroup companion="sage" label="둘째" value={accessories.sage} ownedAccessories={ownedAccessories} onChange={onAccessoryChange} />
+              {onOpenShop ? (
+                <button
+                  type="button"
+                  onClick={onOpenShop}
+                  className="press-response inline-flex min-h-11 items-center gap-2 rounded-control px-2 text-caption font-semibold text-foreground"
+                >
+                  <ShoppingBag size={16} aria-hidden="true" />
+                  장식 더 받으러 가기
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          <p className="garden-landscape-footer px-4 py-3 text-caption text-muted-foreground">정원은 점수나 미션 없이 함께한 시간만 따라 자라요.</p>
+        </section>
+      ) : (
+        <section
+          className="m-4 my-auto rounded-surface border border-border bg-card p-8 text-center"
+          aria-label={unavailableReason === 'shared_unavailable' ? '정원 확인 중' : '정원 준비 안내'}
+        >
+          <Sprout size={32} className="mx-auto text-muted-foreground" aria-hidden="true" />
+          <p className="mt-4 text-body font-semibold text-foreground">{unavailableCopy}</p>
+        </section>
+      )}
     </div>
   );
 }

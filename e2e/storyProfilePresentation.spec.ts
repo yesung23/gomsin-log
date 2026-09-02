@@ -60,23 +60,16 @@ for (const width of [320, 390]) {
     await page.screenshot({ path: `${OUT}/story-${width}.png`, fullPage: true });
 
     await page.goto('/settings');
-    await page.getByRole('button', { name: '무지 종이' }).click();
     const sizeButtons = ['작게', '기본', '크게'].map((name) => page.getByRole('button', { name, exact: true }));
     for (const button of sizeButtons) {
       const box = await button.boundingBox();
       expect(box?.height).toBeGreaterThanOrEqual(44);
     }
     await sizeButtons[2].click();
-    await expect(page.locator('html')).toHaveAttribute('data-paper', 'plain');
     await expect(page.locator('html')).toHaveAttribute('data-record-text-size', 'large');
-    const background = await page.locator('#main-content').evaluate((node) => getComputedStyle(node).backgroundImage);
-    expect(background).toBe('none');
     await page.reload();
-    await expect(page.locator('html')).toHaveAttribute('data-paper', 'plain');
     await expect(page.locator('html')).toHaveAttribute('data-record-text-size', 'large');
-    await expect(page.getByRole('button', { name: '무지 종이' })).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByRole('button', { name: '크게', exact: true })).toHaveAttribute('aria-pressed', 'true');
-    await page.screenshot({ path: `${OUT}/plain-paper-${width}.png`, fullPage: true });
     await page.getByText('게시물·스토리 글자 크기', { exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${OUT}/text-size-settings-${width}.png` });
 

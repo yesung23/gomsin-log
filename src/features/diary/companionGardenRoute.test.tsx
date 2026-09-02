@@ -79,7 +79,8 @@ describe('companion garden route authority', () => {
     expect(screen.getByRole('heading', { level: 1, name: '우리 정원' })).toBeInTheDocument();
     expect(screen.getByText('함께한 100일')).toBeInTheDocument();
     expect(screen.getByRole('heading', { level: 2, name: '든든한 나무' })).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /친구 들어올리기/ })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /친구 길게 눌러 잡기/ })).toHaveLength(2);
+    expect(screen.getByTestId('garden-scene').className).not.toContain('aspect-[4/3]');
   });
 
   it.each([undefined, '2026-02-30', 'not-a-date', '2026-12-31'])(
@@ -89,7 +90,7 @@ describe('companion garden route authority', () => {
       renderGarden();
       expect(screen.getByText('함께한 날을 설정하면 정원이 자라기 시작해요.')).toBeInTheDocument();
       expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /친구 들어올리기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /친구 길게 눌러 잡기/ })).not.toBeInTheDocument();
     },
   );
 
@@ -99,7 +100,7 @@ describe('companion garden route authority', () => {
     expect(screen.getByRole('region', { name: '정원 확인 중' })).toBeInTheDocument();
     expect(screen.getByText('공유 정보를 확인하는 중이에요. 확인되면 정원을 다시 보여드려요.')).toBeInTheDocument();
     expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /친구 들어올리기/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /친구 길게 눌러 잡기/ })).not.toBeInTheDocument();
   });
 
   it.each(['unknown', 'personal', 'pending', 'disconnected'] as const)(
@@ -108,7 +109,7 @@ describe('companion garden route authority', () => {
       coupleLifecycle = lifecycle;
       renderGarden();
       expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /친구 들어올리기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /친구 길게 눌러 잡기/ })).not.toBeInTheDocument();
     },
   );
 
@@ -125,12 +126,18 @@ describe('companion garden route authority', () => {
     localStorage.setItem('gomsin.diary.garden.me', JSON.stringify({
       version: 1, peach: 'cap', sage: 'none',
     }));
+    localStorage.setItem('gomsin.diary.shop.me', JSON.stringify({
+      version: 1,
+      ownedAccessories: ['flower'],
+      ownedPapers: ['plain', 'ruled'],
+      lastFreeDrawDate: null,
+    }));
     const user = userEvent.setup();
     const view = renderGarden();
 
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'cap');
     await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
-    await user.click(screen.getByRole('radio', { name: '초록 친구 꽃' }));
+    await user.click(screen.getByRole('radio', { name: '둘째 친구 꽃' }));
     expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
     expect(JSON.parse(localStorage.getItem('gomsin.diary.garden.me') || '{}')).toMatchObject({
       version: 1, peach: 'cap', sage: 'flower',
@@ -142,6 +149,18 @@ describe('companion garden route authority', () => {
     expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-accessory', 'flower');
   });
 
+  it('does not expose accessories that this account has not drawn', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    renderGarden();
+
+    await user.click(screen.getByRole('button', { name: '정원 꾸미기' }));
+
+    expect(screen.getAllByRole('radio', { name: /친구 없음/ })).toHaveLength(2);
+    expect(screen.queryByRole('radio', { name: /친구 꽃/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /친구 모자/ })).not.toBeInTheDocument();
+  });
+
   it('back is explicit and returns to diary', async () => {
     vi.useRealTimers();
     const user = userEvent.setup();
@@ -150,9 +169,17 @@ describe('companion garden route authority', () => {
     expect(navigate).toHaveBeenCalledWith('/diary');
   });
 
-  it('does not create a second main landmark inside MobileShell', () => {
+  it('opens the Shop from the full-screen garden app bar', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    renderGarden();
+    await user.click(screen.getByRole('button', { name: '상점 열기' }));
+    expect(navigate).toHaveBeenCalledWith('/shop');
+  });
+
+  it('uses the full app content without a bottom tab bar or second main landmark', () => {
     renderGarden();
     expect(screen.getAllByRole('main')).toHaveLength(1);
-    expect(screen.getByRole('tab', { name: '일기장' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
   });
 });

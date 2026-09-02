@@ -10787,3 +10787,528 @@ PRODUCTION
 - Vercel: NOT APPLIED by this task; PR preview status only
 - TestFlight: NOT APPLIED
 - App Store: NOT APPLIED
+## 2026-09-01 — Diary · Garden · Shop V2 interrupted-state handoff
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: stopped-state capture and continuation handoff
+- Step: live dirty-tree audit, failure reproduction, checkpoint, Obsidian report, next-owner prompt
+- Previous Gate: Tasks 1–3 committed through `7e515fe`; Task 4 partially edited
+- This Gate: exact interrupted state preserved and documented; implementation remains blocked on red Task 4 tree
+
+DIRECTION CHECK
+- Product source checked: current user correction, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; current branch remains no-real-money. The later IAP request is separate and not implemented.
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, session protocol
+- Current-state checked: `bash scripts/agent/session-start.sh`, live Git branch/HEAD/status/diff, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-01 Companion Garden implementation and Git/CI closure entries
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-01
+- Does this task conflict with canonical direction? NO for state capture. IAP implementation would require a separate monetization direction check.
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop
+- Model: GPT-5 primary
+- Role: orchestrator / factual state capture; no implementation
+- PR: none
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: unchanged `7e515fe123d9e7a4c2345fc394326d34db0a96ee`; dirty tree explicitly not reviewed for release
+
+CHANGED / REVIEWED
+- file: `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`
+- function/component/migration: handoff and ready-to-paste Luna Max continuation prompt
+- what changed/reviewed: recorded seven committed slices, exact dirty files/staging boundary, current failures, do-not-damage rules, Task 4 completion order, validation and master promotion gates
+- why: allow a new owner to resume without discarding or misrepresenting the interrupted work
+- file: `control-tower/reports/codex/2026-09-01_2141_diary-garden-shop-v2-handoff_codex.md`
+- function/component/migration: non-canonical Obsidian task report
+- what changed/reviewed: factual stopped-state report with local/remote evidence boundaries
+- why: mandatory Control Tower record
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: no new app behavior; no IAP/payment implementation
+- Production: unchanged
+
+VERIFICATION
+- command: `npm run typecheck`
+- FAIL: 13 errors in the partially edited `CompanionGardenView.tsx`; proves current tree is not releasable
+- command: focused Vitest run over Garden view/route/styles, exact asset, and CSP files
+- FAIL: 18 failed / 21 passed; exact asset hash test passed but Task 4 render/CSS/precache work is incomplete
+- command: `git diff --check`
+- PASS: pre-handoff dirty implementation diff had no whitespace errors
+- command: `git fetch origin --prune`; SHA/divergence inspection
+- PASS: observed `origin/master` `bd4a9f3`, branch 0 behind / 7 ahead; no remote write
+
+REVIEW IMPACT
+- DELTA: docs-only handoff. Existing reviews do not cover the final future Task 4 HEAD.
+- whether an earlier review is stale: yes for any completed Task 4 claim; final exact HEAD requires fresh verification/review
+
+BLOCKERS
+- code: partial Task 4 render wiring, CSS, and precache implementation; current typecheck/tests red
+- environment: physical iPhone remains disconnected; device evidence not attempted
+- external/manual: IAP/refund request requires separate current-policy/legal research and monetization direction check
+
+STOPPED AT
+- exact completed boundary: live state reproduced, checkpointed, and handed off without modifying implementation or losing dirty work
+
+REMAINING
+- complete Task 4 from current diff, run focused/full/browser/native validation, obtain fresh independent review, finish Task 5 docs, then safely promote to master
+- separately research and draft Apple IAP/refund readiness; do not mix it into the free Garden branch
+
+NEXT ACTION
+- next owner: bounded Luna Max implementer, then primary orchestrator and Terra reviewer
+- tool/model: Luna Max implementation; Terra review; Daybreak Blue only if security/privacy/release boundaries materially change
+- 기준 SHA: `7e515fe123d9e7a4c2345fc394326d34db0a96ee` plus the exact preserved dirty tree
+- exact next task: follow the prompt in `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`, beginning with repairing Task 4 to focused test/typecheck GREEN
+
+DO NOT ADVANCE UNTIL
+- exact worktree/branch/HEAD/status are rechecked
+- no reset/stash/clean/overwrite occurs
+- focused tests, typecheck, lint, build, relevant browser checks, and fresh exact-HEAD review pass
+- live `origin/master` is rechecked before any non-force promotion
+
+PRODUCTION
+- NOT APPLIED: GitHub master, Vercel, Supabase, TestFlight, App Store, physical iPhone
+- UNVERIFIED: remote Supabase state and final dirty-tree runtime behavior
+
+---
+
+## 2026-09-01 — Diary · Garden · Shop V2 Task 4 local completion
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: interrupted Task 4 completion + Task 5 local verification/documentation
+- Previous Gate: Task 4 dirty tree with 13 type errors and 18/39 focused failures
+- This Gate: Task 4 implementation and local verification green; independent exact-tree review/promotion still pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; this branch remains free/no-real-money and does not implement the separate IAP request
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, repository session protocol
+- Current-state checked: exact preserved worktree, branch/HEAD/status/diff, live `origin/master` via read-only `git ls-remote`
+- Latest relevant Work Log checked: immediately preceding Diary · Garden · Shop V2 interrupted-state handoff
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: ChatGPT + DevSpace
+- Model: GPT-5.6 Sol
+- Role: primary implementation integrator / verifier
+- PR: none created or modified by this continuation
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: committed HEAD unchanged `7e515fe123d9e7a4c2345fc394326d34db0a96ee`; verification covers the exact preserved uncommitted Task 4 tree on top of it
+
+CHANGED / REVIEWED
+- file: `src/assets/characters/paper-pair-v1.webp`, `src/features/diary/companionGardenAsset.test.ts`
+- function/component/migration: exact historical character asset and byte-identity guard
+- what changed/reviewed: restored the 1254×1254 historical WebP derivative and enforced SHA-256 `cac84b0179f4f0d05a655b4c41c03b644a7fdd67d3701c51a9de30c5f04ff856`; private source PNG with C2PA remains outside Git
+- why: use the approved original character source rather than a newly drawn replacement
+- file: `src/features/diary/CompanionGardenPage.tsx`, `src/features/diary/CompanionGardenView.tsx`, focused tests
+- function/component/migration: full-content Garden and companion interaction state machine
+- what changed/reviewed: hidden persistent tab bar, Shop app-bar action, exact sprite crops, two independent wanderers, 500ms continuous long-press, pre-activation movement cancellation, pointer-captured bounded drag, release/cancel cleanup, Enter/Space 900ms equivalent, owned-accessory filtering, reduced-motion behavior, minimal scene-object registry seam
+- why: finish Task 4 against its written acceptance criteria without adding economy/server scope
+- file: `src/styles/index.css`, `vite.config.ts`, `src/lib/cspExternalResources.test.ts`, `e2e/companionGarden.spec.ts`
+- function/component/migration: pickup feedback/motion accessibility, lazy asset boundary, browser acceptance
+- what changed/reviewed: continuous held wriggle, immediate pressed feedback, reduced-motion overrides, `paper-pair-v1` service-worker precache exclusion, portrait/landscape/reduced-motion E2E
+- why: make direct manipulation reliable while avoiding a 1.49MB unconditional offline-install cost
+- file: `src/components/HandwritingSection.test.tsx`, `src/components/ProfilePaperMenu.tsx`, `src/features/us/postComposerSheet.test.tsx`
+- function/component/migration: earlier Tasks 1–3 integration freshness
+- what changed/reviewed: immediate paper application assertion, non-stale owned-paper inventory read, Settings reachability through relocated My overflow
+- why: preserve the previously committed paper/menu direction while the combined branch is verified
+- file: `docs/V4_AS_BUILT.md`, `docs/CURRENT_STATE.md`, `control-tower/reports/codex/2026-09-01_2358_diary-garden-shop-v2-task4-local-closure_codex.md`
+- function/component/migration: factual as-built/current-state/Control Tower closure record
+- what changed/reviewed: replaced interrupted-state claims with verified local behavior and explicit remote/review boundaries
+- why: keep repository and Obsidian records aligned with the actual tree
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase SQL/RPC/RLS/storage work
+- product semantics: no score, streak, food, mission, paid entitlement, StoreKit, price, fake currency, server inventory, AI, analytics, or unrelated redesign added
+- Production: no GitHub master push/merge, Vercel deploy, Supabase mutation, TestFlight/App Store action, or physical-device installation
+
+VERIFICATION
+- command: `npm run typecheck`
+- PASS: TypeScript build graph is clean; the previous 13 `CompanionGardenView.tsx` errors are resolved
+- command: focused Vitest over `CompanionGardenView`, route, styles, exact asset, and CSP/service-worker tests
+- PASS: 5 files / 39 tests
+- command: focused ESLint plus `git diff --check`
+- PASS: changed Garden/build surface linted cleanly and no whitespace errors were found
+- command: `npm exec playwright test e2e/companionGarden.spec.ts`
+- PASS: 3/3; 375×812 portrait, 812×375 landscape, and reduced-motion cover exact crops, hidden nav, wandering, quick-tap rejection, long-press/drag/release, keyboard equivalent, Shop routing, and bounds
+- command: `npm run test`
+- PASS: 279 files / 3,904 tests
+- command: `npm run lint`
+- PASS: full repository lint
+- command: `npm run verify:native`
+- PASS: 4 files / 106 tests
+- command: placeholder production build with an invalid-looking API key
+- PASS AS NEGATIVE GATE: build correctly failed closed instead of accepting a non-key placeholder
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder npm run build`
+- PASS: non-secret shape-valid placeholder production build completed
+- command: inspect emitted Garden asset plus `dist/index.html` and `dist/sw.js`
+- PASS: `paper-pair-v1` emitted as a separate asset, absent from initial HTML and absent from service-worker precache
+- command: source hash verification
+- PASS: app WebP SHA-256 `cac84b...ff856`; private C2PA PNG SHA-256 `8b8db0...42d01`
+- command: `git ls-remote origin refs/heads/master` and branch divergence inspection
+- PASS: live `origin/master` remained `bd4a9f3...`, committed branch remained 0 behind / 7 ahead; read-only only
+
+REVIEW IMPACT
+- DELTA: UI/local-state/assets/build-precache semantics changed after the interrupted handoff, so prior Garden review cannot be inherited
+- whether an earlier review is stale: YES for final Task 4; independent exact-tree correctness/accessibility review is still UNVERIFIED
+
+BLOCKERS
+- code: none known from local unit/browser/native/build verification
+- environment: an independent Terra-equivalent exact-tree reviewer and write-capable commit/promotion path were not available through the current execution surface; physical iPhone was not exercised
+- external/manual: private provenance packet explicitly says legal uniqueness/non-infringement remains a manual rights-review question; current use stays free/optional and does not expand to paid merchandise/accessories
+
+STOPPED AT
+- exact completed boundary: Task 4 implementation, Task 5 local test/build verification, and repository/Control Tower documentation are green in the preserved dirty worktree; no remote write or commit was performed
+
+REMAINING
+- obtain an independent exact-tree review for correctness/regression/accessibility
+- after that review, stage intended files only, commit the preserved tree, rerun required CI, recheck live `origin/master`, and promote without force only if still conflict-free
+- physical-device QA remains a separate evidence gate; do not infer it from Playwright/native static tests
+
+NEXT ACTION
+- next owner: independent reviewer, then write-capable integration owner
+- tool/model: Terra-level reviewer or equivalent, followed by normal Git integration tooling
+- 기준 SHA: `7e515fe123d9e7a4c2345fc394326d34db0a96ee` plus this exact preserved dirty tree
+- exact next task: review the final diff against Task 4 acceptance criteria and prior Tasks 1–3 regressions; only after PASS commit named intended files and run remote CI/promotion gates
+
+DO NOT ADVANCE UNTIL
+- independent exact-tree review is PASS or its absence is explicitly accepted as a release risk
+- intended feature/docs files are separated from any unrelated local changes
+- live `origin/master` is rechecked immediately before integration
+- required CI is green on the exact commit being promoted
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical iPhone: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 independent review and local integration gate
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Task 4 review/fix loop, Task 5 exact-tree verification, application commit, factual release records
+- Previous Gate: locally green uncommitted Task 4 tree with independent review still pending
+- This Gate: application commit `8d463c1` independently reviewed and locally verified; push/Draft PR/remote CI still pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, explicit user-approved no-real-money direction
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no-real-money, device-local Shop remains aligned and IAP/payment stays closed
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: exact worktree/branch/HEAD/status/diff, source call paths, current tests, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-01 interrupted handoff and Task 4 local completion entries immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop multi-agent orchestration
+- Model: GPT-5 primary orchestrator; Luna implementer/verifier; Sol security/state-boundary reviewer; Terra independent regression reviewer
+- Role: primary integration owner with bounded implementation and two independent final delta reviews
+- PR: none at this local gate
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: application commit `8d463c1685d071634c88eef4564e0ec6844d5758`; following documentation commit is docs/report-only
+
+CHANGED / REVIEWED
+- file: `src/features/diary/CompanionGardenView.tsx`, `src/features/diary/companionGardenMotion.ts`, focused tests, `e2e/companionGarden.spec.ts`
+- function/component/migration: full-content Garden, physical geometry, pickup/drag input state machine
+- what changed/reviewed: exact 98×112 footprint containment, non-overlap wandering/drag, 430×180 epsilon boundary, rendered-position pickup freeze, pointer cancellation/lost-capture cleanup, finite keyboard/semantic activation, reduced motion, portrait/landscape browser coverage
+- why: close all Sol/Terra Critical/Important review findings and satisfy Task 4 acceptance criteria
+- file: `src/assets/characters/paper-pair-v1.webp`, `src/features/diary/companionGardenAsset.test.ts`, `vite.config.ts`, `src/lib/cspExternalResources.test.ts`
+- function/component/migration: exact historical asset and lazy/precache boundary
+- what changed/reviewed: exact WebP derivative is hash-guarded, emitted separately, and omitted from initial HTML/service-worker precache
+- why: use the approved historical character source without unconditional 1.49MB startup/offline cost
+- file: `src/App.tsx`, `src/lib/paperTexturePreference.ts`, `src/components/HandwritingSection.tsx`, `src/components/ProfilePaperMenu.tsx`, `src/features/shop/ShopPage.tsx` and tests
+- function/component/migration: owned-paper recovery, single paper-setting owner, truthful free Shop disclosure
+- what changed/reviewed: unowned retained selection is reconciled on app/shop/profile entry; Settings duplicate removed; Shop states all current items are free and no payment exists
+- why: close cross-feature ownership contradictions and malformed-state recovery without server/economy scope
+- file: `docs/CURRENT_STATE.md`, `docs/V4_AS_BUILT.md`, `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_0308_diary-garden-shop-v2-reviewed-closure_codex.md`
+- function/component/migration: factual current-state/as-built/ledger/Control Tower record
+- what changed/reviewed: replaced stale 3,904-PASS and review-unverified claims with exact final evidence and explicit remaining boundaries
+- why: repository documentation must match the actual reviewed tree
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no SQL/RPC/RLS/storage migration
+- product semantics: no paid entitlement, StoreKit, price, fake currency, server inventory, score, streak, mission, AI, analytics, or adjacent redesign
+- Production: no master merge, deploy, Supabase mutation, TestFlight/App Store action, or physical-device install
+
+VERIFICATION
+- command: focused feature Vitest across Garden view/state/geometry/route/styles/asset/wiring, Shop/local state, paper preference, Settings and CSP paths
+- PASS: 14 files / 148 tests
+- command: repeat former flaky no-overlap View test
+- PASS: Luna 30/30; Terra independent 20/20
+- command: `npm run test -- --exclude src/features/search/searchPage.test.tsx --exclude src/lib/e2eeRollback.test.ts`
+- PASS: 277 files / 3,874 tests
+- command: `npm run test -- src/lib/e2eeRollback.test.ts` in a throwaway PostgreSQL environment
+- PASS: 17/17
+- command: `npm run test -- src/features/search/searchPage.test.tsx`
+- FAIL: 26/27 passed; one date-dependent `soldier-next-leave` fixture uses 2026-09-01 and is now past current date. Test and Search implementation are unchanged from `origin/master`, so this is an existing unrelated failure, not counted as feature green.
+- command: aggregate current-tree unit evidence
+- PASS / FAIL: 3,917 PASS / 1 existing unrelated FAIL across 279 files
+- command: `npm run typecheck`; `npm run lint`; `git diff --check`; `git diff --cached --check`
+- PASS: TypeScript, full ESLint, and whitespace/staged-integrity gates are clean
+- command: `npm exec playwright test e2e/companionGarden.spec.ts`
+- PASS: 3/3 for 375×812 portrait, 812×375 landscape, reduced motion, exact crops, navigation, long press/drag/release, and containment
+- command: `npm run verify:native`
+- PASS: 4 files / 106 tests; native configuration/privacy/assets/permissions only, not physical-device behavior
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder npm run build`
+- PASS: production build with non-secret shape-valid placeholders
+- command: source hash plus built `dist/index.html`/`dist/sw.js` inspection
+- PASS: WebP SHA-256 `cac84b...ff856`; asset emitted separately and absent from initial HTML/precache
+- command: Sol final geometry delta review
+- PASS: former 430×180 Important resolved; 270 additional supported geometry combinations produced 0 overlap; new Critical 0 / Important 0
+- command: Terra final delta review
+- PASS: former test flake and 430×180 boundary closed; focused 44/44 and repeat 20/20; new Critical 0 / Important 0
+- command: `git fetch origin --prune`; ancestry/divergence check
+- PASS: live master `bd4a9f3`, merge base identical, branch 0 behind / 8 ahead after application commit; no force or remote write
+
+REVIEW IMPACT
+- FULL: final Task 4 behavior was independently reviewed after earlier findings; Sol and Terra final delta verdicts are PASS with no open Critical/Important
+- whether an earlier review is stale: earlier HOLD reports remain historical; final PASS applies to the content recorded in application commit `8d463c1`. The following docs-only commit requires only narrow factual delta review.
+
+BLOCKERS
+- code: no feature-code blocker found; one unchanged date-dependent Search test remains red outside this branch scope
+- environment: physical iOS/Android touch, VoiceOver/TalkBack/Switch Control, and device pointer-capture behavior remain UNVERIFIED
+- external/manual: remote CI awaits push/Draft PR; external C2PA/right-to-use/legal judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: reviewed application tree committed as `8d463c1`; factual docs prepared; no remote write or production mutation yet
+
+REMAINING
+- commit docs/report without `control-tower/Now.md`, push branch, create Draft PR, and inspect exact-commit remote checks
+- do not merge/deploy until repository approval and required CI are green
+
+NEXT ACTION
+- next owner: Codex primary integration owner, then repository maintainer/user for approval
+- tool/model: Git/GitHub integration; exact-commit CI; no additional implementation model unless CI finds a branch-caused failure
+- 기준 SHA: application commit `8d463c1685d071634c88eef4564e0ec6844d5758`
+- exact next task: commit factual documentation, push `codex/diary-garden-shop-v2`, open Draft PR, record CI result without merging
+
+DO NOT ADVANCE UNTIL
+- `control-tower/Now.md` is excluded from the feature/docs commit
+- live `origin/master` remains an ancestor and no force operation is used
+- Draft PR required checks pass on the exact final docs HEAD
+- physical-device and external-rights gaps are either completed or explicitly accepted as separate manual gates before release
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 Draft PR CI remediation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Draft PR browser-contract alignment and deterministic full-suite closure
+- Previous Gate: Draft PR #92 opened; reviewed application commit locally green; remote checks pending
+- This Gate: branch-caused browser expectations corrected; unrelated date-expired Search fixture isolated; exact final CI rerun pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, current implemented paper ownership path
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; free local collection direction unchanged
+- Engineering source checked: `AGENTS.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: PR #92 checks/logs, exact branch diff, local full suite, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-02 independent review and local integration gate immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop multi-agent orchestration
+- Model: GPT-5 primary orchestrator; Luna browser-test worker; Terra independent reviewer; prior Sol security/state review remains PASS
+- Role: CI diagnosis, bounded test maintenance, independent verification, integration owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `d5fdc0ed2d3b144ce0878f6f632dd0d2b7cbffe2`
+- New HEAD / Reviewed HEAD: browser contract `75c08708c5ea4f0bd788affa5b5dbdb2480cf967`; date fixture `4b8a8f94d8e8997275d2ca2c824103728e847745`; following report commit is docs-only
+
+CHANGED / REVIEWED
+- file: `e2e/realUsability.spec.ts`, `e2e/storyProfilePresentation.spec.ts`
+- function/component/migration: Diary-to-Shop route, free paper acquisition/application, Settings presentation regression
+- what changed/reviewed: replaced deleted labels/controls with the current `상점 열기`, `무료로 받기 → 적용하기 → 사용 중`, reload persistence, and Settings text-size-only contract
+- why: the first remote browser run correctly found stale tests after the approved paper-setting ownership move
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: upcoming leave fixture clock
+- what changed/reviewed: pins only the affected test to 2026-08-27 and restores real timers in a render-safe finally boundary
+- why: fixed vacation date 2026-09-01 expired on the 2026-09-02 UTC runner; product code is unchanged
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1011_diary-garden-shop-v2-ci-remediation_codex.md`
+- function/component/migration: factual CI remediation record
+- what changed/reviewed: records remote failures, bounded fixes, review results, local proof, and remaining exact-HEAD CI gate
+- why: keep the mandatory ledger and Control Tower aligned with repository reality
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged by CI remediation; no new feature, payment, or ownership rule
+- Production: no master merge/deploy, Supabase mutation, TestFlight/App Store action, or physical-device install
+
+VERIFICATION
+- command: `npx playwright test e2e/realUsability.spec.ts e2e/storyProfilePresentation.spec.ts`
+- PASS: 16/16; proves the corrected browser flows locally
+- command: GitHub `Real-browser creator/partner matrix` on `75c0870`
+- PASS: 5m44s; proves the production-bundle browser matrix, including the four former failures, is green on that commit
+- command: `npm run test -- src/features/search/searchPage.test.tsx`
+- PASS: 27/27 after deterministic clock isolation
+- command: `npm run test`
+- PASS: 279 files / 3,918 tests after deterministic clock isolation
+- command: `npm run typecheck`; `npm run lint`; `git diff --check`
+- PASS: TypeScript, ESLint, and whitespace integrity are clean
+- command: Terra review of browser delta and final clock-isolation delta
+- PASS: no Critical/Important; initial timer-leak HOLD was fixed and re-reviewed PASS
+
+REVIEW IMPACT
+- DELTA: tests/docs only; application/security semantics remain covered by the earlier Sol/Terra PASS on `8d463c1`
+- whether an earlier review is stale: NO for application semantics; browser/date-test deltas have their own Terra PASS
+
+BLOCKERS
+- code: none known locally
+- environment: exact final documentation-inclusive HEAD CI is pending; physical touch/accessibility remains UNVERIFIED
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: browser contract and deterministic Search fixture are committed/pushed and locally green; final factual docs are prepared for push
+
+REMAINING
+- wait for all required checks on the exact final Draft PR HEAD
+- do not merge/deploy; physical-device and external-rights gates remain separate
+
+NEXT ACTION
+- next owner: Codex primary orchestrator, then repository maintainer/user
+- tool/model: GitHub exact-HEAD CI; no new implementation model unless CI finds a branch-caused failure
+- 기준 SHA: documentation-inclusive HEAD following `4b8a8f94d8e8997275d2ca2c824103728e847745`
+- exact next task: push report commit, confirm every required check, release the claim, and hand off the Draft PR without promotion
+
+DO NOT ADVANCE UNTIL
+- exact final Draft PR HEAD required checks are green
+- repository approval is explicit
+- production/manual gates are separately satisfied or consciously deferred
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: PR PREVIEW ONLY / production NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 physical iPhone installation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Xcode 27 Beta physical-device build, signed install, launch, and visual smoke proof
+- Previous Gate: Draft PR #92 exact HEAD `f5fc1a0` had all required remote checks green; physical iOS remained UNVERIFIED
+- This Gate: connected iPhone installation and launch verified on the exact reviewed branch content
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no business, pricing, storage, or AI-role change
+- Engineering source checked: `AGENTS.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: exact branch HEAD, clean feature diff, Xcode build result, installed-app inventory, launch result, and physical-device screenshot
+- Latest relevant Work Log checked: 2026-09-02 Draft PR CI remediation immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex primary orchestrator with Xcode 27.0 beta 6 and CoreDevice `devicectl`
+- Model: GPT-5 primary; no new implementation subagent required for device-only verification
+- Role: physical-device build/install/verification owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- New HEAD / Reviewed HEAD: installed content `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`; following ledger/report commit is docs-only
+
+CHANGED / REVIEWED
+- file: no application/source file changed
+- function/component/migration: iOS Debug package for `app.gomsinlog`
+- what changed/reviewed: rebuilt the exact branch with configured public app environment, synced Capacitor assets, signed with the matching development team/profile, installed over the existing developer app, launched it, and captured a physical-device smoke screenshot
+- why: close the previously explicit physical iOS installation gate without merging, deploying, or changing product behavior
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1042_diary-garden-shop-v2-iphone-install_codex.md`
+- function/component/migration: factual physical-device evidence record
+- what changed/reviewed: records toolchain, signing diagnosis, install/launch proof, boundaries, and remaining manual interaction scope
+- why: mandatory work ledger and Control Tower traceability
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase query or mutation
+- product semantics: unchanged
+- Production: no master merge, Vercel promotion, TestFlight upload, or App Store action
+
+VERIFICATION
+- command: configured `npm run build`; `npx cap sync ios`
+- PASS: web production bundle and Capacitor iOS assets completed; proves the installed native package contains the current branch web bundle
+- command: Xcode 27.0 beta 6 `xcodebuild` for physical destination with iOS 27 SDK and matching development team `CB3WLY278W`
+- PASS: `** BUILD SUCCEEDED **`; signed with the development profile for `app.gomsinlog`
+- command: `codesign --verify --deep --strict`; bundle/version/profile inspection
+- PASS: signature valid; bundle `app.gomsinlog`, version `0.1.0` (1), development profile UUID matched the downloaded app profile
+- command: Xcode 27 Beta `devicectl device install app`; `devicectl device process launch`
+- PASS: app installed and launched on the connected physical iPhone without uninstalling the existing bundle first
+- command: `devicectl device info apps --filter ...`; physical screenshot capture and visual inspection
+- PASS: installed inventory lists `곰신로그` / `app.gomsinlog` / `0.1.0` (1); screenshot shows the live `우리 정원` screen and Shop entry point
+
+REVIEW IMPACT
+- NONE: no application, security, data, or migration file changed; this entry only closes a physical-device evidence gap
+- whether an earlier review is stale: NO; installation used the exact already-reviewed application HEAD `f5fc1a0`
+
+BLOCKERS
+- code: none found during build/install/launch
+- environment: full touch interactions, long-press dragging, VoiceOver/Switch Control, and all Shop state transitions were not automated in this install-only pass
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: exact branch package built with Xcode 27 Beta, signed, installed, launched, inventoried, and visually smoke-verified on the connected iPhone
+
+REMAINING
+- user/manual interaction QA for Shop acquisition/application/reload, long-press garden movement, and accessibility gestures
+- Draft PR remains unmerged; no production or App Store promotion was performed
+
+NEXT ACTION
+- next owner: user/product QA, then repository maintainer after explicit approval
+- tool/model: physical iPhone manual touch/accessibility QA; existing Draft PR checks for the docs-only record commit
+- 기준 SHA: installed application `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- exact next task: exercise the Shop and garden gestures on the installed phone, then decide whether Draft PR #92 is ready for approval
+
+DO NOT ADVANCE UNTIL
+- any release decision distinguishes this successful install/smoke proof from the still-manual interaction/accessibility coverage
+- repository approval is explicit and exact release HEAD checks are green
+- external character-rights gate is resolved or explicitly accepted by the responsible owner
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel production: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: APPLIED to the connected iPhone as a signed development build
+
+---

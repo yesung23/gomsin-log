@@ -5,8 +5,9 @@ import {
 } from '@/lib/handwritingPreference';
 import {
   applyPaperTextureAttribute,
-  loadPaperTexture,
+  reconcileOwnedPaperTexture,
 } from '@/lib/paperTexturePreference';
+import { loadCompanionShopState } from '@/lib/companionShopLocalState';
 import {
   applyRecordTextSizeAttribute,
   loadRecordTextSize,
@@ -322,7 +323,8 @@ export function App() {
   const viewerId = state.authenticatedUser?.id || state.profile.id || '';
   useEffect(() => {
     applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
-    applyPaperTextureAttribute(loadPaperTexture(viewerId));
+    const shopState = loadCompanionShopState(viewerId);
+    applyPaperTextureAttribute(reconcileOwnedPaperTexture(viewerId, shopState.ownedPapers));
     applyRecordTextSizeAttribute(loadRecordTextSize(viewerId));
   }, [viewerId]);
 

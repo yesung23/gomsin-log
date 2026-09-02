@@ -158,10 +158,11 @@ describe('마이탭 헤더 배치', () => {
     expect(id.parentElement?.className).toMatch(/justify-center/);
   });
 
-  it('기존 기록 남기기와 설정 진입점을 없애지 않는다', () => {
+  it('기존 기록 남기기와 설정 진입점을 없애지 않는다', async () => {
     open();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '설정' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+    expect(screen.getByRole('button', { name: '설정 및 계정 관리' })).toBeTruthy();
   });
 });
 

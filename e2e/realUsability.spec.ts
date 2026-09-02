@@ -100,9 +100,9 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   */
   await page.getByRole('tab', { name: '일기장' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
-  await page.getByRole('button', { name: '종이 고르기' }).click();
+  await page.getByRole('button', { name: '상점 열기' }).click();
   await page.waitForURL(/\/shop$/, { timeout: 20_000 });
-  await expect(page.getByRole('radiogroup', { name: '기본 종이' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: '종이 바탕' })).toBeVisible();
   await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
 
@@ -150,16 +150,21 @@ for (const width of [320, 390, 430]) {
   });
 }
 
-test('paper chosen in the library becomes the default for an uncustomized diary page', async ({ browser }) => {
+test('paper collected and applied in the Shop persists as the account background', async ({ browser }) => {
   const context = await browser.newContext();
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
 
   await bootedInto(page, '/shop');
-  await page.getByRole('radio', { name: '크림 편지지' }).click();
-  await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
-  await page.getByRole('button', { name: /지면 열기$/ }).first().click();
-  await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-paper', 'cream');
+  await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
+  await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
+  await page.getByRole('button', { name: '크림 편지지 적용하기' }).click();
+  await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+  await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+
+  await page.reload();
+  await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+  await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
   await context.close();
 });

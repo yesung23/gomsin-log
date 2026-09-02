@@ -3,6 +3,10 @@ import {
   GARDEN_BOUNDS,
   GARDEN_MIN_MOVE_DISTANCE,
   GARDEN_MIN_COMPANION_DISTANCE,
+  GARDEN_COMPANION_SIZE,
+  companionsOverlap,
+  constrainCompanionPoint,
+  getPhysicalGardenBounds,
   gardenFirstMoveDelay,
   gardenMoveDuration,
   gardenPauseDuration,
@@ -20,6 +24,29 @@ function sequence(values: number[]): () => number {
 }
 
 describe('companion garden wandering geometry', () => {
+  it('keeps the full companion body inside a 320px scene at both horizontal edges', () => {
+    expect(GARDEN_BOUNDS.minX).toBe(16);
+    expect(GARDEN_BOUNDS.maxX).toBe(84);
+  });
+
+  it('derives physical-safe bounds and detects rendered sprite overlap', () => {
+    const bounds = getPhysicalGardenBounds(320, 141);
+    expect(bounds.minX).toBeGreaterThanOrEqual(16);
+    expect(bounds.maxX).toBeLessThanOrEqual(84);
+    expect(bounds.minY).toBeLessThanOrEqual(bounds.maxY);
+    expect(companionsOverlap({ x: 50, y: 80 }, { x: 50, y: 80 }, { width: 320, height: 141 }, GARDEN_COMPANION_SIZE.gap)).toBe(true);
+    expect(companionsOverlap({ x: 16, y: 80 }, { x: 84, y: 80 }, { width: 320, height: 141 }, GARDEN_COMPANION_SIZE.gap)).toBe(false);
+  });
+
+  it('escapes an overlapping request in a short 430x180 scene', () => {
+    const scene = { width: 430, height: 180 };
+    const other = { x: 74, y: 74 };
+    const point = constrainCompanionPoint({ x: 74, y: 74 }, other, scene);
+
+    expect(point).not.toEqual(other);
+    expect(companionsOverlap(point, other, scene, GARDEN_COMPANION_SIZE.gap)).toBe(false);
+  });
+
   it.each([0, 0.001, 0.25, 0.5, 0.75, 0.999, 1, -2, 5])(
     'keeps destinations inside the safe garden floor for random=%s',
     (randomValue) => {

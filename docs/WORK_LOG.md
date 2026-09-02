@@ -11218,3 +11218,97 @@ PRODUCTION
 - physical device: NOT APPLIED / UNVERIFIED
 
 ---
+
+## 2026-09-02 — Diary · Garden · Shop V2 physical iPhone installation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Xcode 27 Beta physical-device build, signed install, launch, and visual smoke proof
+- Previous Gate: Draft PR #92 exact HEAD `f5fc1a0` had all required remote checks green; physical iOS remained UNVERIFIED
+- This Gate: connected iPhone installation and launch verified on the exact reviewed branch content
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no business, pricing, storage, or AI-role change
+- Engineering source checked: `AGENTS.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: exact branch HEAD, clean feature diff, Xcode build result, installed-app inventory, launch result, and physical-device screenshot
+- Latest relevant Work Log checked: 2026-09-02 Draft PR CI remediation immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex primary orchestrator with Xcode 27.0 beta 6 and CoreDevice `devicectl`
+- Model: GPT-5 primary; no new implementation subagent required for device-only verification
+- Role: physical-device build/install/verification owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- New HEAD / Reviewed HEAD: installed content `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`; following ledger/report commit is docs-only
+
+CHANGED / REVIEWED
+- file: no application/source file changed
+- function/component/migration: iOS Debug package for `app.gomsinlog`
+- what changed/reviewed: rebuilt the exact branch with configured public app environment, synced Capacitor assets, signed with the matching development team/profile, installed over the existing developer app, launched it, and captured a physical-device smoke screenshot
+- why: close the previously explicit physical iOS installation gate without merging, deploying, or changing product behavior
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1042_diary-garden-shop-v2-iphone-install_codex.md`
+- function/component/migration: factual physical-device evidence record
+- what changed/reviewed: records toolchain, signing diagnosis, install/launch proof, boundaries, and remaining manual interaction scope
+- why: mandatory work ledger and Control Tower traceability
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase query or mutation
+- product semantics: unchanged
+- Production: no master merge, Vercel promotion, TestFlight upload, or App Store action
+
+VERIFICATION
+- command: configured `npm run build`; `npx cap sync ios`
+- PASS: web production bundle and Capacitor iOS assets completed; proves the installed native package contains the current branch web bundle
+- command: Xcode 27.0 beta 6 `xcodebuild` for physical destination with iOS 27 SDK and matching development team `CB3WLY278W`
+- PASS: `** BUILD SUCCEEDED **`; signed with the development profile for `app.gomsinlog`
+- command: `codesign --verify --deep --strict`; bundle/version/profile inspection
+- PASS: signature valid; bundle `app.gomsinlog`, version `0.1.0` (1), development profile UUID matched the downloaded app profile
+- command: Xcode 27 Beta `devicectl device install app`; `devicectl device process launch`
+- PASS: app installed and launched on the connected physical iPhone without uninstalling the existing bundle first
+- command: `devicectl device info apps --filter ...`; physical screenshot capture and visual inspection
+- PASS: installed inventory lists `곰신로그` / `app.gomsinlog` / `0.1.0` (1); screenshot shows the live `우리 정원` screen and Shop entry point
+
+REVIEW IMPACT
+- NONE: no application, security, data, or migration file changed; this entry only closes a physical-device evidence gap
+- whether an earlier review is stale: NO; installation used the exact already-reviewed application HEAD `f5fc1a0`
+
+BLOCKERS
+- code: none found during build/install/launch
+- environment: full touch interactions, long-press dragging, VoiceOver/Switch Control, and all Shop state transitions were not automated in this install-only pass
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: exact branch package built with Xcode 27 Beta, signed, installed, launched, inventoried, and visually smoke-verified on the connected iPhone
+
+REMAINING
+- user/manual interaction QA for Shop acquisition/application/reload, long-press garden movement, and accessibility gestures
+- Draft PR remains unmerged; no production or App Store promotion was performed
+
+NEXT ACTION
+- next owner: user/product QA, then repository maintainer after explicit approval
+- tool/model: physical iPhone manual touch/accessibility QA; existing Draft PR checks for the docs-only record commit
+- 기준 SHA: installed application `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- exact next task: exercise the Shop and garden gestures on the installed phone, then decide whether Draft PR #92 is ready for approval
+
+DO NOT ADVANCE UNTIL
+- any release decision distinguishes this successful install/smoke proof from the still-manual interaction/accessibility coverage
+- repository approval is explicit and exact release HEAD checks are green
+- external character-rights gate is resolved or explicitly accepted by the responsible owner
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel production: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: APPLIED to the connected iPhone as a signed development build
+
+---

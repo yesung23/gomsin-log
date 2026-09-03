@@ -115,6 +115,42 @@ beforeEach(() => {
 });
 
 describe('군화(soldier) 기본 주 콘텐츠', () => {
+  it('복무 상세가 접힌 상태에서는 요약만 보이고 상세 서비스 값은 숨긴다', () => {
+    currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+    renderSearch();
+
+    const exp = computeServiceExp(SERVING_MILITARY);
+    const disclosure = screen.getByRole('button', { name: '복무 상세' });
+
+    expect(screen.getByText('내 복무')).toBeInTheDocument();
+    expect(screen.getByText(`D-${exp!.remainingDays}`)).toBeInTheDocument();
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
+      `복무율 ${formatExpPercent(exp!.totalPercent, 4)}`,
+    );
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure).toHaveClass('min-h-11');
+    expect(screen.queryByTestId('service-level')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-exp-readout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('service-level')).toBeInTheDocument();
+    expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
+    expect(screen.getByTestId('service-today-exp')).toBeInTheDocument();
+    expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
+
+    fireEvent.click(disclosure);
+
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByTestId('service-level')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-exp-readout')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
+  });
+
   it('복무 정보가 있으면 상세 페이지로 들어가지 않아도 진행 정보가 렌더링된다', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
@@ -129,21 +165,19 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
       new RegExp(`복무율 \\d+\\.\\d{4}%`),
     );
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.elapsedDays}일 경과`);
-    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(`${exp!.remainingDays}일 남음`);
+    expect(screen.queryByTestId('service-progress-details')).not.toBeInTheDocument();
+    const disclosure = screen.getByRole('button', { name: '복무 상세' });
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    expect(disclosure).toHaveAttribute('aria-controls', 'service-details');
+    expect(disclosure).toHaveClass('min-h-11');
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByTestId('service-progress-details')).toHaveTextContent(`${exp!.elapsedDays}일 경과`);
+    expect(screen.getByTestId('service-progress-details')).toHaveTextContent(`${exp!.remainingDays}일 남음`);
     expect(screen.getByTestId('service-level')).toHaveTextContent(
       exp!.isPreEnlistment ? '입대 대기' : `${exp!.levelBadge} ${exp!.tier.label}`,
     );
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent(`다음 Lv.${exp!.level + 1}까지`);
-    const tierToggle = screen.getByRole('button', { name: '전체 단계' });
-    expect(tierToggle).toHaveAttribute('aria-expanded', 'false');
-    expect(tierToggle).toHaveAttribute('aria-controls', 'service-tier-rail');
-    expect(tierToggle).toHaveClass('min-h-11');
-    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
-    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
-    fireEvent.click(tierToggle);
-    expect(tierToggle).toHaveAttribute('aria-expanded', 'true');
-    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByTestId('service-tier-step-1')).toHaveTextContent('신병');
     expect(screen.getByTestId('service-tier-step-2')).toHaveTextContent('일초');
@@ -152,9 +186,6 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-tier-step-5')).toHaveTextContent('상초');
     expect(screen.getByTestId('service-tier-step-6')).toHaveTextContent('상꺾');
     expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
-    fireEvent.click(screen.getByRole('button', { name: '단계 접기' }));
-    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
-    expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).not.toHaveClass('bg-card/60');
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' }).firstElementChild)
@@ -186,8 +217,9 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
       expect(exp?.daysUntilEnlistment).toBeGreaterThan(0);
       expect(screen.getByText(`입대 D-${exp!.daysUntilEnlistment}`)).toBeInTheDocument();
       expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
-        `입대까지 ${exp!.daysUntilEnlistment}일`,
+        '복무율 0.0000%',
       );
+      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
       expect(screen.getByTestId('service-level-guide')).toHaveTextContent(
         `입대까지 ${exp!.daysUntilEnlistment}일`,
       );
@@ -201,6 +233,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
     fireEvent.click(screen.getByRole('button', { name: '복무 정보 수정' }));
     expect(mockNavigate).toHaveBeenCalledWith('/service');
   });
@@ -264,8 +297,10 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     });
     renderSearch();
 
-    expect(screen.getByText('전역했어요')).toBeInTheDocument();
+    expect(screen.getByText('전역')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 입력하기' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
+    expect(screen.getByTestId('service-status')).toHaveTextContent('전역했어요');
     expect(screen.getByTestId('service-level')).toHaveTextContent('MAX 왕고');
     expect(screen.getByTestId('service-level-guide')).toHaveTextContent('복무를 마쳤어요.');
   });
@@ -286,11 +321,10 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     renderSearch();
 
     const exp = computeServiceExp(currentState.profile.military);
-    expect(screen.getByTestId('service-level')).toHaveTextContent(`${exp!.levelBadge} ${exp!.tier.label}`);
-    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
+    expect(screen.queryByTestId('service-level')).not.toBeInTheDocument();
     expect(screen.queryByTestId('service-tier-rail')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
-    expect(document.getElementById('service-tier-rail')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
+    expect(screen.getByTestId('service-level')).toHaveTextContent(`${exp!.levelBadge} ${exp!.tier.label}`);
     expect(screen.getByTestId('service-tier-rail')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toHaveAttribute('aria-valuenow');
@@ -317,6 +351,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
       currentState = stateWith({ role: 'soldier', military });
       vi.setSystemTime(startMs + totalMs * 0.24);
       renderSearch();
+      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
 
       vi.setSystemTime(startMs + totalMs * 0.25);
       act(() => {
@@ -343,6 +378,7 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     });
     renderSearch();
 
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
     expect(screen.getByTestId('service-level')).toHaveTextContent('MAX 왕고');
     expect(screen.queryByRole('progressbar', { name: '현재 복무 레벨 경험치 진행률' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
@@ -367,12 +403,12 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
 
     expect(screen.getByText('지수의 복무')).toBeInTheDocument();
     expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
-    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('EXP');
     expect(screen.queryByRole('button', { name: '복무 정보 수정' })).not.toBeInTheDocument();
 
-    const toggle = screen.getByRole('button', { name: '전체 단계' });
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
+    const toggle = screen.getByRole('button', { name: '복무 상세' });
     expect(toggle).toHaveClass('min-h-11');
-    fireEvent.click(toggle);
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('EXP');
     expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
   });
 
@@ -448,7 +484,7 @@ describe('검색 입력 및 네비게이션', () => {
     expect(searchRegion).toContainElement(input);
     expect(input).toHaveAttribute('aria-describedby', 'record-search-help');
     expect(input).toHaveAttribute('aria-controls', 'record-search-results');
-    expect(document.getElementById('record-search-help')).toHaveTextContent('이 기기 안에서만 찾아요');
+    expect(document.getElementById('record-search-help')).toHaveTextContent(/^기기 안에서만 검색해요 · 날짜도 가능$/);
     expect(document.getElementById('record-search-results')).toBeInTheDocument();
     expect(screen.getByTestId('record-search-field')).toHaveStyle({ background: 'var(--paper)' });
     const composeBtn = screen.getByRole('button', { name: '기록 남기기' });
@@ -561,7 +597,7 @@ describe('검색 화면의 비색상 상태 의미', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
-    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
 
     const currentSteps = document.querySelectorAll('[aria-current="step"]');
     expect(currentSteps).toHaveLength(1);
@@ -607,6 +643,7 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
       vi.setSystemTime(startMs + 12_345_000);
       currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
       renderSearch();
+      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
 
       const readout = screen.getByTestId('service-exp-readout');
       expect(readout).toHaveTextContent(formatExpNumber(12_345));
@@ -629,9 +666,9 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
     currentState = stateWith({ role: 'soldier', military: navyMilitary });
     renderSearch();
 
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
     expect(screen.getByText(/해군/)).toBeInTheDocument();
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
     expect(screen.getByTestId('service-tier-step-7')).toHaveTextContent('왕고');
   });
 
@@ -639,6 +676,7 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
+    fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
     const readout = screen.getByTestId('service-exp-readout');
     expect(readout).toBeInTheDocument();
     // EXP formatted with / and %
@@ -655,6 +693,7 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
       vi.setSystemTime(sampleMs);
       currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
       renderSearch();
+      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
 
       const exp = computeServiceExp(SERVING_MILITARY, sampleMs)!;
       const readout = screen.getByTestId('service-exp-readout');
@@ -679,6 +718,7 @@ describe('복무 EXP 실시간 및 다군 지원', () => {
       vi.setSystemTime(startMs + (secPerLevel - 0.5) * 1000);
       currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
       renderSearch();
+      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
 
       expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.1');
       expect(screen.getByTestId('service-level-guide')).toHaveTextContent('다음 Lv.2까지');

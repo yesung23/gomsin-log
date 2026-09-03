@@ -151,7 +151,7 @@ function InlineServiceInfo({
   title?: string;
 }) {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
-  const [showAllTiers, setShowAllTiers] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'promo'; text: string; isBent: boolean } | null>(null);
   const prevRef = useRef<{ tierKey: string; ready: boolean }>({
     tierKey: '',
@@ -234,43 +234,76 @@ function InlineServiceInfo({
       className="ink-box relative space-y-3.5 overflow-hidden p-4"
       data-testid="soldier-service-info"
     >
-      {/* Level-up / Promo Accessible Feedback */}
-      {feedback ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className={cn(
-            'flex items-center gap-1.5 rounded-control border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong',
-            feedback.isBent && 'ring-2 ring-coral/20',
-          )}
-          data-testid="service-feedback"
-          data-tier-effect={feedback.isBent ? 'bent' : 'none'}
-        >
-          {feedback.isBent ? (
-            <Zap size={15} className="shrink-0" aria-hidden="true" />
-          ) : (
-            <Sparkles size={14} className="shrink-0" aria-hidden="true" />
-          )}
-          <span>{feedback.text}</span>
-        </div>
-      ) : null}
-
       <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <div className="ink-chip flex h-10 w-10 shrink-0 items-center justify-center p-1 text-coral-strong">
-            <RankInsignia bars={expState.rank.bars} size={32} />
+        <div className="min-w-0">
+          <h2
+            id="service-summary-heading"
+            className="text-heading break-keep [overflow-wrap:anywhere]"
+            style={{ color: 'var(--ink)' }}
+          >
+            {title}
+          </h2>
+          <div
+            className="text-label font-semibold text-card-foreground"
+            data-testid="service-progress-summary"
+          >
+            복무율 {formatExpPercent(expState.totalPercent, 4)}
           </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h2
-                id="service-summary-heading"
-                className="text-heading break-keep [overflow-wrap:anywhere]"
-                style={{ color: 'var(--ink)' }}
-              >
-                {title}
-              </h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <span className="text-heading font-bold text-card-foreground tabular-nums">
+              {expState.isDischarged
+                ? '전역'
+                : expState.isBeforeEnlistment
+                  ? `입대 D-${daysUntilEnlistment}`
+                  : `D-${expState.remainingDays}`}
+          </span>
+          <button
+            type="button"
+            aria-expanded={showDetails}
+            aria-controls="service-details"
+            onClick={() => setShowDetails((open) => !open)}
+            className="press-response inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-caption font-bold text-coral-strong"
+          >
+            복무 상세
+            <ChevronDown
+              size={15}
+              aria-hidden="true"
+              className={cn('motion-safe:transition-transform', showDetails && 'rotate-180')}
+            />
+          </button>
+        </div>
+      </div>
+
+      <div id="service-details" hidden={!showDetails}>
+        {showDetails ? (
+          <div className="space-y-3.5">
+          {/* Level-up / Promo Accessible Feedback */}
+          {feedback ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className={cn(
+                'flex items-center gap-1.5 rounded-control border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong',
+                feedback.isBent && 'ring-2 ring-coral/20',
+              )}
+              data-testid="service-feedback"
+              data-tier-effect={feedback.isBent ? 'bent' : 'none'}
+            >
+              {feedback.isBent ? (
+                <Zap size={15} className="shrink-0" aria-hidden="true" />
+              ) : (
+                <Sparkles size={14} className="shrink-0" aria-hidden="true" />
+              )}
+              <span>{feedback.text}</span>
             </div>
-            <div className="text-caption text-muted-foreground">
+          ) : null}
+
+          <div className="flex items-start gap-2.5">
+            <div className="ink-chip flex h-10 w-10 shrink-0 items-center justify-center p-1 text-coral-strong">
+              <RankInsignia bars={expState.rank.bars} size={32} />
+            </div>
+            <div className="min-w-0 text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
               <span data-testid="service-status">
                 {expState.isDischarged
@@ -282,97 +315,69 @@ function InlineServiceInfo({
               · <span className="opacity-80">복무 레벨</span>
             </div>
           </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <span className="text-heading font-bold text-card-foreground tabular-nums">
-            {expState.isDischarged
-              ? '전역'
-              : expState.isBeforeEnlistment
-                ? `입대 D-${daysUntilEnlistment}`
-                : `D-${expState.remainingDays}`}
-          </span>
-        </div>
-      </div>
 
-      <div className="space-y-2">
-        <div
-          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
-          data-testid="service-progress-summary"
-        >
-          <span>복무율 {formatExpPercent(expState.totalPercent, 4)}</span>
-          <span className="text-muted-foreground tabular-nums">
-            {expState.isBeforeEnlistment
-              ? `입대까지 ${daysUntilEnlistment}일`
-              : `${expState.elapsedDays}일 경과 · ${expState.remainingDays}일 남음`}
-          </span>
-        </div>
-        <div
-          role="progressbar"
-          aria-label="개인 복무 진행률"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={expState.totalPercent}
-          aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 ${expState.levelBadge} ${currentTier.label}, ${nextGuide}`}
-          className="h-2 overflow-hidden rounded-full border"
-          style={{ background: 'var(--paper)', borderColor: 'var(--ink-faint)' }}
-        >
-          <div
-            className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
-            style={{ width: `${expState.totalPercent}%`, background: 'var(--ink-accent)' }}
-          />
-        </div>
-        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
-          <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
-          <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
-        </div>
-      </div>
-
-      {/* Service tier, real-time EXP and connected roadmap track */}
-      <div className="ink-rule" aria-hidden="true" />
-      <div className="space-y-3 pt-0.5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 space-y-1">
-            <div className="flex items-center gap-1.5" data-testid="service-level">
-              <span
-                className={cn(
-                  'inline-flex items-center gap-1 rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong tabular-nums',
-                  expState.isDischarged && 'bg-coral-strong text-coral-strong-foreground',
-                )}
-                data-tier-key={currentTier.key}
-              >
-                {expState.isDischarged ? <Crown size={12} aria-hidden="true" /> : null}
-                <span>{expState.levelBadge}</span>
-              </span>
-              {' '}
-              <span className={cn('text-label font-bold text-card-foreground', expState.isDischarged && 'text-coral-strong')}>
-                {expState.isPreEnlistment ? '입대 대기' : currentTier.label}
+          <div className="space-y-2">
+            <div
+              className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
+              data-testid="service-progress-details"
+            >
+              <span className="text-muted-foreground tabular-nums">
+                {expState.isBeforeEnlistment
+                  ? `입대까지 ${daysUntilEnlistment}일`
+                  : `${expState.elapsedDays}일 경과 · ${expState.remainingDays}일 남음`}
               </span>
             </div>
-            <span className="block text-caption text-muted-foreground" data-testid="service-level-guide">
-              {nextGuide}
-            </span>
+            <div
+              role="progressbar"
+              aria-label="개인 복무 진행률"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={expState.totalPercent}
+              aria-valuetext={`복무율 ${formatExpPercent(expState.totalPercent, 4)}, 현재 복무 레벨 ${expState.levelBadge} ${currentTier.label}, ${nextGuide}`}
+              className="h-2 overflow-hidden rounded-full border"
+              style={{ background: 'var(--paper)', borderColor: 'var(--ink-faint)' }}
+            >
+              <div
+                className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
+                style={{ width: `${expState.totalPercent}%`, background: 'var(--ink-accent)' }}
+              />
+            </div>
+            <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
+              <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
+              <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
+            </div>
           </div>
-          <button
-            type="button"
-            aria-expanded={showAllTiers}
-            aria-controls="service-tier-rail"
-            onClick={() => setShowAllTiers((open) => !open)}
-            className="press-response inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg px-2 text-caption font-bold text-coral-strong"
-          >
-            {showAllTiers ? '단계 접기' : '전체 단계'}
-            <ChevronDown
-              size={15}
-              aria-hidden="true"
-              className={cn('motion-safe:transition-transform', showAllTiers && 'rotate-180')}
-            />
-          </button>
-        </div>
-        <p className="text-caption text-muted-foreground" data-testid="service-tier-description">
-          {currentTier.description} 입력한 복무 날짜 기준이며 실제 행정 진급·관계 점수가 아니에요.
-        </p>
 
-        {/* Real-time EXP Readout */}
-        <div className="space-y-1.5" data-testid="service-exp-readout">
+          {/* Service tier, real-time EXP and connected roadmap track */}
+          <div className="ink-rule" aria-hidden="true" />
+          <div className="space-y-3 pt-0.5">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-1.5" data-testid="service-level">
+                <span
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded bg-coral/20 px-1.5 py-0.5 text-caption font-extrabold text-coral-strong tabular-nums',
+                    expState.isDischarged && 'bg-coral-strong text-coral-strong-foreground',
+                  )}
+                  data-tier-key={currentTier.key}
+                >
+                  {expState.isDischarged ? <Crown size={12} aria-hidden="true" /> : null}
+                  <span>{expState.levelBadge}</span>
+                </span>
+                {' '}
+                <span className={cn('text-label font-bold text-card-foreground', expState.isDischarged && 'text-coral-strong')}>
+                  {expState.isPreEnlistment ? '입대 대기' : currentTier.label}
+                </span>
+              </div>
+              <span className="block text-caption text-muted-foreground" data-testid="service-level-guide">
+                {nextGuide}
+              </span>
+            </div>
+            <p className="text-caption text-muted-foreground" data-testid="service-tier-description">
+              {currentTier.description} 입력한 복무 날짜 기준이며 실제 행정 진급·관계 점수가 아니에요.
+            </p>
+
+            {/* Real-time EXP Readout */}
+            <div className="space-y-1.5" data-testid="service-exp-readout">
           <div className="flex items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-1 text-label font-bold text-card-foreground tabular-nums">
               <span className="font-extrabold text-coral-strong">{formatExpNumber(expState.intoLevelSec)}</span>
@@ -419,10 +424,8 @@ function InlineServiceInfo({
           ) : null}
         </div>
 
-        {/* The full tier map stays secondary; the live current level remains visible above. */}
-        <div id="service-tier-rail">
-          {showAllTiers ? (
-            <div className="relative pt-2 pb-1" data-testid="service-tier-rail">
+              {/* The full tier map stays secondary to the compact summary. */}
+              <div className="relative pt-2 pb-1" data-testid="service-tier-rail">
               {/* Background track */}
               <div className="absolute top-[26px] left-[7.14%] right-[7.14%] h-0.5 -translate-y-1/2 bg-border" />
               {/* Active progress rail */}
@@ -481,27 +484,28 @@ function InlineServiceInfo({
                   );
                 })}
               </ol>
+              </div>
             </div>
+
+          {contact?.enabled ? (
+            <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
+              <Clock size={13} aria-hidden="true" />
+              평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
+            </p>
           ) : null}
-        </div>
+
+          {onOpenService ? (
+            <button
+              type="button"
+              onClick={onOpenService}
+              className="press-response min-h-11 text-caption font-semibold text-coral-strong"
+            >
+              복무 정보 수정
+            </button>
+          ) : null}
+          </div>
+        ) : null}
       </div>
-
-      {contact?.enabled ? (
-        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
-          <Clock size={13} aria-hidden="true" />
-          평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
-        </p>
-      ) : null}
-
-      {onOpenService ? (
-        <button
-          type="button"
-          onClick={onOpenService}
-          className="press-response min-h-11 text-caption font-semibold text-coral-strong"
-        >
-          복무 정보 수정
-        </button>
-      ) : null}
     </section>
   );
 }
@@ -764,7 +768,7 @@ function SearchPageBody() {
 
         <p id="record-search-help" className="pt-1.5 text-caption leading-relaxed break-keep" style={{ color: 'var(--ink-soft)' }}>
           {/* 왜 기기 안인지 말한다. 제약처럼 보이는 것이 실은 이 구조가 준 것이다. */}
-          이 기기 안에서만 찾아요 · 8/14 처럼 날짜로도 찾을 수 있어요
+          기기 안에서만 검색해요 · 날짜도 가능
         </p>
       </div>
 

@@ -34,6 +34,15 @@ export type AuthProviderAvailability = {
   email: boolean;
 };
 
+export const AUTH_PROVIDER_AVAILABILITY_TIMEOUT_MS = 8_000;
+
+type AuthProviderAvailabilityRequest = {
+  supabaseUrl: string;
+  publishableKey: string;
+  fetchImpl?: typeof fetch;
+  timeoutMs?: number;
+};
+
 /**
  * Parse GoTrue's public settings response without trusting its shape.
  * Missing or malformed flags stay disabled so the UI never advertises a login
@@ -58,12 +67,20 @@ export function parseAuthProviderAvailability(body: unknown): AuthProviderAvaila
  * The endpoint and publishable key are public by design; no user token or account
  * data is sent. `null` means the availability check itself could not complete.
  */
-export async function fetchAuthProviderAvailability(): Promise<AuthProviderAvailability | null> {
-  if (!isSupabaseConfigured) return null;
+export async function fetchAuthProviderAvailabilityFrom({
+  supabaseUrl,
+  publishableKey,
+  fetchImpl = globalThis.fetch.bind(globalThis),
+  timeoutMs = AUTH_PROVIDER_AVAILABILITY_TIMEOUT_MS,
+}: AuthProviderAvailabilityRequest): Promise<AuthProviderAvailability | null> {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/settings`, {
-      headers: { apikey: SUPABASE_KEY },
+    const response = await fetchImpl(`${supabaseUrl}/auth/v1/settings`, {
+      headers: { apikey: publishableKey },
       cache: 'no-store',
+      signal: controller.signal,
     });
     if (!response.ok) {
       console.error('[gomsinlog] Auth provider settings request failed:', response.status);
@@ -73,7 +90,17 @@ export async function fetchAuthProviderAvailability(): Promise<AuthProviderAvail
   } catch (error) {
     console.error('[gomsinlog] Auth provider settings request failed.');
     return null;
+  } finally {
+    globalThis.clearTimeout(timeoutId);
   }
+}
+
+export async function fetchAuthProviderAvailability(): Promise<AuthProviderAvailability | null> {
+  if (!isSupabaseConfigured) return null;
+  return fetchAuthProviderAvailabilityFrom({
+    supabaseUrl: SUPABASE_URL,
+    publishableKey: SUPABASE_KEY,
+  });
 }
 
 export const supabase: SupabaseClient | null = isSupabaseConfigured

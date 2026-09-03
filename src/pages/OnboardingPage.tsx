@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
@@ -107,11 +107,6 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     return stored === 0 && hasIdentity ? FIRST_WIZARD_STEP : stored;
   }); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
-  // Detect iOS environment for conditional Apple Login UI
-  const isIOS = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  }, []);
   // Fail-closed default: all providers remain disabled until GoTrue explicitly
   // confirms availability. If the availability check fails (null) or is pending,
   // no provider buttons are offered to prevent dead buttons and failed logins.
@@ -125,7 +120,6 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   const [authAvailabilityReloadIndex, setAuthAvailabilityReloadIndex] = useState(0);
   const appleLoginAvailable = authProvidersResolved
     && appleLoginEnabled()
-    && isIOS
     && authProviders.apple;
 
   useEffect(() => {
@@ -1070,6 +1064,16 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   </p>
                 )}
 
+                {!authProvidersResolved && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="min-h-11 text-caption text-muted-foreground text-center flex items-center justify-center"
+                  >
+                    로그인 방법을 확인하고 있어요.
+                  </p>
+                )}
+
                 {/* Primary Auth CTAs */}
                 {appleLoginAvailable && (
                   <button
@@ -1081,6 +1085,18 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   >
                     <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
                   </button>
+                )}
+
+                {appleLoginAvailable && authProvidersResolved && authProviders.google && (
+                  <div
+                    role="separator"
+                    aria-label="기타 로그인"
+                    className="flex items-center gap-3 py-0.5"
+                  >
+                    <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                    <span className="text-caption font-medium text-muted-foreground">기타 로그인</span>
+                    <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  </div>
                 )}
 
                 {authProvidersResolved && authProviders.google && (

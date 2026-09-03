@@ -112,11 +112,7 @@ describe('onboarding entry step', () => {
     expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
   });
 
-  it('shows Apple login on iPhone after the server confirms the provider', async () => {
-    Object.defineProperty(navigator, 'userAgent', {
-      configurable: true,
-      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
-    });
+  it('shows Apple first on web and PWA after the server confirms the provider', async () => {
     fetchAuthProviderAvailability.mockResolvedValue({
       google: true,
       apple: true,
@@ -125,7 +121,10 @@ describe('onboarding entry step', () => {
 
     render(<OnboardingPage />);
 
-    expect(await screen.findByText('Apple로 계속하기')).toBeInTheDocument();
+    const apple = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+    const google = screen.getByRole('button', { name: /Google로 계속하기/ });
+    expect(apple.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('separator', { name: '기타 로그인' })).toBeInTheDocument();
   });
 
   it('keeps Apple login hidden when the server enables it but the reviewed build gate is off', async () => {
@@ -242,6 +241,7 @@ describe('onboarding entry step', () => {
       fetchAuthProviderAvailability.mockReturnValue(new Promise(() => {}));
       render(<OnboardingPage />);
 
+      expect(screen.getByRole('status')).toHaveTextContent('로그인 방법을 확인하고 있어요.');
       expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -284,7 +284,7 @@ describe('onboarding entry step', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
-    it('shows the unavailable message on non-iOS when Apple is the only enabled provider', async () => {
+    it('offers Apple on non-iOS web when it is the only enabled provider and the build gate is on', async () => {
       fetchAuthProviderAvailability.mockResolvedValue({
         google: false,
         apple: true,
@@ -292,11 +292,21 @@ describe('onboarding entry step', () => {
       });
       render(<OnboardingPage />);
 
-      await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
-      expect(await screen.findByRole('alert')).toHaveTextContent(
-        '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
-      );
-      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /Apple로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
+    });
+
+    it('does not label Google as an alternate when Apple is unavailable', async () => {
+      fetchAuthProviderAvailability.mockResolvedValue({
+        google: true,
+        apple: false,
+        email: true,
+      });
+      render(<OnboardingPage />);
+
+      expect(await screen.findByRole('button', { name: /Google로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
     });
 
     it('fails closed on re-entering step 0 and prevents stale Google/Apple CTA during pending recheck', async () => {

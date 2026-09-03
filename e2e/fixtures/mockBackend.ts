@@ -194,41 +194,92 @@ function authUser(scenario: Scenario) {
  * "Subscribed" frame supabase-realtime v2 waits for before reporting SUBSCRIBED,
  * heartbeats, and `access_token` refreshes. No row-level events are pushed.
  */
+type PhoenixWireMessage = {
+  format: 'array' | 'object';
+  joinRef: string | null;
+  ref: string | null;
+  topic: string;
+  event: string;
+  payload: Record<string, unknown>;
+};
+
+function decodePhoenixMessage(raw: unknown): PhoenixWireMessage | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+
+  if (Array.isArray(parsed)) {
+    const [joinRef, ref, topic, event, payload] = parsed;
+    if (typeof topic !== 'string' || typeof event !== 'string') return null;
+    return {
+      format: 'array',
+      joinRef: typeof joinRef === 'string' ? joinRef : null,
+      ref: typeof ref === 'string' ? ref : null,
+      topic,
+      event,
+      payload: payload && typeof payload === 'object' ? payload as Record<string, unknown> : {},
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object') return null;
+  const message = parsed as Record<string, unknown>;
+  if (typeof message.topic !== 'string' || typeof message.event !== 'string') return null;
+  return {
+    format: 'object',
+    joinRef: typeof message.join_ref === 'string' ? message.join_ref : null,
+    ref: typeof message.ref === 'string' ? message.ref : null,
+    topic: message.topic,
+    event: message.event,
+    payload: message.payload && typeof message.payload === 'object'
+      ? message.payload as Record<string, unknown>
+      : {},
+  };
+}
+
+function encodePhoenixMessage(
+  source: PhoenixWireMessage,
+  event: string,
+  payload: Record<string, unknown>,
+  topic = source.topic,
+  ref = source.ref,
+): string {
+  if (source.format === 'array') {
+    return JSON.stringify([source.joinRef, ref, topic, event, payload]);
+  }
+  return JSON.stringify({
+    join_ref: source.joinRef,
+    ref,
+    topic,
+    event,
+    payload,
+  });
+}
+
 export async function installMockRealtime(context: BrowserContext): Promise<void> {
   await context.routeWebSocket(/\/realtime\/v1\/websocket/, (ws) => {
     ws.onMessage((raw) => {
-      let message: { topic?: string; event?: string; ref?: string | null };
-      try {
-        message = JSON.parse(String(raw));
-      } catch {
-        return;
-      }
+      const message = decodePhoenixMessage(raw);
+      if (!message) return;
       const { topic, event, ref } = message;
-      const ok = (overrideTopic?: string) =>
-        ws.send(
-          JSON.stringify({
-            topic: overrideTopic ?? topic,
-            event: 'phx_reply',
-            payload: { status: 'ok', response: {} },
-            ref: ref ?? null,
-          }),
-        );
+      const ok = (overrideTopic?: string) => ws.send(encodePhoenixMessage(
+        message,
+        'phx_reply',
+        { status: 'ok', response: {} },
+        overrideTopic ?? topic,
+        ref,
+      ));
 
       if (event === 'heartbeat') return ok('phoenix');
       if (event === 'phx_join') {
         ok();
-        ws.send(
-          JSON.stringify({
-            topic,
-            event: 'system',
-            payload: {
-              status: 'ok',
-              extension: 'postgres_changes',
-              message: 'Subscribed to PostgreSQL',
-            },
-            ref: null,
-          }),
-        );
+        ws.send(encodePhoenixMessage(message, 'system', {
+          status: 'ok',
+          extension: 'postgres_changes',
+          message: 'Subscribed to PostgreSQL',
+        }, topic, null));
         return;
       }
       if (event === 'access_token' || event === 'phx_leave') return ok();

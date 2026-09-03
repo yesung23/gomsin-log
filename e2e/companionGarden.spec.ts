@@ -188,6 +188,16 @@ async function stopAnimationFramePairSampling(page: Page): Promise<number[]> {
   });
 }
 
+test('garden stays available after the realtime subscribe timeout boundary', async ({ context, page }) => {
+  const unrouted = await openGarden(context, page);
+
+  await page.waitForTimeout(10_750);
+
+  await expect(page.getByTestId('garden-scene')).toBeVisible();
+  await expect(page.getByRole('region', { name: '정원 확인 중' })).toHaveCount(0);
+  expect(unrouted).toEqual([]);
+});
+
 test('full-screen garden uses the exact characters, serializes pair-safe wandering, and supports long-press drag', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   const page = await context.newPage();

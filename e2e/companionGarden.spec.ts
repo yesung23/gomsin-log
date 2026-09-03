@@ -551,6 +551,10 @@ test('small-phone action sheet equips only owned accessories and reaches the Sho
   expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(568);
   expect(await dialog.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingBottom)))
     .toBeGreaterThanOrEqual(16);
+  for (const name of ['첫째 친구 쓰다듬기', '첫째 친구에게 인사하기', '두 친구 같이 놀기']) {
+    const careBox = await page.getByRole('button', { name }).boundingBox();
+    expect(careBox?.height ?? 0, `${name} keeps a 44px touch target`).toBeGreaterThanOrEqual(44);
+  }
 
   const flowerRadio = page.getByRole('radio', { name: '첫째 친구 꽃' });
   const flowerTarget = flowerRadio.locator('..');
@@ -605,6 +609,14 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   ).toBe(moveCount);
   expect(await page.getByTestId('garden-companion-position-peach').boundingBox()).toEqual(peachFrozen);
   expect(await page.getByTestId('garden-companion-position-sage').boundingBox()).toEqual(sageFrozen);
+
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
+  await page.getByRole('button', { name: '첫째 친구 쓰다듬기' }).click();
+  await expect(peach).toHaveAttribute('data-care-reaction', 'pet');
+  await expect(page.getByTestId('garden-care-reaction-peach')).toBeVisible();
+  expect(await peach.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  expect(await page.getByTestId('garden-care-reaction-peach').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  await expect(peach).toHaveAttribute('data-care-reaction', 'none', { timeout: 3_000 });
 
   const box = await peach.boundingBox();
   expect(box).not.toBeNull();

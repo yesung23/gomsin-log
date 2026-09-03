@@ -70,6 +70,7 @@ type MeasuredGardenPair = {
 type GardenCareReaction = {
   kind: GardenCareAction;
   targets: readonly GardenCompanionId[];
+  token: number;
 };
 
 const INITIAL_MOTION: MotionMap = {
@@ -359,6 +360,7 @@ function GardenCompanion({
   pressed,
   lifted,
   careReaction,
+  careReactionToken,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -376,6 +378,7 @@ function GardenCompanion({
   pressed: boolean;
   lifted: boolean;
   careReaction: GardenCareAction | null;
+  careReactionToken: number;
   onPointerDown: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerMove: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -432,6 +435,7 @@ function GardenCompanion({
         )}
       >
         <CompanionGlyph
+          key={careReaction ? `${careReaction}-${careReactionToken}` : 'idle'}
           companion={id}
           accessory={accessory}
           moving={motion.moving}
@@ -995,6 +999,7 @@ export function CompanionGardenView({
     setCareReaction({
       kind: action,
       targets: action === 'play' ? ['peach', 'sage'] : [companion],
+      token: generation,
     });
     setActionSheetCompanion(null);
     announce(action === 'pet'
@@ -1062,6 +1067,7 @@ export function CompanionGardenView({
               pressed={pressed.peach}
               lifted={lifted.peach}
               careReaction={careReaction?.targets.includes('peach') ? careReaction.kind : null}
+              careReactionToken={careReaction?.targets.includes('peach') ? careReaction.token : 0}
               onPointerDown={beginPointerPickup}
               onPointerMove={movePointerPickup}
               onPointerUp={endPointerPickup}
@@ -1083,6 +1089,7 @@ export function CompanionGardenView({
               pressed={pressed.sage}
               lifted={lifted.sage}
               careReaction={careReaction?.targets.includes('sage') ? careReaction.kind : null}
+              careReactionToken={careReaction?.targets.includes('sage') ? careReaction.token : 0}
               onPointerDown={beginPointerPickup}
               onPointerMove={movePointerPickup}
               onPointerUp={endPointerPickup}

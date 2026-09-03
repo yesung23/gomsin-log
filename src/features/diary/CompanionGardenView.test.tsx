@@ -359,6 +359,46 @@ describe('interactive companion garden characters', () => {
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-care-reaction', 'none');
   });
 
+  it('restarts the same care animation, renews its timer, and restores focus to the trigger', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    peach.focus();
+
+    fireEvent.click(peach, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구에게 인사하기' }));
+    const firstArt = screen.getByTestId('garden-companion-art-peach');
+    expect(peach).toHaveFocus();
+
+    act(() => vi.advanceTimersByTime(1_000));
+    fireEvent.click(peach, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구에게 인사하기' }));
+    expect(screen.getByTestId('garden-companion-art-peach')).not.toBe(firstArt);
+    expect(peach).toHaveAttribute('data-care-reaction', 'wave');
+
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(peach).toHaveAttribute('data-care-reaction', 'wave');
+    act(() => vi.advanceTimersByTime(600));
+    expect(peach).toHaveAttribute('data-care-reaction', 'none');
+  });
+
+  it('pauses autonomy for the complete care reaction and starts a fresh idle afterward', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.click(peach, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '두 친구 같이 놀기' }));
+    act(() => vi.advanceTimersByTime(1_600));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+    act(() => vi.advanceTimersByTime(5_000));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(1);
+  });
+
   it('renders exactly two independently addressable companions', () => {
     render(<ControlledGarden />);
     const companions = screen.getAllByRole('button', { name: /친구와 함께 놀기/ });

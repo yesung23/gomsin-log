@@ -275,30 +275,30 @@ function InlineServiceInfo({
         </div>
       </div>
 
+      {/* 상태 변화 알림은 상세가 접혀 있어도 놓치지 않게 한다. */}
+      {feedback ? (
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn(
+            'flex items-center gap-1.5 rounded-control border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong',
+            feedback.isBent && 'ring-2 ring-coral/20',
+          )}
+          data-testid="service-feedback"
+          data-tier-effect={feedback.isBent ? 'bent' : 'none'}
+        >
+          {feedback.isBent ? (
+            <Zap size={15} className="shrink-0" aria-hidden="true" />
+          ) : (
+            <Sparkles size={14} className="shrink-0" aria-hidden="true" />
+          )}
+          <span>{feedback.text}</span>
+        </div>
+      ) : null}
+
       <div id="service-details" hidden={!showDetails}>
         {showDetails ? (
           <div className="space-y-3.5">
-          {/* Level-up / Promo Accessible Feedback */}
-          {feedback ? (
-            <div
-              role="status"
-              aria-live="polite"
-              className={cn(
-                'flex items-center gap-1.5 rounded-control border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong',
-                feedback.isBent && 'ring-2 ring-coral/20',
-              )}
-              data-testid="service-feedback"
-              data-tier-effect={feedback.isBent ? 'bent' : 'none'}
-            >
-              {feedback.isBent ? (
-                <Zap size={15} className="shrink-0" aria-hidden="true" />
-              ) : (
-                <Sparkles size={14} className="shrink-0" aria-hidden="true" />
-              )}
-              <span>{feedback.text}</span>
-            </div>
-          ) : null}
-
           <div className="flex items-start gap-2.5">
             <div className="ink-chip flex h-10 w-10 shrink-0 items-center justify-center p-1 text-coral-strong">
               <RankInsignia bars={expState.rank.bars} size={32} />

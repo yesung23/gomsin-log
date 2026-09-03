@@ -351,7 +351,10 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
       currentState = stateWith({ role: 'soldier', military });
       vi.setSystemTime(startMs + totalMs * 0.24);
       renderSearch();
-      fireEvent.click(screen.getByRole('button', { name: '복무 상세' }));
+      expect(screen.getByRole('button', { name: '복무 상세' })).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
 
       vi.setSystemTime(startMs + totalMs * 0.25);
       act(() => {

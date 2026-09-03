@@ -7,11 +7,11 @@
     
     <!-- PWA & Theme -->
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#FFF7F7" />
+    <meta name="theme-color" content="#FCFBF7" />
     
     <!-- iOS Safari Web App Meta Tags -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="곰신로그" />
     <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
     
@@ -33,8 +33,7 @@
     <title>곰신로그 · 답장이 늦어도, 오늘의 순간은 놓치지 않도록</title>
   </head>
   <body>
-    <div id="root"><div data-testid="boot-splash" role="status" aria-label="곰신로그 여는 중" style="min-height:100dvh;background:#fff7f7;display:flex;align-items:center;justify-content:center"><span aria-hidden="true" style="width:32px;height:32px;border:3px solid #ed7a73;border-top-color:transparent;border-radius:9999px;animation:gomsinlog-boot-spin .8s linear infinite"></span></div></div>
-    <style>@keyframes gomsinlog-boot-spin{to{transform:rotate(360deg)}}</style>
+    <div id="root"><div data-testid="boot-splash" role="status" aria-label="곰신로그 여는 중" style="min-height:100dvh;background:#FCFBF7;color:#3B2924;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px"><img data-brand-mark="true" src="/favicon.svg" alt="" aria-hidden="true" width="112" height="112" style="display:block;width:112px;height:112px" /><span data-brand-wordmark="true" aria-hidden="true" style="font-family:ui-rounded,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;font-size:24px;font-weight:700;letter-spacing:-0.02em;line-height:1">곰신로그</span></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

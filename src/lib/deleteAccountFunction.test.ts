@@ -24,18 +24,27 @@ const EXISTING_APP_METADATA = {
 type AdminOptions = {
   flagError?: unknown;
   deleteUserError?: unknown;
+  beginError?: unknown;
+  beginData?: unknown;
+  cancelError?: unknown;
+  cancelData?: unknown;
   e2eePrepareError?: unknown;
+  e2eePrepareData?: unknown;
   prepareError?: unknown;
+  prepareData?: unknown;
   closeRelationshipsError?: unknown;
   closeRelationshipsData?: unknown;
   cleanupCouplesError?: unknown;
+  cleanupCouplesData?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
   const calls: string[] = [];
+  const rpcCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   const metadataWrites: unknown[] = [];
   const admin = {
     calls,
+    rpcCalls,
     metadataWrites,
     auth: {
       getUser: vi.fn(async () => {
@@ -67,35 +76,96 @@ function makeAdmin(options: AdminOptions = {}) {
         },
       }),
     }),
-    rpc: vi.fn(async (name: string) => {
+    rpc: vi.fn(async (name: string, args?: Record<string, unknown>) => {
       calls.push(`rpc:${name}`);
+      rpcCalls.push({ name, args });
+      if (name === 'begin_account_deletion_v2') {
+        return options.beginError
+          ? { data: null, error: options.beginError }
+          : {
+            data: Object.hasOwn(options, 'beginData')
+              ? options.beginData
+              : {
+                ok: true,
+                attempt_id: args?.p_attempt_id,
+                phase: 'media_cleanup',
+              },
+            error: null,
+          };
+      }
+      if (name === 'cancel_account_deletion_v2') {
+        return options.cancelError
+          ? { data: null, error: options.cancelError }
+          : {
+            data: Object.hasOwn(options, 'cancelData') ? options.cancelData : true,
+            error: null,
+          };
+      }
       // E2EE key-material cleanup runs before the relational preparation and
       // can legitimately refuse, so a failure here must abort the deletion.
-      if (name === 'e2ee_prepare_account_deletion') {
+      if (
+        name === 'e2ee_prepare_account_deletion'
+        || name === 'e2ee_prepare_account_deletion_v2'
+      ) {
         return options.e2eePrepareError
           ? { data: null, error: options.e2eePrepareError }
-          : { data: { partner_remains: false, deleted_devices: 1 }, error: null };
+          : {
+            data: Object.hasOwn(options, 'e2eePrepareData')
+              ? options.e2eePrepareData
+              : name.endsWith('_v2')
+                ? {
+                  ok: true,
+                  phase: 'e2ee_prepared',
+                  preparation: { partner_remains: false, deleted_devices: 1 },
+                }
+                : { partner_remains: false, deleted_devices: 1 },
+            error: null,
+          };
       }
-      if (name === 'prepare_account_deletion') {
+      if (name === 'prepare_account_deletion' || name === 'prepare_account_deletion_v2') {
         return options.prepareError
           ? { data: null, error: options.prepareError }
-          : { data: { ok: true }, error: null };
+          : {
+            data: Object.hasOwn(options, 'prepareData')
+              ? options.prepareData
+              : name.endsWith('_v2')
+                ? { ok: true, phase: 'relational_prepared', preparation: { ok: true } }
+                : { ok: true },
+            error: null,
+          };
       }
-      if (name === 'close_account_relationship_generations') {
+      if (
+        name === 'close_account_relationship_generations'
+        || name === 'close_account_relationship_generations_v2'
+      ) {
         if (options.closeRelationshipsError) {
           return { data: null, error: options.closeRelationshipsError };
         }
         return {
           data: Object.hasOwn(options, 'closeRelationshipsData')
             ? options.closeRelationshipsData
-            : { ok: true, closed_count: 1 },
+            : {
+              ok: true,
+              closed_count: 1,
+              ...(name.endsWith('_v2') ? { phase: 'relationships_closed' } : {}),
+            },
           error: null,
         };
       }
-      if (name === 'cleanup_account_solo_couples') {
+      if (
+        name === 'cleanup_account_solo_couples'
+        || name === 'cleanup_account_solo_couples_v2'
+      ) {
         return options.cleanupCouplesError
           ? { data: null, error: options.cleanupCouplesError }
-          : { data: 1, error: null };
+          : {
+            data: Object.hasOwn(options, 'cleanupCouplesData')
+              ? options.cleanupCouplesData
+              : name.endsWith('_v2')
+                ? { ok: true, phase: 'solo_cleanup_complete', deleted_count: 1 }
+                : 1,
+            error: null,
+          };
       }
       return { data: null, error: null };
     }),
@@ -125,13 +195,13 @@ describe('delete-account - the server-authoritative pending flag', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
   });
 
-  it('writes app_metadata.account_deletion_pending BEFORE the preflight and before begin_account_deletion', async () => {
+  it('writes app_metadata.account_deletion_pending BEFORE the preflight and before fenced begin', async () => {
     const admin = makeAdmin();
     await post(admin);
     const flagAt = admin.calls.indexOf('auth.admin.updateUserById');
     expect(flagAt).toBeGreaterThanOrEqual(0);
     expect(flagAt).toBeLessThan(admin.calls.indexOf('from:daily_records.select'));
-    expect(flagAt).toBeLessThan(admin.calls.indexOf('rpc:begin_account_deletion'));
+    expect(flagAt).toBeLessThan(admin.calls.indexOf('rpc:begin_account_deletion_v2'));
     expect(admin.metadataWrites[0]).toMatchObject({ account_deletion_pending: true });
   });
 
@@ -154,33 +224,125 @@ describe('delete-account - the server-authoritative pending flag', () => {
     // The account is fully intact: not one destructive or preparatory step ran.
     expect(admin.calls).toEqual(['auth.getUser', 'auth.admin.updateUserById']);
     expect(admin.calls).not.toContain('from:daily_records.select');
-    expect(admin.calls).not.toContain('rpc:begin_account_deletion');
-    expect(admin.calls).not.toContain('rpc:prepare_account_deletion');
+    expect(admin.calls).not.toContain('rpc:begin_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
     // And the flag-write failure is NOT reported through the cancel path.
-    expect(admin.calls).not.toContain('rpc:cancel_account_deletion');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
   });
 
-  it('aborts before Auth deletion when E2EE preparation refuses', async () => {
-    // e2ee_prepare_account_deletion raises when removing this account would
-    // leave the surviving partner with no way to decrypt shared history.
-    // Continuing past that would crypto-shred a bystander, so the whole
-    // deletion stops and the Auth user is left intact.
+  it('fenced-cancels only a structured exact orphan refusal confirmed by the DB wrapper', async () => {
     const admin = makeAdmin({
-      e2eePrepareError: new Error('E2EE_DELETION_WOULD_ORPHAN_PARTNER: couple epoch 1'),
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
     });
     const response = await post(admin);
     expect(response.status).toBe(500);
-    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion');
-    expect(admin.calls).not.toContain('rpc:prepare_account_deletion');
+    expect(await response.json()).toMatchObject({ dataRemoved: false });
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
+    expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
+
+    const begin = admin.rpcCalls.find((call) => call.name === 'begin_account_deletion_v2');
+    const cancel = admin.rpcCalls.find((call) => call.name === 'cancel_account_deletion_v2');
+    expect(cancel?.args?.p_attempt_id).toBe(begin?.args?.p_attempt_id);
+  });
+
+  it('does not treat a zero-row fenced cancel as success', async () => {
+    const admin = makeAdmin({
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+      cancelData: false,
+    });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it.each([
+    ['08007', 'transaction resolution unknown'],
+    ['40003', 'statement completion unknown'],
+    ['08006', 'connection failure'],
+    ['P0001', 'unrelated application error'],
+    ['bad', 'malformed SQLSTATE'],
+  ])('keeps the marker for E2EE error %s even when the transport labels it as SQL', async (code, message) => {
+    const admin = makeAdmin({ e2eePrepareError: { code, message } });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion');
+  });
+
+  it.each([
+    null,
+    {},
+    { ok: false, rollback_confirmed: true, refusal_code: 'other', phase: 'media_cleanup' },
+    { ok: false, rollback_confirmed: false, refusal_code: 'e2ee_would_orphan_partner', phase: 'media_cleanup' },
+    { ok: false, rollback_confirmed: true, refusal_code: 'e2ee_would_orphan_partner', phase: 'e2ee_prepared' },
+  ])('keeps the marker for malformed or unknown E2EE result %#', async (e2eePrepareData) => {
+    const admin = makeAdmin({ e2eePrepareData });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion');
+  });
+
+  it('keeps the durable deletion barrier once E2EE preparation has committed', async () => {
+    const admin = makeAdmin({ prepareError: { message: 'relational preparation failed' } });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).toContain('rpc:prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('treats an invalid E2EE success response as possibly committed and keeps the barrier', async () => {
+    const admin = makeAdmin({ e2eePrepareData: null });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+  });
+
+  it('keeps the barrier when an E2EE transport failure cannot prove rollback', async () => {
+    const admin = makeAdmin({
+      e2eePrepareError: { status: 504, message: 'gateway response lost' },
+    });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
   });
 
   it('runs E2EE preparation BEFORE the relational preparation', async () => {
     const admin = makeAdmin({});
     await post(admin);
-    const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion');
-    const relationalAt = admin.calls.indexOf('rpc:prepare_account_deletion');
+    const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion_v2');
+    const relationalAt = admin.calls.indexOf('rpc:prepare_account_deletion_v2');
     const authAt = admin.calls.indexOf('auth.admin.deleteUser');
     expect(e2eeAt).toBeGreaterThanOrEqual(0);
     expect(e2eeAt).toBeLessThan(relationalAt);
@@ -191,9 +353,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
   it('closes every relationship generation after relational preparation and before cleanup or Auth deletion', async () => {
     const admin = makeAdmin();
     await post(admin);
-    const preparationAt = admin.calls.indexOf('rpc:prepare_account_deletion');
-    const closeAt = admin.calls.indexOf('rpc:close_account_relationship_generations');
-    const cleanupAt = admin.calls.indexOf('rpc:cleanup_account_solo_couples');
+    const preparationAt = admin.calls.indexOf('rpc:prepare_account_deletion_v2');
+    const closeAt = admin.calls.indexOf('rpc:close_account_relationship_generations_v2');
+    const cleanupAt = admin.calls.indexOf('rpc:cleanup_account_solo_couples_v2');
     const authAt = admin.calls.indexOf('auth.admin.deleteUser');
 
     expect(closeAt).toBeGreaterThan(preparationAt);
@@ -209,9 +371,10 @@ describe('delete-account - the server-authoritative pending flag', () => {
 
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true, warnings: [] });
-    expect(admin.calls).toContain('rpc:close_account_relationship_generations');
-    expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples');
+    expect(admin.calls).toContain('rpc:close_account_relationship_generations_v2');
+    expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
   });
 
   it('fails closed when relationship closure does not return an explicit valid confirmation', async () => {
@@ -227,8 +390,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
 
       expect(response.status).toBe(500);
       expect(await response.json()).toMatchObject({ dataRemoved: true });
-      expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples');
+      expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples_v2');
       expect(admin.calls).not.toContain('auth.admin.deleteUser');
+      expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
     }
   });
 
@@ -245,9 +409,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
     // active for an account whose data is already gone.
     expect(admin.metadataWrites).toHaveLength(1);
     expect(admin.metadataWrites[0]).toMatchObject({ account_deletion_pending: true });
-    // The upload-blocking marker is a DIFFERENT marker with the opposite
-    // lifecycle, and it is still cleared here exactly as before.
-    expect(admin.calls).toContain('rpc:cancel_account_deletion');
+    // The database marker is now the durable server-side barrier that prevents
+    // this still-live Auth account from creating or joining a new generation.
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
   });
 
   it('does not clear the flag on the success path; Auth deletion removes it implicitly', async () => {
@@ -269,21 +433,56 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'auth.getUser',
       'auth.admin.updateUserById',
       'from:daily_records.select',
-      'rpc:begin_account_deletion',
-      'rpc:e2ee_prepare_account_deletion',
-      'rpc:prepare_account_deletion',
-      'rpc:close_account_relationship_generations',
-      'rpc:cleanup_account_solo_couples',
+      'rpc:begin_account_deletion_v2',
+      'rpc:e2ee_prepare_account_deletion_v2',
+      'rpc:prepare_account_deletion_v2',
+      'rpc:close_account_relationship_generations_v2',
+      'rpc:cleanup_account_solo_couples_v2',
       'auth.admin.deleteUser',
     ]);
   });
 
-  it('PRESERVATION: a database preparation failure still cancels the upload marker', async () => {
+  it('uses one fresh cryptographic attempt UUID for every destructive v2 RPC in an invocation', async () => {
+    const firstAdmin = makeAdmin();
+    const secondAdmin = makeAdmin();
+
+    expect((await post(firstAdmin)).status).toBe(200);
+    expect((await post(secondAdmin)).status).toBe(200);
+
+    const destructiveV2Names = [
+      'begin_account_deletion_v2',
+      'e2ee_prepare_account_deletion_v2',
+      'prepare_account_deletion_v2',
+      'close_account_relationship_generations_v2',
+      'cleanup_account_solo_couples_v2',
+    ];
+    const firstAttempts = firstAdmin.rpcCalls
+      .filter((call) => destructiveV2Names.includes(call.name))
+      .map((call) => call.args?.p_attempt_id);
+    const secondAttempts = secondAdmin.rpcCalls
+      .filter((call) => destructiveV2Names.includes(call.name))
+      .map((call) => call.args?.p_attempt_id);
+
+    expect(firstAttempts).toHaveLength(destructiveV2Names.length);
+    expect(new Set(firstAttempts).size).toBe(1);
+    expect(firstAttempts[0]).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+    expect(secondAttempts).toHaveLength(destructiveV2Names.length);
+    expect(new Set(secondAttempts).size).toBe(1);
+    expect(secondAttempts[0]).not.toBe(firstAttempts[0]);
+    expect(firstAdmin.rpcCalls.some((call) => (
+      /account_deletion|account_relationship|account_solo/.test(call.name)
+      && !call.name.endsWith('_v2')
+    ))).toBe(false);
+  });
+
+  it('does not reopen writes when relational preparation fails after E2EE cleanup committed', async () => {
     const admin = makeAdmin({ prepareError: { message: 'rpc failed' } });
     const response = await post(admin);
     expect(response.status).toBe(500);
-    expect((await response.json()).dataRemoved).toBe(false);
-    expect(admin.calls).toContain('rpc:cancel_account_deletion');
+    expect((await response.json()).dataRemoved).toBe(true);
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
@@ -292,8 +491,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const response = await post(admin);
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true });
-    expect(admin.calls).toContain('rpc:cleanup_account_solo_couples');
+    expect(admin.calls).toContain('rpc:cleanup_account_solo_couples_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
   });
 
   it('uses app_metadata and never user_metadata', async () => {

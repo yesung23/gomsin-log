@@ -12,7 +12,7 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *    write fails, nothing is deleted.
  * 1. Enumerate the caller's daily records and completely remove their Storage
  *    objects. A listing/removal failure aborts before relational/auth changes.
- * 2. Call the service-role-only e2ee_prepare_account_deletion RPC, which
+ * 2. Call the service-role-only fenced E2EE preparation RPC, which
  *    removes this account's device/recovery/envelope material, preserves the
  *    couple-owned epochs and the surviving partner's envelopes, and REFUSES
  *    the whole deletion if continuing would strand that partner.
@@ -76,6 +76,20 @@ type Bucket = any;
 type StorageEntry = { name: string; id: string | null };
 
 type DeleteErrorKind = 'authorization' | 'configuration' | 'server' | 'transient' | 'service' | 'unknown';
+type AccountDeletionPhase =
+  | 'media_cleanup'
+  | 'e2ee_prepared'
+  | 'relational_prepared'
+  | 'relationships_closed'
+  | 'solo_cleanup_complete';
+
+const ACCOUNT_DELETION_PHASES = new Set<AccountDeletionPhase>([
+  'media_cleanup',
+  'e2ee_prepared',
+  'relational_prepared',
+  'relationships_closed',
+  'solo_cleanup_complete',
+]);
 
 /**
  * Convert an external error into a bounded diagnostic category.
@@ -91,6 +105,16 @@ function safeDeleteErrorKind(error: unknown): DeleteErrorKind {
   if (status === 408 || status === 429) return 'transient';
   if (typeof status === 'number' && status >= 500 && status <= 599) return 'server';
   return 'service';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function accountDeletionPhase(value: unknown): AccountDeletionPhase | null {
+  return typeof value === 'string' && ACCOUNT_DELETION_PHASES.has(value as AccountDeletionPhase)
+    ? value as AccountDeletionPhase
+    : null;
 }
 
 export type HandlerDeps = {
@@ -231,16 +255,18 @@ export async function handleDeleteAccountRequest(
   }
 
   const userId = user.id;
+  // One invocation, one unguessable fence. A retry receives a new token and
+  // atomically supersedes the previous invocation without losing its phase.
+  const attemptId = crypto.randomUUID();
 
   // ---- PRIMARY AUTHORITY: the server-side pending flag. ----
   //
   // Placement is load-bearing. It is written BEFORE the read-only
-  // `daily_records` preflight and before `begin_account_deletion`, because the
+  // `daily_records` preflight and before `begin_account_deletion_v2`, because the
   // flag is a hard gate on anything that touches the account.
   //
-  // It sits OUTSIDE the `try` below on purpose: that block's `catch` runs
-  // `cancel_account_deletion` and reports `dataRemoved: databasePreparationCompleted`,
-  // neither of which is the right response to a flag-write failure.
+  // It sits OUTSIDE the `try` below on purpose: a flag-write failure must return
+  // before even the read-only preflight or fenced database marker can run.
   //
   // The existing `app_metadata` is spread FIRST. The Auth API replaces
   // `app_metadata` wholesale rather than merging, and the client derives the
@@ -274,7 +300,9 @@ export async function handleDeleteAccountRequest(
 
   let deletionMarkerStarted = false;
   let databasePreparationCompleted = false;
+  let destructiveDatabasePreparationMayHaveCommitted = false;
   let soloCouplesDeleted = 0;
+  let currentPhase: AccountDeletionPhase | null = null;
 
   try {
     // Read-only preflight. These exact IDs are passed to the transactional RPC,
@@ -289,30 +317,50 @@ export async function handleDeleteAccountRequest(
 
     // This marker is non-destructive. Migration 015's Storage INSERT policy
     // uses it to close the upload race while media is being removed/confirmed.
-    const { error: beginError } = await admin.rpc('begin_account_deletion', {
+    const { data: beginResult, error: beginError } = await admin.rpc('begin_account_deletion_v2', {
       p_user_id: userId,
       p_expected_record_ids: records.map((record) => record.id),
+      p_attempt_id: attemptId,
     });
     if (beginError) throw beginError;
+    const beginPhase = isRecord(beginResult)
+      ? accountDeletionPhase(beginResult.phase)
+      : null;
+    if (
+      !isRecord(beginResult)
+      || beginResult.ok !== true
+      || beginResult.attempt_id !== attemptId
+      || beginPhase === null
+    ) {
+      throw new Error('Account deletion begin did not confirm the fencing token');
+    }
     deletionMarkerStarted = true;
+    currentPhase = beginPhase;
+    destructiveDatabasePreparationMayHaveCommitted = beginPhase !== 'media_cleanup';
 
     try {
       await removeAndConfirmRecordMedia(admin, records);
     } catch (mediaError) {
-      const { error: cancelError } = await admin.rpc('cancel_account_deletion', {
-        p_user_id: userId,
-      });
-      if (cancelError) {
-        const kind = safeDeleteErrorKind(cancelError);
-        console.error('[delete-account] Failed to clear deletion marker', { kind });
+      if (currentPhase === 'media_cleanup') {
+        const { data: cancelled, error: cancelError } = await admin.rpc(
+          'cancel_account_deletion_v2',
+          { p_user_id: userId, p_attempt_id: attemptId },
+        );
+        if (cancelError || cancelled !== true) {
+          const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
+          console.error('[delete-account] Failed to clear fenced deletion marker', { kind });
+        } else {
+          deletionMarkerStarted = false;
+        }
       } else {
-        deletionMarkerStarted = false;
+        throw mediaError;
       }
       const kind = safeDeleteErrorKind(mediaError);
       console.error('[delete-account] Media cleanup failed; database untouched', { kind });
       return jsonResponse(
         {
           error: 'Account deletion failed because stored media could not be fully removed. Please try again.',
+          dataRemoved: false,
           warnings: [],
         },
         500,
@@ -330,31 +378,93 @@ export async function handleDeleteAccountRequest(
     //
     // It is also where the personal/health write floor is removed, which only
     // this service-role path is permitted to do.
+    // From dispatch onward the result is commit-ambiguous: SQLSTATE 08007,
+    // 40003, class 08, and even an application P0001 can all arrive without a
+    // safe client-side proof of what committed. Only the v2 database wrapper's
+    // exact structured orphan refusal proves its nested subtransaction rolled
+    // back and remains cancellable.
+    destructiveDatabasePreparationMayHaveCommitted = true;
     const { data: e2eePreparation, error: e2eePreparationError } = await admin.rpc(
-      'e2ee_prepare_account_deletion',
-      { p_user_id: userId },
+      'e2ee_prepare_account_deletion_v2',
+      { p_user_id: userId, p_attempt_id: attemptId },
     );
     if (e2eePreparationError) throw e2eePreparationError;
-    if (!e2eePreparation || typeof e2eePreparation !== 'object') {
+
+    if (
+      isRecord(e2eePreparation)
+      && e2eePreparation.ok === false
+      && e2eePreparation.rollback_confirmed === true
+      && e2eePreparation.refusal_code === 'e2ee_would_orphan_partner'
+      && e2eePreparation.phase === 'media_cleanup'
+    ) {
+      destructiveDatabasePreparationMayHaveCommitted = false;
+      const { data: cancelled, error: cancelError } = await admin.rpc(
+        'cancel_account_deletion_v2',
+        { p_user_id: userId, p_attempt_id: attemptId },
+      );
+      if (cancelError || cancelled !== true) {
+        destructiveDatabasePreparationMayHaveCommitted = true;
+        const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
+        console.error('[delete-account] Exact orphan refusal could not clear its fence', { kind });
+      } else {
+        deletionMarkerStarted = false;
+      }
+      return jsonResponse(
+        {
+          error: destructiveDatabasePreparationMayHaveCommitted
+            ? 'Account deletion could not be completed safely. Please try again.'
+            : 'Account deletion was refused to preserve shared encrypted history.',
+          dataRemoved: destructiveDatabasePreparationMayHaveCommitted,
+          warnings: [],
+        },
+        500,
+        cors.headers,
+      );
+    }
+
+    const e2eePhase = isRecord(e2eePreparation)
+      ? accountDeletionPhase(e2eePreparation.phase)
+      : null;
+    if (
+      !isRecord(e2eePreparation)
+      || e2eePreparation.ok !== true
+      || e2eePhase === null
+      || e2eePhase === 'media_cleanup'
+    ) {
       throw new Error('E2EE deletion preparation did not confirm success');
     }
+    currentPhase = e2eePhase;
 
     // Migration 015 owns all destructive relational work. In particular,
     // ownership transfer is no longer a best-effort direct table update: an
     // RPC error aborts before auth deletion, preventing ON DELETE CASCADE from
     // destroying shared events or trips.
     const { data: preparation, error: preparationError } = await admin.rpc(
-      'prepare_account_deletion',
+      'prepare_account_deletion_v2',
       {
         p_user_id: userId,
         p_expected_record_ids: records.map((record) => record.id),
+        p_attempt_id: attemptId,
       },
     );
     if (preparationError) throw preparationError;
-    if (!preparation || preparation.ok !== true) {
+    const relationalPhase = isRecord(preparation)
+      ? accountDeletionPhase(preparation.phase)
+      : null;
+    if (
+      !isRecord(preparation)
+      || preparation.ok !== true
+      || relationalPhase === null
+      || ![
+        'relational_prepared',
+        'relationships_closed',
+        'solo_cleanup_complete',
+      ].includes(relationalPhase)
+    ) {
       throw new Error('Account deletion database preparation did not confirm success');
     }
     databasePreparationCompleted = true;
+    currentPhase = relationalPhase;
 
     // Relationship identity is a one-use generation. This service-only step
     // runs after ownership transfer/deletion has committed and before either
@@ -369,33 +479,46 @@ export async function handleDeleteAccountRequest(
     const {
       data: relationshipClosure,
       error: relationshipClosureError,
-    } = await admin.rpc('close_account_relationship_generations', {
+    } = await admin.rpc('close_account_relationship_generations_v2', {
       p_user_id: userId,
+      p_attempt_id: attemptId,
     });
     if (relationshipClosureError) throw relationshipClosureError;
+    const closurePhase = isRecord(relationshipClosure)
+      ? accountDeletionPhase(relationshipClosure.phase)
+      : null;
     if (
-      !relationshipClosure
-      || typeof relationshipClosure !== 'object'
+      !isRecord(relationshipClosure)
       || relationshipClosure.ok !== true
-      || !Number.isInteger(relationshipClosure.closed_count)
-      || relationshipClosure.closed_count < 0
+      || closurePhase === null
+      || !['relationships_closed', 'solo_cleanup_complete'].includes(closurePhase)
+      || !Number.isInteger(relationshipClosure.closed_count as number)
+      || (relationshipClosure.closed_count as number) < 0
     ) {
       throw new Error('Account deletion relationship closure did not confirm success');
     }
+    currentPhase = closurePhase;
 
     // `couples` has no auth.users foreign key, so Auth deletion alone cannot
     // remove a sole-member relationship row (including anniversary metadata).
     // The service-role-only RPC preserves any couple with another membership
     // row, regardless of whether that member is active, pending or disconnected.
     const { data: cleanedCouples, error: cleanupCouplesError } = await admin.rpc(
-      'cleanup_account_solo_couples',
-      { p_user_id: userId },
+      'cleanup_account_solo_couples_v2',
+      { p_user_id: userId, p_attempt_id: attemptId },
     );
     if (cleanupCouplesError) throw cleanupCouplesError;
-    if (!Number.isInteger(cleanedCouples) || cleanedCouples < 0) {
+    if (
+      !isRecord(cleanedCouples)
+      || cleanedCouples.ok !== true
+      || cleanedCouples.phase !== 'solo_cleanup_complete'
+      || !Number.isInteger(cleanedCouples.deleted_count as number)
+      || (cleanedCouples.deleted_count as number) < 0
+    ) {
       throw new Error('Account deletion couple cleanup returned an invalid result');
     }
-    soloCouplesDeleted = cleanedCouples;
+    soloCouplesDeleted = cleanedCouples.deleted_count as number;
+    currentPhase = 'solo_cleanup_complete';
 
     // The last irreversible step, and the only one whose failure leaves a live
     // account with its data already removed, so it gets a few attempts.
@@ -428,41 +551,25 @@ export async function handleDeleteAccountRequest(
 
     return jsonResponse({ success: true, warnings: [] }, 200, cors.headers);
   } catch (error) {
-    if (deletionMarkerStarted) {
-      // Cleared even when the database preparation already committed. The login
-      // still exists in that case, and migration 015's Storage INSERT policy
-      // denies every upload while the marker is set, so leaving it behind would
-      // permanently break an account that is still in use. Retrying deletion
-      // still works: the record set is now empty and matches the next preflight.
-      //
-      // This is a DIFFERENT marker from `app_metadata.account_deletion_pending`,
-      // with the opposite lifecycle. The pending flag deliberately REMAINS set
-      // here, because the account's data is already gone and recovery must stay
-      // active. Do not "tidy it up".
-      const { error: cancelError } = await admin.rpc('cancel_account_deletion', {
-        p_user_id: userId,
-      });
-      if (cancelError) {
-        const kind = safeDeleteErrorKind(cancelError);
-        console.error(
-          '[delete-account] Failed to clear deletion marker; uploads stay blocked until an operator clears it',
-          { kind },
-        );
-      }
-    }
+    // Never infer rollback from an RPC error code. The only cancellation after
+    // E2EE dispatch is handled above from the wrapper's exact structured orphan
+    // refusal. Every other error preserves the fenced marker for retry/recovery.
     const kind = safeDeleteErrorKind(error);
     console.error('[delete-account] Deletion failed', {
       databasePreparationCompleted,
+      destructiveDatabasePreparationMayHaveCommitted,
+      deletionMarkerStarted,
+      phase: currentPhase,
       kind,
     });
     return jsonResponse(
       {
-        error: databasePreparationCompleted
+        error: destructiveDatabasePreparationMayHaveCommitted
           ? 'Your data was removed but the login could not be deleted. Please try again to finish deleting the account.'
           : 'Account deletion failed. Please try again.',
         // Signals that the account still exists while its data is already gone,
         // so the caller does not present this as a clean no-op failure.
-        dataRemoved: databasePreparationCompleted,
+        dataRemoved: destructiveDatabasePreparationMayHaveCommitted,
         warnings: [],
       },
       500,

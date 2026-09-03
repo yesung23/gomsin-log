@@ -21,6 +21,7 @@ export function Bookmark({
   onToggle,
   disabled = false,
   disabledReason,
+  visibleLabel,
   className,
 }: {
   /** The viewer's own mark. This alone controls aria-pressed and removal. */
@@ -31,6 +32,8 @@ export function Bookmark({
   onToggle: () => void;
   disabled?: boolean;
   disabledReason?: string;
+  /** Optional visible copy for contexts where an icon alone would require guessing. */
+  visibleLabel?: string;
   className?: string;
 }) {
   const namedPartner = partnerName.endsWith('님') ? partnerName : `${partnerName}님`;
@@ -53,12 +56,19 @@ export function Bookmark({
       className={cn(
         'press-response inline-flex min-h-11 min-w-11 items-center justify-center',
         'rounded-control transition-colors duration-[120ms]',
+        visibleLabel && 'gap-1 px-2',
         marked || partnerMarked ? 'text-coral-strong' : 'text-muted-foreground hover:text-foreground',
         disabled && 'opacity-50',
         className,
       )}
     >
-      <BookmarkIcon size={18} strokeWidth={2} fill={marked ? 'currentColor' : 'none'} aria-hidden="true" />
+      <BookmarkIcon
+        size={18}
+        strokeWidth={2}
+        fill={marked || partnerMarked ? 'currentColor' : 'none'}
+        aria-hidden="true"
+      />
+      {visibleLabel ? <span className="whitespace-nowrap text-label font-semibold">{visibleLabel}</span> : null}
     </button>
   );
 }

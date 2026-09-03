@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark as BookmarkIcon, MoreHorizontal, Phone, Plus } from 'lucide-react';
+import { Bookmark as BookmarkIcon, Phone, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
@@ -71,7 +71,13 @@ function timeAgo(record: DailyRecord, todayStr: string): string {
 
 export function PaperHome() {
   const navigate = useNavigate();
-  const { state, coupleLifecycle, markTalkAbout, unmarkTalkAbout } = useStore();
+  const {
+    state,
+    coupleLifecycle,
+    sharedSyncStatus,
+    markTalkAbout,
+    unmarkTalkAbout,
+  } = useStore();
   const { profile, talkAboutMarks } = state;
   const isOnline = useOnlineStatus();
   const pendingTalkAboutRef = useRef<string | null>(null);
@@ -95,9 +101,11 @@ export function PaperHome() {
     && profile.couple.partnerUserId !== profile.id
     ? profile.couple.partnerUserId
     : undefined;
+  const sharedPartnerContentAvailable = !!activePartnerUserId
+    && sharedSyncStatus !== 'unavailable';
 
   const feed = useMemo(() => {
-    if (!activePartnerUserId) return [];
+    if (!sharedPartnerContentAvailable) return [];
     const from = parseLocalDate(todayStr);
     from.setDate(from.getDate() - (FEED_DAYS - 1));
     const fromStr = toLocalDateString(from);
@@ -109,7 +117,7 @@ export function PaperHome() {
         && isRecordContentAvailable(record)
       ))
       .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
-  }, [records, activePartnerUserId, todayStr]);
+  }, [records, activePartnerUserId, sharedPartnerContentAvailable, todayStr]);
 
   /*
     1년 전 오늘. 지면 위 조용한 한 줄(계획 #29).
@@ -123,9 +131,15 @@ export function PaperHome() {
     isRecordContentAvailable(record)
     && (
       isOwnRecord(record, { userId: profile.id, role: profile.role })
-      || (!!activePartnerUserId && record.userId === activePartnerUserId)
+      || (sharedPartnerContentAvailable && record.userId === activePartnerUserId)
     )
-  )), [records, profile.id, profile.role, activePartnerUserId]);
+  )), [
+    records,
+    profile.id,
+    profile.role,
+    activePartnerUserId,
+    sharedPartnerContentAvailable,
+  ]);
   const onThisDay = useMemo(
     () => selectOnThisDay(memoryRecords, todayStr),
     [memoryRecords, todayStr],
@@ -172,30 +186,45 @@ export function PaperHome() {
     })();
   }, [isOnline, markTalkAbout, unmarkTalkAbout]);
 
-  const partnerName = profile.couple.partnerName || '상대';
+  const partnerName = activePartnerUserId
+    ? profile.couple.partnerName?.trim() || '상대'
+    : null;
   /*
     상대가 오늘 보낸 배려 신호. 계획서 #30이 이 자리를 요구했고, 지금까지는
     `우리 → 오늘 내 상태` 로 두 번 들어가야 나왔다.
   */
   const careNote = usePartnerCareNote({
     coupleId: profile.couple.coupleId,
-    connected: profile.couple.connected,
+    connected: sharedPartnerContentAvailable,
     userId: profile.id,
   });
-  const hasUnseen = partnerDay.surface.length > 0;
-  const hasMarks = talkTopics.length > 0;
+  const hasUnseen = sharedPartnerContentAvailable && partnerDay.surface.length > 0;
+  const hasMarks = sharedPartnerContentAvailable && talkTopics.length > 0;
   const hasOwnRecordToday = records.some((record) => (
     record.date === todayStr
     && isRecordContentAvailable(record)
     && isOwnRecord(record, { userId: profile.id, role: profile.role })
   ));
   const focus = selectHomeFocus({
-    partnerName,
-    careKind: careNote?.kind ?? null,
+    partnerName: partnerName ?? '',
+    careKind: activePartnerUserId ? careNote?.kind ?? null : null,
     hasPartnerDay: hasUnseen,
     hasTalkAboutMarks: hasMarks,
     hasOwnRecordToday,
   });
+
+  const feedStatus = coupleLifecycle === 'unknown'
+    || (coupleLifecycle === 'connected' && !activePartnerUserId)
+    ? 'identity'
+    : coupleLifecycle === 'connected'
+      && activePartnerUserId
+      && sharedSyncStatus === 'unavailable'
+      ? 'unavailable'
+      : coupleLifecycle === 'connected'
+        && activePartnerUserId
+        && feed.length === 0
+        ? 'empty'
+        : null;
 
   return (
     /*
@@ -215,26 +244,27 @@ export function PaperHome() {
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과
           같은 자리이고, 사람이 쓴 글은 아니지만 **간판**이라 인쇄체로 두면 서식이 된다.
         */}
-        <span className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
+        <span className="hand-text shrink-0 text-title leading-none" style={{ color: 'var(--ink)' }}>
           곰신로그
         </span>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label="이야기할 것"
             onClick={() => navigate('/saved')}
-            className="press-response relative flex h-11 w-11 items-center justify-center"
+            className="press-response inline-flex min-h-11 items-center justify-center gap-1 px-2"
           >
-            <BookmarkIcon size={22} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
-            {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
-            {hasMarks ? (
-              <span
-                aria-hidden="true"
-                className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full"
-                style={{ background: 'var(--ink-accent)' }}
-              />
-            ) : null}
+            <BookmarkIcon
+              size={18}
+              className="pen-icon"
+              color="var(--ink)"
+              fill={hasMarks ? 'currentColor' : 'none'}
+              aria-hidden="true"
+            />
+            <span className="whitespace-nowrap text-label font-semibold" style={{ color: 'var(--ink)' }}>
+              이야기
+            </span>
           </button>
           {hasMarks ? (
             <button
@@ -262,7 +292,7 @@ export function PaperHome() {
         링은 둘에서 끝난다. 인스타라면 여기부터 팔로우한 사람들이 이어지지만 이 앱에는
         두 사람뿐이라 그 자리가 비고, **비는 것이 맞다**(§5.2: 링은 정확히 두 개다).
       */}
-      <section aria-label="스토리" className="flex h-[106px] items-start gap-5 px-4 pt-1">
+      <section aria-label="스토리" className="flex min-h-[106px] items-start gap-5 px-4 pb-2 pt-1">
         <div className="relative">
           <button
             type="button"
@@ -293,26 +323,40 @@ export function PaperHome() {
         </div>
 
         <div className="relative">
-          <button
-            type="button"
-            onClick={() => navigate('/story/partner')}
-            aria-label={`${partnerName}의 스토리`}
-            className="press-response flex w-[72px] flex-col items-center gap-1.5"
-          >
-            {/*
-              링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
-
-              열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
-              말한다 -- 상대는 내가 봤는지 알 수 없다.
-            */}
-            <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
-            <span
-              className="max-w-[72px] truncate text-caption leading-none"
-              style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
+          {activePartnerUserId && partnerName ? (
+            <button
+              type="button"
+              onClick={() => navigate('/story/partner')}
+              aria-label={`${partnerName}의 스토리`}
+              className="press-response flex w-[72px] flex-col items-center gap-1"
             >
-              {partnerName}
-            </span>
-          </button>
+              {/*
+                링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
+
+                열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
+                말한다 -- 상대는 내가 봤는지 알 수 없다.
+              */}
+              <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
+              <span
+                className="max-w-[72px] truncate text-caption leading-none"
+                style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
+              >
+                {partnerName}
+              </span>
+              {hasUnseen ? (
+                <span className="text-caption font-semibold leading-none" style={{ color: 'var(--ink-accent)' }}>
+                  이어 보기
+                </span>
+              ) : null}
+            </button>
+          ) : (
+            <div className="flex w-[72px] flex-col items-center gap-1" aria-hidden="true">
+              <InkCircle size={66} ring="seen"><PenFace size={44} /></InkCircle>
+              <span className="text-caption leading-none" style={{ color: 'var(--ink-soft)' }}>
+                확인 중
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -323,25 +367,89 @@ export function PaperHome() {
           <button
             type="button"
             onClick={() => navigate(focus.to)}
-            className="press-response flex min-h-[76px] w-full items-center gap-3 py-3 text-left"
+            className="press-response flex min-h-[76px] w-full flex-wrap items-center gap-x-3 gap-y-1 py-3 text-left"
           >
-            <span className="min-w-0 flex-1">
+            <span className="min-w-0 flex-1 basis-48">
               <span className="block text-caption" style={{ color: 'var(--ink-soft)' }}>
                 {focus.eyebrow}
               </span>
               <span
-                className="mt-0.5 block break-keep text-body font-semibold"
+                className="mt-0.5 block break-words text-body font-semibold [overflow-wrap:anywhere]"
                 style={{ color: 'var(--ink)' }}
               >
                 {focus.title}
               </span>
             </span>
-            <span className="shrink-0 text-label font-semibold" style={{ color: 'var(--ink-accent)' }}>
+            <span className="ml-auto shrink-0 text-label font-semibold" style={{ color: 'var(--ink-accent)' }}>
               {focus.actionLabel}
             </span>
           </button>
           <div className="ink-rule" aria-hidden="true" />
         </section>
+      ) : null}
+
+      {sharedPartnerContentAvailable && partnerName ? (
+        <section aria-labelledby="home-partner-feed-title">
+          <div className="px-4 pb-2 pt-5">
+            <h2
+              id="home-partner-feed-title"
+              className="break-words text-headline font-semibold [overflow-wrap:anywhere]"
+              style={{ color: 'var(--ink)' }}
+            >
+              {partnerName}의 최근 기록
+            </h2>
+            <p className="mt-0.5 text-caption" style={{ color: 'var(--ink-soft)' }}>
+              오늘을 포함한 {FEED_DAYS}일
+            </p>
+          </div>
+
+          {feedStatus === 'empty' ? (
+            <p className="px-8 py-10 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+              최근 {FEED_DAYS}일에 공유된 기록이 없어요
+            </p>
+          ) : (
+            feed.map((record, index) => (
+              <Post
+                key={record.id}
+                record={record}
+                index={index}
+                mine={record.userId === profile.id}
+                myName={profile.myName || '나'}
+                partnerName={partnerName}
+                todayStr={todayStr}
+                onOpen={() => navigate(`/record?record=${encodeURIComponent(record.id)}`)}
+                talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
+                talkAboutBusy={pendingTalkAboutRecordId !== null}
+                talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
+                talkAboutDisabledReason={!isOnline
+                  ? OFFLINE_READONLY_MESSAGE
+                  : pendingTalkAboutRecordId !== null
+                    ? '다른 책갈피를 바꾸는 중이에요.'
+                    : undefined}
+                onToggleTalkAbout={() => toggleTalkAbout(
+                  record.id,
+                  talkAboutStateByRecordId.get(record.id) ?? 'none',
+                )}
+              />
+            ))
+          )}
+
+          {feed.length > 0 ? (
+            <p className="px-4 py-4 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
+              여기까지가 오늘을 포함한 {FEED_DAYS}일이에요
+            </p>
+          ) : null}
+        </section>
+      ) : feedStatus ? (
+        <p
+          role="status"
+          className="px-8 py-10 text-center text-label leading-relaxed"
+          style={{ color: 'var(--ink-soft)' }}
+        >
+          {feedStatus === 'identity'
+            ? '상대 정보를 확인하고 있어요'
+            : '공유 정보를 아직 확인하지 못했어요'}
+        </p>
       ) : null}
 
       {/*
@@ -363,49 +471,13 @@ export function PaperHome() {
           <span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>
             {onThisDayLabel(onThisDay)}
           </span>
-          <span className="hand-text truncate text-caption" style={{ color: 'var(--ink-soft)' }}>
+          <span
+            className="hand-text min-w-0 truncate text-caption"
+            style={{ color: 'var(--ink-soft)' }}
+          >
             {onThisDay.record.log}
           </span>
         </button>
-      ) : null}
-
-      {feed.length === 0 ? (
-        <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-          지난 이레는 조용했어요.
-          <br />
-          상대가 공유한 하루가 생기면 이곳에 놓여요.
-        </p>
-      ) : (
-        feed.map((record, index) => (
-          <Post
-            key={record.id}
-            record={record}
-            index={index}
-            mine={record.userId === profile.id}
-            myName={profile.myName || '나'}
-            partnerName={partnerName}
-            todayStr={todayStr}
-            onOpen={() => navigate(`/record?record=${encodeURIComponent(record.id)}`)}
-            talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
-            talkAboutBusy={pendingTalkAboutRecordId !== null}
-            talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
-            talkAboutDisabledReason={!isOnline
-              ? OFFLINE_READONLY_MESSAGE
-              : pendingTalkAboutRecordId !== null
-                ? '다른 책갈피를 바꾸는 중이에요.'
-                : undefined}
-            onToggleTalkAbout={() => toggleTalkAbout(
-              record.id,
-              talkAboutStateByRecordId.get(record.id) ?? 'none',
-            )}
-          />
-        ))
-      )}
-
-      {feed.length > 0 ? (
-        <p className="px-4 pt-4 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
-          여기까지가 지난 {FEED_DAYS}일이에요
-        </p>
       ) : null}
     </div>
   );
@@ -479,7 +551,7 @@ function Post({
             }}
           >
             <p
-              className="hand-text record-copy whitespace-pre-wrap break-keep"
+              className="hand-text record-copy whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
               style={{ color: 'var(--ink)' }}
             >
               {record.log}
@@ -489,7 +561,10 @@ function Post({
       </div>
 
       {hasMedia && record.log ? (
-        <p className="hand-text record-copy px-4 pt-3" style={{ color: 'var(--ink)' }}>
+        <p
+          className="hand-text record-copy whitespace-pre-wrap break-words px-4 pt-3 [overflow-wrap:anywhere]"
+          style={{ color: 'var(--ink)' }}
+        >
           {record.log}
         </p>
       ) : null}
@@ -511,18 +586,21 @@ function Post({
         줄 아는 사람에게 거짓말**이고, 이 제품에서 그것은 상대가 내 반응을 봤을 것이라고
         믿게 만드는 종류의 거짓말이다. 자리는 비워 두고 되는 것만 답한다.
       */}
-      <div className="flex h-11 items-center gap-1 px-3">
-        <p className="px-1 text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
+      <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 px-3 py-1">
+        <p
+          className="mr-auto flex min-h-11 items-center px-1 text-caption tabular-nums"
+          style={{ color: 'var(--ink-soft)' }}
+        >
           {timeAgo(record, todayStr)}
         </p>
-        <span className="flex-1" />
         <button
           type="button"
           aria-label={`${author}의 기록 열기`}
           onClick={onOpen}
-          className="press-response flex h-11 w-11 items-center justify-center"
+          className="press-response inline-flex min-h-11 items-center justify-center px-2 text-label font-semibold"
+          style={{ color: 'var(--ink)' }}
         >
-          <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+          원문 보기
         </button>
         <Bookmark
           marked={marked}
@@ -531,6 +609,7 @@ function Post({
           onToggle={onToggleTalkAbout}
           disabled={talkAboutDisabled}
           disabledReason={talkAboutDisabledReason}
+          visibleLabel="이야기"
         />
       </div>
     </article>

@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { PaperHome } from '@/features/home/PaperHome';
 import { localToday } from '@/lib/cycle';
 import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
+import type { SharedSyncStatus } from '@/lib/storeContext';
 import type { DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
 
@@ -17,9 +18,12 @@ let records: DailyRecord[] = [];
 let talkAboutMarks: TalkAboutMark[] = [];
 let partnerSurface: DailyRecord[] = [];
 let partnerUserId: string | undefined = 'partner';
+let partnerName = '예성';
 let coupleLifecycle: CoupleLifecycle = 'connected';
+let sharedSyncStatus: SharedSyncStatus = 'live';
 const markTalkAbout = vi.fn();
 const unmarkTalkAbout = vi.fn();
+const acknowledgePartnerDay = vi.fn();
 let online = true;
 
 vi.mock('@/lib/useOnlineStatus', async () => {
@@ -45,18 +49,22 @@ vi.mock('@/lib/useStore', () => ({
           status: 'active',
           coupleId: 'couple-1',
           partnerUserId,
-          partnerName: '예성',
+          partnerName,
         },
       },
     },
     coupleLifecycle,
+    sharedSyncStatus,
     markTalkAbout,
     unmarkTalkAbout,
   }),
 }));
 
 vi.mock('@/lib/usePartnerDay', () => ({
-  usePartnerDay: () => ({ surface: partnerSurface }),
+  usePartnerDay: () => ({
+    surface: partnerSurface,
+    acknowledge: acknowledgePartnerDay,
+  }),
 }));
 
 vi.mock('@/lib/usePartnerCareNote', () => ({
@@ -87,7 +95,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   partnerSurface = [];
   partnerUserId = 'partner';
+  partnerName = '예성';
   coupleLifecycle = 'connected';
+  sharedSyncStatus = 'live';
   talkAboutMarks = [];
   online = true;
   markTalkAbout.mockResolvedValue({ ok: true });
@@ -102,6 +112,178 @@ beforeEach(() => {
     isPrivate: false,
     attachments: [{ type: 'photo', name: '오늘.jpg' }],
   } as DailyRecord];
+});
+
+describe('Home 출시 상태 표현', () => {
+  it('상대 신원이 아직 확인되지 않았으면 사람을 추측하거나 빈 피드라고 단정하지 않는다', () => {
+    partnerUserId = undefined;
+    records = [];
+
+    view();
+
+    expect(screen.getByText('상대 정보를 확인하고 있어요')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '예성의 스토리' })).not.toBeInTheDocument();
+    expect(screen.queryByText('예성')).not.toBeInTheDocument();
+    expect(screen.queryByText('상대')).not.toBeInTheDocument();
+    expect(screen.queryByText('최근 7일에 공유된 기록이 없어요')).not.toBeInTheDocument();
+  });
+
+  it('정확한 상대와 정상 동기화가 확인된 빈 피드에만 검증된 빈 상태를 말한다', () => {
+    records = [];
+
+    view();
+
+    expect(screen.getByRole('heading', { name: '예성의 최근 기록' })).toBeInTheDocument();
+    expect(screen.getByText('오늘을 포함한 7일')).toBeInTheDocument();
+    expect(screen.getByText('최근 7일에 공유된 기록이 없어요')).toBeInTheDocument();
+    expect(screen.queryByText('상대 정보를 확인하고 있어요')).not.toBeInTheDocument();
+    expect(screen.queryByText('공유 정보를 아직 확인하지 못했어요')).not.toBeInTheDocument();
+  });
+
+  it('공유 동기화를 확인하지 못했으면 캐시를 숨기고 빈 피드라고 말하지 않는다', () => {
+    sharedSyncStatus = 'unavailable';
+
+    view();
+
+    expect(screen.getByText('공유 정보를 아직 확인하지 못했어요')).toBeInTheDocument();
+    expect(screen.queryByText('오늘 하루도 함께해줘서 고마워')).not.toBeInTheDocument();
+    expect(screen.queryByText('최근 7일에 공유된 기록이 없어요')).not.toBeInTheDocument();
+  });
+
+  it('공유 동기화가 불가하면 캐시된 상대 스토리와 지난 오늘도 새 정보처럼 올리지 않는다', () => {
+    const today = localToday();
+    const oneYearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+    const cachedMemory = {
+      id: 'cached-partner-memory',
+      userId: 'partner',
+      date: oneYearAgo,
+      time: '08:00:00',
+      authorRole: 'gomsin',
+      log: '확인되지 않은 상대의 지난 오늘',
+      isPrivate: false,
+      createdAt: `${oneYearAgo}T08:00:00.000Z`,
+    } as DailyRecord;
+    sharedSyncStatus = 'unavailable';
+    partnerSurface = [cachedMemory];
+    records = [cachedMemory];
+
+    view();
+
+    expect(screen.queryByText('이어 보기')).not.toBeInTheDocument();
+    expect(screen.queryByText('확인되지 않은 상대의 지난 오늘')).not.toBeInTheDocument();
+    expect(screen.queryByText('예성의 하루를 이어서 볼 수 있어요')).not.toBeInTheDocument();
+  });
+
+  it.each(['personal', 'pending', 'disconnected'] as const)(
+    '%s 상태는 기존 연결 안내에 맡기고 피드 상태를 단정하지 않는다',
+    (lifecycle) => {
+      coupleLifecycle = lifecycle;
+      records = [];
+
+      view();
+
+      expect(screen.queryByText('상대 정보를 확인하고 있어요')).not.toBeInTheDocument();
+      expect(screen.queryByText('공유 정보를 아직 확인하지 못했어요')).not.toBeInTheDocument();
+      expect(screen.queryByText('최근 7일에 공유된 기록이 없어요')).not.toBeInTheDocument();
+    },
+  );
+
+  it('남은 상대 스토리는 숫자 압박 없이 이어 보기라고 보인다', () => {
+    partnerSurface = [records[0]];
+
+    view();
+
+    const story = screen.getByRole('button', { name: '예성의 스토리' });
+    expect(within(story).getByText('이어 보기')).toBeInTheDocument();
+    expect(story).not.toHaveTextContent(/\d/);
+  });
+
+  it('원문 보기라는 보이는 행동으로 정확히 인코딩된 기록을 연다', () => {
+    records = [{
+      ...records[0],
+      id: 'partner/current?part=1',
+    }];
+
+    view();
+
+    const open = screen.getByRole('button', { name: '예성의 기록 열기' });
+    expect(open).toHaveTextContent('원문 보기');
+    fireEvent.click(open);
+    expect(navigate).toHaveBeenCalledWith('/record?record=partner%2Fcurrent%3Fpart%3D1');
+  });
+
+  it('헤더의 종이 결 위에 보이는 이야기와 사용할 수 있는 통화 행동을 둔다', () => {
+    talkAboutMarks = [{
+      id: 'my-mark',
+      recordId: 'record-1',
+      coupleId: 'couple-1',
+      actorUserId: 'me',
+      createdAt: '2026-09-03T12:00:00.000Z',
+      isCompleted: false,
+    }];
+
+    view();
+
+    const header = screen.getByTestId('home-sticky-header');
+    expect(header).toHaveClass('paper-texture-layer');
+    expect(within(header).getByRole('button', { name: '이야기할 것' })).toHaveTextContent('이야기');
+    expect(within(header).getByRole('button', { name: '통화 모드' })).toBeInTheDocument();
+  });
+
+  it('지난 오늘은 현재 상대의 7일 피드 끝 뒤에 놓고 정확한 원문을 연다', () => {
+    const today = localToday();
+    const oneYearAgo = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+    records = [
+      records[0],
+      {
+        id: 'memory/one',
+        userId: 'me',
+        date: oneYearAgo,
+        time: '08:00:00',
+        authorRole: 'soldier',
+        log: '내 지난 오늘',
+        isPrivate: true,
+        createdAt: `${oneYearAgo}T08:00:00.000Z`,
+      },
+    ];
+
+    view();
+
+    const endpoint = screen.getByText('여기까지가 오늘을 포함한 7일이에요');
+    const memory = screen.getByText('내 지난 오늘');
+    expect(endpoint.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(memory.closest('button')!);
+    expect(navigate).toHaveBeenCalledWith('/record?record=memory%2Fone');
+  });
+
+  it('작은 화면과 큰 글씨에서도 포스트 행동 줄이 높이를 고정하지 않고 감싼다', () => {
+    partnerName = '아주긴이름을사용하는사랑하는상대방';
+    records = [{
+      ...records[0],
+      log: '띄어쓰기없이아주길게이어지는한글기록도화면밖으로나가지않아야해요'.repeat(3),
+    }];
+
+    view();
+
+    const open = screen.getByRole('button', { name: `${partnerName}의 기록 열기` });
+    const actions = open.parentElement;
+    expect(actions).toHaveClass('min-h-11', 'flex-wrap', 'gap-y-2');
+    expect(actions).not.toHaveClass('h-11');
+    expect(actions).not.toHaveStyle({ background: 'var(--paper)' });
+    expect(open).toHaveClass('min-h-11');
+  });
+
+  it('Home의 탐색과 이야기 표시가 PartnerDay 확인을 대신하지 않는다', () => {
+    partnerSurface = [records[0]];
+
+    view();
+
+    fireEvent.click(screen.getByRole('button', { name: '예성의 스토리' }));
+    fireEvent.click(screen.getByRole('button', { name: '예성의 기록 열기' }));
+    fireEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
+
+    expect(acknowledgePartnerDay).not.toHaveBeenCalled();
+  });
 });
 
 describe('홈의 상대방 전용 7일 피드', () => {

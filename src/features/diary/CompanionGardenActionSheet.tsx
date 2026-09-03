@@ -188,9 +188,6 @@ export function CompanionGardenActionSheet({
 
         <section className="mt-4" aria-labelledby="garden-care-title">
           <h3 id="garden-care-title" className="text-label font-semibold text-foreground">돌보기</h3>
-          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
-            한 번 누르면 정원의 친구들이 바로 반응해요.
-          </p>
           <div role="group" className="mt-3 grid grid-cols-3 gap-2" aria-label="친구 돌보기">
             <button
               type="button"
@@ -224,9 +221,6 @@ export function CompanionGardenActionSheet({
 
         <section className="mt-3" aria-labelledby="garden-move-title">
           <h3 id="garden-move-title" className="text-label font-semibold text-foreground">친구 움직이기</h3>
-          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
-            방향을 골라 정원 안에서 한 칸씩 움직여요.
-          </p>
           <div role="group" className="mx-auto mt-3 grid w-fit grid-cols-3 grid-rows-3 gap-2" aria-label={`${label} 친구 이동 방향`}>
             {directions.map(({ id, Icon, gridClass }) => (
               <button
@@ -245,7 +239,7 @@ export function CompanionGardenActionSheet({
         <section className="mt-4" aria-labelledby="garden-accessory-title">
           <h3 id="garden-accessory-title" className="text-label font-semibold text-foreground">친구 꾸미기</h3>
           <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
-            상점에서 받은 무료 장식만 보여요. 선택은 이 계정의 이 기기에 저장돼요.
+            선택은 이 계정의 이 기기에 저장돼요.
           </p>
           <div role="radiogroup" aria-label={`${label} 친구 액세서리`} className="mt-3 flex flex-wrap gap-2">
             {GARDEN_ACCESSORY_OPTIONS

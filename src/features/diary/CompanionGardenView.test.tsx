@@ -315,6 +315,9 @@ describe('interactive companion garden characters', () => {
     const liveRegion = screen.getByTestId('garden-live-region');
 
     fireEvent.click(peach, { detail: 0 });
+    expect(screen.queryByText('한 번 누르면 정원의 친구들이 바로 반응해요.')).not.toBeInTheDocument();
+    expect(screen.queryByText('방향을 골라 정원 안에서 한 칸씩 움직여요.')).not.toBeInTheDocument();
+    expect(screen.getByText('선택은 이 계정의 이 기기에 저장돼요.')).toBeInTheDocument();
     for (const name of ['살구 친구 쓰다듬기', '살구 친구에게 인사하기', '두 친구 같이 놀기']) {
       const action = screen.getByRole('button', { name });
       expect(action).toHaveClass('min-h-11');

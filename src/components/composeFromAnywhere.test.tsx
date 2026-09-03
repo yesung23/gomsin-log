@@ -34,7 +34,7 @@ const read = (path: string) => readFileSync(resolve(process.cwd(), path), 'utf8'
  * 조건 없이 그려지는 것이다. 소스에서 보는 이유는 세 화면 모두 렌더하려면 스토어 전체가
  * 필요하고, 여기서 보고 싶은 것은 **구조적 사실**이기 때문이다.
  */
-const ENTRY_POINTS: Array<{ file: string; label: string; where: string }> = [
+const ENTRY_POINTS: Array<{ file: string; label: string; where: string; openingTag?: string }> = [
   {
     file: 'src/features/home/PaperHome.tsx',
     label: '기록 남기기',
@@ -49,19 +49,20 @@ const ENTRY_POINTS: Array<{ file: string; label: string; where: string }> = [
     file: 'src/features/search/SearchPage.tsx',
     label: '기록 남기기',
     where: '찾기 헤더의 펜',
+    openingTag: '<AppBarAction',
   },
 ];
 
 describe('기록을 시작하는 길은 조건 없이 열려 있다', () => {
-  it.each(ENTRY_POINTS)('$where 는 조건 뒤에 숨지 않는다', ({ file, label }) => {
+  it.each(ENTRY_POINTS)('$where 는 조건 뒤에 숨지 않는다', ({ file, label, openingTag = '<button' }) => {
     const source = read(file);
     const at = source.indexOf(`aria-label="${label}"`);
     expect(at, `${file} 에 진입점이 없다`).toBeGreaterThan(-1);
 
     const before = source.slice(Math.max(0, at - 240), at);
-    // 여는 `<button` 이 그 앞에 있고, 그 사이에 삼항이나 `&&` 가 없어야 한다.
-    expect(before).toContain('<button');
-    const opening = before.slice(before.lastIndexOf('<button'));
+    // 여는 버튼 primitive가 그 앞에 있고, 그 사이에 삼항이나 `&&` 가 없어야 한다.
+    expect(before).toContain(openingTag);
+    const opening = before.slice(before.lastIndexOf(openingTag));
     expect(opening, `${file}: 진입점이 조건부로 그려진다`).not.toMatch(/\?|&&/);
   });
 

@@ -3305,6 +3305,110 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · 온디바이스 하루 정리 모델 출력 방화벽 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary output integrity and exact-source binding
+- Step: 모델 출력 semantic firewall TDD·독립 재검토
+- Previous Gate: 공유 가능한 기록 본문의 건강·위치 표현을 온디바이스 입력으로 허용한 제품 계약
+- This Gate: 현재 40자 입력 단계의 모델 출력은 원문 그대로 또는 안전한 최종 마침표 하나만 통과
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` M6, `AGENTS.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, HEAD `d0914b54732408ddbb56d6f388c3e6fc75099764`, exact dirty-file inventory
+- Latest relevant Work Log checked: 2026-09-03 공유 건강·위치 본문 입력 승인 항목 바로 위
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded independent read-only reviewer
+- Model: GPT-5.6 Sol primary; configured independent reviewer
+- Role: TDD 통합·검증은 primary, 의미 오염·Unicode 우회 검토는 독립 reviewer
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `d0914b54732408ddbb56d6f388c3e6fc75099764`
+- Old HEAD: `d0914b54732408ddbb56d6f388c3e6fc75099764`
+- New HEAD / Reviewed HEAD: code/report commit pending; independent review snapshot은 old HEAD 위 exact five-file delta
+
+#### CHANGED / REVIEWED
+- file: `src/lib/dailySummary/semanticGuard.ts`, `src/lib/dailySummary/semanticGuard.test.ts`
+- function/component/migration: `guardSummaryRewrite`
+- what changed/reviewed: raw source·candidate의 위험 Unicode를 먼저 차단하고 NFC+바깥 trim 뒤 내부 문자·띄어쓰기·구두점을 exact 비교한다. 마지막 문자가 Letter/Number/Mark/Symbol일 때 ASCII `.` 하나만 추가 허용한다.
+- why: 모델이 감정·관계·진단·의도·수량을 지어내거나 인용·부정·불확실성 맥락을 잘라낸 출력을 화면에 노출하지 않기 위해
+- file: `src/lib/dailySummary/verify.ts`, `src/lib/dailySummary/verify.test.ts`
+- function/component/migration: `verifyRefinedItems`, `semantic_mismatch`
+- what changed/reviewed: 길이·index·순서 검사 뒤 각 후보를 같은 index의 원문과 결속해 검증하고 한 줄이라도 실패하면 배치 전체를 거부한다.
+- why: 올바른 형태만 갖춘 환각 출력과 다른 기록의 문장 재결합을 fail-closed 하기 위해
+- file: `src/features/story/storyDailySummary.test.tsx`
+- function/component/migration: whole-day atomic fallback and exact original navigation regression coverage
+- what changed/reviewed: 안전한 원문 echo fixture로 교체하고 뒤 배치 한 줄의 semantic mismatch도 앞 배치까지 포함한 하루 전체 규칙 기반 fallback이 되도록 회귀 테스트를 추가했다.
+- why: 일부 모델 결과와 일부 원문이 섞여 출처를 오해하게 하지 않기 위해
+- file: `control-tower/reports/codex/2026-09-03_1043_on-device-summary-semantic-firewall_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 정확한 변경·검증·한계·다음 gate를 기록
+- why: 구현 존재와 실기기/Production 검증을 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스 처리를 E2EE 또는 완전한 비밀성으로 주장하지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: 공유 가능한 현재 파트너 기록만 대상, 1기록=1항목과 exact source 이동, AI 자동 중요도 선정 금지 유지
+- Production: Supabase·Vercel·TestFlight·App Store·remote flag 모두 변경하지 않음
+
+#### VERIFICATION
+- command: `npm run test -- --run src/lib/dailySummary/onDeviceSummaryBridge.test.ts src/lib/dailySummary/corpus.test.ts src/lib/dailySummary/verify.test.ts src/lib/dailySummary/contract.test.ts src/lib/dailySummary/nativeOnDeviceSummary.test.ts src/lib/dailySummary/semanticGuard.test.ts src/lib/dailySummary/rules.test.ts src/features/story/storyDailySummary.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 8 files / 182 tests
+- what it actually proves: JS 계약·검증·Story fallback·exact-source route 회귀만 증명
+- command: exact five files `npx eslint --no-cache ...`; `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 lint와 전체 TypeScript 정합성
+- command: non-secret placeholder public env로 `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules
+- what it actually proves: production-mode 번들 생성 가능; 실제 Production 환경·연결은 증명하지 않음
+- command: 독립 adversarial direct probes와 재검토
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0, 43/43 probes
+- what it actually proves: 인용·꿈·주체·부정·불확실성·부호·통화·숫자·공백·Unicode 우회와 final-period 경계에 대한 exact reviewed delta
+- command: Foundation Models physical iPhone execution
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실기기 지연·오프라인·발열·배터리·실제 생성 품질은 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- FULL: 이 five-file semantic output boundary는 두 차례 반례 수정 후 exact snapshot을 독립 재검토했다.
+- whether an earlier review is stale: NO for this snapshot; 다음 120→40 발췌 구현은 새 review가 필요
+
+#### BLOCKERS
+- code: 유용한 120→40 exact contiguous excerpt와 visible omission contract 미구현
+- environment: 지원 실물 iPhone Foundation Models 검증 미완료
+- external/manual: 검증 build 외 feature flag 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: 현재 40자 입력/40자 출력 adapter의 fail-closed semantic firewall; feature default-OFF 유지
+
+#### REMAINING
+- 120자 공유 원문에서 최대 40자 exact contiguous excerpt 생성·검증
+- 5개/배치, 최대 20개, 배치당 4초, 하루 단위 atomic fallback
+- 화면의 생략 표시와 한 탭 exact original 이동
+- Native Swift prompt/contract 일치, 독립 review, 실물 iPhone gate
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded implementation Worker/Verifier/Reviewer
+- tool/model: 다음 excerpt contract는 TDD Worker와 독립 privacy/correctness reviewer
+- 기준 SHA: 이 code/report commit
+- exact next task: 정원 좌표 안정성 gate를 먼저 분리 폐쇄한 뒤 120→40 exact excerpt를 별도 커밋으로 구현
+
+#### DO NOT ADVANCE UNTIL
+- private/unreadable/former-partner 행, owner-only 구조화 건강 데이터, GPS/EXIF metadata가 모델 입력에 들어가지 않음
+- 한 항목이 한 exact recordId에 남고 모델이 drop/merge/reorder하지 못함
+- 실물 기기 증거 없이 release-ready 또는 Production-enabled라고 주장하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

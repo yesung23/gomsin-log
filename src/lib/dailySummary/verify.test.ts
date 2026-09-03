@@ -27,22 +27,44 @@ function refined(items: unknown) {
 describe('통과하는 응답', () => {
   it('개수·순서·index가 그대로면 텍스트를 받아들인다', () => {
     const result = refined([
-      { index: 0, text: '시험이 끝났어요' },
-      { index: 1, text: '점심을 먹었어요' },
+      { index: 0, text: '오늘 시험 끝났어' },
+      { index: 1, text: '점심 먹었어.' },
       { index: 2, text: '사진을 남겼어요' },
     ]);
-    expect(result).toEqual({ ok: true, texts: ['시험이 끝났어요', '점심을 먹었어요', '사진을 남겼어요'] });
+    expect(result).toEqual({
+      ok: true,
+      texts: ['오늘 시험 끝났어', '점심 먹었어.', '사진을 남겼어요'],
+    });
   });
 
-  it('공백은 접어서 받아들인다', () => {
+  it('바깥 공백은 접어서 받아들인다', () => {
     const result = refined([
-      { index: 0, text: '  시험이   끝났어요\n' },
-      { index: 1, text: '점심' },
-      { index: 2, text: '사진' },
+      { index: 0, text: '  오늘 시험 끝났어  ' },
+      { index: 1, text: '점심 먹었어' },
+      { index: 2, text: '사진을 남겼어요' },
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.texts[0]).toBe('시험이 끝났어요');
+    expect(result.texts[0]).toBe('오늘 시험 끝났어');
+  });
+
+  it('내부 띄어쓰기를 옮기거나 늘리면 의미가 달라질 수 있어 거부한다', () => {
+    expect(refined([
+      { index: 0, text: '오늘  시험 끝났어' },
+      { index: 1, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ])).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
+  it.each([
+    ["'안 가'라고 했어", '안 가라고 했어'],
+    ['아버지가 방에 들어가신다', '아버지 가방에 들어가신다'],
+    ['３시 운동했어', '－３시 운동했어'],
+  ])('손실 정규화로 같아 보이는 문장도 거부한다: %s -> %s', (source, candidate) => {
+    expect(verifyRefinedItems(
+      [{ index: 0, text: candidate }],
+      [{ index: 0, text: source }],
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
   });
 });
 
@@ -65,14 +87,26 @@ describe('거부하는 응답', () => {
   });
 
   it('index를 환각했다 (범위 밖)', () => {
-    expect(refined([{ index: 0, text: 'a' }, { index: 9, text: 'b' }, { index: 2, text: 'c' }]))
+    expect(refined([
+      { index: 0, text: ITEMS[0].text },
+      { index: 9, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ]))
       .toEqual({ ok: false, rejection: 'index_out_of_range' });
-    expect(refined([{ index: -1, text: 'a' }, { index: 1, text: 'b' }, { index: 2, text: 'c' }]))
+    expect(refined([
+      { index: -1, text: ITEMS[0].text },
+      { index: 1, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ]))
       .toEqual({ ok: false, rejection: 'index_out_of_range' });
   });
 
   it('index를 중복했다 (그래서 하나가 누락됐다)', () => {
-    expect(refined([{ index: 0, text: 'a' }, { index: 0, text: 'b' }, { index: 2, text: 'c' }]))
+    expect(refined([
+      { index: 0, text: ITEMS[0].text },
+      { index: 0, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ]))
       .toEqual({ ok: false, rejection: 'duplicate_index' });
   });
 
@@ -108,10 +142,49 @@ describe('거부하는 응답', () => {
       { index: 0, text: '가'.repeat(41) }, { index: 1, text: 'b' }, { index: 2, text: 'c' },
     ])).toEqual({ ok: false, rejection: 'text_too_long' });
 
-    // 정확히 40자는 통과한다.
+    // 정확히 40자이고 원문과 같은 문장은 통과한다.
+    const forty = '가'.repeat(40);
+    expect(verifyRefinedItems(
+      [{ index: 0, text: forty }],
+      [{ index: 0, text: forty }],
+    ).ok).toBe(true);
+  });
+
+  it('원문에 없는 내용이 한 줄이라도 있으면 배치 전체를 거부한다', () => {
     expect(refined([
-      { index: 0, text: '가'.repeat(40) }, { index: 1, text: 'b' }, { index: 2, text: 'c' },
-    ]).ok).toBe(true);
+      { index: 0, text: '오늘 외로워' },
+      { index: 1, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ])).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
+  it.each([
+    ['너랑 헤어졌어, 꿈에서', '너랑 헤어졌어'],
+    ['춘향이랑 점심 먹었어', '점심 먹었어'],
+    ['3°C였어', '-3°C였어'],
+    ['-3°C였어', '3°C였어'],
+    ['두 번 전화했어', '전화했어'],
+  ])('부분 문자열이어도 의미 맥락이나 수량을 잃으면 거부한다: %s -> %s', (source, candidate) => {
+    expect(verifyRefinedItems(
+      [{ index: 0, text: candidate }],
+      [{ index: 0, text: source }],
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
+  it('index가 맞아도 다른 줄의 문장을 가져오면 거부한다', () => {
+    expect(refined([
+      { index: 0, text: ITEMS[1].text },
+      { index: 1, text: ITEMS[0].text },
+      { index: 2, text: ITEMS[2].text },
+    ])).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
+  it('보이지 않는 문자를 공백처럼 지워 통과시키지 않는다', () => {
+    expect(refined([
+      { index: 0, text: `오늘\u200b 시험 끝났어` },
+      { index: 1, text: ITEMS[1].text },
+      { index: 2, text: ITEMS[2].text },
+    ])).toEqual({ ok: false, rejection: 'semantic_mismatch' });
   });
 });
 
@@ -130,13 +203,21 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
 
   it('검증과 재결합이 한 번에 이뤄지고, 실패는 지도를 만들지 않는다', () => {
     const good = verifyAndBindRefinedLines(
-      [{ index: 0, text: 'A' }, { index: 1, text: 'B' }, { index: 2, text: 'C' }],
+      [
+        { index: 0, text: '오늘 시험 끝났어.' },
+        { index: 1, text: '점심 먹었어.' },
+        { index: 2, text: '사진을 남겼어요.' },
+      ],
       LINES,
       ITEMS,
     );
     expect(good.ok).toBe(true);
     if (!good.ok) return;
-    expect([...good.refined.entries()]).toEqual([['rec-a', 'A'], ['rec-b', 'B'], ['rec-c', 'C']]);
+    expect([...good.refined.entries()]).toEqual([
+      ['rec-a', '오늘 시험 끝났어.'],
+      ['rec-b', '점심 먹었어.'],
+      ['rec-c', '사진을 남겼어요.'],
+    ]);
 
     const bad = verifyAndBindRefinedLines([{ index: 2, text: 'C' }], LINES, ITEMS);
     expect(bad).toEqual({ ok: false, rejection: 'count_mismatch' });
@@ -163,9 +244,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
 
     const bound = verifyAndBindRefinedLines(
       [
-        { index: 0, text: '다듬은 여섯째' },
-        { index: 1, text: '다듬은 일곱째' },
-        { index: 2, text: '다듬은 여덟째' },
+        { index: 0, text: '여섯째 기록.' },
+        { index: 1, text: '일곱째 기록.' },
+        { index: 2, text: '여덟째 기록.' },
       ],
       batch2Lines,
       batch2Items,
@@ -174,9 +255,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
     expect(bound.ok).toBe(true);
     if (!bound.ok) return;
     expect([...bound.refined.entries()]).toEqual([
-      ['rec-6', '다듬은 여섯째'],
-      ['rec-7', '다듬은 일곱째'],
-      ['rec-8', '다듬은 여덟째'],
+      ['rec-6', '여섯째 기록.'],
+      ['rec-7', '일곱째 기록.'],
+      ['rec-8', '여덟째 기록.'],
     ]);
   });
 });

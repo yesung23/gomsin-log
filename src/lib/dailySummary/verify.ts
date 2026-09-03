@@ -4,6 +4,7 @@ import {
   type DailySummaryLine,
   type OnDeviceSummaryItem,
 } from '@/lib/dailySummary/contract';
+import { guardSummaryRewrite } from '@/lib/dailySummary/semanticGuard';
 
 /**
  * 모델 출력을 믿지 않는 자리.
@@ -41,7 +42,8 @@ export type RefineRejection =
   | 'reordered'
   | 'text_not_a_string'
   | 'empty_text'
-  | 'text_too_long';
+  | 'text_too_long'
+  | 'semantic_mismatch';
 
 export type RefineVerification =
   | { ok: true; texts: string[] }
@@ -77,11 +79,17 @@ export function verifyRefinedItems(
     if (index !== position) return { ok: false, rejection: 'reordered' };
 
     if (typeof text !== 'string') return { ok: false, rejection: 'text_not_a_string' };
-    const collapsed = collapseSummaryText(text);
+    // 정상적인 조합형 입력(NFD)은 허용하되 화면에는 일관된 NFC 문자열만 전달한다.
+    const collapsed = collapseSummaryText(text).normalize('NFC');
     if (collapsed.length === 0) return { ok: false, rejection: 'empty_text' };
     // 잘라서 쓰지 않는다. 40자를 넘긴 응답은 계약을 지키지 않은 응답이다.
     if (collapsed.length > MAX_DAILY_SUMMARY_LINE_CHARS) {
       return { ok: false, rejection: 'text_too_long' };
+    }
+    // 길이·형식만 맞는 문장도 사실을 지어낼 수 있다. raw 후보를 그대로 검사하므로 zero-width나
+    // 제어문자를 collapse가 지워 안전해 보이게 만드는 우회도 통과하지 못한다.
+    if (!guardSummaryRewrite(expected[position].text, text).ok) {
+      return { ok: false, rejection: 'semantic_mismatch' };
     }
     texts.push(collapsed);
   }

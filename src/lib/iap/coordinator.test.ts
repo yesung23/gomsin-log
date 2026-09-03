@@ -167,4 +167,28 @@ describe('Apple IAP coordinator', () => {
     expect(coordinator.snapshot().entitlements).toEqual([]);
     expect(native.finish).not.toHaveBeenCalled();
   });
+
+  it('removes a listener whose registration resolves after a newer account is bound', async () => {
+    const { native, server } = ports();
+    const registrations: Array<{
+      resolve: (remove: () => void) => void;
+      remove: ReturnType<typeof vi.fn>;
+    }> = [];
+    vi.mocked(native.addTransactionListener).mockImplementation(() => new Promise((resolve) => {
+      const remove = vi.fn();
+      registrations.push({ resolve, remove });
+    }));
+    const coordinator = createAppleIapCoordinator({ native, server });
+
+    const accountABind = coordinator.bindAccount(ACCOUNT_A, 'Xcode');
+    const accountBBind = coordinator.bindAccount(ACCOUNT_B, 'Xcode');
+    registrations[1].resolve(registrations[1].remove);
+    await accountBBind;
+    registrations[0].resolve(registrations[0].remove);
+    await accountABind;
+
+    expect(registrations[0].remove).toHaveBeenCalledOnce();
+    expect(registrations[1].remove).not.toHaveBeenCalled();
+    expect(coordinator.snapshot().accountId).toBe(ACCOUNT_B);
+  });
 });

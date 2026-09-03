@@ -132,10 +132,14 @@ export function createAppleIapCoordinator(deps: {
         exportCredits: 0,
       };
 
-      removeListener = await deps.native.addTransactionListener((item) => {
+      const registeredRemove = await deps.native.addTransactionListener((item) => {
         void ingest(accountId, expectedGeneration, item);
       });
-      if (!isCurrent(accountId, expectedGeneration)) return;
+      if (!isCurrent(accountId, expectedGeneration)) {
+        registeredRemove();
+        return;
+      }
+      removeListener = registeredRemove;
       await reconcile(accountId, environment, expectedGeneration);
     },
 

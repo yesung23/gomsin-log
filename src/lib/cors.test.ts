@@ -67,7 +67,14 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
                 : name === 'cleanup_account_solo_couples_v2'
                   ? { ok: true, phase: 'solo_cleanup_complete', deleted_count: 0 }
                   : name === 'iap_prepare_account_deletion'
-                    ? { binding_tombstoned: true, entitlements_removed: 0, credits_closed: 0 }
+                    ? {
+                      prepared: true,
+                      entitlements_revoked: 0,
+                      reservations_released: 0,
+                      transactions_retained: 0,
+                      notifications_retained: 0,
+                      credit_entries_retained: 0,
+                    }
                     : null,
         error: null,
       };

@@ -510,6 +510,7 @@ CREATE FUNCTION public.iap_apply_verified_transaction(
   p_transaction_id TEXT,
   p_original_transaction_id TEXT,
   p_product_id TEXT,
+  p_product_type TEXT,
   p_bundle_id TEXT,
   p_app_account_token_hash TEXT,
   p_purchase_date_ms BIGINT,
@@ -550,6 +551,7 @@ DECLARE
   v_reclaim BIGINT := 0;
   v_original_owner UUID;
   v_notification iap_private.apple_notifications%ROWTYPE;
+  v_verified_product_type TEXT;
 BEGIN
   PERFORM iap_private.require_service_role();
   IF p_notification_uuid IS NOT NULL
@@ -562,7 +564,7 @@ BEGIN
      OR p_original_transaction_id IS NULL
      OR NOT iap_private.is_uint64_text(p_transaction_id)
      OR NOT iap_private.is_uint64_text(p_original_transaction_id)
-     OR p_product_id IS NULL OR p_bundle_id IS NULL
+     OR p_product_id IS NULL OR p_product_type IS NULL OR p_bundle_id IS NULL
      OR NOT iap_private.is_sha256_hex(p_app_account_token_hash)
      OR p_purchase_date_ms IS NULL OR p_purchase_date_ms <= 0
      OR p_signed_date_ms IS NULL OR p_signed_date_ms <= 0
@@ -582,6 +584,16 @@ BEGIN
   WHERE c.environment = p_environment AND c.product_id = p_product_id AND c.bundle_id = p_bundle_id;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Apple product is not in the reviewed catalog';
+  END IF;
+  v_verified_product_type := CASE p_product_type
+    WHEN 'Non-Consumable' THEN 'non_consumable'
+    WHEN 'Consumable' THEN 'consumable'
+    WHEN 'Auto-Renewable Subscription' THEN 'subscription'
+    ELSE NULL
+  END;
+  IF v_verified_product_type IS NULL
+     OR v_catalog.product_type IS DISTINCT FROM v_verified_product_type THEN
+    RAISE EXCEPTION 'Apple product type does not match the reviewed catalog';
   END IF;
   IF v_catalog.product_type = 'subscription' AND p_event_kind = 'purchase' AND v_expires_at IS NULL THEN
     RAISE EXCEPTION 'Subscription transaction requires expiresDate';
@@ -789,6 +801,7 @@ CREATE FUNCTION public.iap_process_verified_notification(
   p_transaction_id TEXT DEFAULT NULL,
   p_transaction_original_transaction_id TEXT DEFAULT NULL,
   p_product_id TEXT DEFAULT NULL,
+  p_product_type TEXT DEFAULT NULL,
   p_bundle_id TEXT DEFAULT NULL,
   p_app_account_token_hash TEXT DEFAULT NULL,
   p_purchase_date_ms BIGINT DEFAULT NULL,
@@ -825,6 +838,7 @@ BEGIN
   v_has_transaction := p_transaction_id IS NOT NULL
     OR p_transaction_original_transaction_id IS NOT NULL
     OR p_product_id IS NOT NULL
+    OR p_product_type IS NOT NULL
     OR p_bundle_id IS NOT NULL
     OR p_app_account_token_hash IS NOT NULL
     OR p_purchase_date_ms IS NOT NULL
@@ -838,6 +852,7 @@ BEGIN
     p_transaction_id IS NULL
     OR p_transaction_original_transaction_id IS NULL
     OR p_product_id IS NULL
+    OR p_product_type IS NULL
     OR p_bundle_id IS NULL
     OR p_app_account_token_hash IS NULL
     OR p_purchase_date_ms IS NULL
@@ -905,6 +920,7 @@ BEGIN
       p_transaction_id,
       p_transaction_original_transaction_id,
       p_product_id,
+      p_product_type,
       p_bundle_id,
       p_app_account_token_hash,
       p_purchase_date_ms,
@@ -1126,8 +1142,18 @@ BEGIN
     WHERE e.billing_account_id = v_billing_account_id AND e.active IS TRUE;
     GET DIAGNOSTICS v_entitlements = ROW_COUNT;
 
-    UPDATE iap_private.export_credit_reservations AS r SET status = 'released', updated_at = now()
-    WHERE r.billing_account_id = v_billing_account_id AND r.status = 'reserved';
+    WITH released AS (
+      UPDATE iap_private.export_credit_reservations AS r
+      SET status = 'released', updated_at = now()
+      WHERE r.billing_account_id = v_billing_account_id AND r.status = 'reserved'
+      RETURNING r.reservation_id, r.environment, r.amount
+    )
+    INSERT INTO iap_private.export_credit_ledger (
+      billing_account_id, environment, reservation_id, entry_kind, amount
+    )
+    SELECT v_billing_account_id, released.environment, released.reservation_id,
+      'account_deletion', released.amount
+    FROM released;
     GET DIAGNOSTICS v_reservations = ROW_COUNT;
   END IF;
 
@@ -1180,10 +1206,10 @@ REVOKE ALL ON FUNCTION public.iap_get_state(TEXT) FROM PUBLIC, anon, service_rol
 GRANT EXECUTE ON FUNCTION public.iap_get_state(TEXT) TO authenticated;
 REVOKE ALL ON FUNCTION public.iap_claim_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT) FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_claim_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT) TO service_role;
-REVOKE ALL ON FUNCTION public.iap_apply_verified_transaction(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT, UUID, UUID) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_apply_verified_transaction(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT, UUID, UUID) TO service_role;
-REVOKE ALL ON FUNCTION public.iap_process_verified_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_process_verified_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT) TO service_role;
+REVOKE ALL ON FUNCTION public.iap_apply_verified_transaction(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT, UUID, UUID) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.iap_apply_verified_transaction(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT, UUID, UUID) TO service_role;
+REVOKE ALL ON FUNCTION public.iap_process_verified_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.iap_process_verified_notification(UUID, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, BIGINT, BIGINT, BIGINT, TEXT, TEXT) TO service_role;
 REVOKE ALL ON FUNCTION public.iap_export_credit_reserve(TEXT, BIGINT, UUID) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_export_credit_reserve(TEXT, BIGINT, UUID) TO authenticated;
 REVOKE ALL ON FUNCTION public.iap_export_credit_commit(UUID) FROM PUBLIC, anon, service_role;

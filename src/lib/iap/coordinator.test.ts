@@ -35,9 +35,13 @@ function ports() {
   };
   const server: AppleIapServerPort = {
     preparePurchase: vi.fn(async () => ({ appAccountToken: TOKEN_A })),
-    ingestTransaction: vi.fn(async () => ({
+    ingestTransaction: vi.fn(async (_accountId, signedTransactionJws) => ({
       accepted: true,
-      transactionId: 'tx-1',
+      transactionId: signedTransactionJws === 'jws-2'
+        ? 'tx-2'
+        : signedTransactionJws === 'jws-3'
+          ? 'tx-3'
+          : 'tx-1',
       entitlements: [{ key: 'paper.spring', active: true }],
       exportCredits: 0,
     })),
@@ -82,6 +86,25 @@ describe('Apple IAP coordinator', () => {
     expect(native.sync).toHaveBeenCalledOnce();
     expect(server.ingestTransaction).toHaveBeenCalledWith(ACCOUNT_A, 'jws-2');
     expect(server.ingestTransaction).toHaveBeenCalledWith(ACCOUNT_A, 'jws-3');
+  });
+
+  it('rejects an incomplete restore instead of allowing a success message', async () => {
+    const { native, server } = ports();
+    const coordinator = createAppleIapCoordinator({ native, server });
+    await coordinator.bindAccount(ACCOUNT_A, 'Xcode');
+    vi.mocked(native.currentEntitlements).mockResolvedValue([transaction()]);
+    vi.mocked(server.ingestTransaction).mockRejectedValue(new Error('server unavailable'));
+    vi.mocked(server.loadEntitlements).mockResolvedValue({
+      entitlements: [{ key: 'paper.spring', active: true }],
+      exportCredits: 0,
+    });
+
+    await expect(coordinator.restorePurchases(ACCOUNT_A)).rejects.toThrow('E_IAP_RESTORE_INCOMPLETE');
+    expect(coordinator.snapshot()).toMatchObject({
+      phase: 'ready',
+      entitlements: [{ key: 'paper.spring', active: true }],
+    });
+    expect(native.finish).not.toHaveBeenCalled();
   });
 
   it('loads server state even when StoreKit exposes a transaction bound to another app account', async () => {

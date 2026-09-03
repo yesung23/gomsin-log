@@ -110,9 +110,14 @@ function actorScalar(role, userId, sql, label) {
 function jsonResult(text, label) {
   try { return JSON.parse(text); } catch { throw new Error(`${label}: invalid JSON result ${text}`); }
 }
-function callApply({ user = A, environment = 'Production', tx, original = tx, product, bundle = 'app.gomsinlog', token = boundToken, hash, purchase, signed, expires = null, revoke = null, event, notification = null, claim = null }) {
+function appleType(product) {
+  if (product === 'export.3' || product === 'app.gomsinlog.book.export.credit.1') return 'Consumable';
+  if (product === 'app.gomsinlog.plus.monthly' || product === 'app.gomsinlog.plus.annual') return 'Auto-Renewable Subscription';
+  return 'Non-Consumable';
+}
+function callApply({ user = A, environment = 'Production', tx, original = tx, product, type = appleType(product), bundle = 'app.gomsinlog', token = boundToken, hash, purchase, signed, expires = null, revoke = null, event, notification = null, claim = null }) {
   const args = [
-    q(user) + '::uuid', q(environment), q(tx), q(original), q(product), q(bundle), q(tokenHash(token)),
+    q(user) + '::uuid', q(environment), q(tx), q(original), q(product), q(type), q(bundle), q(tokenHash(token)),
     `${purchase}::bigint`, `${signed}::bigint`, expires === null ? 'NULL' : `${expires}::bigint`,
     revoke === null ? 'NULL' : `${revoke}::bigint`, q(event), q(hash),
     notification ? `${q(notification)}::uuid` : 'NULL', claim ? `${q(claim)}::uuid` : 'NULL',
@@ -190,8 +195,8 @@ try {
   expectFail(asActor('service_role', null, "SELECT count(*) FROM iap_private.apple_transactions"), 'service_role direct private-table access');
   expectFail(asActor('anon', null, `SELECT * FROM public.iap_get_state('Production')`), 'anon state RPC');
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_claim_notification('00000000-0000-4000-8000-000000000001', 'Production', 'DID_RENEW', NULL, '1001', '1001', 1000, ${q(sha('n1'))})`), 'standalone notification claim');
-  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_apply_verified_transaction(${q(A)}::uuid, 'Production', '1001', '1001', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(TOKEN_A))}, 1000, 1000, NULL, NULL, 'purchase', ${q(sha('t1'))})`), 'authenticated transaction apply');
-  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification('00000000-0000-4000-8000-000000000001', 'Production', 'DID_RENEW', NULL, NULL, NULL, 1000, ${q(sha('n1'))}, '1001', '1001', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(TOKEN_A))}, 1000, 1000, NULL, NULL, 'purchase', ${q(sha('t1'))})`, { setRoleClaim: false }), 'service_role missing JWT role claim');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_apply_verified_transaction(${q(A)}::uuid, 'Production', '1001', '1001', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(TOKEN_A))}, 1000, 1000, NULL, NULL, 'purchase', ${q(sha('t1'))})`), 'authenticated transaction apply');
+  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification('00000000-0000-4000-8000-000000000001', 'Production', 'DID_RENEW', NULL, NULL, NULL, 1000, ${q(sha('n1'))}, '1001', '1001', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(TOKEN_A))}, 1000, 1000, NULL, NULL, 'purchase', ${q(sha('t1'))})`, { setRoleClaim: false }), 'service_role missing JWT role claim');
 
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_purchase('paper.off', 'Production')`), 'sale-OFF prepare');
   const prepared = actorScalar('authenticated', A, `SELECT row_to_json(x) FROM public.iap_prepare_purchase('paper.paid', 'Production') AS x`, 'prepare purchase');
@@ -217,21 +222,22 @@ try {
   const notificationId = '00000000-0000-4000-8000-000000000002';
   const processed = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     ${q(notificationId)}::uuid, 'Production', 'REFUND', NULL, '1001', '1001', 4000, ${q(notificationHash)},
-    '1001', '1001', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`, 'atomic notification refund');
+    '1001', '1001', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`, 'atomic notification refund');
   if (jsonResult(processed, 'atomic notification refund').transaction_applied !== true) throw new Error('atomic notification did not apply transaction');
   const replay = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     ${q(notificationId)}::uuid, 'Production', 'REFUND', NULL, '1001', '1001', 4000, ${q(notificationHash)},
-    '1001', '1001', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`, 'atomic notification replay');
+    '1001', '1001', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`, 'atomic notification replay');
   if (jsonResult(replay, 'atomic notification replay').duplicate !== true) throw new Error('notification replay was not duplicate');
   expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification(
     ${q(notificationId)}::uuid, 'Production', 'REFUND', NULL, '1001', '1001', 4000, ${q(sha('notification-conflict'))},
-    '1001', '1001', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`), 'notification UUID payload conflict');
+    '1001', '1001', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 4000, NULL, 4000, 'refund', ${q(refundHash)}) AS x`), 'notification UUID payload conflict');
   const staleNotification = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     '00000000-0000-4000-8000-000000000004', 'Production', 'REFUND', NULL, '1001', '1001', 3500, ${q(sha('notification-stale'))}) AS x`, 'out-of-order notification');
   if (jsonResult(staleNotification, 'out-of-order notification').stale !== true) throw new Error('out-of-order notification was not marked stale');
   expectOk(callApply({ tx: '1001', product: 'paper.paid', hash: sha('purchase-stale'), purchase: 1000, signed: 3000, event: 'purchase' }), 'out-of-order transaction input');
   if (scalar("SELECT last_event_kind FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '1001'", 'stale status') !== 'refund') throw new Error('stale transaction changed latest event');
   expectFail(callApply({ tx: '1001', product: 'paper.paid', hash: sha('refund-conflict'), purchase: 1000, signed: 4000, event: 'refund' }), 'same signedDate different payload conflict');
+  expectFail(callApply({ tx: '1001', product: 'paper.paid', type: 'Consumable', hash: sha('type-conflict'), purchase: 1000, signed: 6000, event: 'purchase' }), 'verified Apple product type mismatch');
   expectOk(callApply({ tx: '1001', product: 'paper.paid', hash: sha('reverse-1001'), purchase: 1000, signed: 5000, event: 'refund_reversed' }), 'refund reversed entitlement');
   const restoredState = scalar(`SELECT active::text || '|' || (SELECT last_event_kind FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '1001') || '|' || COALESCE((SELECT revocation_at::text FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '1001'), 'null') FROM iap_private.entitlements WHERE billing_account_id = ${q(billingAccountId)}::uuid AND environment = 'Production' AND entitlement_key = 'paper.paid'`, 'refund reversed entitlement state');
   if (!restoredState.startsWith('true|')) throw new Error(`refund reversed did not restore entitlement (state ${restoredState || '<empty>'})`);
@@ -265,7 +271,7 @@ try {
   expectOk(callApply({ environment: 'Xcode', tx: '9009', product: 'paper.paid', hash: sha('xcode-9009'), purchase: 1000, signed: 1000, event: 'purchase' }), 'Xcode transaction fixture');
 
   const raceSql = (user, token, tx) => `SELECT * FROM public.iap_apply_verified_transaction(
-    ${q(user)}::uuid, 'Production', ${q(tx)}, '4000', 'paper.paid', 'app.gomsinlog',
+    ${q(user)}::uuid, 'Production', ${q(tx)}, '4000', 'paper.paid', 'Non-Consumable', 'app.gomsinlog',
     ${q(tokenHash(token))}, 1000, 8000, NULL, NULL, 'purchase', ${q(sha(`race-${tx}`))})`;
   const raceResults = await Promise.all([
     asActorAsync('service_role', null, raceSql(A, boundToken, '4001')),
@@ -288,13 +294,14 @@ try {
   const atomicRollbackId = '00000000-0000-4000-8000-000000000003';
   expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification(
     ${q(atomicRollbackId)}::uuid, 'Production', 'DID_RENEW', NULL, '3003', '3003', 6000, ${q(sha('n-rollback'))},
-    '3003', '3003', 'not-in-catalog', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 6000, NULL, NULL, 'purchase', ${q(sha('t-rollback'))}) AS x`), 'atomic process invalid transaction');
+    '3003', '3003', 'not-in-catalog', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 6000, NULL, NULL, 'purchase', ${q(sha('t-rollback'))}) AS x`), 'atomic process invalid transaction');
   if (scalar(`SELECT count(*)::text FROM iap_private.apple_notifications WHERE notification_uuid = ${q(atomicRollbackId)}::uuid`, 'atomic rollback proof') !== '0') throw new Error('failed process partially committed notification claim');
 
   expectOk(callApply({ environment: 'Sandbox', token: TOKEN_A, tx: '1001', product: 'paper.paid', hash: sha('sandbox-1001'), purchase: 1000, signed: 1000, event: 'purchase' }), 'sandbox/prod identifier separation');
   if (scalar("SELECT count(*)::text FROM iap_private.apple_transactions WHERE transaction_id = '1001'", 'environment separation count') !== '2') throw new Error('sandbox and production ledgers were not separate');
 
   const pendingReservation = jsonResult(actorScalar('authenticated', A, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 1, '20000000-0000-4000-8000-000000000005'::uuid) AS x`, 'reserve before durable deletion flag'), 'reserve before durable deletion flag');
+  const pendingReservationAmount = Number(scalar(`SELECT amount::text FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(pendingReservation.reservation_id)}::uuid`, 'reserved amount before durable deletion flag'));
   expectOk(admin(`UPDATE auth.users SET raw_app_meta_data = '{"account_deletion_pending":true}'::jsonb WHERE id = ${q(A)}::uuid`), 'set durable Auth deletion flag');
   if (scalar(`SELECT count(*)::text FROM public.account_deletion_requests WHERE user_id = ${q(A)}::uuid`, 'no transient deletion marker') !== '0') throw new Error('durable deletion test unexpectedly retained a transient request row');
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_purchase('paper.paid', 'Production')`), 'durable deletion flag blocks purchase prepare');
@@ -307,10 +314,11 @@ try {
   const pendingDeletionNotificationId = '00000000-0000-4000-8000-000000000006';
   expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification(
     ${q(pendingDeletionNotificationId)}::uuid, 'Production', 'DID_RENEW', NULL, '7002', '7002', 7100, ${q(sha('pending-delete-notification'))},
-    '7002', '7002', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 7000, 7100, NULL, NULL, 'purchase', ${q(sha('pending-delete-7002'))}) AS x`), 'durable deletion flag blocks notification grant');
+    '7002', '7002', 'paper.paid', 'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 7000, 7100, NULL, NULL, 'purchase', ${q(sha('pending-delete-7002'))}) AS x`), 'durable deletion flag blocks notification grant');
   if (scalar(`SELECT count(*)::text FROM iap_private.apple_notifications WHERE notification_uuid = ${q(pendingDeletionNotificationId)}::uuid`, 'pending deletion notification rollback') !== '0') throw new Error('pending deletion notification partially committed');
 
   const before = scalar(`SELECT (SELECT count(*) FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid) || '|' || (SELECT count(*) FROM iap_private.apple_notifications) || '|' || (SELECT count(*) FROM iap_private.export_credit_ledger WHERE billing_account_id = ${q(billingAccountId)}::uuid)`, 'deletion evidence before');
+  const creditBeforeDeletion = Number(scalar(`SELECT iap_private.credit_balance(${q(billingAccountId)}::uuid, 'Production')::text`, 'credit balance before deletion release'));
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'authenticated account deletion prep');
   expectFail(asActor('anon', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'anon account deletion prep');
   expectFail(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'missing-marker account deletion prep');
@@ -318,13 +326,22 @@ try {
   expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'service account deletion prep');
   expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'idempotent account deletion prep');
   const after = scalar(`SELECT (SELECT count(*) FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid) || '|' || (SELECT count(*) FROM iap_private.apple_notifications) || '|' || (SELECT count(*) FROM iap_private.export_credit_ledger WHERE billing_account_id = ${q(billingAccountId)}::uuid)`, 'deletion evidence after');
-  if (before !== after) throw new Error(`account deletion prep deleted immutable evidence (${before} -> ${after})`);
+  const [beforeTransactions, beforeNotifications, beforeCreditEntries] = before.split('|').map(Number);
+  const [afterTransactions, afterNotifications, afterCreditEntries] = after.split('|').map(Number);
+  if (beforeTransactions !== afterTransactions || beforeNotifications !== afterNotifications
+    || afterCreditEntries !== beforeCreditEntries + 1) {
+    throw new Error(`account deletion prep damaged evidence or missed its release entry (${before} -> ${after})`);
+  }
+  if (Number(scalar(`SELECT iap_private.credit_balance(${q(billingAccountId)}::uuid, 'Production')::text`, 'credit balance after deletion release')) !== creditBeforeDeletion + pendingReservationAmount) {
+    throw new Error('account deletion did not balance the released reservation in the audit ledger');
+  }
+  if (scalar(`SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE reservation_id = ${q(pendingReservation.reservation_id)}::uuid AND entry_kind = 'account_deletion'`, 'account deletion release evidence') !== '1') throw new Error('account deletion release was not recorded exactly once');
   if (scalar(`SELECT (user_id IS NULL)::text || '|' || (app_account_token IS NULL)::text || '|' || length(app_account_token_hash)::text FROM iap_private.apple_account_bindings WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'raw token/user tombstone') !== 'true|true|64') throw new Error('account deletion prep did not tombstone the user/raw token while preserving the hash');
   expectOk(admin(`DELETE FROM auth.users WHERE id = ${q(A)}::uuid`), 'auth delete after billing tombstone');
   if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'retained ledger after auth delete') !== '7') throw new Error('auth user deletion removed billing-account transaction evidence');
   const deletedNotification = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     '00000000-0000-4000-8000-000000000005', 'Production', 'REFUND', NULL, '2002', '2002', 7000, ${q(sha('deleted-notification'))},
-    '2002', '2002', 'export.3', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 7000, NULL, 7000, 'refund', ${q(sha('deleted-refund'))}) AS x`, 'post-deletion notification');
+    '2002', '2002', 'export.3', 'Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 7000, NULL, 7000, 'refund', ${q(sha('deleted-refund'))}) AS x`, 'post-deletion notification');
   if (jsonResult(deletedNotification, 'post-deletion notification').transaction_applied !== false) throw new Error('post-deletion notification re-granted a tombstoned account');
   if (scalar("SELECT status FROM iap_private.apple_notifications WHERE notification_uuid = '00000000-0000-4000-8000-000000000005'", 'post-deletion notification status') !== 'processed') throw new Error('post-deletion notification was not retained as processed evidence');
   if (actorScalar('service_role', null, `SELECT count(*)::text FROM public.iap_list_reconciliation_targets()`, 'tombstoned reconciliation exclusion') !== '0') throw new Error('tombstoned account remained an automatic reconciliation target');

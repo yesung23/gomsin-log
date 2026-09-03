@@ -76,6 +76,7 @@ Deno.serve(async (request) => {
         p_transaction_id: transaction.transactionId,
         p_original_transaction_id: transaction.originalTransactionId,
         p_product_id: transaction.productId,
+        p_product_type: transaction.type,
         p_bundle_id: transaction.bundleId,
         p_app_account_token_hash: await sha256Hex(transaction.appAccountToken),
         p_purchase_date_ms: transaction.purchaseDate,

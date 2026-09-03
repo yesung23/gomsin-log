@@ -1,10 +1,16 @@
 export type AppleEnvironment = 'Sandbox' | 'Production' | 'Xcode';
+export type AppleTransactionType =
+  | 'Auto-Renewable Subscription'
+  | 'Non-Consumable'
+  | 'Consumable'
+  | 'Non-Renewing Subscription';
+export type AppleTransactionEventKind = 'purchase' | 'refund' | 'revoke' | 'refund_reversed';
 
 export type VerifiedAppleTransaction = {
   transactionId: string;
   originalTransactionId: string;
   productId: string;
-  type: string;
+  type: AppleTransactionType;
   appAccountToken?: string | null;
   bundleId: string;
   environment: AppleEnvironment;
@@ -30,6 +36,27 @@ const PRODUCT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 const TRANSACTION_ID = /^[1-9][0-9]{0,19}$/;
 const NOTIFICATION_KIND = /^[A-Z0-9_]{1,64}$/;
 const JWS = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+const APPLE_TRANSACTION_TYPES = new Set<AppleTransactionType>([
+  'Auto-Renewable Subscription',
+  'Non-Consumable',
+  'Consumable',
+  'Non-Renewing Subscription',
+]);
+const ENTITLEMENT_TRANSACTION_NOTIFICATIONS = new Set([
+  'SUBSCRIBED',
+  'DID_CHANGE_RENEWAL_PREF',
+  'DID_CHANGE_RENEWAL_STATUS',
+  'OFFER_REDEEMED',
+  'DID_RENEW',
+  'EXPIRED',
+  'DID_FAIL_TO_RENEW',
+  'GRACE_PERIOD_EXPIRED',
+  'PRICE_INCREASE',
+  'REFUND_DECLINED',
+  'RENEWAL_EXTENDED',
+  'RENEWAL_EXTENSION',
+  'ONE_TIME_CHARGE',
+]);
 
 export function isUuid(value: unknown): value is string {
   return typeof value === 'string' && UUID.test(value);
@@ -37,6 +64,15 @@ export function isUuid(value: unknown): value is string {
 
 export function isCompactJws(value: unknown): value is string {
   return typeof value === 'string' && value.length >= 12 && value.length <= 32_768 && JWS.test(value);
+}
+
+export function appleTransactionEventKind(
+  notificationType: string,
+): AppleTransactionEventKind | null {
+  if (notificationType === 'REFUND') return 'refund';
+  if (notificationType === 'REFUND_REVERSED') return 'refund_reversed';
+  if (notificationType === 'REVOKE') return 'revoke';
+  return ENTITLEMENT_TRANSACTION_NOTIFICATIONS.has(notificationType) ? 'purchase' : null;
 }
 
 function isAppleUInt64(value: unknown): value is string {
@@ -54,7 +90,7 @@ export function isVerifiedTransaction(value: unknown): value is VerifiedAppleTra
   return isAppleUInt64(item.transactionId)
     && isAppleUInt64(item.originalTransactionId)
     && typeof item.productId === 'string' && PRODUCT_ID.test(item.productId)
-    && typeof item.type === 'string' && item.type.length > 0 && item.type.length <= 64
+    && APPLE_TRANSACTION_TYPES.has(item.type as AppleTransactionType)
     && (item.appAccountToken == null || isUuid(item.appAccountToken))
     && typeof item.bundleId === 'string' && item.bundleId.length > 0 && item.bundleId.length <= 200
     && (item.environment === 'Sandbox' || item.environment === 'Production' || item.environment === 'Xcode')

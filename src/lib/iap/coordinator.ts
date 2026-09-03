@@ -78,23 +78,25 @@ export function createAppleIapCoordinator(deps: {
     expectedGeneration: number,
     transactionValue: NativeTransaction,
   ) => {
-    if (!isCurrent(accountId, expectedGeneration)) return;
+    if (!isCurrent(accountId, expectedGeneration)) return false;
     try {
       const result = await deps.server.ingestTransaction(
         accountId,
         transactionValue.signedTransactionJws,
       );
-      if (!isCurrent(accountId, expectedGeneration)) return;
+      if (!isCurrent(accountId, expectedGeneration)) return false;
       if (!result.accepted || result.transactionId !== transactionValue.transactionId) {
         state = { ...state, phase: 'error' };
-        return;
+        return false;
       }
       applyServerSnapshot(accountId, expectedGeneration, result);
       await deps.native.finish({ transactionId: transactionValue.transactionId });
+      return true;
     } catch {
       if (isCurrent(accountId, expectedGeneration)) {
         state = { ...state, phase: 'error' };
       }
+      return false;
     }
   };
 
@@ -104,13 +106,17 @@ export function createAppleIapCoordinator(deps: {
     expectedGeneration: number,
   ) => {
     const transactions = await deps.native.currentEntitlements();
+    let allTransactionsAccepted = true;
     for (const item of transactions) {
-      if (!isCurrent(accountId, expectedGeneration)) return;
-      await ingest(accountId, expectedGeneration, item);
+      if (!isCurrent(accountId, expectedGeneration)) return false;
+      if (!(await ingest(accountId, expectedGeneration, item))) {
+        allTransactionsAccepted = false;
+      }
     }
-    if (!isCurrent(accountId, expectedGeneration)) return;
+    if (!isCurrent(accountId, expectedGeneration)) return false;
     const snapshot = await deps.server.loadEntitlements(accountId, environment);
     applyServerSnapshot(accountId, expectedGeneration, snapshot);
+    return allTransactionsAccepted;
   };
 
   return {
@@ -150,7 +156,8 @@ export function createAppleIapCoordinator(deps: {
       state = { ...state, phase: 'syncing' };
       await deps.native.sync();
       if (!isCurrent(accountId, expectedGeneration)) return;
-      await reconcile(accountId, boundEnvironment, expectedGeneration);
+      const complete = await reconcile(accountId, boundEnvironment, expectedGeneration);
+      if (!complete) throw new Error('E_IAP_RESTORE_INCOMPLETE');
     },
 
     async purchase(
@@ -180,8 +187,8 @@ export function createAppleIapCoordinator(deps: {
         return { status: 'pending' };
       }
       if (result.status === 'cancelled') return { status: 'cancelled' };
-      await ingest(accountId, expectedGeneration, result.transaction);
-      return { status: state.phase === 'error' ? 'error' : 'success' };
+      const accepted = await ingest(accountId, expectedGeneration, result.transaction);
+      return { status: accepted ? 'success' : 'error' };
     },
 
     dispose(): void {

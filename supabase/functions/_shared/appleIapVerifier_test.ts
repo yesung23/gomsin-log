@@ -4,16 +4,30 @@ import {
   normalizeNotification,
   normalizeTransaction,
 } from './appleIapVerifier.ts';
-import { isVerifiedNotification, isVerifiedTransaction } from './appleIapContract.ts';
+import {
+  appleTransactionEventKind,
+  isVerifiedNotification,
+  isVerifiedTransaction,
+} from './appleIapContract.ts';
 import { notificationFixture, transactionFixture } from './appleIapTestFixtures.ts';
 
 Deno.test('Apple contract accepts only canonical UInt64 transaction ids and bounded notification names', () => {
   assert.equal(isVerifiedTransaction(transactionFixture()), true);
   assert.equal(isVerifiedTransaction(transactionFixture({ transactionId: 'tx-1' })), false);
   assert.equal(isVerifiedTransaction(transactionFixture({ transactionId: '18446744073709551616' })), false);
+  assert.equal(isVerifiedTransaction(transactionFixture({ type: 'unexpected' })), false);
   assert.equal(isVerifiedNotification(notificationFixture()), true);
   assert.equal(isVerifiedNotification(notificationFixture({ notificationType: 'REFUND!' })), false);
   assert.equal(isVerifiedNotification(notificationFixture({ subtype: '' })), false);
+});
+
+Deno.test('only entitlement-changing Apple notifications can apply a transaction', () => {
+  assert.equal(appleTransactionEventKind('DID_RENEW'), 'purchase');
+  assert.equal(appleTransactionEventKind('REFUND'), 'refund');
+  assert.equal(appleTransactionEventKind('REFUND_REVERSED'), 'refund_reversed');
+  assert.equal(appleTransactionEventKind('REVOKE'), 'revoke');
+  assert.equal(appleTransactionEventKind('CONSUMPTION_REQUEST'), null);
+  assert.equal(appleTransactionEventKind('FUTURE_UNKNOWN_TYPE'), null);
 });
 
 Deno.test('Apple verifier normalizes only the bounded claims the ledger accepts', () => {

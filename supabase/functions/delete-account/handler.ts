@@ -528,7 +528,23 @@ export async function handleDeleteAccountRequest(
       { p_user_id: userId },
     );
     if (iapPreparationError) throw iapPreparationError;
-    if (!iapPreparation || typeof iapPreparation !== 'object') {
+    const iapPreparationRow = Array.isArray(iapPreparation) ? iapPreparation[0] : iapPreparation;
+    const iapCounts = iapPreparationRow && typeof iapPreparationRow === 'object'
+      ? [
+        'entitlements_revoked',
+        'reservations_released',
+        'transactions_retained',
+        'notifications_retained',
+        'credit_entries_retained',
+      ].map((key) => (iapPreparationRow as Record<string, unknown>)[key])
+      : [];
+    const isNonNegativeInteger = (value: unknown) => (
+      typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ) || (typeof value === 'string' && /^(0|[1-9][0-9]*)$/.test(value));
+    if (!iapPreparationRow || typeof iapPreparationRow !== 'object'
+      || (iapPreparationRow as Record<string, unknown>).prepared !== true
+      || iapCounts.length !== 5
+      || !iapCounts.every(isNonNegativeInteger)) {
       throw new Error('IAP deletion preparation did not confirm success');
     }
 

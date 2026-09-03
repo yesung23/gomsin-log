@@ -37,6 +37,7 @@ type AdminOptions = {
   cleanupCouplesError?: unknown;
   cleanupCouplesData?: unknown;
   iapPrepareError?: unknown;
+  iapPrepareData?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
@@ -171,7 +172,17 @@ function makeAdmin(options: AdminOptions = {}) {
       if (name === 'iap_prepare_account_deletion') {
         return options.iapPrepareError
           ? { data: null, error: options.iapPrepareError }
-          : { data: { binding_tombstoned: true, entitlements_removed: 1, credits_closed: 0 }, error: null };
+          : {
+            data: options.iapPrepareData ?? [{
+              prepared: true,
+              entitlements_revoked: 1,
+              reservations_released: 0,
+              transactions_retained: 2,
+              notifications_retained: 1,
+              credit_entries_retained: 0,
+            }],
+            error: null,
+          };
       }
       return { data: null, error: null };
     }),
@@ -505,6 +516,15 @@ describe('delete-account - the server-authoritative pending flag', () => {
 
   it('does not delete Auth when IAP tombstoning cannot be confirmed', async () => {
     const admin = makeAdmin({ iapPrepareError: { message: 'iap cleanup failed' } });
+    const response = await post(admin);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('does not delete Auth when IAP tombstoning returns a malformed success shape', async () => {
+    const admin = makeAdmin({ iapPrepareData: [] });
     const response = await post(admin);
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true });

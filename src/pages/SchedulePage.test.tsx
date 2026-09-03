@@ -151,6 +151,18 @@ describe('SchedulePage loading lifecycle', () => {
     expect(pageHeader).toContainElement(createButton);
   });
 
+  it('uses the calendar state itself instead of a persistent instruction paragraph', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await waitFor(() => expect(addEventButton()).toBeEnabled());
+    expect(screen.queryByText(/일정 추가를 누른 뒤 날짜를/)).not.toBeInTheDocument();
+
+    fireEvent.click(addEventButton());
+    expect(screen.getByText('날짜를 골라 주세요')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+  });
+
   it('선택한 날짜와 다가오는 일정 영역을 제목으로 탐색할 수 있다', async () => {
     setOnLine(true);
     renderSchedulePage();

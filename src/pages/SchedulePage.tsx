@@ -1086,11 +1086,7 @@ export function SchedulePage() {
                     <span>다음</span>
                   </Button>
                 </div>
-              ) : (
-                <p className="mt-2 text-caption leading-relaxed break-keep" style={{ color: 'var(--ink-soft)' }}>
-                  일정 추가를 누른 뒤 날짜를 누르거나 끌어 골라요. 떨어진 날도 하나씩 더할 수 있어요
-                </p>
-              )}
+              ) : null}
             </section>
 
             {/* Selected date events and tasks */}

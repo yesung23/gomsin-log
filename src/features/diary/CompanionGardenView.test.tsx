@@ -274,7 +274,7 @@ afterEach(() => {
 describe('interactive companion garden characters', () => {
   it('keeps the garden surface quiet while exposing one discoverable play entry point', () => {
     const onBack = vi.fn();
-    render(<CompanionGardenView
+    const { container } = render(<CompanionGardenView
       state={AVAILABLE}
       accessories={DEFAULT_ACCESSORIES}
       onBack={onBack}
@@ -284,12 +284,26 @@ describe('interactive companion garden characters', () => {
     expect(screen.getByText('함께한 100일')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '우리 정원' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '든든한 나무' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '꾸미기와 함께 놀기' })).toBeInTheDocument();
+    const playAction = screen.getByRole('button', { name: '꾸미기와 함께 놀기' });
+    expect(playAction).toBeInTheDocument();
+    expect(playAction).toHaveClass('min-h-11');
+    expect(playAction).toHaveClass('min-w-11');
+    expect(playAction.textContent?.trim()).toBe('');
     expect(screen.queryByRole('button', { name: '상점 열기' })).not.toBeInTheDocument();
     expect(screen.queryByText('길게 누르면 친구를 들어 올려 움직일 수 있어요.')).not.toBeInTheDocument();
     expect(screen.queryByText('정원은 점수나 미션 없이 함께한 시간만 따라 자라요.')).not.toBeInTheDocument();
-    expect(screen.getByTestId('garden-scene')).toHaveClass('bg-card');
+    const scene = screen.getByTestId('garden-scene');
+    expect(scene).toHaveClass('garden-surface');
+    expect(scene).toHaveClass('bg-white');
+    expect(scene).not.toHaveClass('bg-card');
+    expect(scene).not.toHaveClass('border-y');
     expect(screen.getByTestId('garden-scene')).not.toHaveAttribute('style');
+
+    // Only visible words on the available garden: “함께한 N일”
+    const visibleTexts = Array.from(container.querySelectorAll('*:not(.sr-only)'))
+      .filter((el) => el.children.length === 0 && !el.closest('.sr-only') && (el.textContent || '').trim().length > 0)
+      .map((el) => el.textContent?.trim());
+    expect(visibleTexts).toEqual(['함께한 100일']);
   });
 
   it('renders exactly two independently addressable companions', () => {
@@ -320,6 +334,68 @@ describe('interactive companion garden characters', () => {
     expect(second).toHaveAttribute('viewBox', '156 514 138 155');
     expect(first.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
     expect(second.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
+  });
+
+  it('renders visible art at ~half size with buttons >=44x44, deterministic limb DOM, and no rear/lift frame swap', () => {
+    render(<ControlledGarden />);
+    for (const companion of ['peach', 'sage'] as const) {
+      const button = screen.getByTestId(`garden-companion-${companion}`);
+      expect(button).toHaveClass('min-h-11');
+      expect(button).toHaveClass('min-w-11');
+      expect(button).toHaveAttribute('aria-describedby', `garden-companion-${companion}-desc`);
+
+      const art = screen.getByTestId(`garden-companion-art-${companion}`);
+      expect(art).toHaveClass('garden-companion-art');
+      expect(art).toHaveClass('h-[28px]');
+      expect(art).toHaveClass('w-[25px]');
+
+      // Four code-native limbs are present in DOM
+      expect(screen.getByTestId(`garden-limb-${companion}-arm-left`)).toBeInTheDocument();
+      expect(screen.getByTestId(`garden-limb-${companion}-arm-right`)).toBeInTheDocument();
+      expect(screen.getByTestId(`garden-limb-${companion}-leg-left`)).toBeInTheDocument();
+      expect(screen.getByTestId(`garden-limb-${companion}-leg-right`)).toBeInTheDocument();
+
+      // No rear/lift sprite-swap frames exist in DOM
+      expect(screen.queryByTestId(`garden-character-${companion}-walk`)).not.toBeInTheDocument();
+      expect(screen.queryByTestId(`garden-character-${companion}-lift`)).not.toBeInTheDocument();
+    }
+  });
+
+  it('announces lifted, released, and cancelled-before-lift states in a polite live region without false tap announcements', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByRole('button', { name: '첫째 친구와 함께 놀기. 길게 눌러 직접 이동' });
+    const liveRegion = screen.getByTestId('garden-live-region');
+    expect(liveRegion).toHaveAttribute('aria-live', 'polite');
+    expect(liveRegion).toHaveAttribute('aria-atomic', 'true');
+    expect(liveRegion).toHaveClass('sr-only');
+    expect(liveRegion.textContent).toBe('');
+
+    // 1. Quick tap does not announce pickup/release/cancel
+    fireEvent.pointerDown(peach, { pointerId: 1, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
+    act(() => vi.advanceTimersByTime(150));
+    fireEvent.pointerUp(peach, { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100 });
+    fireEvent.click(peach, { detail: 1 });
+    expect(liveRegion.textContent).toBe('');
+
+    // Close action sheet
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구와 함께 놀기 닫기' }));
+    expect(liveRegion.textContent).toBe('');
+
+    // 2. Cancelled before lift (movement > 8px before 500ms)
+    fireEvent.pointerDown(peach, { pointerId: 2, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
+    fireEvent.pointerMove(peach, { pointerId: 2, pointerType: 'touch', clientX: 112, clientY: 100 });
+    expect(liveRegion.textContent).toContain('취소');
+
+    // 3. Long-press activates pickup -> lifted announcement
+    fireEvent.pointerDown(peach, { pointerId: 3, pointerType: 'touch', button: 0, clientX: 100, clientY: 100 });
+    act(() => vi.advanceTimersByTime(500));
+    expect(peach).toHaveAttribute('data-lifted', 'true');
+    expect(liveRegion.textContent).toContain('들어 올렸어요');
+
+    // 4. Pointer release -> released announcement
+    fireEvent.pointerUp(peach, { pointerId: 3, pointerType: 'touch', clientX: 100, clientY: 100 });
+    expect(liveRegion.textContent).toContain('내려놓았어요');
   });
 
   it.each(['cap', 'bow', 'scarf', 'flower'] as const)(

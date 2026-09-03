@@ -27,8 +27,8 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-03
 
-- Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 코드 checkpoint는
-  `27c0805c3eb24e1cb19c0a63b66f876b0847ace7`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
+- Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 Garden application checkpoint는
+  `a96b0c4`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
   문서 변경이므로 다음 작업·검토는 application checkpoint와 docs HEAD를 모두 다시 확인한다. Production·remote Supabase·
   TestFlight·App Store에는 이 workstream에서 아무 변경도 적용하지 않았다.
 - 제품 오너가 [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md)의 방향을
@@ -38,20 +38,24 @@
 - 로컬 commit `0f26bb3`부터 여행 OCR은 읽은 내용을 DB에 자동 저장하지 않고 review draft로
   열며, 사용자가 `저장`을 눌러야 write한다. 온디바이스 요약은 정확한 feature flag `true`인
   검증 빌드에서만 열린다.
-- 2026-09-03 Control Tower와 독립 Verifier가 exact application checkpoint `27c0805`에서
-  Garden/Shop focused **11 files / 171 tests PASS**, `npm run typecheck` PASS, 대상 ESLint와
-  `git diff --check 63beb82..27c0805` PASS를 확인했다. system Chrome의
-  `e2e/companionGarden.spec.ts`는 retry 없이 **11/11 PASS**했고, 390×844·320px·landscape·light/dark·
+- 2026-09-03 Control Tower가 application checkpoint `a96b0c4` 직전 동일 staged tree에서
+  Garden focused **7 files / 167 tests PASS**, `npm run typecheck` PASS, 대상 ESLint와
+  `git diff --check` PASS를 확인했다. system Chrome의
+  `e2e/companionGarden.spec.ts`는 retry 없이 **12/12 PASS**했고, 390×844·320px·landscape·light/dark·
   reduced motion·키보드·drag·pair gap·반복 돌보기와 Realtime 10초 subscribe 경계를 포함한다.
-  `e2e/realUsability.spec.ts --grep "finite free Shop reveal stays usable"`는 320px·393px **2/2 PASS**,
-  non-secret loopback placeholder production build는 **2,546 modules PASS**다. 독립 누적 Garden
-  review와 final Realtime-harness delta review는 모두 CRITICAL/HIGH/MEDIUM/LOW **0건**이다.
+  새 검증은 320px와 390px에서 364→365일 실제 나무 높이가 감소하지 않는 것도 포함한다.
+  `e2e/realUsability.spec.ts --grep "finite free Shop reveal stays usable"`의 320px·393px **2/2 PASS**는
+  Shop이 바뀌기 전 `27c0805`의 역사적 증거이며 이번 exact checkpoint에서는 재실행하지 않았다.
+  독립 Garden 리뷰는 width-only 성장에서 1주년 높이 감소 MEDIUM을 발견했고, failing test와
+  height-based rendering으로 수정했다. fresh exact-commit delta review는 아직 필요하다.
   이는 로컬 production bundle + mock backend 증거이며 실제 RLS·Production·실기기 증거가 아니다.
-- 현재 사용 가능한 `/diary/garden`은 `함께한 N일`, 나무, 단계, 설명을 노출하지 않는 흰 전체화면
-  놀이터다. 원본 `paper-pair-v1.webp`에서 자른 25×28px 캐릭터 두 마리는 최소 44×44px 조작 영역
-  안에서 겹치거나 경계를 벗어나지 않고 걷는다. 탭 sheet의 쓰다듬기·인사하기·같이 놀기는 서로
-  다른 유한 반응을 내며, 동일 행동을 연속 실행해도 모션과 1.6초 타이머가 다시 시작된다. 점수·
-  스트릭·배고픔·경험치·실패·관계 평가는 없다.
+- 현재 사용 가능한 `/diary/garden`은 첫 진입에서 account-scoped local `나무 심기`를 요구하고,
+  성공 후 함께한 날에 따라 네 개의 완성형 투명 WebP 중앙 나무를 보여 준다. 단계 안에서도 매일
+  시각 높이가 자라지만 `함께한 N일`·단계·설명 문구는 노출하지 않는다. 원본
+  `paper-pair-v1.webp`에서 자른 72×76px `살구/초록` 캐릭터는 최소 44×44px 조작 영역 안에서
+  겹치거나 경계를 벗어나지 않고 걷고, 탭/가까운 만남에는 부끄러워한 뒤 달린다. 걷기·뛰기에는
+  반대 위상 팔다리, 500ms pickup에는 독립적인 네 팔다리 버둥이 적용된다. reduced-motion 전환은
+  이미 예약된 반응 timer도 취소한다. 점수·스트릭·배고픔·경험치·실패·관계 평가는 없다.
 - starter 장식 5종은 날짜 제한·마감·재화·결제 없이 미보유 항목만 남은 회전판에서 하나씩
   공개된다. 소유권을 회전 전에 계정별 기기 로컬 저장소에 저장하고, 중복·storage failure·계정
   전환을 fail-closed 처리한다. 향후 유료 catalog·StoreKit·server entitlement는 아직 구현되거나

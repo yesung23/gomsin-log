@@ -12147,3 +12147,118 @@ PRODUCTION
 - NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
 
 ---
+
+## 2026-09-03 — 함께 자라는 중앙 나무·표현형 캐릭터 정원 local candidate
+
+### PLAN POSITION
+- Phase: V5-D Garden product foundation
+- Workstream: aspirational shared world, generated tree art, character motion, accessibility
+- Step: 첫 심기 → 일일 성장 → 걷기/뛰기/부끄러움/잡힘 → actual-browser boundary
+- Previous Gate: 글자 없는 흰 정원·유한 무료 starter reveal local release (`27c0805`)
+- This Gate: application `a96b0c45be5ea545ae2190c3e5878f50579a11c0` local candidate; final delta pending
+
+### DIRECTION CHECK
+- Product source checked: latest 2026-09-03 product-owner messages, `PRODUCT_V5_MASTER_DECISION`, `V4_AS_BUILT`, current Garden plan
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1`; 무료 연결/기본 정원과 향후 direct-purchase 표현 상품 원칙 유지
+- Engineering source checked: `AGENTS.md`, `ENGINEERING_ROADMAP` V5-D, `DIARY_GARDEN_SHOP_V2_PLAN`
+- Current-state checked: `session-start.sh`, exact branch/HEAD/status, code and system Chrome output
+- Latest relevant Work Log checked: 2026-09-03 글자 없는 조용한 육성 정원 gate
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? YES, latest explicit product-owner instruction resolves it
+- If YES, what conflict: 이전 `나무 없음`과 25×28px 제약을 중앙 성장 나무와 72×76px 캐릭터로 supersede했다. 점수·스트릭·needs/decay·유료 랜덤 loot 금지는 유지한다.
+
+### OWNERSHIP
+- Tool: Codex primary, OpenAI image generation, independent Terra Reviewer, system Chrome Playwright
+- Model: GPT-5.6 Sol primary; configured Reviewer
+- Role: product decision, test-first implementation, asset provenance, integration, browser verification, independent defect review
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `2b10a8cf663f5757b1191160f49a19d123cd17bb`
+- Old HEAD: `2b10a8cf663f5757b1191160f49a19d123cd17bb`
+- New HEAD / Reviewed HEAD: `a96b0c45be5ea545ae2190c3e5878f50579a11c0`; post-fix exact delta pending
+
+### CHANGED / REVIEWED
+- file: `src/assets/garden/garden-tree-stage-{1..4}-v1.webp`, `CompanionGardenTree.tsx`, asset tests
+- function/component/migration: complete alpha tree family and one-image-per-stage renderer
+- what changed/reviewed: rejected false-checkerboard output, generated real RGBA art, losslessly cropped four complete trees, pinned hashes, removed crop-composite tree
+- why: prior stretched/composite tree was not commercially acceptable
+- file: `companionGarden.ts`, `CompanionGardenPage.tsx`, `companionGardenLocalState.ts` and tests
+- function/component/migration: account-scoped planting and daily visual growth
+- what changed/reviewed: successful first planting persists in local v2; v1 accessories load as planted; milestones remain 1/30/100/365 while height grows daily and does not shrink at one year
+- why: express accumulated time without a score or attendance pressure
+- file: `CompanionGardenView.tsx`, `gardenCharacterCrops.ts`, `companionGardenMotion.ts`, `index.css` and tests
+- function/component/migration: exact-source 72×76 companions and walk/run/shy/held state machine
+- what changed/reviewed: `살구/초록`, opposing limb phases, touch/encounter shy→safe run, four-limb held flail, pair-safe geometry, pending-reaction cancellation on reduced-motion/visibility/sheet/unavailable
+- why: replace mechanical drift/shake with legible nurturing behavior and preserve accessibility
+- file: `e2e/companionGarden.spec.ts`
+- function/component/migration: actual browser geometry, interaction, and growth regression
+- what changed/reviewed: 72×76 expectations plus 320/390 rendered-height test at 364→365 days
+- why: width-only unit tests missed intrinsic-aspect-ratio shrink
+- file: current/canonical/provenance docs and Control Tower report
+- function/component/migration: product override, implementation facts, asset provenance, evidence boundary
+- what changed/reviewed: records aspirational-world direction, exact derivatives/hashes, local proof, and remote/legal unknowns
+- why: prevent superseded no-tree/tiny-character plan from being reactivated
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no schema or remote query/mutation
+- product semantics: couple lifecycle, anniversary calculation, records, unread/briefing, AI, E2EE, account deletion unchanged
+- Production: no push, merge, deploy, Supabase, Vercel, TestFlight, or App Store action
+
+### VERIFICATION
+- command: reduced-motion transition regressions before fix
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 2 failures reproduced delayed shy/care run after reduce was enabled
+- what it actually proves: a real stale-timer accessibility race existed
+- command: height contract before implementation
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 13 failures for missing height function/style
+- what it actually proves: old width contract did not encode visible-height monotonicity
+- command: focused Garden Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 7 files / 167 tests
+- what it actually proves: planting, local migration, asset hash, growth, rig, timer/motion/geometry, style, route authority
+- command: `npm run typecheck`; scoped ESLint; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, changed-source lint, whitespace integrity
+- command: system Chrome `e2e/companionGarden.spec.ts --project=chromium-390 --workers=1`
+- PASS / FAIL / UNVERIFIED: PASS — 12/12, retry 0, 1.2 minutes
+- what it actually proves: local production bundle, Realtime boundary, one-year height, exact characters, collision/drag/actions, light/dark, landscape, small phone, reduced motion
+- command: `e2e/.artifacts/garden-final-a96b0c4-390.png`
+- PASS / FAIL / UNVERIFIED: PASS — mature tree and two full characters visible without checkerboard, seam, clipping, or body loss
+- what it actually proves: one 390px light frame, not a full animation cycle or physical-iPhone result
+- command: independent cumulative review before final height fix
+- PASS / FAIL / UNVERIFIED: MEDIUM 1 — one-year height regression; CRITICAL/HIGH/LOW 0; reproduced and fixed
+- what it actually proves: fresh post-fix exact-commit delta is still required
+- command: exact-HEAD full repository, physical iPhone, remote RLS/Production
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: Garden local evidence cannot be generalized to whole-app RC or Production
+
+### REVIEW IMPACT
+- FULL: assets, planting, growth, geometry, and interaction changed; older Garden reviews are stale
+- whether an earlier review is stale: YES until post-fix delta closes `a96b0c4`
+
+### BLOCKERS
+- code: fresh independent delta of the height fix and exact commit pending
+- environment: physical iPhone motion/VoiceOver/reduced-motion/10+ minute energy unverified
+- external/manual: historical character/accessory rights, StoreKit products, server entitlement, App Review unverified
+
+### STOPPED AT
+- exact completed boundary: committed Garden candidate with focused/browser tests and final screenshot; docs/final delta remain
+
+### REMAINING
+- exact-commit independent delta; whole-repo suite; physical-iPhone accessibility/energy
+- future world layout/building manifest, server sync, direct-purchase entitlement, owned-world editing
+
+### NEXT ACTION
+- next owner: Codex Control Tower
+- tool/model: Sol for V5-B auth/security; bounded workers for isolated UI; independent final reviewer
+- 기준 SHA: `a96b0c45be5ea545ae2190c3e5878f50579a11c0` plus docs commit
+- exact next task: Apple-primary/Google-secondary auth, default-OFF first; separately gate same-email linking and Apple deletion-token revocation
+
+### DO NOT ADVANCE UNTIL
+- Apple Production activation has same-email/private-relay negative tests and deletion revoke evidence
+- paid Garden has rights manifest, server transaction verification, refund fallback, and authoritative entitlement
+- local browser evidence is not presented as physical-iPhone or Production PASS
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: remote state was neither queried nor changed
+
+---

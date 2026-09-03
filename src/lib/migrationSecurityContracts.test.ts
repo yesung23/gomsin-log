@@ -346,6 +346,7 @@ describe('the RPC return shape matches the hand-written client parser', () => {
       partnerPresent: true,
       invitationActive: true,
       invitationExpiresAt: '2026-09-01T00:00:00.000Z',
+      relationshipContext: 'military',
     });
   });
 

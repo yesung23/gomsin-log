@@ -16,6 +16,7 @@ import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
+import { RouteAccessibilityManager } from '@/components/RouteAccessibilityManager';
 import { AppLoadingState } from '@/components/ui/AppLoadingState';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
@@ -248,7 +249,7 @@ function AuthSyncUnavailable({
   );
 }
 
-export function App() {
+function AppContent() {
   const {
     state,
     isReady,
@@ -424,5 +425,13 @@ export function App() {
         </Routes>
       </>
     </Suspense>
+  );
+}
+
+export function App() {
+  return (
+    <RouteAccessibilityManager>
+      <AppContent />
+    </RouteAccessibilityManager>
   );
 }

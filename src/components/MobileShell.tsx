@@ -3,7 +3,7 @@ import { Home, Search, BookHeart, CalendarDays } from 'lucide-react';
 import { InkCircle, PenFace } from '@/components/paper';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { routeAnnouncement } from '@/lib/routeAnnouncement';
+import { RouteMainRegistration } from '@/components/RouteAccessibilityManager';
 import { InstallPromptBanner } from '@/components/InstallPromptBanner';
 import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
@@ -95,11 +95,8 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
-  const [announcement, setAnnouncement] = useState('');
   /** The measured height of the tab bar, published to the bottom-pinned layers. */
   const [tabBarHeight, setTabBarHeight] = useState(0);
-  /** The first render is not a navigation, so it must not steal focus. */
-  const isFirstRender = useRef(true);
 
   /**
    * Publish the tab bar's real height as `--gomsin-tabbar-height`.
@@ -132,37 +129,9 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
     return () => observer.disconnect();
   }, [hideNav]);
 
-  /**
-   * Tell a screen reader the screen changed, and put focus at the top of it.
-   *
-   * Without this, moving between tabs announced nothing and left focus wherever
-   * the previous screen had it -- usually on a tab in the bar at the bottom, so
-   * the next Tab press walked backwards through the navigation instead of into
-   * the content the user just asked for. WCAG 2.1 SC 4.1.3 and SC 2.4.3.
-   *
-   * The announcement is re-armed through an empty string first: navigating
-   * `/trips` -> `/trips/1` yields the same text, and an `aria-live` region whose
-   * content does not change is not re-read.
-   */
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    const message = routeAnnouncement(pathname);
-    setAnnouncement('');
-    if (message) {
-      const armed = window.setTimeout(() => setAnnouncement(message), 50);
-      mainRef.current?.focus();
-      mainRef.current?.scrollTo?.({ top: 0 });
-      return () => window.clearTimeout(armed);
-    }
-    mainRef.current?.focus();
-    mainRef.current?.scrollTo?.({ top: 0 });
-  }, [pathname]);
-
   return (
     <div className="min-h-screen min-h-[100dvh] w-full flex justify-center bg-muted">
+      <RouteMainRegistration pathname={pathname} mainRef={mainRef} />
       <div
         /*
           Astryx components read their colour, type and spacing from tokens that
@@ -197,11 +166,6 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
         >
           본문으로 건너뛰기
         </a>
-
-        {/* Route changes are announced here. Visually hidden, never empty of purpose. */}
-        <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
-          {announcement}
-        </div>
 
         {/*
           종이가 여기 깔린다 (2026-08-23).

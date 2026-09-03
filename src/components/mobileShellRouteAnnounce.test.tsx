@@ -1,6 +1,13 @@
+import { lazy, StrictMode, Suspense } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter, useLocation } from 'react-router-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 /**
@@ -16,29 +23,485 @@ import userEvent from '@testing-library/user-event';
  * into the content the user had just asked for. WCAG 2.1 SC 4.1.3 and SC 2.4.3.
  */
 
+const routeAnnouncementProbe = vi.hoisted(() => ({
+  returnSentinelForExcludedRoutes: false,
+}));
+
+vi.mock('@/lib/routeAnnouncement', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/routeAnnouncement')>();
+
+  return {
+    ...actual,
+    routeAnnouncement: (pathname: string) => (
+      routeAnnouncementProbe.returnSentinelForExcludedRoutes
+      && (pathname === '/call' || pathname.startsWith('/story/'))
+        ? '제외 계약 검증용 화면입니다'
+        : actual.routeAnnouncement(pathname)
+    ),
+  };
+});
+
 vi.mock('@/components/InstallPromptBanner', () => ({ InstallPromptBanner: () => null }));
 vi.mock('@/components/OfflineBanner', () => ({ OfflineBanner: () => null }));
 vi.mock('@/components/SharedSyncBanner', () => ({ SharedSyncBanner: () => null }));
 
-const { MobileShell } = await import('@/components/MobileShell');
+const [{ MobileShell }, { RouteAccessibilityManager }] = await Promise.all([
+  import('@/components/MobileShell'),
+  import('@/components/RouteAccessibilityManager'),
+]);
 
 function LocationDisplay() {
-  const { pathname } = useLocation();
-  return <span data-testid="current-path">{pathname}</span>;
+  const { pathname, search, hash } = useLocation();
+  return <span data-testid="current-path">{pathname}{search}{hash}</span>;
 }
 
 function renderShell(initialPath: string) {
   return render(
     <MemoryRouter initialEntries={[initialPath]}>
-      <MobileShell>
-        <LocationDisplay />
-        <p>본문</p>
-      </MobileShell>
+      <RouteAccessibilityManager>
+        <MobileShell>
+          <LocationDisplay />
+          <p>본문</p>
+        </MobileShell>
+      </RouteAccessibilityManager>
     </MemoryRouter>,
   );
 }
 
+function HomeRoute() {
+  const navigate = useNavigate();
+
+  return (
+    <MobileShell>
+      <h1>홈</h1>
+      <LocationDisplay />
+      <button type="button" onClick={() => navigate('/home?filter=mine#today')}>
+        같은 화면 상태 변경
+      </button>
+      <button type="button" onClick={() => navigate('/')}>온보딩으로 이동</button>
+      <button type="button" onClick={() => navigate('/support')}>고객지원으로 이동</button>
+      <button type="button" onClick={() => navigate('/story/partner')}>스토리로 이동</button>
+      <button type="button" onClick={() => navigate('/call')}>통화로 이동</button>
+    </MobileShell>
+  );
+}
+
+function SearchRoute() {
+  const navigate = useNavigate();
+
+  return (
+    <MobileShell>
+      <h1>찾기</h1>
+      <button type="button" onClick={() => navigate(-1)}>뒤로</button>
+      <button type="button" onClick={() => navigate('/schedule')}>일정으로 이동</button>
+    </MobileShell>
+  );
+}
+
+function ScheduleRoute() {
+  const navigate = useNavigate();
+
+  return (
+    <MobileShell>
+      <h1>일정</h1>
+      <button type="button" onClick={() => navigate('/trips/abc-123')}>여행 상세</button>
+    </MobileShell>
+  );
+}
+
+function TripRoute() {
+  return (
+    <MobileShell>
+      <h1>여행 상세</h1>
+    </MobileShell>
+  );
+}
+
+function SupportRoute() {
+  return (
+    <MobileShell hideNav>
+      <h1>고객지원</h1>
+    </MobileShell>
+  );
+}
+
+function StoryOwnedRoute() {
+  return (
+    <MobileShell hideNav>
+      <h1>스토리 자체 화면</h1>
+    </MobileShell>
+  );
+}
+
+function CallOwnedRoute() {
+  return (
+    <MobileShell hideNav>
+      <h1>통화 자체 화면</h1>
+    </MobileShell>
+  );
+}
+
+function SetupIncompleteRoute() {
+  return (
+    <main tabIndex={-1}>
+      <h1>시작하기</h1>
+    </main>
+  );
+}
+
+function renderSeparateShellRoutes(
+  initialEntries: string[] = ['/home'],
+  initialIndex = initialEntries.length - 1,
+  strict = false,
+) {
+  const app = (
+    <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
+      <RouteAccessibilityManager>
+        <Routes>
+          <Route path="/home" element={<HomeRoute />} />
+          <Route path="/search" element={<SearchRoute />} />
+          <Route path="/schedule" element={<ScheduleRoute />} />
+          <Route path="/trips/:id" element={<TripRoute />} />
+          <Route path="/support" element={<SupportRoute />} />
+          <Route path="/story/partner" element={<StoryOwnedRoute />} />
+          <Route path="/call" element={<CallOwnedRoute />} />
+          <Route path="/" element={<SetupIncompleteRoute />} />
+        </Routes>
+      </RouteAccessibilityManager>
+    </MemoryRouter>
+  );
+
+  return render(strict ? <StrictMode>{app}</StrictMode> : app);
+}
+
 describe('MobileShell announces the screen and moves focus on navigation', () => {
+  it('announces forward navigation when each route mounts its own MobileShell', async () => {
+    const user = userEvent.setup();
+    renderSeparateShellRoutes();
+    const liveRegion = screen.getByRole('status');
+
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+
+    await user.click(screen.getByRole('tab', { name: '찾기' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('찾기 화면입니다');
+    });
+    expect(screen.getByRole('status')).toBe(liveRegion);
+    expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+
+  it('focuses and scrolls only the new main with auto behavior even under reduced motion', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    try {
+      renderSeparateShellRoutes();
+      const homeMain = screen.getByRole('heading', { name: '홈' }).closest('main');
+      expect(homeMain).not.toBeNull();
+      const homeFocus = vi.spyOn(homeMain!, 'focus');
+
+      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+
+      const searchMain = screen.getByRole('heading', { name: '찾기' }).closest('main');
+      expect(searchMain).not.toBeNull();
+      const searchFocus = vi.spyOn(searchMain!, 'focus');
+      const searchScroll = vi.fn();
+      Object.defineProperty(searchMain, 'scrollTo', {
+        configurable: true,
+        value: searchScroll,
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(homeMain?.isConnected).toBe(false);
+      expect(homeFocus).not.toHaveBeenCalled();
+      expect(searchFocus).toHaveBeenCalledTimes(1);
+      expect(searchFocus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(searchScroll).toHaveBeenCalledTimes(1);
+      expect(searchScroll).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
+      expect(document.activeElement).toBe(searchMain);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('announces and focuses the newly mounted main on browser POP/back', async () => {
+    const user = userEvent.setup();
+    renderSeparateShellRoutes(['/home', '/search']);
+
+    expect(screen.getByRole('status').textContent).toBe('');
+    await user.click(screen.getByRole('button', { name: '뒤로' }));
+
+    const homeMain = screen.getByRole('heading', { name: '홈' }).closest('main');
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('홈 화면입니다');
+      expect(document.activeElement).toBe(homeMain);
+    });
+  });
+
+  it('keeps a StrictMode direct load silent without focus or scroll', async () => {
+    vi.useFakeTimers();
+    try {
+      renderSeparateShellRoutes(['/home'], 0, true);
+      const main = screen.getByRole('heading', { name: '홈' }).closest('main');
+      expect(main).not.toBeNull();
+      const focus = vi.spyOn(main!, 'focus');
+      const scroll = vi.fn();
+      Object.defineProperty(main, 'scrollTo', { configurable: true, value: scroll });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect(focus).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+      expect(document.activeElement).not.toBe(main);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('ignores query and hash changes when the pathname stays the same', async () => {
+    vi.useFakeTimers();
+    try {
+      renderSeparateShellRoutes();
+      const main = screen.getByRole('heading', { name: '홈' }).closest('main');
+      expect(main).not.toBeNull();
+      const focus = vi.spyOn(main!, 'focus');
+      const scroll = vi.fn();
+      Object.defineProperty(main, 'scrollTo', { configurable: true, value: scroll });
+
+      fireEvent.click(screen.getByRole('button', { name: '같은 화면 상태 변경' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByTestId('current-path')).toHaveTextContent('/home?filter=mine#today');
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect(focus).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('re-arms the persistent live region for distinct paths with the same text', async () => {
+    vi.useFakeTimers();
+    try {
+      renderSeparateShellRoutes();
+      const liveRegion = screen.getByRole('status');
+      const observedText: string[] = [];
+      const observer = new MutationObserver(() => {
+        observedText.push(liveRegion.textContent ?? '');
+      });
+      observer.observe(liveRegion, { childList: true, characterData: true, subtree: true });
+
+      fireEvent.click(screen.getByRole('tab', { name: '일정' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+      expect(liveRegion.textContent).toBe('일정 화면입니다');
+
+      fireEvent.click(screen.getByRole('button', { name: '여행 상세' }));
+      expect(liveRegion.textContent).toBe('');
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(liveRegion.textContent).toBe('일정 화면입니다');
+      expect(observedText.filter((text) => text === '일정 화면입니다')).toHaveLength(2);
+      expect(observedText).toContain('');
+      observer.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits through Suspense until the destination main is mounted and registered', async () => {
+    vi.useFakeTimers();
+    try {
+      let resolveSearchRoute!: (module: { default: typeof SearchRoute }) => void;
+      const searchRouteModule = new Promise<{ default: typeof SearchRoute }>((resolve) => {
+        resolveSearchRoute = resolve;
+      });
+      const LazySearchRoute = lazy(() => searchRouteModule);
+
+      render(
+        <MemoryRouter initialEntries={['/home']}>
+          <RouteAccessibilityManager>
+            <Suspense fallback={<p>찾기 불러오는 중</p>}>
+              <Routes>
+                <Route path="/home" element={<HomeRoute />} />
+                <Route path="/search" element={<LazySearchRoute />} />
+              </Routes>
+            </Suspense>
+          </RouteAccessibilityManager>
+        </MemoryRouter>,
+      );
+
+      const oldMain = screen.getByRole('heading', { name: '홈' }).closest('main');
+      expect(oldMain).not.toBeNull();
+      const oldFocus = vi.spyOn(oldMain!, 'focus');
+
+      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect(oldFocus).not.toHaveBeenCalled();
+
+      await act(async () => {
+        resolveSearchRoute({ default: SearchRoute });
+        await searchRouteModule;
+      });
+
+      const searchMain = screen.getByRole('heading', { name: '찾기' }).closest('main');
+      expect(searchMain).not.toBeNull();
+      const searchFocus = vi.spyOn(searchMain!, 'focus');
+      const searchScroll = vi.fn();
+      Object.defineProperty(searchMain, 'scrollTo', {
+        configurable: true,
+        value: searchScroll,
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(searchFocus).toHaveBeenCalledTimes(1);
+      expect(searchScroll).toHaveBeenCalledWith({ top: 0, behavior: 'auto' });
+      expect(screen.getByRole('status')).toHaveTextContent('찾기 화면입니다');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a stale registered target so rapid navigation acts only on the final route', async () => {
+    vi.useFakeTimers();
+    try {
+      renderSeparateShellRoutes();
+
+      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+      const searchMain = screen.getByRole('heading', { name: '찾기' }).closest('main');
+      expect(searchMain).not.toBeNull();
+      const searchFocus = vi.spyOn(searchMain!, 'focus');
+      const searchScroll = vi.fn();
+      Object.defineProperty(searchMain, 'scrollTo', {
+        configurable: true,
+        value: searchScroll,
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '일정으로 이동' }));
+      const scheduleMain = screen.getByRole('heading', { name: '일정' }).closest('main');
+      expect(scheduleMain).not.toBeNull();
+      const scheduleFocus = vi.spyOn(scheduleMain!, 'focus');
+      const scheduleScroll = vi.fn();
+      Object.defineProperty(scheduleMain, 'scrollTo', {
+        configurable: true,
+        value: scheduleScroll,
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(searchFocus).not.toHaveBeenCalled();
+      expect(searchScroll).not.toHaveBeenCalled();
+      expect(scheduleFocus).toHaveBeenCalledTimes(1);
+      expect(scheduleScroll).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole('status')).toHaveTextContent('일정 화면입니다');
+      expect(document.activeElement).toBe(scheduleMain);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('announces the MobileShell-based support route', async () => {
+    const user = userEvent.setup();
+    renderSeparateShellRoutes();
+
+    await user.click(screen.getByRole('button', { name: '고객지원으로 이동' }));
+
+    const supportMain = screen.getByRole('heading', { name: '고객지원' }).closest('main');
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('고객지원 화면입니다');
+      expect(document.activeElement).toBe(supportMain);
+    });
+  });
+
+  it('does not call setup-incomplete pathname / home when no MobileShell main registers', async () => {
+    vi.useFakeTimers();
+    try {
+      renderSeparateShellRoutes();
+      fireEvent.click(screen.getByRole('button', { name: '온보딩으로 이동' }));
+
+      const onboardingMain = screen.getByRole('heading', { name: '시작하기' }).closest('main');
+      expect(onboardingMain).not.toBeNull();
+      const focus = vi.spyOn(onboardingMain!, 'focus');
+      const scroll = vi.fn();
+      Object.defineProperty(onboardingMain, 'scrollTo', {
+        configurable: true,
+        value: scroll,
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect(focus).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['스토리로 이동', '스토리 자체 화면'],
+    ['통화로 이동', '통화 자체 화면'],
+  ])('leaves the %s destination to its own accessibility owner', async (buttonName, heading) => {
+    vi.useFakeTimers();
+    routeAnnouncementProbe.returnSentinelForExcludedRoutes = true;
+    try {
+      renderSeparateShellRoutes();
+      fireEvent.click(screen.getByRole('button', { name: buttonName }));
+
+      const ownedMain = screen.getByRole('heading', { name: heading }).closest('main');
+      expect(ownedMain).not.toBeNull();
+      const focus = vi.spyOn(ownedMain!, 'focus');
+      const scroll = vi.fn();
+      Object.defineProperty(ownedMain, 'scrollTo', {
+        configurable: true,
+        value: scroll,
+      });
+
+      await act(async () => {
+        await vi.runAllTimersAsync();
+      });
+
+      expect(screen.getByRole('status').textContent).toBe('');
+      expect(focus).not.toHaveBeenCalled();
+      expect(scroll).not.toHaveBeenCalled();
+    } finally {
+      routeAnnouncementProbe.returnSentinelForExcludedRoutes = false;
+      vi.useRealTimers();
+    }
+  });
+
   it('says nothing on the first render, which is not a navigation', () => {
     renderShell('/home');
     expect(screen.getByRole('status').textContent).toBe('');

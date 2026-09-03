@@ -42,6 +42,8 @@ describe('a route change is announced and moves focus', () => {
     expect(routeScreenName('/home')).toBe('홈');
     expect(routeScreenName('/record')).toBe('기록');
     expect(routeScreenName('/search')).toBe('찾기');
+    expect(routeScreenName('/me')).toBe('나');
+    expect(routeScreenName('/diary/garden')).toBe('우리 정원');
     expect(routeScreenName('/diary')).toBe('일기장');
     expect(routeScreenName('/shop')).toBe('상점');
     expect(routeScreenName('/schedule')).toBe('일정');
@@ -49,9 +51,11 @@ describe('a route change is announced and moves focus', () => {
     expect(routeScreenName('/trips')).toBe('일정');
     expect(routeScreenName('/trips/abc-123')).toBe('일정');
     expect(routeScreenName('/us')).toBe('우리');
+    expect(routeScreenName('/service')).toBe('군 복무 정보');
     expect(routeScreenName('/my')).toBe('마이');
     expect(routeScreenName('/settings')).toBe('설정');
     expect(routeScreenName('/legal/privacy')).toBe('약관 및 정책');
+    expect(routeScreenName('/support')).toBe('고객지원');
   });
 
   it('stays silent rather than guessing at an unknown path', () => {
@@ -66,18 +70,47 @@ describe('a route change is announced and moves focus', () => {
     expect(routeAnnouncement('/record')).toBe('기록 화면입니다');
   });
 
-  it('MobileShell ships the live region, the skip link and a focusable main', () => {
+  it('the persistent manager is the sole route live-region owner', () => {
     const shell = read('src/components/MobileShell.tsx');
-    expect(shell).toContain('aria-live="polite"');
-    expect(shell).toContain('routeAnnouncement(pathname)');
+    const manager = read('src/components/RouteAccessibilityManager.tsx');
+
+    expect(manager.match(/data-route-announcer=/g)).toHaveLength(1);
+    expect(manager.match(/aria-live="polite"/g)).toHaveLength(1);
+    expect(manager).toContain('routeAnnouncement(pendingPathname)');
+    expect(shell).not.toContain('data-route-announcer=');
+    expect(shell).not.toContain('aria-live="polite"');
+    expect(shell).not.toContain('routeAnnouncement(');
+    expect(shell).toContain('<RouteMainRegistration pathname={pathname} mainRef={mainRef} />');
+
     // The skip link must target the main region and be the first focusable thing.
     expect(shell).toContain('href="#main-content"');
     expect(shell).toContain('id="main-content"');
     expect(shell).toContain('tabIndex={-1}');
-    expect(shell).toContain('mainRef.current?.focus()');
     expect(shell.indexOf('href="#main-content"')).toBeLessThan(shell.indexOf('id="main-content"'));
-    // The first render is not a navigation and must not steal focus.
-    expect(shell).toContain('isFirstRender');
+  });
+
+  it('keeps the manager above every AppContent early return, Suspense and Routes', () => {
+    const app = read('src/App.tsx');
+    const appContentStart = app.indexOf('function AppContent()');
+    const exportedAppStart = app.indexOf('export function App()');
+    const appContent = app.slice(appContentStart, exportedAppStart);
+    const exportedApp = app.slice(exportedAppStart);
+
+    expect(appContentStart).toBeGreaterThan(-1);
+    expect(exportedAppStart).toBeGreaterThan(appContentStart);
+    expect(appContent).toContain('if (!isReady)');
+    expect(appContent).toContain('<Suspense');
+    expect(appContent).toContain('<Routes>');
+    expect(exportedApp).toContain('<RouteAccessibilityManager>');
+    expect(exportedApp).toContain('<AppContent />');
+    expect(exportedApp).not.toContain('<Suspense');
+    expect(exportedApp).not.toContain('<Routes>');
+  });
+
+  it('centrally leaves story and call routes to their own accessibility owners', () => {
+    const manager = read('src/components/RouteAccessibilityManager.tsx');
+    expect(manager).toContain("pathname === '/call'");
+    expect(manager).toContain("pathname.startsWith('/story/')");
   });
 
   it('PRESERVATION: the tab bar keeps its label and its prefix matching', () => {

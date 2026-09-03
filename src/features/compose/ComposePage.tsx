@@ -43,12 +43,7 @@ import type { BasicEmotion, EmotionFlowItem } from '@/types';
 
 export function ComposePage() {
   const navigate = useNavigate();
-  const {
-    state,
-    addRecordWithMedia,
-    updateRecordMedia,
-    queueRecordForLater,
-  } = useStore();
+  const { state, addRecordWithMedia, queueRecordForLater } = useStore();
 
   const userId = state.authenticatedUser?.id || state.profile.id || '';
   const restored = useRef(readComposerDraft(userId)).current;
@@ -89,12 +84,8 @@ export function ComposePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<Array<{ file: File; url: string }>>([]);
   const [saving, setSaving] = useState(false);
-  const [mediaRetryRecordId, setMediaRetryRecordId] = useState<string | null>(null);
-  const [needsSavedRecordRecovery, setNeedsSavedRecordRecovery] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const saveInFlightRef = useRef(false);
-  const isMediaRetry = mediaRetryRecordId !== null;
-  const nonMediaControlsLocked = isMediaRetry || needsSavedRecordRecovery;
 
   /*
     선택한 사진은 서버에 올리기 전까지 이 기기 안의 Blob URL로만 보여 준다.
@@ -121,10 +112,9 @@ export function ComposePage() {
   */
   useEffect(() => {
     if (!userId) return;
-    if (nonMediaControlsLocked) return;
     if (log.trim().length === 0 && !isPrivate) return;
     writeComposerDraft(userId, { log, isPrivate });
-  }, [userId, log, isPrivate, nonMediaControlsLocked]);
+  }, [userId, log, isPrivate]);
 
   const connected = state.profile.couple.connected;
   /*
@@ -180,65 +170,8 @@ export function ComposePage() {
   const buildFlow = (now: Date): EmotionFlowItem[] =>
     buildEmotionFlow({ mood, now, isPrivate: effectivePrivate });
 
-  const done = (message: string) => {
-    clearComposerDraft(userId);
-    review.reset();
-    setMood([]);
-    seededFrom.current = '';
-    moodTouched.current = false;
-    toast.success(message);
-    navigate('/home');
-  };
-
-  const keepOnlyFailedFiles = (failedFiles: string[]) => {
-    const failed = new Set(failedFiles);
-    setFiles((current) => current.filter((file) => failed.has(file.name)));
-  };
-
-  const removePhoto = (index: number) => {
-    const remaining = files.filter((_, fileIndex) => fileIndex !== index);
-    setFiles(remaining);
-    if (isMediaRetry && remaining.length === 0) setMediaRetryRecordId(null);
-  };
-
   const runSave = async () => {
-    if (saving) return;
-
-    if (mediaRetryRecordId) {
-      if (files.length === 0) {
-        setMediaRetryRecordId(null);
-        return;
-      }
-      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-        toast.warning('오프라인에서는 사진을 다시 올릴 수 없어요. 연결된 뒤 다시 시도해 주세요.');
-        return;
-      }
-
-      setSaving(true);
-      let retryResult: Awaited<ReturnType<typeof updateRecordMedia>>;
-      try {
-        retryResult = await updateRecordMedia(mediaRetryRecordId, { addFiles: files });
-      } finally {
-        setSaving(false);
-      }
-
-      if (!retryResult.ok || retryResult.failedFiles.length > 0) {
-        if (retryResult.failedFiles.length > 0) keepOnlyFailedFiles(retryResult.failedFiles);
-        const count = retryResult.failedFiles.length || files.length;
-        toast.warning(
-          retryResult.error
-          || `사진 ${count}장은 아직 올리지 못했어요. 같은 기록에 다시 시도해 주세요.`,
-        );
-        return;
-      }
-
-      setFiles([]);
-      setMediaRetryRecordId(null);
-      done('사진도 남겼어요.');
-      return;
-    }
-
-    if (needsSavedRecordRecovery || !hasContent) return;
+    if (saving || !hasContent) return;
 
     const now = new Date();
     const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -260,6 +193,16 @@ export function ComposePage() {
       talkAbout: false,
       emotionFlow: flow,
       emotionUpdatedAt: flow.length > 0 ? now.toISOString() : null,
+    };
+
+    const done = (message: string) => {
+      clearComposerDraft(userId);
+      review.reset();
+      setMood([]);
+      seededFrom.current = '';
+      moodTouched.current = false;
+      toast.success(message);
+      navigate('/home');
     };
 
     /*
@@ -342,24 +285,17 @@ export function ComposePage() {
       성공한 사진은 이미 올라갔으므로 목록에서 뺀다. 남는 것은 실패한 것뿐이다.
     */
     if (result.failedFiles.length > 0) {
-      keepOnlyFailedFiles(result.failedFiles);
+      const failed = new Set(result.failedFiles);
+      setFiles((current) => current.filter((file) => failed.has(file.name)));
       setLog('');
       clearComposerDraft(userId);
       review.reset();
       setMood([]);
       seededFrom.current = '';
       moodTouched.current = false;
-      if (result.recordId) {
-        setMediaRetryRecordId(result.recordId);
-        toast.warning(
-          `사진 ${result.failedFiles.length}장은 올리지 못했어요. 글은 남겼어요. 같은 기록에 다시 올려 주세요.`,
-        );
-      } else {
-        setNeedsSavedRecordRecovery(true);
-        toast.warning(
-          '글은 저장됐지만 저장된 기록을 확인할 수 없어 사진 재시도를 시작하지 않았어요.',
-        );
-      }
+      toast.warning(
+        `사진 ${result.failedFiles.length}장은 올리지 못했어요. 글은 남겼어요. 아래에 그대로 두었으니 다시 시도해 주세요.`,
+      );
       return;
     }
 
@@ -380,13 +316,6 @@ export function ComposePage() {
 
   const stamp = new Date().toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' });
   const clock = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
-  const canUseHeaderAction = needsSavedRecordRecovery
-    || (isMediaRetry ? files.length > 0 : hasContent);
-  const headerActionLabel = needsSavedRecordRecovery
-    ? '저장된 기록 보기'
-    : isMediaRetry
-      ? (saving ? '올리는 중' : '사진 다시 올리기')
-      : (saving ? '남기는 중' : '남기기');
 
   return (
     <div className="notebook flex min-h-screen min-h-[100dvh] flex-col">
@@ -403,9 +332,7 @@ export function ComposePage() {
           <X size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
         </button>
         <span className="flex-1 text-center text-body font-semibold" style={{ color: 'var(--ink)' }}>
-          {isMediaRetry
-            ? '사진 다시 올리기'
-            : needsSavedRecordRecovery ? '저장된 기록 확인' : '오늘 남기기'}
+          오늘 남기기
         </span>
         {/* 인스타의 `공유` 자리. 글이나 사진이 하나라도 있으면 누를 수 있다. */}
         {/*
@@ -417,18 +344,12 @@ export function ComposePage() {
         */}
         <button
           type="button"
-          onClick={() => {
-            if (needsSavedRecordRecovery) {
-              navigate('/record');
-              return;
-            }
-            void save();
-          }}
-          disabled={!canUseHeaderAction || saving}
-          className={canUseHeaderAction && !saving ? 'ink-fill px-3.5 py-2' : 'ink-chip px-3.5 py-2'}
-          style={canUseHeaderAction && !saving ? undefined : { color: 'var(--ink-soft)' }}
+          onClick={() => void save()}
+          disabled={!hasContent || saving}
+          className={hasContent && !saving ? 'ink-fill px-3.5 py-2' : 'ink-chip px-3.5 py-2'}
+          style={hasContent && !saving ? undefined : { color: 'var(--ink-soft)' }}
         >
-          <span className="text-label font-semibold">{headerActionLabel}</span>
+          <span className="text-label font-semibold">{saving ? '남기는 중' : '남기기'}</span>
         </button>
       </header>
 
@@ -448,20 +369,9 @@ export function ComposePage() {
           <span className="text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>{clock}</span>
         </div>
 
-        {isMediaRetry ? (
-          <p role="status" className="pb-3 text-caption" style={{ color: 'var(--ink-soft)' }}>
-            기록은 저장됐어요. 실패한 사진 {files.length}장만 같은 기록에 다시 올려요.
-          </p>
-        ) : needsSavedRecordRecovery ? (
-          <p role="status" className="pb-3 text-caption" style={{ color: 'var(--ink-soft)' }}>
-            글은 저장됐지만 같은 기록에 사진을 다시 붙일 수 있는 정보가 없어요. 저장된 기록을 확인해 주세요.
-          </p>
-        ) : null}
-
         <textarea
           value={log}
           onChange={(event) => setLog(event.target.value)}
-          readOnly={nonMediaControlsLocked}
           placeholder="오늘 어땠어?"
           /*
             **필드를 떠나는 것**이 분석이 기다리는 경계다. blur 는 생각이 끝났다는 뜻이고
@@ -493,9 +403,8 @@ export function ComposePage() {
                 <button
                   type="button"
                   aria-label={`선택한 사진 ${index + 1} 빼기`}
-                  disabled={saving}
-                  onClick={() => removePhoto(index)}
-                  className="press-response absolute right-1 top-1 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/65 text-white disabled:opacity-40"
+                  onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}
+                  className="press-response absolute right-1 top-1 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/65 text-white"
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
@@ -509,22 +418,15 @@ export function ComposePage() {
           type="file"
           multiple
           accept={MEDIA_ACCEPT}
-          disabled={nonMediaControlsLocked}
           className="hidden"
           onChange={(event) => {
             const accepted: File[] = [];
-            const selectedNames = new Set(files.map((file) => file.name));
             Array.from(event.target.files ?? []).forEach((file) => {
               const classified = classifyMediaFile(file);
               if ('error' in classified) {
                 toast.error(`${file.name}: ${classified.error}`);
                 return;
               }
-              if (selectedNames.has(file.name)) {
-                toast.warning(`${file.name}: 같은 이름의 사진은 한 번만 선택할 수 있어요.`);
-                return;
-              }
-              selectedNames.add(file.name);
               accepted.push(file);
             });
             if (accepted.length > 0) setFiles((current) => [...current, ...accepted]);
@@ -534,8 +436,7 @@ export function ComposePage() {
         <button
           type="button"
           onClick={() => fileInput.current?.click()}
-          disabled={nonMediaControlsLocked}
-          className="ink-chip mt-2 flex w-full items-center justify-center gap-2 py-3 disabled:opacity-40"
+          className="ink-chip mt-2 flex w-full items-center justify-center gap-2 py-3"
         >
           <ImageIcon size={17} className="pen-icon" color="var(--ink-soft)" aria-hidden="true" />
           <span className="text-label" style={{ color: 'var(--ink-soft)' }}>
@@ -569,9 +470,8 @@ export function ComposePage() {
                 type="button"
                 aria-pressed={on}
                 aria-label={BASIC_EMOTION_LABEL[item]}
-                disabled={nonMediaControlsLocked}
                 onClick={() => toggleMood(item)}
-                className="flex min-h-11 w-[52px] flex-col items-center gap-1 disabled:opacity-40"
+                className="flex min-h-11 w-[52px] flex-col items-center gap-1"
               >
                 <EmotionCharacter emotion={item} selected={on} size={40} />
                 <span
@@ -596,7 +496,7 @@ export function ComposePage() {
                 type="button"
                 role="radio"
                 aria-checked={on}
-                disabled={nonMediaControlsLocked || (!connected && option.shared)}
+                disabled={!connected && option.shared}
                 onClick={() => setIsPrivate(!option.shared)}
                 className="ink-box flex flex-1 items-center justify-center gap-1.5 py-3 disabled:opacity-40"
                 style={on ? { background: 'var(--ink)', color: 'var(--paper)' } : { color: 'var(--ink)' }}

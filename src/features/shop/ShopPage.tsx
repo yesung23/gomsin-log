@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Check, FileText, Sparkles, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
@@ -17,9 +18,11 @@ import {
 import {
   STARTER_ACCESSORY_IDS,
   STARTER_ACCESSORY_OPTIONS,
+  STARTER_REVEAL_DURATION_MS,
   drawStarterAccessory,
   getAvailableStarterPool,
   type StarterAccessoryId,
+  type StarterAccessoryOption,
 } from '@/lib/companionStarterReveal';
 import { GardenAccessoryArt } from '@/features/diary/GardenAccessoryArt';
 import {
@@ -35,6 +38,20 @@ type ShopAnnouncement = {
   section: 'accessory' | 'paper';
   message: string;
 };
+
+type PendingStarterReveal = {
+  token: number;
+  userId: string;
+  item: StarterAccessoryOption;
+};
+
+const STARTER_REVEAL_FALLBACK_GRACE_MS = 250;
+
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
 function withObjectParticle(label: string): string {
   const lastCodePoint = label.codePointAt(label.length - 1) ?? 0;
@@ -55,16 +72,22 @@ export function ShopPageBody() {
   });
   const [announcement, setAnnouncement] = useState<ShopAnnouncement | null>(null);
   const [isSpinning, setIsSpinning] = useState(false);
-  const [spinningItem, setSpinningItem] = useState<StarterAccessoryId | null>(null);
+  const [revealedItem, setRevealedItem] = useState<StarterAccessoryId | null>(null);
   const spinTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const spinGenerationRef = useRef(0);
+  const pendingRevealRef = useRef<PendingStarterReveal | null>(null);
+  const currentUserIdRef = useRef(userId);
+  currentUserIdRef.current = userId;
 
   useEffect(() => {
+    spinGenerationRef.current += 1;
+    pendingRevealRef.current = null;
     if (spinTimerRef.current) {
       clearTimeout(spinTimerRef.current);
       spinTimerRef.current = null;
     }
     setIsSpinning(false);
-    setSpinningItem(null);
+    setRevealedItem(null);
 
     const nextShopState = loadCompanionShopState(userId);
     setShopState(nextShopState);
@@ -74,6 +97,8 @@ export function ShopPageBody() {
     setAnnouncement(null);
 
     return () => {
+      spinGenerationRef.current += 1;
+      pendingRevealRef.current = null;
       if (spinTimerRef.current) {
         clearTimeout(spinTimerRef.current);
         spinTimerRef.current = null;
@@ -83,11 +108,36 @@ export function ShopPageBody() {
 
   const availableStarterPool = getAvailableStarterPool(shopState.ownedAccessories);
   const isStarterComplete = availableStarterPool.length === 0;
+  const rouletteOptions = STARTER_ACCESSORY_OPTIONS.filter(({ id }) => (
+    availableStarterPool.includes(id)
+  ));
 
   // Visual list of all accessories (starter items first, then legacy items if any)
   const legacyAccessories = GARDEN_ACCESSORY_OPTIONS.filter(
     (opt) => opt.id !== 'none' && !STARTER_ACCESSORY_IDS.includes(opt.id as StarterAccessoryId),
   );
+
+  const completeStarterReveal = (token: number) => {
+    const pending = pendingRevealRef.current;
+    if (!pending
+      || pending.token !== token
+      || spinGenerationRef.current !== token
+      || currentUserIdRef.current !== pending.userId) return;
+
+    if (spinTimerRef.current) {
+      clearTimeout(spinTimerRef.current);
+      spinTimerRef.current = null;
+    }
+    pendingRevealRef.current = null;
+    setShopState(loadCompanionShopState(pending.userId));
+    setIsSpinning(false);
+    setRevealedItem(pending.item.id);
+    setAnnouncement({
+      kind: 'status',
+      section: 'accessory',
+      message: `${withObjectParticle(pending.item.label)} 무료로 받았어요.`,
+    });
+  };
 
   const startDraw = () => {
     if (!userId || isSpinning || isStarterComplete) return;
@@ -109,25 +159,34 @@ export function ShopPageBody() {
       return;
     }
 
-    // Storage succeeded: start visual spin
-    setIsSpinning(true);
-    setSpinningItem(drawnItem.id);
-
-    // Duration 800ms
-    spinTimerRef.current = setTimeout(() => {
-      setIsSpinning(false);
-      setShopState(nextState);
+    // Ownership is durable before the reveal begins. Reduced-motion users get
+    // the same result without being forced through a decorative animation.
+    if (prefersReducedMotion()) {
+      setShopState(loadCompanionShopState(userId));
+      setRevealedItem(drawnItem.id);
       setAnnouncement({
         kind: 'status',
         section: 'accessory',
         message: `${withObjectParticle(drawnItem.label)} 무료로 받았어요.`,
       });
-      spinTimerRef.current = null;
-    }, 800);
+      return;
+    }
+
+    const token = spinGenerationRef.current + 1;
+    spinGenerationRef.current = token;
+    pendingRevealRef.current = { token, userId, item: drawnItem };
+    setIsSpinning(true);
+    setRevealedItem(null);
+
+    // `animationend` is the normal completion path. This fallback covers a
+    // suspended/backgrounded WebView that never delivers the CSS event.
+    spinTimerRef.current = setTimeout(() => {
+      completeStarterReveal(token);
+    }, STARTER_REVEAL_DURATION_MS + STARTER_REVEAL_FALLBACK_GRACE_MS);
   };
 
   const choosePaper = (paper: typeof PAPER_TEXTURE_OPTIONS[number]) => {
-    if (!userId) return;
+    if (!userId || isSpinning) return;
     const owned = shopState.ownedPapers.includes(paper.id);
     if (!owned) {
       const next = collectCompanionPaper(userId, paper.id);
@@ -195,20 +254,59 @@ export function ShopPageBody() {
           {/* Roulette Wheel visual card */}
           <div
             data-testid="accessory-draw-roulette"
+            aria-busy={isSpinning}
             className="flex flex-col items-center justify-center rounded-2xl border border-border bg-card/60 p-6 text-center shadow-sm"
           >
             <div className="relative flex h-32 w-32 items-center justify-center">
+              <span
+                aria-hidden="true"
+                className="absolute left-1/2 top-0 z-20 h-0 w-0 -translate-x-1/2 border-x-[7px] border-t-[10px] border-x-transparent border-t-foreground"
+              />
               <div
-                className={`flex h-28 w-28 items-center justify-center rounded-full border-2 border-dashed border-border bg-muted/30 ${
+                data-testid="accessory-roulette-wheel"
+                aria-hidden="true"
+                onAnimationEnd={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  const token = pendingRevealRef.current?.token;
+                  if (token !== undefined) completeStarterReveal(token);
+                }}
+                className={`relative h-28 w-28 rounded-full border-2 border-dashed border-border bg-muted/30 ${
                   isSpinning ? 'accessory-roulette-spinning' : ''
                 }`}
+                style={{
+                  '--accessory-roulette-duration': `${STARTER_REVEAL_DURATION_MS}ms`,
+                } as CSSProperties}
               >
-                {spinningItem ? (
-                  <GardenAccessoryArt accessory={spinningItem} className="h-14 w-14 drop-shadow-sm" />
-                ) : (
-                  <Sparkles size={32} className="text-muted-foreground/60" aria-hidden="true" />
-                )}
+                {rouletteOptions.map((option, index) => {
+                  const angle = -90 + (360 / Math.max(rouletteOptions.length, 1)) * index;
+                  const radians = angle * Math.PI / 180;
+                  return (
+                    <span
+                      key={option.id}
+                      className="absolute h-7 w-7"
+                      style={{
+                        left: `${50 + Math.cos(radians) * 34}%`,
+                        top: `${50 + Math.sin(radians) * 34}%`,
+                        transform: 'translate(-50%, -50%)',
+                      }}
+                    >
+                      <GardenAccessoryArt accessory={option.id} className="h-full w-full drop-shadow-sm" />
+                    </span>
+                  );
+                })}
               </div>
+              <span className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                {revealedItem ? (
+                  <span
+                    data-testid="starter-reveal-result"
+                    className="flex h-12 w-12 items-center justify-center rounded-full border border-border bg-card shadow-sm"
+                  >
+                    <GardenAccessoryArt accessory={revealedItem} className="h-8 w-8" />
+                  </span>
+                ) : (
+                  <Sparkles size={24} className="text-muted-foreground/60" />
+                )}
+              </span>
             </div>
 
             <div className="mt-4">
@@ -307,7 +405,7 @@ export function ShopPageBody() {
                   key={paper.id}
                   type="button"
                   aria-label={label}
-                  disabled={!userId || active}
+                  disabled={!userId || active || isSpinning}
                   aria-describedby={!userId ? 'shop-login-help' : undefined}
                   onClick={() => choosePaper(paper)}
                   className="press-response min-h-[112px] overflow-hidden rounded-surface border text-left disabled:cursor-default"

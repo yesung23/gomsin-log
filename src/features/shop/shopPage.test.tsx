@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { GARDEN_ACCESSORY_OPTIONS } from '@/lib/companionGardenLocalState';
@@ -93,20 +93,29 @@ describe('free local companion shop', () => {
     expect(screen.queryByText(/오늘|마감|자정|기회/)).not.toBeInTheDocument();
   });
 
-  it('draws a finite starter accessory via roulette and announces it after spin', async () => {
+  it('persists the draw first, hides the result during a complete wheel spin, then reveals it', async () => {
     const user = userEvent.setup();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
     renderShop();
 
     const drawButton = screen.getByRole('button', { name: '회전 뽑기로 장식 받기' });
     await user.click(drawButton);
 
     const stateAfterClick = loadCompanionShopState('user-me');
-    expect(stateAfterClick.ownedAccessories.length).toBe(1);
+    expect(stateAfterClick.ownedAccessories).toEqual(['boots']);
+    expect(screen.queryByTestId('starter-reveal-result')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    const wheel = screen.getByTestId('accessory-roulette-wheel');
+    expect(wheel).toHaveClass('accessory-roulette-spinning');
+    expect(wheel.style.getPropertyValue('--accessory-roulette-duration')).toBe('1200ms');
+    fireEvent.animationEnd(wheel);
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toBeInTheDocument();
     });
-    expect(screen.getByRole('status').textContent).toMatch(/무료로 받았어요/);
+    expect(screen.getByRole('status')).toHaveTextContent('군화를 무료로 받았어요.');
+    expect(screen.getByTestId('starter-reveal-result')).toBeInTheDocument();
   });
 
   it('keeps the item unowned and announces an error when collection persistence fails', async () => {
@@ -241,9 +250,82 @@ describe('free local companion shop', () => {
     await user.click(drawButton);
     expect(loadCompanionShopState('user-me').ownedAccessories.length).toBe(1);
 
+    fireEvent.animationEnd(screen.getByTestId('accessory-roulette-wheel'));
     await waitFor(() => {
       expect(screen.getByRole('status')).toBeInTheDocument();
     });
+  });
+
+  it('locks paper actions during the spin and reloads the latest persisted state at completion', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    renderShop();
+
+    await user.click(screen.getByRole('button', { name: '회전 뽑기로 장식 받기' }));
+    const paperButton = screen.getByRole('button', { name: '모눈 종이 무료로 받기' });
+    expect(paperButton).toBeDisabled();
+
+    const stored = JSON.parse(localStorage.getItem('gomsin.diary.shop.user-me') || '{}');
+    localStorage.setItem('gomsin.diary.shop.user-me', JSON.stringify({
+      ...stored,
+      ownedPapers: ['plain', 'ruled', 'grid'],
+    }));
+
+    fireEvent.animationEnd(screen.getByTestId('accessory-roulette-wheel'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '모눈 종이 적용하기' })).toBeInTheDocument();
+    });
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
+  });
+
+  it('cancels pending reveal UI when the authenticated account changes', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const view = renderShop();
+
+    await user.click(screen.getByRole('button', { name: '회전 뽑기로 장식 받기' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
+
+    currentState = {
+      authenticatedUser: { id: 'user-other' },
+      profile: { id: 'profile-other' },
+    };
+    view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '회전 뽑기로 장식 받기' })).toBeEnabled();
+    });
+    expect(screen.getByTestId('accessory-draw-roulette')).toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByTestId('starter-reveal-result')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(loadCompanionShopState('user-other').ownedAccessories).toEqual([]);
+  });
+
+  it('reveals immediately without spinning when reduced motion is requested', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    try {
+      const user = userEvent.setup();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      renderShop();
+      await user.click(screen.getByRole('button', { name: '회전 뽑기로 장식 받기' }));
+
+      expect(screen.getByTestId('accessory-roulette-wheel')).not.toHaveClass('accessory-roulette-spinning');
+      expect(screen.getByTestId('starter-reveal-result')).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('군화를 무료로 받았어요.');
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   it('disables the draw button and shows completion copy when all 5 starter items are owned', () => {

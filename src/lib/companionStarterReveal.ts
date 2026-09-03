@@ -2,6 +2,9 @@ import type { CollectibleGardenAccessory } from './companionShopLocalState';
 
 export type StarterAccessoryId = 'boots' | 'sneakers' | 'letter' | 'dogtag' | 'plane';
 
+/** Shared by the React completion fallback and the CSS custom property. */
+export const STARTER_REVEAL_DURATION_MS = 1200;
+
 export interface StarterAccessoryOption {
   id: StarterAccessoryId;
   label: string;

@@ -19,12 +19,43 @@ const NOMINAL_PAIR_GAP_PX = 4;
 const SUBPIXEL_MEASUREMENT_EPSILON_PX = 0.001;
 const MIN_MEASURED_PAIR_GAP_PX = NOMINAL_PAIR_GAP_PX - SUBPIXEL_MEASUREMENT_EPSILON_PX;
 
-async function openGarden(context: BrowserContext, page: Page) {
+async function openGarden(
+  context: BrowserContext,
+  page: Page,
+  theme?: 'light' | 'dark',
+) {
   const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
+  if (theme) {
+    await context.addInitScript((value) => {
+      const key = 'gomsinlog.state.v2';
+      const raw = window.localStorage.getItem(key);
+      const stored = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+      window.localStorage.setItem(key, JSON.stringify({ ...stored, theme: value }));
+    }, theme);
+  }
   await page.goto('/diary/garden');
   await expect(page.locator('#root')).not.toBeEmpty();
   await expect(page.getByText('함께한 100일')).toBeVisible({ timeout: 20_000 });
   return unrouted;
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const rgb = (value: string): [number, number, number] => {
+    const channels = value.match(/[\d.]+/g)?.slice(0, 3).map(Number);
+    if (!channels || channels.length !== 3) throw new Error(`Unsupported color: ${value}`);
+    return channels as [number, number, number];
+  };
+  const luminance = (value: string) => {
+    const linear = rgb(value).map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.03928
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  };
+  const values = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (values[0] + 0.05) / (values[1] + 0.05);
 }
 
 async function longPressAndDrag(page: Page, companionTestId: string) {
@@ -54,8 +85,15 @@ async function longPressAndDrag(page: Page, companionTestId: string) {
   await expect(companion).toHaveAttribute('data-pressed', 'true');
   await page.waitForTimeout(520);
   await expect(companion).toHaveAttribute('data-lifted', 'true');
-  const liftedFrame = companion.locator('.garden-character-frame--lift');
-  expect(await liftedFrame.evaluate((node) => getComputedStyle(node).animationName)).toContain('garden-lift-frame');
+  const liftedLimbs = companion.locator('.garden-limb');
+  await expect(liftedLimbs).toHaveCount(4);
+  const liftedAnimations = await liftedLimbs.evaluateAll((nodes) => (
+    nodes.map((node) => getComputedStyle(node).animationName)
+  ));
+  expect(liftedAnimations).toHaveLength(4);
+  expect(liftedAnimations.every((name) => name.startsWith('garden-flail-'))).toBe(true);
+  expect(new Set(liftedAnimations).size).toBe(4);
+  expect(await companion.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
   expect(await companion.evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
 
   await page.mouse.move(targetX, targetY, { steps: 4 });
@@ -163,19 +201,34 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
   await expect(peach).toBeVisible();
   await expect(sage).toBeVisible();
 
+  const pageSurface = await page.locator('#main-content').evaluate((node) => getComputedStyle(node).backgroundColor);
+  const sceneSurface = await page.getByTestId('garden-scene').evaluate((node) => getComputedStyle(node).backgroundColor);
+  expect(sceneSurface).toBe('rgb(255, 255, 255)');
+  expect(pageSurface).toBe('rgb(255, 255, 255)');
+
   await expect.poll(async () => (
     Number(await peach.getAttribute('data-move-count'))
     + Number(await sage.getAttribute('data-move-count'))
   ), { timeout: 10_000 }).toBeGreaterThan(0);
   let sawAutonomousMove = false;
+  let sawLimbWalk = false;
   for (let sampleIndex = 0; sampleIndex < 20; sampleIndex += 1) {
     const sample = await companionMotionSample(page);
     sawAutonomousMove ||= sample.movingCount === 1;
+    for (const companion of [peach, sage]) {
+      if (await companion.getAttribute('data-wandering') !== 'true') continue;
+      const limbAnimations = await companion.locator('.garden-limb').evaluateAll((nodes) => (
+        nodes.map((node) => getComputedStyle(node).animationName)
+      ));
+      sawLimbWalk ||= limbAnimations.length === 4
+        && limbAnimations.every((name) => name.startsWith('garden-walk-'));
+    }
     expect(sample.movingCount).toBeLessThanOrEqual(1);
     expect(sample.gapPx).toBeGreaterThanOrEqual(MIN_MEASURED_PAIR_GAP_PX);
     await page.waitForTimeout(150);
   }
   expect(sawAutonomousMove).toBe(true);
+  expect(sawLimbWalk).toBe(true);
   await expect.poll(async () => Math.min(
     Number(await peach.getAttribute('data-move-count')),
     Number(await sage.getAttribute('data-move-count')),
@@ -205,8 +258,8 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
 
   const visualBox = await peach.locator('.garden-exact-character').boundingBox();
   const hitBox = await peach.boundingBox();
-  expect(visualBox?.width ?? 0).toBeLessThanOrEqual(55);
-  expect(visualBox?.height ?? 0).toBeLessThanOrEqual(62);
+  expect(visualBox?.width ?? 0).toBeLessThanOrEqual(26);
+  expect(visualBox?.height ?? 0).toBeLessThanOrEqual(29);
   expect(hitBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(hitBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
@@ -227,6 +280,46 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
   expect(unrouted).toEqual([]);
   await context.close();
 });
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`garden stays white and readable in ${theme} mode`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const unrouted = await openGarden(context, page, theme);
+
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    for (const surface of [
+      page.locator('[data-astryx-theme="gomsin"]'),
+      page.locator('#main-content'),
+      page.locator('header'),
+      page.getByTestId('garden-scene'),
+    ]) {
+      expect(await surface.evaluate((node) => getComputedStyle(node).backgroundColor))
+        .toBe('rgb(255, 255, 255)');
+      expect(await surface.evaluate((node) => getComputedStyle(node).backgroundImage))
+        .toBe('none');
+    }
+
+    const together = page.getByText('함께한 100일');
+    const textColors = await together.evaluate((node) => ({
+      foreground: getComputedStyle(node).color,
+      background: getComputedStyle(node.closest('.garden-surface')!).backgroundColor,
+    }));
+    expect(contrastRatio(textColors.foreground, textColors.background)).toBeGreaterThanOrEqual(4.5);
+
+    for (const name of ['이전 화면으로', '꾸미기와 함께 놀기']) {
+      const control = page.getByRole('button', { name });
+      const colors = await control.evaluate((node) => ({
+        foreground: getComputedStyle(node).color,
+        background: getComputedStyle(node.closest('header')!).backgroundColor,
+      }));
+      expect(contrastRatio(colors.foreground, colors.background)).toBeGreaterThanOrEqual(3);
+    }
+
+    expect(unrouted).toEqual([]);
+    await context.close();
+  });
+}
 
 test('quiet garden remains usable in landscape', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 812, height: 375 } });
@@ -483,8 +576,11 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   await page.mouse.down();
   await page.waitForTimeout(520);
   await expect(peach).toHaveAttribute('data-lifted', 'true');
-  expect(await peach.locator('.garden-character-frame--walk').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
-  expect(await peach.locator('.garden-character-frame--lift').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  const reducedLimbAnimations = await peach.locator('.garden-limb').evaluateAll((nodes) => (
+    nodes.map((node) => getComputedStyle(node).animationName)
+  ));
+  expect(reducedLimbAnimations).toEqual(['none', 'none', 'none', 'none']);
+  expect(await peach.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
   expect(await peach.evaluate((node) => getComputedStyle(node).filter)).not.toBe('none');
   await page.mouse.up();
   await expect(peach).toHaveAttribute('data-lifted', 'false');

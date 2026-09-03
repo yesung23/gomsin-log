@@ -11,6 +11,7 @@ describe('companion garden motion CSS', () => {
     expect(css).toContain('--garden-ink-soft:');
     expect(css).toContain('--garden-character-paper:');
     expect(css).toContain('.garden-surface');
+    expect(css).toMatch(/\.garden-shell-surface\s*\{[^}]*background-color:\s*var\(--garden-surface\)[^}]*background-image:\s*none/s);
     expect(css).toMatch(/\.garden-header \.pen-icon\s*\{[^}]*color:\s*var\(--garden-ink\)/s);
     expect(css).toMatch(/\.garden-ink-muted\s*\{[^}]*color:\s*var\(--garden-ink-soft\)/s);
   });

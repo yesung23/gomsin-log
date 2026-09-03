@@ -89,10 +89,13 @@ export interface MobileShellProps {
    * (/support, /legal/:doc) so unauthenticated users do not see authenticated app tabs.
    */
   hideNav?: boolean;
+  /** Replace the paper frame with the garden's theme-invariant white playfield. */
+  surface?: 'paper' | 'garden';
 }
 
-export function MobileShell({ children, hideNav = false }: MobileShellProps) {
+export function MobileShell({ children, hideNav = false, surface = 'paper' }: MobileShellProps) {
   const { pathname } = useLocation();
+  const usesGardenSurface = surface === 'garden';
   const mainRef = useRef<HTMLElement>(null);
   const navRef = useRef<HTMLElement>(null);
   /** The measured height of the tab bar, published to the bottom-pinned layers. */
@@ -145,9 +148,12 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
           other by `src/lib/astryxFoundation.test.ts`.
         */
         data-astryx-theme="gomsin"
-        className="relative h-screen h-[100dvh] w-full max-w-[430px] overflow-hidden shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        className={cn(
+          'relative h-screen h-[100dvh] w-full max-w-[430px] overflow-hidden shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]',
+          usesGardenSurface && 'garden-shell-surface',
+        )}
         style={{
-          background: 'var(--paper)',
+          background: usesGardenSurface ? 'var(--garden-surface)' : 'var(--paper)',
           ...(hideNav
             ? ({ '--gomsin-tabbar-height': '0px' } as CSSProperties)
             : tabBarHeight > 0
@@ -180,6 +186,7 @@ export function MobileShell({ children, hideNav = false }: MobileShellProps) {
           className={cn(
             'notebook min-h-0 flex-1 overflow-y-auto focus:outline-none',
             hideNav ? 'pb-[max(env(safe-area-inset-bottom,0px),1.5rem)]' : 'pb-20',
+            usesGardenSurface && 'garden-shell-surface',
           )}
         >
           {/* Shown above every tab, because a stale or withheld shared workspace

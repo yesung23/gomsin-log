@@ -1071,6 +1071,11 @@ input[type='range']::-webkit-slider-thumb {
   background-color: var(--garden-surface);
 }
 
+.garden-shell-surface {
+  background-color: var(--garden-surface);
+  background-image: none;
+}
+
 .garden-header {
   background-image: none;
   color: var(--garden-ink);

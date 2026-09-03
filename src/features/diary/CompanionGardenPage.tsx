@@ -81,7 +81,7 @@ function CompanionGardenPageBody() {
 
 export function CompanionGardenPage() {
   return (
-    <MobileShell hideNav>
+    <MobileShell hideNav surface="garden">
       <CompanionGardenPageBody />
     </MobileShell>
   );

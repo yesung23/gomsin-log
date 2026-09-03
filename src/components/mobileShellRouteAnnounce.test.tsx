@@ -599,4 +599,20 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     expect(main?.className).toContain('min-h-0');
     expect(main?.className).toContain('overflow-y-auto');
   });
+
+  it('can replace the paper frame with one uninterrupted garden surface', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/diary/garden']}>
+        <MobileShell hideNav surface="garden">
+          <p>정원</p>
+        </MobileShell>
+      </MemoryRouter>,
+    );
+    const main = container.querySelector('#main-content');
+    const frame = main?.parentElement;
+
+    expect(main).toHaveClass('garden-shell-surface');
+    expect(frame).toHaveClass('garden-shell-surface');
+    expect(screen.queryByRole('tablist', { name: '하단 내비게이션' })).not.toBeInTheDocument();
+  });
 });

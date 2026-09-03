@@ -12031,3 +12031,119 @@ PRODUCTION
 - physical device: APPLIED to the connected iPhone as a signed development build
 
 ---
+
+## 2026-09-03 — 글자 없는 조용한 육성 정원·Realtime 브라우저 게이트 폐쇄
+
+### PLAN POSITION
+- Phase: V5-D Garden local release gate
+- Workstream: Diary Garden interaction, accessibility, and browser reliability
+- Step: 날짜/나무/설명 제거 → 직접 돌보기 반응 → 반복 모션 회귀 → current Realtime mock contract
+- Previous Gate: finite free starter reveal의 소유권 선저장·계정 전환·storage failure closure (`63beb82`)
+- This Gate: exact application HEAD `27c0805` local RELEASE
+
+### DIRECTION CHECK
+- Product source checked: latest 2026-09-03 product-owner correction, `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 유료 확률형 뽑기·압박형 retention을 추가하지 않음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, branch/status/HEAD, actual source and browser output
+- Latest relevant Work Log checked: 2026-09-03 Garden pair-safe motion/accessibility gate
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? YES, product owner가 명시적으로 좁게 supersede함
+- If YES, what conflict: 함께한 날 copy와 direct starter choice를 제거/변경했다. 현재 계약은 사용 가능한 정원에 가시 텍스트 없음, 압박 없는 직접 돌보기, 날짜 제한 없는 유한 무료 회전 공개다. 유료 랜덤 loot는 계속 금지한다.
+
+### OWNERSHIP
+- Tool: Codex primary orchestrator + independent Reviewer + independent Verifier
+- Model: GPT-5.6 Sol primary; configured Terra Reviewer and Luna Verifier roles
+- Role: primary 구현·root-cause investigation·통합, Reviewer exact-delta/cumulative 검사, Verifier exact-HEAD 명령 재실행
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `63beb82a48e64b7a3c827ddaa79bf3c21032b092`
+- Old HEAD: `63beb82a48e64b7a3c827ddaa79bf3c21032b092`
+- New HEAD / Reviewed HEAD: `27c0805c3eb24e1cb19c0a63b66f876b0847ace7`
+
+### CHANGED / REVIEWED
+- file: `src/features/diary/CompanionGardenView.tsx`, `CompanionGardenActionSheet.tsx`, `src/styles/index.css`
+- function/component/migration: available Garden surface, care state machine, exact-source character animation
+- what changed/reviewed: `함께한 N일`, 나무, 단계, 설명을 제거하고 흰 전체화면에 25×28px 원본 캐릭터 두 마리와 뒤로가기/놀기 아이콘만 남겼다. 쓰다듬기·인사하기·같이 놀기는 각각 유한 body/limb 반응을 내고 동일 행동 반복도 generation token으로 새로 시작한다.
+- why: 대시보드 문구보다 직접 만지고 반응하는 조용한 육성감을 만들면서 관계 점수·출석 압박을 피하기 위해
+- file: `src/features/diary/CompanionGardenView.test.tsx`, route/style tests
+- function/component/migration: timer generation, scheduler pause/resume, focus restoration, reduced motion, 44px target contracts
+- what changed/reviewed: 동일 행동 재실행, stale timer 무효화, care 동안 자율 이동 정지, action 후 새 idle cadence, unavailable cleanup을 고정했다.
+- why: 눈에 보이는 모션과 키보드/보조기술 경로가 같은 상태 의미를 갖게 하기 위해
+- file: `e2e/companionGarden.spec.ts`, `e2e/realUsability.spec.ts`
+- function/component/migration: actual Chrome Garden/Shop matrix
+- what changed/reviewed: 반복 CSS 모션, 320px action target, reduced motion, no-copy surface, pair geometry, 10.75초 Realtime subscribe boundary, finite free roulette persistence를 검증한다.
+- why: jsdom으로 증명할 수 없는 layout, animation, focus, viewport, protocol timeout을 실제 브라우저에서 닫기 위해
+- file: `e2e/fixtures/mockBackend.ts`
+- function/component/migration: Phoenix Realtime JSON wire decoder/encoder
+- what changed/reviewed: object-only mock을 current array `[join_ref, ref, topic, event, payload]`와 legacy object 모두 읽고 같은 wire format으로 reply하도록 고쳤다.
+- why: Supabase Realtime 2.111.0 join을 mock이 무응답으로 버려 10초 후 앱의 정상 quarantine을 오탐하던 원인을 제거하기 위해
+- file: `docs/V5_GARDEN_NATURAL_INTERACTION_PLAN_2026-09-03.md`, `docs/V4_AS_BUILT.md`, `docs/CURRENT_STATE.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, Control Tower report
+- function/component/migration: canonical/current/historical boundary record
+- what changed/reviewed: 최신 사용자 override, 구현 사실, 검증과 Production/실기기 미확인 범위를 기록하고 once-per-day/direct-choice 역사 계약을 superseded로 표시했다.
+- why: 다음 AI가 과거 계획을 현재 제품 계약으로 재활성화하지 않게 하기 위해
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: couple lifecycle, anniversary 계산, RLS, 기록/unread/briefing, E2EE, AI 의미 변경 없음
+- Production: push·merge·deploy·Supabase·TestFlight·App Store 변경 없음
+
+### VERIFICATION
+- command: Garden/Shop focused Vitest 11개 실제 파일 경로
+- PASS / FAIL / UNVERIFIED: PASS — 11 files / 171 tests
+- what it actually proves: view/state/motion/geometry/asset/route/wiring/local ownership 회귀
+- command: `npm run typecheck`; cumulative changed TS/TSX scoped ESLint; `git diff --check 63beb82..27c0805`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, 대상 lint, whitespace integrity
+- command: pre-fix temporary Realtime diagnostic browser spec
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — received 4 frames / sent 0, `unavailableAt: 10392ms`, 화면 `정원 확인 중`
+- what it actually proves: 캐릭터 timer가 아니라 object-only mock이 current array join을 무응답 처리한 것이 공통 원인
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/companionGarden.spec.ts --project=chromium-390 --workers=1`
+- PASS / FAIL / UNVERIFIED: PASS — 11/11, retry 0; independent Verifier 재실행도 11/11 PASS
+- what it actually proves: 10초 경계 이후 availability, wordless surface, motion/pair gap, care repeat, touch/focus/reduced-motion/browser layout
+- command: same system Chrome `e2e/realUsability.spec.ts --grep 'finite free Shop reveal stays usable'`
+- PASS / FAIL / UNVERIFIED: PASS — 320px·393px 2/2; independent 재실행도 2/2 PASS
+- what it actually proves: finite free spinner, 44px, no overflow, reload persistence의 mock browser 경로
+- command: loopback URL + non-secret placeholder anon JWT `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,546 modules; Garden 33.87 kB / gzip 11.43 kB; source sheet 1,489.08 kB lazy asset
+- what it actually proves: production-mode bundle 생성; 실제 backend 연결은 증명하지 않음
+- command: independent cumulative Garden review at `3137715` + Realtime harness delta review at `27c0805`
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0
+- what it actually proves: 기능 누적 diff와 final test-wire delta에 알려진 차단 결함 없음
+- command: exact-HEAD full repository Vitest, current physical iPhone touch/VoiceOver/energy, remote RLS/Production
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 이번 local slice 증거를 전체 앱·실기기·Production으로 확대 주장할 수 없음
+
+### REVIEW IMPACT
+- FULL: Garden surface/interaction/motion 계약은 누적 fresh review. Final `27c0805`는 test-harness-only DELTA review.
+- whether an earlier review is stale: NO for exact application checkpoint; 이후 Garden 또는 mock protocol 변경 시 재검토 필요
+
+### BLOCKERS
+- code: 이 local Garden gate에서 알려진 blocker 없음
+- environment: current physical iPhone touch, VoiceOver, reduced-motion, 10분 이상 energy profile 미실행
+- external/manual: 캐릭터/액세서리 상업적 권리, StoreKit 상품·App Review·server entitlement 미확인
+
+### STOPPED AT
+- exact completed boundary: 글자 없는 조용한 육성 정원 + 유한 무료 회전 공개 + current Realtime mock browser gate local RELEASE
+
+### REMAINING
+- exact HEAD 전체 repository suite
+- 1.489 MB source sheet decode/memory와 장시간 실제 iPhone energy 측정
+- 유료 액세서리/상호작용 건물은 권리·StoreKit·server ledger gate 뒤 별도 구현
+
+### NEXT ACTION
+- next owner: Codex Control Tower
+- tool/model: bounded photo reliability Worker + Verifier + independent security review where storage/data semantics change
+- 기준 SHA: docs commit의 parent application checkpoint `27c0805`
+- exact next task: `docs/V5_PHOTO_SAFETY_SLICE_PLAN_2026-09-03.md`의 안전한 선택·압축·retry 경계를 다시 검증하고 RC blocker부터 닫기
+
+### DO NOT ADVANCE UNTIL
+- 실기기 증거 없이 VoiceOver/energy PASS를 주장하지 않음
+- 실제 RLS/remote catalog 증거 없이 Supabase/Production PASS를 주장하지 않음
+- 권리와 server-authoritative entitlement 검증 전 유료 Garden 판매를 켜지 않음
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---

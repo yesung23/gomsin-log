@@ -130,6 +130,15 @@ and reduced-motion contracts above remain in force.
 
 ### Refinement A: Quiet white garden with original-character motion
 
+> **SUPERSEDED 2026-09-03:** the product owner's newer instruction and
+> `V5_GARDEN_NATURAL_INTERACTION_PLAN_2026-09-03.md` replace Refinement A items 1–2 and
+> Refinement B item 1. The available garden now has no visible together-day copy or other text,
+> and the playfield remains white in both themes with verified control contrast. Nurturing comes
+> from direct `쓰다듬기 · 인사하기 · 같이 놀기` reactions, never pressure metrics. The free
+> starter spinner is finite and always available until its five unique items are owned; it has no
+> once-per-day limit, countdown, currency, payment, or missed-day loss. The historical text below
+> remains only to explain the superseded implementation sequence.
+
 2026-09-02 Control Tower accessibility amendment: a real dark-mode capture showed that an isolated
 pure-white stage becomes a high-luminance band against the surrounding dark paper. The user's newer
 instruction to make every surface more natural and accessible therefore supersedes only the

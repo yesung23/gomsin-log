@@ -28,8 +28,8 @@
 ## 0. Current V5 control-tower checkpoint — 2026-09-03
 
 - Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 코드 checkpoint는
-  `3426e15133eb2ea761e42eb14870b2e69b217bf4`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
-  변경이므로 작업·검토 시 exact HEAD와 diff를 다시 확인한다. Production·remote Supabase·
+  `27c0805c3eb24e1cb19c0a63b66f876b0847ace7`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
+  문서 변경이므로 다음 작업·검토는 application checkpoint와 docs HEAD를 모두 다시 확인한다. Production·remote Supabase·
   TestFlight·App Store에는 이 workstream에서 아무 변경도 적용하지 않았다.
 - 제품 오너가 [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md)의 방향을
   승인했다. 정원 액세서리·상호작용 건물·종이 IAP와 선택형 Plus, 앱 RC 다음 Book Studio는
@@ -38,20 +38,30 @@
 - 로컬 commit `0f26bb3`부터 여행 OCR은 읽은 내용을 DB에 자동 저장하지 않고 review draft로
   열며, 사용자가 `저장`을 눌러야 write한다. 온디바이스 요약은 정확한 feature flag `true`인
   검증 빌드에서만 열린다.
-- 2026-09-03 Control Tower가 code checkpoint `3426e15`에서
-  `npx vitest run --config vitest.config.ts --configLoader runner`를 실행해 293 files / 4,046
-  tests PASS, `npm run typecheck` PASS,
-  `npx eslint src/features/shop/ShopPage.tsx src/features/shop/shopPage.test.tsx src/lib/companionShopLocalState.ts src/lib/companionShopLocalState.test.ts`
-  PASS와 `git diff --check` PASS를 확인했다. 상점은
-  `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npx playwright test e2e/realUsability.spec.ts --grep "direct Shop collection stays usable"`
-  로 320px·393px의
-  repository Playwright mock-backend 경로에서 직접 무료 액세서리 선택, 종이 수령·적용,
-  reload 보존, 44px 조작 영역, 가로 overflow 없음이 2/2 PASS했다. 이는 로컬·mock 증거이며
-  Production 동작 증거가 아니다. 이 실행 증거는 세션 종료 `WORK_LOG`와 Control Tower
-  report에도 같은 exact command와 함께 기록한다.
-- commit `3426e15`부터 V4의 일일 무작위 액세서리 뽑기와 timer/FOMO가 제거됐다. 기존 소유권은
-  보존되고 starter set은 날짜 제한 없이 직접 선택한다. 유료 catalog·entitlement·결제는
-  구현되거나 활성화된 상태가 아니다.
+- 2026-09-03 Control Tower와 독립 Verifier가 exact application checkpoint `27c0805`에서
+  Garden/Shop focused **11 files / 171 tests PASS**, `npm run typecheck` PASS, 대상 ESLint와
+  `git diff --check 63beb82..27c0805` PASS를 확인했다. system Chrome의
+  `e2e/companionGarden.spec.ts`는 retry 없이 **11/11 PASS**했고, 390×844·320px·landscape·light/dark·
+  reduced motion·키보드·drag·pair gap·반복 돌보기와 Realtime 10초 subscribe 경계를 포함한다.
+  `e2e/realUsability.spec.ts --grep "finite free Shop reveal stays usable"`는 320px·393px **2/2 PASS**,
+  non-secret loopback placeholder production build는 **2,546 modules PASS**다. 독립 누적 Garden
+  review와 final Realtime-harness delta review는 모두 CRITICAL/HIGH/MEDIUM/LOW **0건**이다.
+  이는 로컬 production bundle + mock backend 증거이며 실제 RLS·Production·실기기 증거가 아니다.
+- 현재 사용 가능한 `/diary/garden`은 `함께한 N일`, 나무, 단계, 설명을 노출하지 않는 흰 전체화면
+  놀이터다. 원본 `paper-pair-v1.webp`에서 자른 25×28px 캐릭터 두 마리는 최소 44×44px 조작 영역
+  안에서 겹치거나 경계를 벗어나지 않고 걷는다. 탭 sheet의 쓰다듬기·인사하기·같이 놀기는 서로
+  다른 유한 반응을 내며, 동일 행동을 연속 실행해도 모션과 1.6초 타이머가 다시 시작된다. 점수·
+  스트릭·배고픔·경험치·실패·관계 평가는 없다.
+- starter 장식 5종은 날짜 제한·마감·재화·결제 없이 미보유 항목만 남은 회전판에서 하나씩
+  공개된다. 소유권을 회전 전에 계정별 기기 로컬 저장소에 저장하고, 중복·storage failure·계정
+  전환을 fail-closed 처리한다. 향후 유료 catalog·StoreKit·server entitlement는 아직 구현되거나
+  활성화된 상태가 아니다.
+- Supabase Realtime 2.111.0은 Phoenix JSON 배열 wire format을 쓰지만 오래된 Playwright mock은
+  객체만 파싱해 10초 뒤 테스트 앱을 정상 보안 격리시키고 있었다. commit `27c0805`는 **테스트
+  하네스만** 현재 wire format으로 고쳤으며 앱의 Realtime·RLS·quarantine 의미는 바꾸지 않았다.
+- `3426e15`에서 기록된 전체 Vitest 293 files / 4,046 tests PASS는 그 SHA의 역사적 증거다.
+  Garden 이후 exact HEAD에서 전체 저장소 suite는 다시 실행하지 않았으므로 현재 전체 suite는
+  **UNVERIFIED**이고, 위 171개 focused + 실제 browser gate만 현재 증거다.
 - Apple provider의 실제 Production 설정, StoreKit 상품, App Store 계약/심사, Supabase 현재
   migration catalog, 실물 지원 iPhone 동작은 **UNVERIFIED**다. 현재 코드는 GoTrue provider
   응답이 Apple ON이면 iOS CTA를 표시하므로 독립적인 V5 build gate는 **NOT BUILT**다.

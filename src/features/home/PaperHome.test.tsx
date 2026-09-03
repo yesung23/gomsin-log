@@ -134,7 +134,7 @@ describe('Home 출시 상태 표현', () => {
     view();
 
     expect(screen.getByRole('heading', { name: '예성의 최근 기록' })).toBeInTheDocument();
-    expect(screen.getByText('오늘을 포함한 7일')).toBeInTheDocument();
+    expect(screen.queryByText('오늘을 포함한 7일')).not.toBeInTheDocument();
     expect(screen.getByText('최근 7일에 공유된 기록이 없어요')).toBeInTheDocument();
     expect(screen.queryByText('상대 정보를 확인하고 있어요')).not.toBeInTheDocument();
     expect(screen.queryByText('공유 정보를 아직 확인하지 못했어요')).not.toBeInTheDocument();
@@ -198,6 +198,18 @@ describe('Home 출시 상태 표현', () => {
     expect(story).not.toHaveTextContent(/\d/);
   });
 
+  it('지금 필요한 것은 설명 문단 없이 한 제목과 한 행동으로 보인다', () => {
+    partnerSurface = [records[0]];
+
+    view();
+
+    const focus = screen.getByRole('region', { name: '지금 가장 필요한 것' });
+    expect(within(focus).getByText('예성의 오늘')).toBeInTheDocument();
+    expect(within(focus).getByText('이어 보기')).toBeInTheDocument();
+    expect(within(focus).queryByText('상대의 오늘')).not.toBeInTheDocument();
+    expect(within(focus).queryByText(/하루를 이어서 볼 수/)).not.toBeInTheDocument();
+  });
+
   it('원문 보기라는 보이는 행동으로 정확히 인코딩된 기록을 연다', () => {
     records = [{
       ...records[0],
@@ -249,9 +261,11 @@ describe('Home 출시 상태 표현', () => {
 
     view();
 
-    const endpoint = screen.getByText('여기까지가 오늘을 포함한 7일이에요');
+    const feedRecord = screen.getByText('오늘 하루도 함께해줘서 고마워').closest('article');
     const memory = screen.getByText('내 지난 오늘');
-    expect(endpoint.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('여기까지가 오늘을 포함한 7일이에요')).not.toBeInTheDocument();
+    expect(feedRecord).not.toBeNull();
+    expect(feedRecord!.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(memory.closest('button')!);
     expect(navigate).toHaveBeenCalledWith('/record?record=memory%2Fone');
   });

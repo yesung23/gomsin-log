@@ -19,7 +19,8 @@ describe('Home current-need priority', () => {
       hasOwnRecordToday: false,
     })).toMatchObject({
       kind: 'care',
-      title: '오늘은 몸이 힘들어요',
+      title: '예성: 오늘은 몸이 힘들어요',
+      actionLabel: '보기',
       to: '/me',
     });
   });
@@ -32,6 +33,8 @@ describe('Home current-need priority', () => {
       hasOwnRecordToday: false,
     })).toMatchObject({
       kind: 'partner-day',
+      title: '예성의 오늘',
+      actionLabel: '이어 보기',
       to: '/story/partner',
     });
   });
@@ -43,6 +46,8 @@ describe('Home current-need priority', () => {
       hasOwnRecordToday: false,
     })).toMatchObject({
       kind: 'talk-about',
+      title: '이따 이야기할 것',
+      actionLabel: '모아보기',
       to: '/saved',
     });
   });
@@ -53,6 +58,8 @@ describe('Home current-need priority', () => {
       hasOwnRecordToday: false,
     })).toMatchObject({
       kind: 'compose',
+      title: '오늘 한 줄 남기기',
+      actionLabel: '쓰기',
       to: '/compose',
     });
   });

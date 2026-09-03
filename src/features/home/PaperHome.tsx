@@ -367,18 +367,13 @@ export function PaperHome() {
           <button
             type="button"
             onClick={() => navigate(focus.to)}
-            className="press-response flex min-h-[76px] w-full flex-wrap items-center gap-x-3 gap-y-1 py-3 text-left"
+            className="press-response flex min-h-[60px] w-full items-center gap-3 py-2 text-left"
           >
-            <span className="min-w-0 flex-1 basis-48">
-              <span className="block text-caption" style={{ color: 'var(--ink-soft)' }}>
-                {focus.eyebrow}
-              </span>
-              <span
-                className="mt-0.5 block break-words text-body font-semibold [overflow-wrap:anywhere]"
-                style={{ color: 'var(--ink)' }}
-              >
-                {focus.title}
-              </span>
+            <span
+              className="min-w-0 flex-1 break-words text-body font-semibold [overflow-wrap:anywhere]"
+              style={{ color: 'var(--ink)' }}
+            >
+              {focus.title}
             </span>
             <span className="ml-auto shrink-0 text-label font-semibold" style={{ color: 'var(--ink-accent)' }}>
               {focus.actionLabel}
@@ -398,9 +393,6 @@ export function PaperHome() {
             >
               {partnerName}의 최근 기록
             </h2>
-            <p className="mt-0.5 text-caption" style={{ color: 'var(--ink-soft)' }}>
-              오늘을 포함한 {FEED_DAYS}일
-            </p>
           </div>
 
           {feedStatus === 'empty' ? (
@@ -434,11 +426,6 @@ export function PaperHome() {
             ))
           )}
 
-          {feed.length > 0 ? (
-            <p className="px-4 py-4 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
-              여기까지가 오늘을 포함한 {FEED_DAYS}일이에요
-            </p>
-          ) : null}
         </section>
       ) : feedStatus ? (
         <p

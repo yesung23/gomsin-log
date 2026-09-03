@@ -5,7 +5,6 @@ export type HomeFocusKind = 'care' | 'partner-day' | 'talk-about' | 'compose';
 
 export interface HomeFocus {
   kind: HomeFocusKind;
-  eyebrow: string;
   title: string;
   actionLabel: string;
   to: '/me' | '/story/partner' | '/saved' | '/compose';
@@ -37,9 +36,8 @@ export function selectHomeFocus({
   if (careKind) {
     return {
       kind: 'care',
-      eyebrow: `${partnerName}의 오늘 쪽지`,
-      title: CYCLE_SUPPORT_LABEL[careKind],
-      actionLabel: '쪽지 보기',
+      title: `${partnerName}: ${CYCLE_SUPPORT_LABEL[careKind]}`,
+      actionLabel: '보기',
       to: '/me',
     };
   }
@@ -47,9 +45,8 @@ export function selectHomeFocus({
   if (hasPartnerDay) {
     return {
       kind: 'partner-day',
-      eyebrow: '상대의 오늘',
-      title: `${partnerName}의 하루를 이어서 볼 수 있어요`,
-      actionLabel: '보러 가기',
+      title: `${partnerName}의 오늘`,
+      actionLabel: '이어 보기',
       to: '/story/partner',
     };
   }
@@ -57,8 +54,7 @@ export function selectHomeFocus({
   if (hasTalkAboutMarks) {
     return {
       kind: 'talk-about',
-      eyebrow: '이따 이야기하기',
-      title: '모아둔 이야기를 통화 전에 가볍게 훑어보세요',
+      title: '이따 이야기할 것',
       actionLabel: '모아보기',
       to: '/saved',
     };
@@ -67,9 +63,8 @@ export function selectHomeFocus({
   if (!hasOwnRecordToday) {
     return {
       kind: 'compose',
-      eyebrow: '오늘의 한 줄',
-      title: '오늘 있었던 일을 가볍게 남겨볼까요',
-      actionLabel: '남기기',
+      title: '오늘 한 줄 남기기',
+      actionLabel: '쓰기',
       to: '/compose',
     };
   }

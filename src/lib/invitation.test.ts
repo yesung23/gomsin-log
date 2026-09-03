@@ -144,6 +144,30 @@ describe('createCoupleInvitation retry logic', () => {
     expect(mockRpc).toHaveBeenCalledTimes(5);
   });
 
+  it('uses the context-aware creation RPC only for an explicitly general couple', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'couple-general', error: null });
+
+    const result = await createCoupleInvitationOnline('gomsin', 'general');
+
+    expect(result.coupleId).toBe('couple-general');
+    expect(mockRpc).toHaveBeenCalledWith('create_couple_and_invitation_v2', {
+      p_role: 'gomsin',
+      p_code_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      p_relationship_context: 'general',
+    });
+  });
+
+  it('keeps the legacy military creation call compatible by default', async () => {
+    mockRpc.mockResolvedValueOnce({ data: 'couple-military', error: null });
+
+    await createCoupleInvitationOnline('soldier');
+
+    expect(mockRpc).toHaveBeenCalledWith('create_couple_and_invitation', {
+      p_role: 'soldier',
+      p_code_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+  });
+
   it('gives up after INVITATION_CODE_ATTEMPTS collisions', async () => {
     mockRpc.mockResolvedValue({ data: null, error: { code: '23505', message: 'duplicate' } });
 
@@ -225,6 +249,34 @@ describe('consumeCoupleInvitation with supabase configured', () => {
     consumeOnline = mod.consumeCoupleInvitation;
     resetForTest = mod.__resetInviteAttemptsForTest;
     resetForTest();
+  });
+
+  it('binds a general join attempt to the context-aware redemption RPC', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { ok: true, couple_id: 'couple-general', error_code: null },
+      error: null,
+    });
+
+    const result = await consumeOnline('123456', 'general');
+
+    expect(result.coupleId).toBe('couple-general');
+    expect(mockRpc).toHaveBeenCalledWith('redeem_invitation_v2', {
+      p_code_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      p_expected_relationship_context: 'general',
+    });
+  });
+
+  it('keeps the legacy military redemption call compatible by default', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { ok: true, couple_id: 'couple-military', error_code: null },
+      error: null,
+    });
+
+    await consumeOnline('123456');
+
+    expect(mockRpc).toHaveBeenCalledWith('redeem_invitation', {
+      p_code_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
   });
 
   /**

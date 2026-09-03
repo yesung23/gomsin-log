@@ -20,9 +20,22 @@ import {
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { classifyServerError } from '@/lib/serverErrors';
 import { appleLoginEnabled } from '@/lib/appleLoginFeature';
+import { isGeneralCoupleOnboardingEnabled } from '@/lib/generalCoupleGate';
+import {
+  parseGenderIdentity,
+  resolveRelationshipContext,
+  usesMilitaryFeatures,
+} from '@/lib/relationshipContext';
 
 import { toast } from 'sonner';
-import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
+import type {
+  Role,
+  Branch,
+  MilitaryStatus,
+  DischargeDateSource,
+  GenderIdentity,
+  RelationshipContext,
+} from '@/types';
 import { addMonths } from '@/lib/utils';
 
 function isAbortError(error: unknown): boolean {
@@ -156,6 +169,11 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
   const socialLoginInFlightRef = useRef(false);
   const [role, setRole] = useState<Role>('gomsin');
+  const [relationshipContext, setRelationshipContext] = useState<RelationshipContext>(() =>
+    resolveRelationshipContext(state.profile.couple.relationshipContext) ?? 'military');
+  const [genderIdentity, setGenderIdentity] = useState<GenderIdentity | undefined>(() =>
+    parseGenderIdentity(state.profile.genderIdentity));
+  const generalCoupleOnboardingEnabled = isGeneralCoupleOnboardingEnabled();
   const [nickname, setNickname] = useState('');
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
   const [createdCoupleId, setCreatedCoupleId] = useState('');
@@ -265,7 +283,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     a learned pattern). A 곰신 who was never asked would fall back to the
     schema default, which was written for a soldier's day.
   */
-  const totalSteps = role === 'gomsin' ? 5 : 6;
+  const totalSteps = usesMilitaryFeatures(relationshipContext) && role === 'soldier' ? 6 : 5;
 
   // Handle Google OAuth Login
   const handleGoogleLogin = async () => {
@@ -355,6 +373,24 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     }
 
     const existing = lifecycleResult.state;
+    const authoritativeRelationshipContext = resolveRelationshipContext(
+      existing.relationshipContext,
+    );
+    const isValidRole = existing.role === 'gomsin' || existing.role === 'soldier';
+    if (!authoritativeRelationshipContext || !isValidRole) {
+      toast.error('이미 만들어진 커플 공간의 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return { ok: false, mintedCode: false };
+    }
+
+    // A relationship generation is server-owned and immutable. Onboarding may
+    // have restarted with a stale local choice, so adopt the authoritative mode
+    // before deciding which remaining steps apply.
+    setRelationshipContext(authoritativeRelationshipContext);
+    setRole(existing.role as Role);
+    if (usesMilitaryFeatures(authoritativeRelationshipContext)) {
+      setGenderIdentity(undefined);
+    }
+
     if (existing.partnerPresent) {
       // Already connected: there is nothing to invite anyone to.
       setCreatedCoupleId(existing.coupleId!);
@@ -470,7 +506,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       if (spaceMode === 'create' && !createdInviteCode && !createdCoupleId) {
         setIsGeneratingCode(true);
         try {
-          const res = await createCoupleInvitation(role);
+          const res = await createCoupleInvitation(role, relationshipContext);
           if (!isCurrentIdentity(identity)) return;
           if (res.error || !res.coupleId || !res.code) {
             // `User already in an active couple` is not a dead end: the couple
@@ -513,7 +549,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           }
           setIsVerifyingCode(true);
           try {
-            const res = await consumeCoupleInvitation(cleanCode);
+            const res = await consumeCoupleInvitation(cleanCode, relationshipContext);
             if (!isCurrentIdentity(identity)) return;
             if (res.error || !res.coupleId) {
               // The server can report that the SESSION, not the code, is the
@@ -546,10 +582,15 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
           const serverState = lifecycleResult.state;
           const isValidRole = serverState.role === 'gomsin' || serverState.role === 'soldier';
+          const authoritativeRelationshipContext = resolveRelationshipContext(
+            serverState.relationshipContext,
+          );
           if (
             serverState.coupleId !== targetCoupleId
             || serverState.memberStatus !== 'active'
             || !isValidRole
+            || !authoritativeRelationshipContext
+            || authoritativeRelationshipContext !== relationshipContext
             || !serverState.partnerPresent
           ) {
             toast.error('커플 공간 정보가 올바르지 않습니다. 다시 시도해 주세요.');
@@ -558,6 +599,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
           const authoritativeRole = serverState.role as Role;
           setRole(authoritativeRole);
+          setRelationshipContext(authoritativeRelationshipContext);
 
           if (supabase) {
             try {
@@ -571,7 +613,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             } catch {}
           }
           toast.success('커플 공간 연결 성공!');
-          if (authoritativeRole === 'soldier') {
+          if (usesMilitaryFeatures(authoritativeRelationshipContext) && authoritativeRole === 'soldier') {
             setStep(5);
           } else {
             setStep(6);
@@ -594,7 +636,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
     // 곰신 skips 복무 정보 (step 5) only. Step 6 asks when they want to hear
     // from the app, which is a question for both roles.
-    if (role === 'gomsin' && step === 4) {
+    if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 4) {
       setStep(6);
       return;
     }
@@ -606,11 +648,8 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   };
 
   const handleBack = () => {
-    if (role === 'gomsin' && step === 6) {
-      setStep(4);
-      if (spaceMode === 'join') {
-        setStep(3);
-      }
+    if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 6) {
+      setStep(spaceMode === 'join' ? 3 : 4);
       return;
     }
     if (role === 'soldier' && step === 6) {
@@ -754,11 +793,21 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
         const authState = authorityResult.state;
         const isValidRole = authState.role === 'gomsin' || authState.role === 'soldier';
+        const authoritativeRelationshipContext = resolveRelationshipContext(
+          authState.relationshipContext,
+        );
         const isTargetCouple = !!createdCoupleId && authState.coupleId === createdCoupleId;
         const isActiveMember = authState.memberStatus === 'active';
         const isPartnerValid = spaceMode === 'create' ? true : authState.partnerPresent;
 
-        if (!isTargetCouple || !isActiveMember || !isValidRole || !isPartnerValid) {
+        if (
+          !isTargetCouple
+          || !isActiveMember
+          || !isValidRole
+          || !authoritativeRelationshipContext
+          || authoritativeRelationshipContext !== relationshipContext
+          || !isPartnerValid
+        ) {
           toast.error('커플 정보가 올바르지 않습니다. 다시 확인해 주세요.');
           return;
         }
@@ -790,7 +839,9 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           id: userId,
           display_name: finalNickname,
           role: authoritativeRole,
-          military_info: military,
+          ...(usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? { military_info: military }
+            : { gender_identity: genderIdentity ?? null }),
           onboarding_completed_at: nowIso,
           updated_at: nowIso,
         });
@@ -836,10 +887,14 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
         await updateProfile({
           myName: finalNickname,
           role: authoritativeRole,
+          ...(usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? { genderIdentity: undefined }
+            : { genderIdentity }),
           onboardingCompletedAt: nowIso,
           couple: {
             ...state.profile.couple,
             coupleId: createdCoupleId || undefined,
+            relationshipContext: authoritativeRelationshipContext,
             // No invented partner name: it is filled in for real once the partner joins.
             partnerName: joinedPartnerName || '',
             anniversaryDate: spaceMode === 'create' ? anniversaryDate : undefined,
@@ -848,7 +903,9 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             connected: authoritativePartnerPresent,
             status: authoritativePartnerPresent ? 'active' : 'pending',
           },
-          military,
+          military: usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? military
+            : state.profile.military,
           contact,
         }, { persist: false });
 
@@ -859,7 +916,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           );
         }
         setSetupComplete(true);
-        if (authoritativeRole === 'gomsin' && navigate) {
+        if ((!usesMilitaryFeatures(authoritativeRelationshipContext) || authoritativeRole === 'gomsin') && navigate) {
           navigate('/compose');
         }
       }
@@ -1125,11 +1182,17 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   <h2 className="text-title">곰신로그를 어떻게 사용할까요?</h2>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-3" role="group" aria-label="사용 방식">
                   <button
-                    onClick={() => setRole('gomsin')}
+                    type="button"
+                    aria-pressed={relationshipContext === 'military' && role === 'gomsin'}
+                    onClick={() => {
+                      setRelationshipContext('military');
+                      setGenderIdentity(undefined);
+                      setRole('gomsin');
+                    }}
                     className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
-                      role === 'gomsin'
+                      relationshipContext === 'military' && role === 'gomsin'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
@@ -1144,9 +1207,15 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   </button>
 
                   <button
-                    onClick={() => setRole('soldier')}
+                    type="button"
+                    aria-pressed={relationshipContext === 'military' && role === 'soldier'}
+                    onClick={() => {
+                      setRelationshipContext('military');
+                      setGenderIdentity(undefined);
+                      setRole('soldier');
+                    }}
                     className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
-                      role === 'soldier'
+                      relationshipContext === 'military' && role === 'soldier'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
@@ -1159,6 +1228,70 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                       <div className="text-caption text-muted-foreground mt-1">상대의 오늘을 이어 봐요</div>
                     </div>
                   </button>
+
+                  {generalCoupleOnboardingEnabled && (
+                    <>
+                      <button
+                        type="button"
+                        aria-pressed={relationshipContext === 'general'}
+                        onClick={() => {
+                          setRelationshipContext('general');
+                          // The existing two-value role remains an internal
+                          // membership slot. It is never presented as identity in
+                          // general-couple mode.
+                          setRole('gomsin');
+                        }}
+                        className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
+                          relationshipContext === 'general'
+                            ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
+                            : 'border-border bg-card'
+                        }`}
+                      >
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                          <CoupleAvatar size={42} />
+                        </span>
+                        <div className="flex-1">
+                          <div className="text-heading text-foreground">저는 곰신 커플이 아니에요</div>
+                          <div className="text-caption text-muted-foreground mt-1">군 관련 화면 없이 함께 기록해요</div>
+                        </div>
+                      </button>
+
+                      {relationshipContext === 'general' && (
+                        <div role="group" aria-label="성별" className="grid grid-cols-2 gap-2 rounded-surface border border-border bg-muted/30 p-3">
+                          {([
+                            ['woman', '여성이에요'],
+                            ['man', '남성이에요'],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={genderIdentity === value}
+                              onClick={() => setGenderIdentity(value)}
+                              className={`press-response-row min-h-11 rounded-control border px-3 text-label font-semibold ${
+                                genderIdentity === value
+                                  ? 'border-coral bg-coral/10 text-foreground'
+                                  : 'border-border bg-card text-muted-foreground'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            aria-pressed={genderIdentity === undefined}
+                            onClick={() => setGenderIdentity(undefined)}
+                            className={`press-response-row col-span-2 min-h-11 rounded-control border px-3 text-label font-semibold ${
+                              genderIdentity === undefined
+                                ? 'border-coral bg-coral/10 text-foreground'
+                                : 'border-border bg-card text-muted-foreground'
+                            }`}
+                          >
+                            답하지 않을래요
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1222,7 +1355,9 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                         ? 'onboarding-nickname-error'
                         : undefined
                     }
-                    placeholder={role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
+                    placeholder={relationshipContext === 'general'
+                      ? '예) 하루'
+                      : role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
                     maxLength={12}
                     className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
@@ -1463,7 +1598,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           )}
 
           {/* STEP 5: Military Info (Soldier ONLY) */}
-          {step === 5 && role === 'soldier' && (
+          {step === 5 && usesMilitaryFeatures(relationshipContext) && role === 'soldier' && (
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
@@ -1577,12 +1712,12 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     each person's notification inside their own window.
                   */}
                   <h2 className="text-title">
-                    {role === 'soldier'
+                    {usesMilitaryFeatures(relationshipContext) && role === 'soldier'
                       ? '주로 언제 오늘의 로그를 확인할 수 있나요?'
                       : '언제 알려드리면 좋을까요?'}
                   </h2>
                   <p className="text-body text-muted-foreground mt-1">
-                    {role === 'soldier'
+                    {usesMilitaryFeatures(relationshipContext) && role === 'soldier'
                       ? '이 시간에만 알림을 보내드려요. 상대의 로그 표시에도 함께 쓰여요.'
                       : '이 시간 밖에서는 알리지 않아요. 하루에 한 번을 넘지 않고, 내용은 담기지 않아요.'}
                   </p>
@@ -1670,7 +1805,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 disabled={isFinishing}>
                 {isFinishing
                   ? '저장 중...'
-                  : role === 'gomsin'
+                  : !usesMilitaryFeatures(relationshipContext) || role === 'gomsin'
                     ? '오늘의 첫 순간 남기기'
                     : '오늘의 로그 기다리기'}
               </Button>

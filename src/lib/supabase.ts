@@ -15,7 +15,7 @@ import {
   type ServerErrorKind,
 } from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
-import type { AuthUser, IAuthRepository, Role } from '@/types';
+import type { AuthUser, IAuthRepository, RelationshipContext, Role } from '@/types';
 import { createPkceTimeoutFetch } from '@/lib/oauthPkce';
 import { appleLoginEnabled } from '@/lib/appleLoginFeature';
 
@@ -229,7 +229,10 @@ function isAlreadyInCoupleMessage(message?: string): boolean {
 /**
  * Create a new couple in Supabase and generate invitation code via RPC.
  */
-export async function createCoupleInvitation(role: Role): Promise<{
+export async function createCoupleInvitation(
+  role: Role,
+  relationshipContext: RelationshipContext = 'military',
+): Promise<{
   coupleId: string;
   code: string;
   error?: string;
@@ -264,10 +267,20 @@ export async function createCoupleInvitation(role: Role): Promise<{
       const codeHash = await hashInvitationCode(code);
 
       // Atomic SECURITY DEFINER RPC creating couple, member and invitation.
-      const { data: coupleIdData, error: rpcError } = await supabase.rpc('create_couple_and_invitation', {
-        p_role: role,
-        p_code_hash: codeHash,
-      });
+      const creationRpc = relationshipContext === 'general'
+        ? 'create_couple_and_invitation_v2'
+        : 'create_couple_and_invitation';
+      const creationArgs = relationshipContext === 'general'
+        ? {
+            p_role: role,
+            p_code_hash: codeHash,
+            p_relationship_context: relationshipContext,
+          }
+        : { p_role: role, p_code_hash: codeHash };
+      const { data: coupleIdData, error: rpcError } = await supabase.rpc(
+        creationRpc,
+        creationArgs,
+      );
 
       if (!rpcError) return { coupleId: coupleIdData as string, code };
       if (isInvitationCodeCollision(rpcError) && attempt < INVITATION_CODE_ATTEMPTS) continue;
@@ -418,9 +431,10 @@ function invitationErrorVerdict(
   }
 }
 
-/** Consume an invitation through migration 015's sole authenticated API. */
+/** Consume an invitation through the server-owned authenticated RPC boundary. */
 export async function consumeCoupleInvitation(
   code: string,
+  expectedRelationshipContext: RelationshipContext = 'military',
 ): Promise<{ coupleId?: string; error?: string; reason?: ServerErrorKind }> {
   const normalized = code.trim();
   if (!/^\d{6}$/.test(normalized)) {
@@ -443,7 +457,16 @@ export async function consumeCoupleInvitation(
     if (await serverCallBlockedByPendingDeletion()) {
       return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 사용할 수 없어요.' };
     }
-    const { data, error } = await supabase.rpc('redeem_invitation', { p_code_hash: codeHash });
+    const redemptionRpc = expectedRelationshipContext === 'general'
+      ? 'redeem_invitation_v2'
+      : 'redeem_invitation';
+    const redemptionArgs = expectedRelationshipContext === 'general'
+      ? {
+          p_code_hash: codeHash,
+          p_expected_relationship_context: expectedRelationshipContext,
+        }
+      : { p_code_hash: codeHash };
+    const { data, error } = await supabase.rpc(redemptionRpc, redemptionArgs);
 
     if (error) {
       if (error.code === 'PGRST202') {

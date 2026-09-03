@@ -76,6 +76,7 @@ const ROLE_STEP = '곰신로그를 어떻게 사용할까요?';
 describe('onboarding entry step', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'true');
+    vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'false');
     setOnboardingStep.mockClear();
     state.authenticatedUser = null;
     state.onboardingStep = 0;
@@ -174,6 +175,37 @@ describe('onboarding entry step', () => {
     // The defect: this rendered the landing screen, and there was no way forward.
     await waitFor(() => expect(screen.queryByText(SIGN_IN_CTA)).not.toBeInTheDocument());
     expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+  });
+
+  it('keeps the general-couple path hidden until its reviewed build gate is on', async () => {
+    state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /곰신 커플이 아니에요/ })).not.toBeInTheDocument();
+  });
+
+  it('lets a general couple answer optional gender and continue without military wording', async () => {
+    vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'true');
+    state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
+    const user = (await import('@testing-library/user-event')).default.setup();
+
+    render(<OnboardingPage />);
+
+    await user.click(await screen.findByRole('button', { name: /곰신 커플이 아니에요/ }));
+    const genderGroup = screen.getByRole('group', { name: '성별' });
+    expect(genderGroup).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '여성이에요' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '남성이에요' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '답하지 않을래요' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: '여성이에요' }));
+    expect(screen.getByRole('button', { name: '여성이에요' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '다음' }));
+
+    expect(await screen.findByText('어떻게 불러드리면 될까요?')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('예) 하루')).toBeInTheDocument();
   });
 
   it('advances a visitor who signs in while the landing screen is open', async () => {

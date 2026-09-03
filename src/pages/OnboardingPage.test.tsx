@@ -94,7 +94,14 @@ const storeState = {
   profile: {
     myName: '',
     role: 'gomsin' as const,
-    couple: { partnerName: '', coupleCode: '', connected: false, status: 'pending' as const },
+    genderIdentity: undefined as 'woman' | 'man' | undefined,
+    couple: {
+      partnerName: '',
+      coupleCode: '',
+      connected: false,
+      status: 'pending' as const,
+      relationshipContext: 'military' as 'military' | 'general',
+    },
     military: {},
     contact: {},
   },
@@ -132,6 +139,7 @@ function clickNext() {
 
 describe('OnboardingPage step 3 - couple space', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'false');
     toastCalls.length = 0;
     profileUpserts.length = 0;
     contactUpserts.length = 0;
@@ -140,6 +148,8 @@ describe('OnboardingPage step 3 - couple space', () => {
     setSetupComplete.mockReset();
     mockNavigate.mockReset();
     storeState.profile.myName = '';
+    storeState.profile.genderIdentity = undefined;
+    storeState.profile.couple.relationshipContext = 'military';
     createCoupleInvitation.mockReset();
     consumeCoupleInvitation.mockReset();
     recoverExpiredSession.mockReset().mockResolvedValue(true);
@@ -153,6 +163,10 @@ describe('OnboardingPage step 3 - couple space', () => {
     regenerateCoupleInvitation.mockReset();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
     vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('does not render a code-entry input while in create mode', async () => {
@@ -243,6 +257,48 @@ describe('OnboardingPage step 3 - couple space', () => {
     expect(toastCalls.some((call) => call.message.includes('이미 만든 공간을 찾아'))).toBe(true);
     // The raw RPC message never reaches the user.
     expect(toastCalls.every((call) => !call.message.includes('already in an active couple'))).toBe(true);
+  });
+
+  it('adopts the server relationship mode and role when an interrupted creator resumes', async () => {
+    // The user may choose a different mode after onboarding restarts, but an
+    // existing couple generation is authoritative and immutable.
+    storeState.profile.couple.relationshipContext = 'general';
+    createCoupleInvitation.mockResolvedValue({
+      coupleId: '',
+      code: '',
+      error: 'User already in an active couple',
+      reason: 'already_in_couple',
+    });
+    fetchMyCoupleState.mockResolvedValue({
+      ok: true,
+      state: {
+        coupleId: 'couple-existing',
+        relationshipContext: 'military',
+        role: 'soldier',
+        memberStatus: 'active',
+        partnerPresent: false,
+        invitationActive: false,
+        invitationExpiresAt: null,
+      },
+    });
+    regenerateCoupleInvitation.mockResolvedValue({ code: '654321' });
+
+    await mountStep3();
+    await act(async () => { clickNext(); });
+    await waitFor(() => expect(screen.getByText('654321')).toBeInTheDocument());
+
+    // Continue through the anniversary step. The server-owned military/soldier
+    // mode must restore the service step instead of following the stale local
+    // general-couple choice.
+    await act(async () => { clickNext(); });
+    await waitFor(() =>
+      expect(screen.getByText('둘은 언제부터 함께였나요?')).toBeInTheDocument(),
+    );
+    await act(async () => { clickNext(); });
+
+    await waitFor(() =>
+      expect(screen.getByText('복무 정보를 알려주세요.')).toBeInTheDocument(),
+    );
   });
 
   it('renders the invitation expiry next to a recovered code', async () => {
@@ -848,6 +904,65 @@ describe('OnboardingPage step 3 - couple space', () => {
   });
 
   describe('Security and authority state enforcement', () => {
+    it('keeps a general-couple joiner out of military onboarding and persists only optional identity', async () => {
+      vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'true');
+      storeState.onboardingStep = 1;
+      render(<OnboardingPage />);
+      await waitFor(() => expect(screen.getByText('곰신로그를 어떻게 사용할까요?')).toBeInTheDocument());
+
+      await act(async () => { screen.getByText('저는 곰신 커플이 아니에요').click(); });
+      await act(async () => { screen.getByRole('button', { name: '여성이에요' }).click(); });
+      await act(async () => { clickNext(); });
+
+      await waitFor(() => expect(screen.getByText('어떻게 불러드리면 될까요?')).toBeInTheDocument());
+      fireEvent.change(screen.getByLabelText(/내 닉네임/), { target: { value: '일반커플' } });
+      await act(async () => { clickNext(); });
+
+      await waitFor(() => expect(screen.getByText('우리 둘만의 로그를 시작해볼까요?')).toBeInTheDocument());
+      await act(async () => { screen.getByText('초대 코드가 있어요').click(); });
+      fireEvent.change(screen.getByLabelText('숫자 6자리 초대 코드'), { target: { value: '778899' } });
+      consumeCoupleInvitation.mockResolvedValue({ coupleId: 'couple-general' });
+      fetchMyCoupleState.mockResolvedValue({
+        ok: true,
+        state: {
+          coupleId: 'couple-general',
+          relationshipContext: 'general',
+          // This remains an internal membership slot and must not turn the UI
+          // into a military journey.
+          role: 'soldier',
+          memberStatus: 'active',
+          partnerPresent: true,
+          invitationActive: false,
+          invitationExpiresAt: null,
+        },
+      });
+      await act(async () => { clickNext(); });
+
+      expect(consumeCoupleInvitation).toHaveBeenCalledWith('778899', 'general');
+      await waitFor(() => expect(screen.getByText('언제 알려드리면 좋을까요?')).toBeInTheDocument());
+      expect(screen.queryByText('복무 정보를 알려주세요.')).not.toBeInTheDocument();
+
+      await act(async () => { screen.getByRole('button', { name: '완료하기' }).click(); });
+      await waitFor(() => expect(screen.getByText('우리 둘만의 곰신로그가 준비됐어요.')).toBeInTheDocument());
+      await act(async () => { screen.getByRole('button', { name: '오늘의 첫 순간 남기기' }).click(); });
+
+      await waitFor(() => expect(setSetupComplete).toHaveBeenCalledWith(true));
+      expect(profileUpserts).toHaveLength(1);
+      expect(profileUpserts[0]).toMatchObject({
+        role: 'soldier',
+        gender_identity: 'woman',
+      });
+      expect(profileUpserts[0]).not.toHaveProperty('military_info');
+      const updatedProfile = updateProfile.mock.calls[0][0] as {
+        genderIdentity?: string;
+        couple: { relationshipContext?: string };
+      };
+      expect(updatedProfile.genderIdentity).toBe('woman');
+      expect(updatedProfile.couple.relationshipContext).toBe('general');
+      expect(mockNavigate).toHaveBeenCalledWith('/compose');
+      storeState.onboardingStep = 3;
+    });
+
     it('saves authoritative server role and advances to step 5 for soldier joiner even if local role was gomsin', async () => {
       consumeCoupleInvitation.mockResolvedValue({ coupleId: 'couple-server-soldier' });
       fetchMyCoupleState.mockResolvedValue({

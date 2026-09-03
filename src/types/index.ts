@@ -459,6 +459,8 @@ export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
 
 export interface CoupleInfo {
   coupleId?: string;
+  /** Product mode chosen when this immutable relationship generation was created. */
+  relationshipContext?: RelationshipContext;
   /** Active membership에서 직접 확인한 현재 상대 계정 ID. 온디바이스 privacy gate에 사용한다. */
   partnerUserId?: string;
   partnerName: string;
@@ -488,6 +490,8 @@ export interface UserProfile {
   id?: string;               // Auth UID
   myName: string;
   role: Role;
+  /** Optional owner-only self-description. Never used for authorization or feature access. */
+  genderIdentity?: GenderIdentity;
   avatarPath?: string;
   username?: string;
   profileCaption?: string;

@@ -1,4 +1,5 @@
-import type { CoupleInfo } from '@/types';
+import type { CoupleInfo, RelationshipContext } from '@/types';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 /**
  * The five states a couple space can actually be in, as the USER experiences it.
@@ -35,6 +36,7 @@ export type CoupleLifecycle =
  */
 export type RemoteCoupleState = {
   coupleId: string | null;
+  relationshipContext: RelationshipContext;
   role: string | null;
   memberStatus: string | null;
   partnerPresent: boolean;
@@ -51,9 +53,12 @@ export function parseRemoteCoupleState(value: unknown): RemoteCoupleState | null
   if (!('couple_id' in row)) return null;
   const coupleId = row.couple_id;
   if (coupleId !== null && typeof coupleId !== 'string') return null;
+  const relationshipContext = resolveRelationshipContext(row.relationship_context);
+  if (!relationshipContext) return null;
   const expiresAt = row.invitation_expires_at;
   return {
     coupleId: coupleId ?? null,
+    relationshipContext,
     role: typeof row.role === 'string' ? row.role : null,
     memberStatus: typeof row.member_status === 'string' ? row.member_status : null,
     partnerPresent: row.partner_present === true,
@@ -118,6 +123,7 @@ export function mergeCoupleState(
     delete cleared.partnerUserId;
     delete cleared.partnerJoinedAt;
     delete cleared.partnerMilitary;
+    delete cleared.relationshipContext;
     return {
       ...cleared,
       coupleId: undefined,
@@ -153,6 +159,7 @@ export function mergeCoupleState(
   return {
     ...base,
     coupleId: remote.coupleId,
+    relationshipContext: remote.relationshipContext,
     // The partner's display name comes from `get_partner_profile`, not from here.
     partnerName: remote.partnerPresent ? local.partnerName : '',
     coupleCode: keepCode ? local.coupleCode : '',

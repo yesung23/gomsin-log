@@ -13,7 +13,9 @@ import {
 import { useDialogFocus } from '@/lib/useDialogFocus';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import { cn } from '@/lib/utils';
+import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
 import {
+  GARDEN_COMPANION_LABELS,
   GARDEN_ACCESSORY_OPTIONS,
   type GardenAccessory,
   type GardenAccessoryState,
@@ -22,13 +24,14 @@ import {
 import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import { GardenAccessoryArt } from './GardenAccessoryArt';
 import { isSourceAccessory } from './gardenAccessoryCrops';
+import { gardenCharacterSourceViewBox } from './gardenCharacterCrops';
 
 export type GardenMoveDirection = 'up' | 'down' | 'left' | 'right';
 export type GardenCareAction = 'pet' | 'wave' | 'play';
 
 const COMPANION_LABELS: Record<GardenCompanionId, string> = {
-  peach: '첫째',
-  sage: '둘째',
+  peach: GARDEN_COMPANION_LABELS.peach,
+  sage: GARDEN_COMPANION_LABELS.sage,
 };
 
 const DIRECTION_LABELS: Record<GardenMoveDirection, string> = {
@@ -164,12 +167,20 @@ export function CompanionGardenActionSheet({
                 onSelectCompanion(id);
               }}
               className={cn(
-                'press-response min-h-11 rounded-control border px-3 text-label font-semibold',
+                'press-response flex min-h-11 items-center gap-2 rounded-control border px-3 text-label font-semibold',
                 companion === id
                   ? 'border-coral-strong bg-coral-fill text-coral-fill-foreground'
                   : 'border-border text-foreground',
               )}
             >
+              <svg
+                data-testid={`garden-selector-portrait-${id}`}
+                viewBox={gardenCharacterSourceViewBox(id)}
+                className="h-9 w-8 shrink-0"
+                aria-hidden="true"
+              >
+                <image href={paperPairAsset} width="1254" height="1254" pointerEvents="none" />
+              </svg>
               {COMPANION_LABELS[id]} 친구
             </button>
           ))}

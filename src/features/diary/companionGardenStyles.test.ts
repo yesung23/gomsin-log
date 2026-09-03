@@ -37,7 +37,18 @@ describe('companion garden motion CSS', () => {
     expect(css).not.toContain('@keyframes garden-body-shake');
     expect(css).not.toMatch(/.garden-companion-(?:control|lifted|body)[^{]*{[^}]*animation:[^}]*shake/i);
     expect(css).not.toMatch(/\.garden-companion-lifted\s*\{[^}]*animation:/i);
-    expect(css).toMatch(/\.garden-limb\s*\{[^}]*background-color:\s*var\(--garden-character-paper\)[^}]*border:/s);
+    expect(css).not.toContain('.garden-limb');
+    expect(css).toContain('.garden-pixel-limb');
+    expect(css).toContain('@keyframes garden-run');
+    expect(css).toContain('@keyframes garden-shy');
+    expect(css).toContain('@keyframes garden-shy-arm-left');
+    expect(css).toContain('@keyframes garden-shy-arm-right');
+    expect(css).toContain('.garden-motion-run');
+    expect(css).toContain('.garden-motion-shy');
+    expect(css).toMatch(/@keyframes garden-walk-arm-left[\s\S]*?rotate\(-22deg\)[\s\S]*?rotate\(22deg\)/);
+    expect(css).toMatch(/@keyframes garden-walk-arm-right[\s\S]*?rotate\(22deg\)[\s\S]*?rotate\(-22deg\)/);
+    expect(css).toMatch(/@keyframes garden-walk-leg-left[\s\S]*?rotate\(18deg\)[\s\S]*?rotate\(-18deg\)/);
+    expect(css).toMatch(/@keyframes garden-walk-leg-right[\s\S]*?rotate\(-18deg\)[\s\S]*?rotate\(18deg\)/);
   });
 
   it('turns autonomous visual motion off for reduced-motion users', () => {
@@ -51,17 +62,20 @@ describe('companion garden motion CSS', () => {
     expect(reduced).toContain('transition: none');
     expect(reduced).not.toMatch(/\.garden-companion-position\s*\{[^}]*transition:\s*none/s);
     expect(reduced).toContain('.accessory-roulette-spinning');
-    expect(reduced).toContain('.garden-care-reaction');
+    expect(reduced).toContain('.garden-pixel-limb');
+    expect(reduced).toMatch(/\.garden-motion-shy \.garden-companion-body\s*\{[^}]*transform:/s);
+    expect(reduced).toMatch(/\.garden-motion-shy \.garden-pixel-limb-arm-left\s*\{[^}]*transform:/s);
   });
 
-  it('defines distinct nurturing reactions without introducing a persistent score surface', () => {
+  it('defines distinct nurturing reactions without floating glyphs or a persistent score surface', () => {
     expect(css).toContain('@keyframes garden-care-pet');
     expect(css).toContain('@keyframes garden-care-wave-arm');
     expect(css).toContain('@keyframes garden-care-play');
-    expect(css).toContain('@keyframes garden-care-symbol');
     expect(css).toContain('.garden-care-pet');
     expect(css).toContain('.garden-care-wave');
     expect(css).toContain('.garden-care-play');
+    expect(css).not.toContain('.garden-care-reaction');
+    expect(css).not.toContain('@keyframes garden-care-symbol');
     expect(css).not.toContain('.garden-care-meter');
     expect(css).not.toContain('.garden-care-score');
   });

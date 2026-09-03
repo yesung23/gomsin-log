@@ -4,6 +4,7 @@ import {
   GARDEN_AUTONOMOUS_DISTANCE_PX,
   GARDEN_AUTONOMOUS_SPEED_PX_PER_SECOND,
   GARDEN_BOUNDS,
+  GARDEN_CLOSE_ENCOUNTER_DISTANCE_PX,
   GARDEN_COMPANION_SIZE,
   GARDEN_DESTINATION_MEMORY_RADIUS_PX,
   GARDEN_IDLE_DURATION_MS,
@@ -51,12 +52,17 @@ function expectPointInside(point: GardenPoint, width: number, height: number) {
 
 describe('companion garden pair geometry', () => {
   it('keeps the full rendered companion body inside the scene', () => {
-    expect(GARDEN_COMPANION_SIZE).toEqual({ width: 49, height: 56, gap: 4 });
+    expect(GARDEN_COMPANION_SIZE).toEqual({ width: 72, height: 76, gap: 4 });
     const bounds = getPhysicalGardenBounds(320, 141, GARDEN_BOUNDS);
     expect(bounds).not.toBeNull();
     expect(bounds!.minX).toBeGreaterThanOrEqual(GARDEN_BOUNDS.minX);
     expect(bounds!.maxX).toBeLessThanOrEqual(GARDEN_BOUNDS.maxX);
     expect(bounds!.minY).toBeLessThanOrEqual(bounds!.maxY);
+  });
+
+  it('only treats an actual near-touch as a shy encounter', () => {
+    expect(GARDEN_CLOSE_ENCOUNTER_DISTANCE_PX).toBe(88);
+    expect(GARDEN_CLOSE_ENCOUNTER_DISTANCE_PX).toBeLessThan(96);
   });
 
   it('detects overlap using the supplied rendered footprints', () => {

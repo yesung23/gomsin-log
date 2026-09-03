@@ -17,6 +17,12 @@ export interface GardenAccessoryState {
   sage: GardenAccessory;
 }
 
+export interface GardenLocalState {
+  version: 2;
+  planted: boolean;
+  accessories: GardenAccessoryState;
+}
+
 export const GARDEN_ACCESSORY_OPTIONS: readonly { id: GardenAccessory; label: string }[] = [
   { id: 'none', label: '없음' },
   { id: 'cap', label: '모자' },
@@ -36,6 +42,17 @@ export const DEFAULT_GARDEN_ACCESSORIES: GardenAccessoryState = {
   sage: 'none',
 };
 
+export const DEFAULT_GARDEN_STATE: GardenLocalState = {
+  version: 2,
+  planted: false,
+  accessories: DEFAULT_GARDEN_ACCESSORIES,
+};
+
+export const GARDEN_COMPANION_LABELS: Record<GardenCompanionId, string> = {
+  peach: '살구',
+  sage: '초록',
+};
+
 const VALID_ACCESSORIES = new Set<GardenAccessory>(GARDEN_ACCESSORY_OPTIONS.map(({ id }) => id));
 const KEY_PREFIX = 'gomsin.diary.garden.';
 
@@ -53,21 +70,66 @@ function freshDefault(): GardenAccessoryState {
   return { ...DEFAULT_GARDEN_ACCESSORIES };
 }
 
-export function loadGardenAccessories(userId: string): GardenAccessoryState {
-  if (!userId || typeof localStorage === 'undefined') return freshDefault();
+function freshGardenState(): GardenLocalState {
+  return {
+    version: 2,
+    planted: false,
+    accessories: freshDefault(),
+  };
+}
+
+function parseAccessories(value: unknown): GardenAccessoryState {
+  if (!value || typeof value !== 'object') return freshDefault();
+  const parsed = value as Record<string, unknown>;
+  return {
+    version: 1,
+    peach: validAccessory(parsed.peach),
+    sage: validAccessory(parsed.sage),
+  };
+}
+
+export function loadGardenState(userId: string): GardenLocalState {
+  if (!userId || typeof localStorage === 'undefined') return freshGardenState();
   try {
     const raw = localStorage.getItem(key(userId));
-    if (!raw) return freshDefault();
+    if (!raw) return freshGardenState();
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (!parsed || typeof parsed !== 'object' || parsed.version !== 1) return freshDefault();
+    if (!parsed || typeof parsed !== 'object') return freshGardenState();
+    if (parsed.version === 1) {
+      return {
+        version: 2,
+        planted: true,
+        accessories: parseAccessories(parsed),
+      };
+    }
+    if (parsed.version !== 2) return freshGardenState();
     return {
-      version: 1,
-      peach: validAccessory(parsed.peach),
-      sage: validAccessory(parsed.sage),
+      version: 2,
+      planted: parsed.planted === true,
+      accessories: parseAccessories(parsed.accessories),
     };
   } catch {
-    return freshDefault();
+    return freshGardenState();
   }
+}
+
+export function saveGardenPlanting(userId: string): GardenLocalState {
+  if (!userId || typeof localStorage === 'undefined') return freshGardenState();
+  const current = loadGardenState(userId);
+  if (current.planted) return current;
+  const next: GardenLocalState = { ...current, planted: true };
+  try {
+    const serialized = JSON.stringify(next);
+    localStorage.setItem(key(userId), serialized);
+    if (localStorage.getItem(key(userId)) !== serialized) return current;
+  } catch {
+    return current;
+  }
+  return next;
+}
+
+export function loadGardenAccessories(userId: string): GardenAccessoryState {
+  return loadGardenState(userId).accessories;
 }
 
 export function saveGardenAccessory(
@@ -76,18 +138,22 @@ export function saveGardenAccessory(
   accessory: GardenAccessory,
 ): GardenAccessoryState {
   if (!userId || typeof localStorage === 'undefined') return freshDefault();
-  const current = loadGardenAccessories(userId);
+  const currentState = loadGardenState(userId);
   const next: GardenAccessoryState = {
-    ...current,
+    ...currentState.accessories,
     [companion]: validAccessory(accessory),
   };
+  const nextState: GardenLocalState = {
+    ...currentState,
+    accessories: next,
+  };
   try {
-    const serialized = JSON.stringify(next);
+    const serialized = JSON.stringify(nextState);
     localStorage.setItem(key(userId), serialized);
-    if (localStorage.getItem(key(userId)) !== serialized) return current;
+    if (localStorage.getItem(key(userId)) !== serialized) return currentState.accessories;
   } catch {
     // Decoration persistence is deliberately best-effort. It never blocks the garden itself.
-    return current;
+    return currentState.accessories;
   }
   return next;
 }

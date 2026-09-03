@@ -23,6 +23,7 @@ async function openGarden(
   context: BrowserContext,
   page: Page,
   theme?: 'light' | 'dark',
+  plant = true,
 ) {
   const { unrouted } = await installMockBackend(context, GARDEN_SCENARIO);
   if (theme) {
@@ -37,6 +38,10 @@ async function openGarden(
   await expect(page.locator('#root')).not.toBeEmpty();
   await expect(page.getByTestId('garden-scene')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('garden-exact-character-peach')).toBeVisible();
+  if (plant && await page.getByRole('button', { name: '나무 심기' }).count()) {
+    await page.getByRole('button', { name: '나무 심기' }).click();
+    await expect(page.getByTestId('garden-tree-stage-3')).toBeVisible();
+  }
   await expect(page.getByText(/함께한 \d+일/)).toHaveCount(0);
   return unrouted;
 }
@@ -87,7 +92,7 @@ async function longPressAndDrag(page: Page, companionTestId: string) {
   await expect(companion).toHaveAttribute('data-pressed', 'true');
   await page.waitForTimeout(520);
   await expect(companion).toHaveAttribute('data-lifted', 'true');
-  const liftedLimbs = companion.locator('.garden-limb');
+  const liftedLimbs = companion.locator('.garden-pixel-limb');
   await expect(liftedLimbs).toHaveCount(4);
   const liftedAnimations = await liftedLimbs.evaluateAll((nodes) => (
     nodes.map((node) => getComputedStyle(node).animationName)
@@ -198,6 +203,33 @@ test('garden stays available after the realtime subscribe timeout boundary', asy
   expect(unrouted).toEqual([]);
 });
 
+test('the one-year artwork transition never renders the tree shorter on supported phone widths', async ({ browser }) => {
+  for (const viewportWidth of [320, 390]) {
+    const renderedHeights: number[] = [];
+    for (const togetherDays of [364, 365]) {
+      const context = await browser.newContext({ viewport: { width: viewportWidth, height: 844 } });
+      const page = await context.newPage();
+      await installMockBackend(context, {
+        ...CREATOR,
+        anniversaryDate: shiftCalendarDate(TODAY, -(togetherDays - 1)),
+      });
+      await page.goto('/diary/garden');
+      await expect(page.getByTestId('garden-scene')).toBeVisible({ timeout: 20_000 });
+      if (await page.getByRole('button', { name: '나무 심기' }).count()) {
+        await page.getByRole('button', { name: '나무 심기' }).click();
+      }
+      const level = togetherDays === 364 ? 3 : 4;
+      const treeArt = page.getByTestId(`garden-tree-art-${level}`);
+      await expect(treeArt).toBeVisible();
+      const box = await treeArt.boundingBox();
+      expect(box).not.toBeNull();
+      renderedHeights.push(box?.height ?? 0);
+      await context.close();
+    }
+    expect(renderedHeights[1]).toBeGreaterThanOrEqual(renderedHeights[0] - 0.5);
+  }
+});
+
 test('full-screen garden uses the exact characters, serializes pair-safe wandering, and supports long-press drag', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 375, height: 812 } });
   const page = await context.newPage();
@@ -207,8 +239,8 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
 
   await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toHaveCount(0);
   await expect(page.getByTestId('garden-scene')).not.toHaveClass(/aspect-\[4\/3\]/);
-  await expect(page.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '20 515 136 155');
-  await expect(page.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '156 514 138 155');
+  await expect(page.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '0 0 175 185');
+  await expect(page.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '0 0 175 185');
 
   const peach = page.getByTestId('garden-companion-peach');
   const sage = page.getByTestId('garden-companion-sage');
@@ -231,7 +263,7 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
     sawAutonomousMove ||= sample.movingCount === 1;
     for (const companion of [peach, sage]) {
       if (await companion.getAttribute('data-wandering') !== 'true') continue;
-      const limbAnimations = await companion.locator('.garden-limb').evaluateAll((nodes) => (
+      const limbAnimations = await companion.locator('.garden-pixel-limb').evaluateAll((nodes) => (
         nodes.map((node) => getComputedStyle(node).animationName)
       ));
       sawLimbWalk ||= limbAnimations.length === 4
@@ -248,11 +280,32 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
     Number(await sage.getAttribute('data-move-count')),
   ), { timeout: 25_000 }).toBeGreaterThan(0);
 
-  // A normal click exposes the same non-drag interaction available to assistive technology.
+  // A direct touch-like click stays in the garden: shy first, then a visibly
+  // faster source-pixel run. The palette and keyboard still expose controls.
+  const beforeTouch = {
+    x: await sage.getAttribute('data-x'),
+    y: await sage.getAttribute('data-y'),
+  };
   await sage.click();
   await expect(sage).toHaveAttribute('data-lifted', 'false');
-  await expect(page.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeVisible();
-  await page.getByRole('button', { name: '둘째 친구와 함께 놀기 닫기' }).click();
+  await expect(sage).toHaveAttribute('data-motion-state', 'shy');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByTestId('garden-live-region')).toContainText('초록 친구가 부끄러워서');
+  await expect(sage).toHaveAttribute('data-motion-state', 'run');
+  const runAnimations = await sage.locator('.garden-pixel-limb').evaluateAll((nodes) => (
+    nodes.map((node) => getComputedStyle(node).animationName)
+  ));
+  expect(runAnimations).toEqual([
+    'garden-run-arm-left',
+    'garden-run-arm-right',
+    'garden-run-leg-left',
+    'garden-run-leg-right',
+  ]);
+  expect({
+    x: await sage.getAttribute('data-x'),
+    y: await sage.getAttribute('data-y'),
+  }).not.toEqual(beforeTouch);
+  await expect(sage).toHaveAttribute('data-motion-state', 'idle', { timeout: 3_000 });
 
   const sageBox = await sage.boundingBox();
   expect(sageBox).not.toBeNull();
@@ -272,8 +325,10 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
 
   const visualBox = await peach.locator('.garden-exact-character').boundingBox();
   const hitBox = await peach.boundingBox();
-  expect(visualBox?.width ?? 0).toBeLessThanOrEqual(26);
-  expect(visualBox?.height ?? 0).toBeLessThanOrEqual(29);
+  expect(visualBox?.width ?? 0).toBeGreaterThanOrEqual(71);
+  expect(visualBox?.width ?? 0).toBeLessThanOrEqual(73);
+  expect(visualBox?.height ?? 0).toBeGreaterThanOrEqual(75);
+  expect(visualBox?.height ?? 0).toBeLessThanOrEqual(77);
   expect(hitBox?.width ?? 0).toBeGreaterThanOrEqual(44);
   expect(hitBox?.height ?? 0).toBeGreaterThanOrEqual(44);
 
@@ -281,9 +336,9 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
   await sage.focus();
   await sage.press('Enter');
   await expect(sage).toHaveAttribute('data-lifted', 'false');
-  await expect(page.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: '초록 친구와 함께 놀기' })).toBeVisible();
   const beforeKeyboardMove = Number(await sage.getAttribute('data-x'));
-  await page.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }).click();
+  await page.getByRole('button', { name: '초록 친구 왼쪽으로 이동' }).click();
   await expect.poll(async () => Number(await sage.getAttribute('data-x'))).toBeLessThan(beforeKeyboardMove);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -304,37 +359,35 @@ test('care actions create distinct one-shot reactions without adding a garden sc
   const peach = page.getByTestId('garden-companion-peach');
   const sage = page.getByTestId('garden-companion-sage');
 
-  await sage.click();
-  const wave = page.getByRole('button', { name: '둘째 친구에게 인사하기' });
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
+  await page.getByRole('button', { name: '초록 친구', exact: true }).click();
+  const wave = page.getByRole('button', { name: '초록 친구에게 인사하기' });
   const waveBox = await wave.boundingBox();
   expect(waveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
   await wave.click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(sage).toHaveAttribute('data-care-reaction', 'wave');
-  await expect(page.getByTestId('garden-care-reaction-sage')).toBeVisible();
-  await expect(page.getByTestId('garden-live-region')).toContainText('둘째 친구가 반갑게 손을 흔들어요');
-  expect(await sage.locator('.garden-limb-arm-right').evaluate((node) => getComputedStyle(node).animationName))
-    .toBe('garden-care-wave-arm');
+  await expect(page.getByTestId('garden-care-reaction-sage')).toHaveCount(0);
+  await expect(page.getByTestId('garden-live-region')).toContainText('초록 친구가 반갑게 손을 흔들어요');
+  await expect(sage).toHaveAttribute('data-motion-state', 'shy');
 
   const firstWaveArt = await page.getByTestId('garden-companion-art-sage').elementHandle();
   expect(firstWaveArt).not.toBeNull();
-  await sage.click();
-  await page.getByRole('button', { name: '둘째 친구에게 인사하기' }).click();
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
+  await page.getByRole('button', { name: '초록 친구', exact: true }).click();
+  await page.getByRole('button', { name: '초록 친구에게 인사하기' }).click();
   await expect.poll(async () => firstWaveArt?.evaluate((node) => node.isConnected))
     .toBe(false);
   await expect(sage).toHaveAttribute('data-care-reaction', 'wave');
-  expect(await sage.locator('.garden-limb-arm-right').evaluate((node) => getComputedStyle(node).animationName))
-    .toBe('garden-care-wave-arm');
+  await expect(sage).toHaveAttribute('data-motion-state', 'shy');
   await expect(sage).toHaveAttribute('data-care-reaction', 'none', { timeout: 3_000 });
 
   await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
   await page.getByRole('button', { name: '두 친구 같이 놀기' }).click();
   await expect(peach).toHaveAttribute('data-care-reaction', 'play');
   await expect(sage).toHaveAttribute('data-care-reaction', 'play');
-  expect(await peach.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName))
-    .toBe('garden-care-play');
-  expect(await sage.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName))
-    .toBe('garden-care-play');
+  await expect(peach).toHaveAttribute('data-motion-state', 'shy');
+  await expect(sage).toHaveAttribute('data-motion-state', 'shy');
 
   await expect(page.getByText(/레벨|경험치|점수|출석|배고픔/)).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
@@ -410,9 +463,9 @@ test('quiet garden remains usable in landscape', async ({ browser }) => {
   await expect(page.getByRole('button', { name: '상점 열기' })).toHaveCount(0);
 
   const peach = page.getByTestId('garden-companion-peach');
-  await peach.click();
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
   for (let step = 0; step < 10; step += 1) {
-    await page.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '살구 친구 오른쪽으로 이동' }).click();
   }
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 430, height: 375 });
@@ -453,15 +506,15 @@ test('inner scene geometry keeps Y stable through repeated landscape resize free
     expect(Math.abs(afterResize[id].renderedY - before[id].renderedY)).toBeLessThanOrEqual(0.01);
   }
 
-  await page.getByTestId('garden-companion-peach').click();
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
   for (let move = 0; move < 5; move += 1) {
-    await page.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }).click();
-    await page.getByRole('button', { name: '첫째 친구 왼쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '살구 친구 오른쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '살구 친구 왼쪽으로 이동' }).click();
   }
-  await page.getByRole('button', { name: '둘째 친구', exact: true }).click();
+  await page.getByRole('button', { name: '초록 친구', exact: true }).click();
   for (let move = 0; move < 5; move += 1) {
-    await page.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }).click();
-    await page.getByRole('button', { name: '둘째 친구 오른쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '초록 친구 왼쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '초록 친구 오른쪽으로 이동' }).click();
   }
 
   const afterMoves = await companionYAnchors(page);
@@ -523,19 +576,21 @@ test('rapid directional transitions and a companion switch preserve the four-pix
   const unrouted = await openGarden(context, page);
   const peach = page.getByTestId('garden-companion-peach');
 
-  await peach.click();
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
   for (let step = 0; step < 4; step += 1) {
-    await page.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }).click();
+    await page.getByRole('button', { name: '살구 친구 오른쪽으로 이동' }).click();
     await page.waitForTimeout(220);
   }
-  await expect(peach).toHaveAttribute('data-x', '58.00');
+  const stagedX = Number(await peach.getAttribute('data-x'));
+  expect(stagedX).toBeGreaterThan(50);
+  expect(stagedX).toBeLessThan(58);
 
   await startAnimationFramePairSampling(page);
-  await page.getByRole('button', { name: '첫째 친구 위쪽으로 이동' }).click();
-  await page.getByRole('button', { name: '첫째 친구 위쪽으로 이동' }).click();
-  await page.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }).click();
-  await page.getByRole('button', { name: '둘째 친구', exact: true }).click();
-  await page.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }).click();
+  await page.getByRole('button', { name: '살구 친구 위쪽으로 이동' }).click();
+  await page.getByRole('button', { name: '살구 친구 위쪽으로 이동' }).click();
+  await page.getByRole('button', { name: '살구 친구 오른쪽으로 이동' }).click();
+  await page.getByRole('button', { name: '초록 친구', exact: true }).click();
+  await page.getByRole('button', { name: '초록 친구 왼쪽으로 이동' }).click();
   await page.waitForTimeout(260);
   const gaps = await stopAnimationFramePairSampling(page);
 
@@ -562,7 +617,7 @@ test('small-phone action sheet equips only owned accessories and reaches the Sho
   const unrouted = await openGarden(context, page);
 
   await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
-  const dialog = page.getByRole('dialog', { name: '첫째 친구와 함께 놀기' });
+  const dialog = page.getByRole('dialog', { name: '살구 친구와 함께 놀기' });
   await expect(dialog).toBeVisible();
   const dialogBox = await dialog.boundingBox();
   expect(dialogBox).not.toBeNull();
@@ -571,12 +626,12 @@ test('small-phone action sheet equips only owned accessories and reaches the Sho
   expect((dialogBox?.y ?? 0) + (dialogBox?.height ?? 0)).toBeLessThanOrEqual(568);
   expect(await dialog.evaluate((node) => Number.parseFloat(getComputedStyle(node).paddingBottom)))
     .toBeGreaterThanOrEqual(16);
-  for (const name of ['첫째 친구 쓰다듬기', '첫째 친구에게 인사하기', '두 친구 같이 놀기']) {
+  for (const name of ['살구 친구 쓰다듬기', '살구 친구에게 인사하기', '두 친구 같이 놀기']) {
     const careBox = await page.getByRole('button', { name }).boundingBox();
     expect(careBox?.height ?? 0, `${name} keeps a 44px touch target`).toBeGreaterThanOrEqual(44);
   }
 
-  const flowerRadio = page.getByRole('radio', { name: '첫째 친구 꽃' });
+  const flowerRadio = page.getByRole('radio', { name: '살구 친구 꽃' });
   const flowerTarget = flowerRadio.locator('..');
   const flowerTargetBox = await flowerTarget.boundingBox();
   expect(flowerTargetBox?.width ?? 0).toBeGreaterThanOrEqual(44);
@@ -630,13 +685,30 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   expect(await page.getByTestId('garden-companion-position-peach').boundingBox()).toEqual(peachFrozen);
   expect(await page.getByTestId('garden-companion-position-sage').boundingBox()).toEqual(sageFrozen);
 
+  const reducedPosition = {
+    x: await peach.getAttribute('data-x'),
+    y: await peach.getAttribute('data-y'),
+  };
   await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
-  await page.getByRole('button', { name: '첫째 친구 쓰다듬기' }).click();
+  await page.getByRole('button', { name: '살구 친구 쓰다듬기' }).click();
   await expect(peach).toHaveAttribute('data-care-reaction', 'pet');
-  await expect(page.getByTestId('garden-care-reaction-peach')).toBeVisible();
-  expect(await peach.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
-  expect(await page.getByTestId('garden-care-reaction-peach').evaluate((node) => getComputedStyle(node).animationName)).toBe('none');
+  await expect(page.getByTestId('garden-care-reaction-peach')).toHaveCount(0);
+  await expect(peach).toHaveAttribute('data-motion-state', 'shy');
   await expect(peach).toHaveAttribute('data-care-reaction', 'none', { timeout: 3_000 });
+  await expect(peach).toHaveAttribute('data-motion-state', 'idle');
+  expect({
+    x: await peach.getAttribute('data-x'),
+    y: await peach.getAttribute('data-y'),
+  }).toEqual(reducedPosition);
+
+  await peach.click();
+  await expect(peach).toHaveAttribute('data-motion-state', 'shy');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(peach).toHaveAttribute('data-motion-state', 'idle', { timeout: 3_000 });
+  expect({
+    x: await peach.getAttribute('data-x'),
+    y: await peach.getAttribute('data-y'),
+  }).toEqual(reducedPosition);
 
   const box = await peach.boundingBox();
   expect(box).not.toBeNull();
@@ -645,7 +717,7 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   await page.mouse.down();
   await page.waitForTimeout(520);
   await expect(peach).toHaveAttribute('data-lifted', 'true');
-  const reducedLimbAnimations = await peach.locator('.garden-limb').evaluateAll((nodes) => (
+  const reducedLimbAnimations = await peach.locator('.garden-pixel-limb').evaluateAll((nodes) => (
     nodes.map((node) => getComputedStyle(node).animationName)
   ));
   expect(reducedLimbAnimations).toEqual(['none', 'none', 'none', 'none']);

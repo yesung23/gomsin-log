@@ -23,6 +23,7 @@ export interface GardenFootprint {
 export type GardenCompanionKey = 'peach' | 'sage';
 export type GardenPairPoints = Record<GardenCompanionKey, GardenPoint>;
 export type GardenPairFootprints = Record<GardenCompanionKey, GardenFootprint>;
+export type GardenMotionState = 'idle' | 'walk' | 'run' | 'shy' | 'held';
 
 export interface GardenDestinationOptions {
   random?: () => number;
@@ -34,8 +35,8 @@ export interface GardenDestinationOptions {
 
 /** The visible sprite footprint, kept beside the geometry that constrains it. */
 export const GARDEN_COMPANION_SIZE = {
-  width: 49,
-  height: 56,
+  width: 72,
+  height: 76,
   gap: 4,
 } as const;
 
@@ -56,6 +57,8 @@ export const GARDEN_DIRECT_Y_BOUNDS = { minY: 28, maxY: 94 } as const;
 export const GARDEN_AUTONOMOUS_DISTANCE_PX = { min: 52, max: 140 } as const;
 export const GARDEN_AUTONOMOUS_SPEED_PX_PER_SECOND = { min: 42, max: 58 } as const;
 export const GARDEN_MOVE_DURATION_MS = { min: 1_200, max: 3_800 } as const;
+export const GARDEN_RUN_DURATION_MS = { min: 420, max: 900 } as const;
+export const GARDEN_CLOSE_ENCOUNTER_DISTANCE_PX = 88;
 export const GARDEN_IDLE_DURATION_MS = {
   min: 2_000,
   max: 5_000,
@@ -609,6 +612,19 @@ export function gardenMoveDuration(
     (safeDistance / speed) * 1_000,
     GARDEN_MOVE_DURATION_MS.min,
     GARDEN_MOVE_DURATION_MS.max,
+  ));
+}
+
+export function gardenRunDuration(
+  distancePx: number,
+  random: () => number = Math.random,
+): number {
+  const safeDistance = Number.isFinite(distancePx) && distancePx > 0 ? distancePx : 64;
+  const speed = between(120, 180, random);
+  return Math.round(clamp(
+    (safeDistance / speed) * 1_000,
+    GARDEN_RUN_DURATION_MS.min,
+    GARDEN_RUN_DURATION_MS.max,
   ));
 }
 

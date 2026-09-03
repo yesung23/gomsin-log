@@ -1041,6 +1041,46 @@ input[type='range']::-webkit-slider-thumb {
   }
 }
 
+@keyframes garden-run {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-3px) scaleY(0.97); }
+}
+
+@keyframes garden-run-arm-left {
+  0%, 100% { transform: rotate(-42deg); }
+  50% { transform: rotate(42deg); }
+}
+
+@keyframes garden-run-arm-right {
+  0%, 100% { transform: rotate(42deg); }
+  50% { transform: rotate(-42deg); }
+}
+
+@keyframes garden-run-leg-left {
+  0%, 100% { transform: rotate(36deg); }
+  50% { transform: rotate(-36deg); }
+}
+
+@keyframes garden-run-leg-right {
+  0%, 100% { transform: rotate(-36deg); }
+  50% { transform: rotate(36deg); }
+}
+
+@keyframes garden-shy {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(3px) scaleY(0.92); }
+}
+
+@keyframes garden-shy-arm-left {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(58deg) translateY(-2px); }
+}
+
+@keyframes garden-shy-arm-right {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-58deg) translateY(-2px); }
+}
+
 @keyframes garden-flail-arm-left {
   0%, 100% { transform: rotate(-35deg) scaleY(1); }
   25% { transform: rotate(40deg) scaleY(0.92); }
@@ -1083,12 +1123,6 @@ input[type='range']::-webkit-slider-thumb {
   45% { transform: translateY(-5px) scale(1.04); }
 }
 
-@keyframes garden-care-symbol {
-  0% { opacity: 0; transform: translateY(4px) scale(0.72); }
-  30% { opacity: 1; transform: translateY(0) scale(1); }
-  100% { opacity: 0; transform: translateY(-8px) scale(0.92); }
-}
-
 .garden-surface {
   background-color: var(--garden-surface);
 }
@@ -1126,72 +1160,80 @@ input[type='range']::-webkit-slider-thumb {
   position: relative;
 }
 
-.garden-companion-limbs {
-  position: absolute;
-  inset: 0;
+.garden-pixel-limb {
+  transform-box: fill-box;
+  transform-origin: center center;
   pointer-events: none;
 }
 
-.garden-limb {
-  position: absolute;
-  border-radius: 9999px;
-  background-color: var(--garden-character-paper);
-  border: 1px solid var(--garden-character-outline);
-  box-sizing: border-box;
-  pointer-events: none;
-  transform-origin: center top;
+.garden-pixel-limb-arm-left {
+  transform-origin: 100% 52%;
 }
 
-.garden-limb-arm-left {
-  left: -2px;
-  top: 10px;
-  width: 3.5px;
-  height: 8px;
-  transform-origin: top right;
+.garden-pixel-limb-arm-right {
+  transform-origin: 0% 52%;
 }
 
-.garden-limb-arm-right {
-  right: -2px;
-  top: 10px;
-  width: 3.5px;
-  height: 8px;
-  transform-origin: top left;
+.garden-pixel-limb-leg-left,
+.garden-pixel-limb-leg-right {
+  transform-origin: 50% 0%;
 }
 
-.garden-limb-leg-left {
-  left: 5px;
-  bottom: -3px;
-  width: 3.5px;
-  height: 7px;
-  transform-origin: top center;
-}
-
-.garden-limb-leg-right {
-  right: 5px;
-  bottom: -3px;
-  width: 3.5px;
-  height: 7px;
-  transform-origin: top center;
-}
-
+.garden-motion-walk .garden-companion-body,
 .garden-companion-walking .garden-companion-body {
   animation: garden-walk-bob 0.38s ease-in-out infinite;
 }
 
-.garden-companion-walking .garden-limb-arm-left {
+.garden-motion-walk .garden-pixel-limb-arm-left,
+.garden-companion-walking .garden-pixel-limb-arm-left {
   animation: garden-walk-arm-left 0.38s ease-in-out infinite;
 }
 
-.garden-companion-walking .garden-limb-arm-right {
+.garden-motion-walk .garden-pixel-limb-arm-right,
+.garden-companion-walking .garden-pixel-limb-arm-right {
   animation: garden-walk-arm-right 0.38s ease-in-out infinite;
 }
 
-.garden-companion-walking .garden-limb-leg-left {
+.garden-motion-walk .garden-pixel-limb-leg-left,
+.garden-companion-walking .garden-pixel-limb-leg-left {
   animation: garden-walk-leg-left 0.38s ease-in-out infinite;
 }
 
-.garden-companion-walking .garden-limb-leg-right {
+.garden-motion-walk .garden-pixel-limb-leg-right,
+.garden-companion-walking .garden-pixel-limb-leg-right {
   animation: garden-walk-leg-right 0.38s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-companion-body {
+  animation: garden-run 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-arm-left {
+  animation: garden-run-arm-left 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-arm-right {
+  animation: garden-run-arm-right 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-leg-left {
+  animation: garden-run-leg-left 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-leg-right {
+  animation: garden-run-leg-right 0.22s ease-in-out infinite;
+}
+
+.garden-motion-shy .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
+}
+
+.garden-motion-shy .garden-pixel-limb-arm-left {
+  animation: garden-shy-arm-left 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy .garden-pixel-limb-arm-right {
+  animation: garden-shy-arm-right 0.34s ease-in-out 2 alternate;
 }
 
 .garden-companion-control {
@@ -1207,45 +1249,31 @@ input[type='range']::-webkit-slider-thumb {
   z-index: 2;
 }
 
-.garden-companion-lifted .garden-limb-arm-left {
+.garden-motion-held .garden-pixel-limb-arm-left,
+.garden-companion-lifted .garden-pixel-limb-arm-left {
   animation: garden-flail-arm-left 0.28s ease-in-out infinite;
 }
 
-.garden-companion-lifted .garden-limb-arm-right {
+.garden-motion-held .garden-pixel-limb-arm-right,
+.garden-companion-lifted .garden-pixel-limb-arm-right {
   animation: garden-flail-arm-right 0.32s ease-in-out infinite;
 }
 
-.garden-companion-lifted .garden-limb-leg-left {
+.garden-motion-held .garden-pixel-limb-leg-left,
+.garden-companion-lifted .garden-pixel-limb-leg-left {
   animation: garden-flail-leg-left 0.24s ease-in-out infinite;
 }
 
-.garden-companion-lifted .garden-limb-leg-right {
+.garden-motion-held .garden-pixel-limb-leg-right,
+.garden-companion-lifted .garden-pixel-limb-leg-right {
   animation: garden-flail-leg-right 0.26s ease-in-out infinite;
-}
-
-.garden-care-reaction {
-  position: absolute;
-  right: -9px;
-  top: -13px;
-  z-index: 3;
-  display: inline-flex;
-  width: 20px;
-  height: 20px;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--garden-character-outline);
-  border-radius: 9999px;
-  background: var(--garden-surface);
-  color: var(--garden-ink);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
-  animation: garden-care-symbol 1.25s ease-out both;
 }
 
 .garden-care-pet .garden-companion-body {
   animation: garden-care-pet 0.46s ease-in-out 3;
 }
 
-.garden-care-wave .garden-limb-arm-right {
+.garden-care-wave .garden-pixel-limb-arm-right {
   animation: garden-care-wave-arm 0.28s ease-in-out 5;
 }
 
@@ -1253,9 +1281,29 @@ input[type='range']::-webkit-slider-thumb {
   animation: garden-care-play 0.45s ease-in-out 3;
 }
 
-.garden-care-play .garden-limb-arm-left,
-.garden-care-play .garden-limb-arm-right {
+.garden-care-play .garden-pixel-limb-arm-left,
+.garden-care-play .garden-pixel-limb-arm-right {
   animation: garden-care-wave-arm 0.34s ease-in-out 4 alternate;
+}
+
+/* Care enters the same shy state before the short safe run. The semantic
+ * motion state owns the source-pixel pose even while the care token is live. */
+.garden-motion-shy.garden-care-pet .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
+}
+
+.garden-motion-shy.garden-care-wave .garden-pixel-limb-arm-left,
+.garden-motion-shy.garden-care-play .garden-pixel-limb-arm-left {
+  animation: garden-shy-arm-left 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy.garden-care-wave .garden-pixel-limb-arm-right,
+.garden-motion-shy.garden-care-play .garden-pixel-limb-arm-right {
+  animation: garden-shy-arm-right 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy.garden-care-play .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
 }
 
 /* Keep the full sprite usable in the short landscape content viewport. */
@@ -1266,20 +1314,54 @@ input[type='range']::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .garden-motion-walk .garden-companion-body,
+  .garden-motion-walk .garden-pixel-limb,
+  .garden-motion-run .garden-companion-body,
+  .garden-motion-run .garden-pixel-limb,
+  .garden-motion-shy .garden-companion-body,
+  .garden-motion-shy .garden-pixel-limb,
+  .garden-motion-held .garden-pixel-limb,
   .garden-companion-walking .garden-companion-body,
-  .garden-companion-walking .garden-limb,
-  .garden-companion-lifted .garden-limb,
+  .garden-companion-walking .garden-pixel-limb,
+  .garden-companion-lifted .garden-pixel-limb,
   .garden-care-pet .garden-companion-body,
-  .garden-care-wave .garden-limb-arm-right,
+  .garden-care-wave .garden-pixel-limb-arm-right,
   .garden-care-play .garden-companion-body,
-  .garden-care-play .garden-limb,
-  .garden-care-reaction,
+  .garden-care-play .garden-pixel-limb,
   .accessory-roulette-spinning {
     animation: none !important;
   }
 
   .garden-companion-pressed {
     transition: none !important;
+  }
+
+  .garden-motion-shy .garden-companion-body {
+    transform: translateY(2px) scaleY(0.95);
+  }
+
+  .garden-motion-shy .garden-pixel-limb-arm-left {
+    transform: rotate(42deg) translateY(-1px);
+  }
+
+  .garden-motion-shy .garden-pixel-limb-arm-right {
+    transform: rotate(-42deg) translateY(-1px);
+  }
+
+  .garden-motion-held .garden-pixel-limb-arm-left {
+    transform: rotate(34deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-arm-right {
+    transform: rotate(-34deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-leg-left {
+    transform: rotate(-22deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-leg-right {
+    transform: rotate(22deg);
   }
 }
 

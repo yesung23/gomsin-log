@@ -7,6 +7,8 @@ import { togetherDays } from '@/lib/coupleStats';
 import { isCalendarDate } from '@/lib/trips';
 import { deriveCompanionGardenState } from './companionGarden';
 import {
+  loadGardenState,
+  saveGardenPlanting,
   loadGardenAccessories,
   saveGardenAccessory,
   type GardenAccessory,
@@ -21,15 +23,25 @@ function CompanionGardenPageBody() {
   const couple = state.profile.couple;
   const anniversaryDate = couple.anniversaryDate;
   const userId = state.authenticatedUser?.id || state.profile.id || '';
+  const [gardenLocalState, setGardenLocalState] = useState(() => loadGardenState(userId));
   const [accessories, setAccessories] = useState(() => loadGardenAccessories(userId));
   const [ownedAccessories, setOwnedAccessories] = useState(
     () => loadCompanionShopState(userId).ownedAccessories,
   );
 
   useEffect(() => {
+    setGardenLocalState(loadGardenState(userId));
     setAccessories(loadGardenAccessories(userId));
     setOwnedAccessories(loadCompanionShopState(userId).ownedAccessories);
   }, [userId]);
+
+  const plantTree = (): boolean => {
+    const next = saveGardenPlanting(userId);
+    if (!next.planted) return false;
+    setGardenLocalState(next);
+    setAccessories(next.accessories);
+    return true;
+  };
 
   const changeAccessory = (companion: GardenCompanionId, accessory: GardenAccessory): boolean => {
     if (!userId || (accessory !== 'none' && !ownedAccessories.includes(accessory))) return false;
@@ -71,8 +83,10 @@ function CompanionGardenPageBody() {
       state={gardenState}
       unavailableReason={unavailableReason}
       accessories={accessories}
+      planted={gardenLocalState.planted}
       ownedAccessories={ownedAccessories}
       onAccessoryChange={changeAccessory}
+      onPlantTree={plantTree}
       onBack={() => navigate('/diary')}
       onOpenShop={() => navigate('/shop')}
     />

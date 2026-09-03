@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_GARDEN_ACCESSORIES,
+  loadGardenState,
+  saveGardenPlanting,
   loadGardenAccessories,
   saveGardenAccessory,
 } from '@/lib/companionGardenLocalState';
@@ -13,6 +15,49 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('companion garden local accessories', () => {
+  it('shows a fresh account as unplanted and persists planting per account', () => {
+    expect(loadGardenState('alice')).toEqual({
+      version: 2,
+      planted: false,
+      accessories: DEFAULT_GARDEN_ACCESSORIES,
+    });
+
+    expect(saveGardenPlanting('alice')).toEqual({
+      version: 2,
+      planted: true,
+      accessories: DEFAULT_GARDEN_ACCESSORIES,
+    });
+    expect(loadGardenState('alice').planted).toBe(true);
+    expect(loadGardenState('bob').planted).toBe(false);
+  });
+
+  it('treats version-1 accessory state as already planted without losing either accessory', () => {
+    localStorage.setItem('gomsin.diary.garden.alice', JSON.stringify({
+      version: 1,
+      peach: 'cap',
+      sage: 'flower',
+    }));
+
+    expect(loadGardenState('alice')).toEqual({
+      version: 2,
+      planted: true,
+      accessories: { version: 1, peach: 'cap', sage: 'flower' },
+    });
+  });
+
+  it('does not announce planting success when storage rejects persistence', () => {
+    vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota', 'QuotaExceededError');
+    });
+
+    expect(saveGardenPlanting('alice')).toEqual({
+      version: 2,
+      planted: false,
+      accessories: DEFAULT_GARDEN_ACCESSORIES,
+    });
+    expect(loadGardenState('alice').planted).toBe(false);
+  });
+
   it('supports newly added source-sheet accessory IDs while keeping legacy IDs valid', () => {
     saveGardenAccessory('alice', 'peach', 'boots');
     saveGardenAccessory('alice', 'sage', 'letter');

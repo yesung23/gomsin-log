@@ -76,6 +76,49 @@ afterEach(() => {
 });
 
 describe('companion garden route authority', () => {
+  it('offers a central accessible planting ceremony for a fresh account', () => {
+    renderGarden();
+
+    expect(screen.getByRole('button', { name: '나무 심기' })).toBeInTheDocument();
+    expect(screen.getByTestId('garden-planting-ceremony')).toBeInTheDocument();
+    expect(screen.queryByTestId('garden-tree-stage-2')).not.toBeInTheDocument();
+  });
+
+  it('persists planting and renders one complete generated tree asset without crop-compositing artifacts', () => {
+    renderGarden();
+
+    fireEvent.click(screen.getByRole('button', { name: '나무 심기' }));
+
+    const tree = screen.getByTestId('garden-tree-stage-3');
+    expect(tree).toBeInTheDocument();
+    expect(screen.queryByTestId('garden-planting-ceremony')).not.toBeInTheDocument();
+    expect(tree.querySelectorAll('[data-source-pixel="true"]')).toHaveLength(0);
+    expect(tree.querySelectorAll('clipPath, clippath')).toHaveLength(0);
+    expect(tree.querySelectorAll('[data-testid^="garden-companion-"]')).toHaveLength(0);
+    expect(JSON.parse(localStorage.getItem('gomsin.diary.garden.me') ?? '{}')).toMatchObject({
+      version: 2,
+      planted: true,
+    });
+
+    const treeArt = screen.getByTestId('garden-tree-art-3');
+    expect(treeArt).toHaveAttribute('alt', '');
+    expect(treeArt.getAttribute('src')).toContain('garden-tree-stage-3-v1.webp');
+    expect(tree).toHaveStyle({ height: 'min(76vw, 237px)' });
+  });
+
+  it('shows exact portraits and color-linked names in the friend selector', () => {
+    renderGarden();
+    fireEvent.click(screen.getByRole('button', { name: '꾸미기와 함께 놀기' }));
+
+    expect(screen.getByRole('dialog', { name: '살구 친구와 함께 놀기' })).toBeInTheDocument();
+    expect(screen.getByTestId('garden-selector-portrait-peach')).toBeInTheDocument();
+    expect(screen.getByTestId('garden-selector-portrait-sage')).toBeInTheDocument();
+    expect(screen.getByTestId('garden-selector-portrait-peach')).toHaveAttribute('viewBox', '440 675 175 185');
+    expect(screen.getByTestId('garden-selector-portrait-sage')).toHaveAttribute('viewBox', '285 675 175 185');
+    expect(screen.getByRole('button', { name: '초록 친구' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '첫째 친구' })).not.toBeInTheDocument();
+  });
+
   it('verified active couple + valid anniversary renders the real growth state', () => {
     renderGarden();
     expect(screen.getByRole('heading', { level: 1, name: '정원' })).toBeInTheDocument();
@@ -160,25 +203,25 @@ describe('companion garden route authority', () => {
 
     const firstCompanionRadios = screen.getAllByRole('radio');
     expect(firstCompanionRadios.map((radio) => radio.getAttribute('aria-label'))).toEqual([
-      '첫째 친구 없음',
-      '첫째 친구 모자',
-      '첫째 친구 꽃',
+      '살구 친구 없음',
+      '살구 친구 모자',
+      '살구 친구 꽃',
     ]);
     expect(firstCompanionRadios.every((radio) => (
       radio instanceof HTMLInputElement
       && radio.type === 'radio'
       && radio.name === 'garden-accessory-peach'
     ))).toBe(true);
-    expect(screen.queryByRole('radio', { name: '첫째 친구 리본' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: '첫째 친구 목도리' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '살구 친구 리본' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: '살구 친구 목도리' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '둘째 친구' }));
-    expect(screen.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '초록 친구' }));
+    expect(screen.getByRole('dialog', { name: '초록 친구와 함께 놀기' })).toBeInTheDocument();
     const secondCompanionRadios = screen.getAllByRole('radio');
     expect(secondCompanionRadios.map((radio) => radio.getAttribute('aria-label'))).toEqual([
-      '둘째 친구 없음',
-      '둘째 친구 모자',
-      '둘째 친구 꽃',
+      '초록 친구 없음',
+      '초록 친구 모자',
+      '초록 친구 꽃',
     ]);
     expect(secondCompanionRadios.every((radio) => (
       radio instanceof HTMLInputElement
@@ -192,11 +235,15 @@ describe('companion garden route authority', () => {
     const view = renderGarden();
 
     fireEvent.click(screen.getByTestId('garden-companion-peach'), { detail: 0 });
-    fireEvent.click(screen.getByRole('radio', { name: '첫째 친구 리본' }));
+    fireEvent.click(screen.getByRole('radio', { name: '살구 친구 리본' }));
 
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'bow');
     expect(screen.getByTestId('garden-accessory-peach-bow')).toBeVisible();
-    expect(JSON.parse(localStorage.getItem('gomsin.diary.garden.me') || '{}')).toMatchObject({ peach: 'bow' });
+    expect(JSON.parse(localStorage.getItem('gomsin.diary.garden.me') || '{}')).toMatchObject({
+      version: 2,
+      planted: false,
+      accessories: { peach: 'bow' },
+    });
 
     view.unmount();
     renderGarden();
@@ -217,7 +264,7 @@ describe('companion garden route authority', () => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
 
-    fireEvent.click(screen.getByRole('radio', { name: '첫째 친구 모자' }));
+    fireEvent.click(screen.getByRole('radio', { name: '살구 친구 모자' }));
 
     expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-accessory', 'none');
     expect(screen.queryByTestId('garden-accessory-peach-cap')).not.toBeInTheDocument();

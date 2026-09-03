@@ -29,7 +29,8 @@
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
 > 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **068**.
+> 이 057 시점의 다음 예약 번호는 068이었습니다. 현재 active chain의 다음 사용 가능
+> 번호는 **073**입니다.
 
 > **📄 058·059 작성됨 · 운영 미적용 (2026-08-24).** `058_couple_highlights.sql`은
 > 활성 커플에 한정된 독립 하이라이트와 순서형 사진 항목, shared-only child RLS,
@@ -202,6 +203,11 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `065_harden_e2ee_pairing_rpc.sql` | 062 페어링 RPC의 NULL evidence/signature, 만료·확정·활성화 경계를 forward hardening | **운영 적용 (2026-08-28) — RPC 3개 catalog·negative actor 검증 PASS. live active device/scope key가 0이라 실제 두 기기 정상 ceremony는 UNVERIFIED** |
 | `066_atomic_push_delivery_claims.sql` | 푸시 발송 후보의 원자적 claim/lease와 claim 소유자 완료·release | **운영 미적용 — live 선행 테이블과 sender가 없어 명시적으로 보류** |
 | `067_profile_post_intent.sql` | 기존 기록에 명시적 프로필 게시물 의도 `is_profile_post`를 추가하고 과거 사진은 추측 backfill하지 않음 | **운영 적용 (2026-08-28) — boolean NOT NULL DEFAULT false, 기존 5행 false, actor·rollback 검증 PASS** |
+| `068_allow_story_product_event_screen.sql` | V4 Story의 집계 전환 화면 `story`를 닫힌 product-event 화면 어휘에 추가하되 source record id는 계속 거부 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `069_require_current_cycle_consent.sql` | 현재 버전의 명시적 동의가 있을 때만 legacy partner cycle projection을 계산하도록 fail-closed 보강 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `070_cycle_consent_atomic_write_gate.sql` | 주기 민감정보 동의 grant/revoke와 원본 쓰기·projection을 revision 및 row lock으로 원자화 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `071_disable_automatic_cycle_projection.sql` | 현 동의·고지 범위를 벗어난 자동 건강정보 projection을 all-false로 비활성화하면서 원본은 보존 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `072_close_private_capable_realtime_metadata.sql` | `daily_records`·`couple_tasks`를 Realtime publication에서 제거하고 shared 변화만 content-free invalidation으로 전달 | **로컬 fresh-chain·actor 검증 / 운영 NOT APPLIED · UNVERIFIED — client adoption 및 실제 WebSocket gate 전 적용 금지** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -1021,3 +1027,34 @@ supabase functions deploy delete-account
   동의, 새 동의 버전, 법무 검토와 forward migration이 필요합니다.
 - **원격 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업은 로컬 fresh chain만 사용했고
   Production Supabase에는 접근하거나 적용하지 않았습니다.
+
+## 072 — 비공개 가능 기록·할 일의 Realtime 메타데이터 폐쇄 (2026-09-03)
+
+- `072_close_private_capable_realtime_metadata.sql`은 `daily_records`와 `couple_tasks`를
+  `supabase_realtime` publication에서 제거합니다. Supabase Postgres Changes의 DELETE는
+  row-level filter를 적용할 수 없으므로, 비공개 행의 본문을 보내지 않더라도 삭제 시점과
+  존재 사실이 상대에게 신호로 남을 수 있기 때문입니다.
+- 대체 경로는 `(couple_id, slice, updated_at)`만 가진 기존
+  `collaboration_invalidations`입니다. 새 trigger는 shared INSERT/UPDATE/DELETE와
+  shared↔private 전환만 신호하고, 처음부터 끝까지 private인 INSERT/UPDATE/DELETE는
+  invalidation조차 만들지 않습니다. payload를 상태로 신뢰하지 않고 client가 현재 RLS로
+  보이는 행을 다시 읽습니다.
+- migration 전 호환 단계에서 앱은 direct source subscription을 별도 compatibility
+  channel에 격리합니다. migration 뒤 그 channel이 실패해도 membership·invalidation
+  channel은 독립적으로 유지되고, 오류·foreground·online 경로는 bounded HTTP
+  reconciliation으로 복구합니다.
+- 로컬 검증: `npm run test:phase0`이 실제 001→072 fresh chain을 PostgreSQL 17 임시
+  클러스터에 적용합니다. publication 전후, trigger 함수 실행권한 회수, private CRUD
+  무신호, shared CRUD·양방향 privacy 전환 신호, synthetic cross-couple old/new scope,
+  owner·active partner·unrelated·anon·former-partner RLS를 실제 actor로 검증했습니다.
+  shared child가 있는 단독 커플의 account-cleanup cascade가 DELETE trigger의 FK 재생성에
+  막히지 않는 것도 실제 RPC로 검증합니다. records/tasks out-of-order read, thrown read,
+  create/update/delete-vs-refresh 경합과 mutation 성공 뒤 authoritative re-read까지 실패하는
+  경로는 Vitest로 별도 검증합니다.
+- rollback은 source table을 publication에 다시 넣지 않습니다. 문제가 있으면 두 source는
+  unpublished 상태로 두고 invalidation 또는 HTTP reconciliation을 새 forward migration과
+  client patch로 복구합니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 구버전 client adoption 확인, 원격
+  publication catalog 사전 점검, staging의 실제 2-actor WebSocket(private CRUD 0건,
+  shared CRUD 및 reconnect) 검증 전에는 적용하지 않습니다. migration 파일 존재와 로컬
+  PostgreSQL PASS는 Production 적용 증거가 아닙니다.

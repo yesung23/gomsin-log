@@ -141,11 +141,12 @@ const removeRecordMedia = vi.fn(async () => {
 const fetchRecordsFromDB = vi.fn(async () => []);
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
+const deleteRecordFromDB = vi.fn(async () => ({ ok: true as const }));
 const activateCoupleProtectionForAuthenticatedSession = vi.fn(async () => 'not_paired' as const);
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
-  deleteRecordFromDB: vi.fn().mockResolvedValue({ ok: true }),
+  deleteRecordFromDB: (...args: unknown[]) => deleteRecordFromDB(...(args as [])),
   fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
@@ -245,6 +246,8 @@ function Probe({
     disconnect,
     updateProfile,
     addRecordWithMedia,
+    updateRecord,
+    deleteRecord,
     queueRecordForLater,
     flushOutbox,
     refreshCoupleLifecycle,
@@ -303,6 +306,14 @@ function Probe({
       >
         post
       </button>
+      <button onClick={() => {
+        const first = state.records[0];
+        if (first) void updateRecord(first.id, { log: '수정된 최신 기록' });
+      }}>update-first-record</button>
+      <button onClick={() => {
+        const first = state.records[0];
+        if (first) void deleteRecord(first.id);
+      }}>delete-first-record</button>
       <button onClick={() => {
         void queueRecordForLater({
           date: '2026-08-16',
@@ -390,6 +401,7 @@ describe('StoreProvider auth lifecycle', () => {
     mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
+    deleteRecordFromDB.mockReset().mockResolvedValue({ ok: true });
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
@@ -1400,6 +1412,457 @@ describe('StoreProvider auth lifecycle', () => {
     });
 
     await waitFor(() => expect(screen.getByTestId('events')).toHaveTextContent(''));
+  });
+
+  it('uses insert/update invalidations for records while retaining the direct-read compatibility channel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false, log: 'before' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCalls = channel.on.mock.calls.filter(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    expect(invalidationCalls.map((call) => call[1]?.event)).toEqual(['INSERT', 'UPDATE']);
+    expect(channel.on.mock.calls.some((call) => call[1]?.table === 'daily_records')).toBe(false);
+    const compatibilityChannel = createdChannels.find(
+      (entry) => entry.name === 'couple-records-compat:couple-1',
+    )!;
+    expect(compatibilityChannel.on.mock.calls.some(
+      (call) => call[1]?.table === 'daily_records' && call[1]?.event === '*',
+    )).toBe(true);
+    expect(compatibilityChannel.subscribe).toHaveBeenCalledWith();
+
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ id: 'record-after', userId: 'user-a', isPrivate: false, log: 'authoritative' }],
+    });
+    await act(async () => {
+      invalidationCalls[0]?.[2]?.({
+        new: { slice: 'records', log_text: 'payload must not become state' },
+      });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('records')).toHaveTextContent('record-after');
+    expect(screen.getByTestId('logs')).toHaveTextContent('authoritative');
+    expect(screen.getByTestId('logs')).not.toHaveTextContent('payload must not become state');
+  });
+
+  it('reconciles every shared slice after SUBSCRIBED before considering the channel live', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ id: 'record-after', userId: 'user-a', isPrivate: false }],
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-after'));
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('get_my_active_couple_id');
+  });
+
+  it('prevents an older records refresh from overwriting a newer same-access refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const older = deferred<{ ok: true; records: never[] }>();
+    const newer = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => newer.resolve({
+      ok: true,
+      records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+    await act(async () => older.resolve({
+      ok: true,
+      records: [{ id: 'record-older', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-older');
+  });
+
+  it('ignores an older records rejection after a newer same-access refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let rejectOlder!: (reason?: unknown) => void;
+    const older = new Promise<{ ok: true; records: never[] }>((_resolve, reject) => {
+      rejectOlder = reject;
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+
+    await act(async () => rejectOlder(new Error('stale request failed')));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('shares the records sequence between SUBSCRIBED reconciliation and a dedicated refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const olderReconciliation = deferred<{ ok: true; records: never[] }>();
+    const newerDedicated = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation.promise)
+      .mockReturnValueOnce(newerDedicated.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => newerDedicated.resolve({
+      ok: true,
+      records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+    await act(async () => olderReconciliation.resolve({
+      ok: true,
+      records: [{ id: 'record-reconciliation-older', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-reconciliation-older');
+  });
+
+  it('ignores an older reconciliation records rejection after a dedicated refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let rejectReconciliation!: (reason?: unknown) => void;
+    const olderReconciliation = new Promise<{ ok: true; records: never[] }>((_resolve, reject) => {
+      rejectReconciliation = reject;
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+
+    await act(async () => rejectReconciliation(new Error('stale reconciliation records failed')));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('does not let an in-flight records read erase a newly created record', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+    saveRecordToDB.mockResolvedValueOnce({ ok: true, contentRevision: 1 });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    const channel = await waitFor(() => {
+      const found = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록'));
+    await act(async () => staleRead.resolve({ ok: true, records: [] }));
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('does not append a record twice when its invalidation refetch wins the create-response race', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const createResponse = deferred<{ ok: true; contentRevision: number }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    saveRecordToDB.mockReturnValueOnce(createResponse.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    const channel = await waitFor(() => {
+      const found = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(1));
+    const inserted = saveRecordToDB.mock.calls[0]?.[0] as {
+      id: string; userId: string; isPrivate: boolean; log: string;
+    };
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ ...inserted, contentRevision: 1 }] as never,
+    });
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(inserted.id));
+
+    await act(async () => createResponse.resolve({ ok: true, contentRevision: 1 }));
+    await waitFor(() => expect(lastMediaResult?.ok).toBe(true));
+    expect(screen.getByTestId('records').textContent?.split(',')).toEqual([inserted.id]);
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('does not let an in-flight records read undo a successful record update', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const original = {
+      id: 'record-1', userId: 'user-a', date: '2026-08-01', time: '12:00',
+      authorRole: 'gomsin', log: '수정 전 기록', isPrivate: false, createdAt: '2026-08-01T03:00:00Z',
+      contentRevision: 1,
+    };
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [original] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+    saveRecordToDB.mockResolvedValueOnce({ ok: true, contentRevision: 2 });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('수정 전 기록'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('update-first-record').click());
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('수정된 최신 기록'));
+    await act(async () => staleRead.resolve({ ok: true, records: [original] as never }));
+    expect(screen.getByTestId('logs')).toHaveTextContent('수정된 최신 기록');
+    expect(screen.getByTestId('logs')).not.toHaveTextContent('수정 전 기록');
+  });
+
+  it('does not let an in-flight records read resurrect a successfully deleted record', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const original = {
+      id: 'record-1', userId: 'user-a', date: '2026-08-01', time: '12:00',
+      authorRole: 'gomsin', log: '삭제할 기록', isPrivate: false, createdAt: '2026-08-01T03:00:00Z',
+      contentRevision: 1,
+    };
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [original] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('delete-first-record').click());
+    await waitFor(() => expect(screen.getByTestId('records')).not.toHaveTextContent('record-1'));
+    await act(async () => staleRead.resolve({ ok: true, records: [original] as never }));
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-1');
+  });
+
+  it('removes a shared record only after the RLS-visible authoritative refresh returns no row', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-shared', userId: 'partner-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-shared'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'UPDATE',
+    );
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [] });
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(''));
   });
 
   it('does not append an event saved for account A after switching to account B', async () => {

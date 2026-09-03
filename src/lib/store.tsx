@@ -183,6 +183,25 @@ function shouldKeepCurrentRecordSnapshot(
   return wasReconciled || current !== requestStart;
 }
 
+function mergeCreatedRecordSnapshot(
+  records: DailyRecord[],
+  candidate: DailyRecord,
+): DailyRecord[] {
+  const existingIndex = records.findIndex((record) => record.id === candidate.id);
+  if (existingIndex < 0) return [...records, candidate];
+
+  // The record's own invalidation may win the HTTP-response race. Keep the
+  // authoritative refetch when it is at least as new, and replace it only when
+  // this create flow completed a later attachment revision.
+  const existing = records[existingIndex];
+  const existingRevision = existing.contentRevision ?? 1;
+  const candidateRevision = candidate.contentRevision ?? 1;
+  if (existingRevision >= candidateRevision) return records;
+  const next = records.slice();
+  next[existingIndex] = candidate;
+  return next;
+}
+
 /**
  * The couple space this account belongs to, whether or not a partner has joined.
  *
@@ -520,6 +539,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [sharedSyncStatus, setSharedSyncStatus] = useState<SharedSyncStatus>('live');
   /** Orders every bookmark read, including full, realtime and post-write refreshes. */
   const talkAboutRefreshSequenceRef = useRef(0);
+  /** Orders records reads across dedicated invalidations and full access reconciliation. */
+  const recordsRefreshSequenceRef = useRef(0);
   /** Current value for mutation guards that must close before the next render. */
   const talkAboutSyncStatusRef = useRef<TalkAboutSyncStatus>('ready');
   const [talkAboutSyncStatusState, setTalkAboutSyncStatusState] =
@@ -883,6 +904,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!isCurrentIdentity(expected)) return false;
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
     talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
@@ -1204,6 +1226,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         clearE2eeRuntime();
         sessionGenerationRef.current += 1;
         membershipReconciliationRef.current += 1;
+        recordsRefreshSequenceRef.current += 1;
         talkAboutRefreshSequenceRef.current += 1;
         quarantinedWorkspaceRef.current = null;
         pendingDisconnectRef.current = null;
@@ -1594,6 +1617,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!matchesCurrentWorkspace(expected)) return false;
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
     talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = expected;
     setSharedSyncStatus('unavailable');
@@ -1638,6 +1662,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) return false;
 
     membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
     talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
@@ -1734,8 +1759,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
+      const recordsRefreshSequence = ++recordsRefreshSequenceRef.current;
       const talkAboutRefreshSequence = ++talkAboutRefreshSequenceRef.current;
-      const [recordsResult, eventsResult, tripsResult, talkAboutResult, highlightsResult] = await Promise.all([
+      const [
+        recordsSettled,
+        eventsSettled,
+        tripsSettled,
+        talkAboutSettled,
+        highlightsSettled,
+      ] = await Promise.allSettled([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
         fetchTripsResultFromDB(workspace.coupleId),
@@ -1743,7 +1775,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         fetchCoupleHighlightsResultFromDB(workspace.coupleId),
       ]);
       if (!isLatestCurrentWorkspace()) return false;
-      if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
+      const recordsResultIsLatest = recordsRefreshSequenceRef.current === recordsRefreshSequence;
+      const recordsResult = recordsSettled.status === 'fulfilled' ? recordsSettled.value : null;
+      const eventsResult = eventsSettled.status === 'fulfilled' ? eventsSettled.value : null;
+      const tripsResult = tripsSettled.status === 'fulfilled' ? tripsSettled.value : null;
+      const talkAboutResult = talkAboutSettled.status === 'fulfilled' ? talkAboutSettled.value : null;
+      const highlightsResult = highlightsSettled.status === 'fulfilled' ? highlightsSettled.value : null;
+      if (
+        (recordsResultIsLatest && (!recordsResult || !recordsResult.ok))
+        || !eventsResult?.ok
+        || !tripsResult?.ok
+      ) {
         console.error('[gomsinlog] Authoritative shared workspace refresh failed');
         quarantineSharedAccess(workspace);
         return false;
@@ -1754,32 +1796,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         talkAboutRefreshSequenceRef.current === talkAboutRefreshSequence;
       const role = current.profile.role;
       const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
-      const records = visibleRecordsForViewer(
-        recordsResult.records.map((record) => ({
-          ...record,
-          authorRole: record.userId === workspace.userId ? role : partnerRole,
-        })),
-        { userId: workspace.userId, role },
-      );
+      const records = recordsResult?.ok
+        ? visibleRecordsForViewer(
+            recordsResult.records.map((record) => ({
+              ...record,
+              authorRole: record.userId === workspace.userId ? role : partnerRole,
+            })),
+            { userId: workspace.userId, role },
+          )
+        : current.records;
       const nextState: AppState = {
         ...current,
-        records,
+        records: recordsResultIsLatest ? records : current.records,
         events: eventsResult.events,
         trips: reconcileParentTrips(tripsResult.trips),
         // A coordination read failure is not evidence that every topic was
         // removed. Preserve the last authorized list and let the next
         // invalidation/manual refresh retry it.
-        talkAboutMarks: talkAboutResultIsLatest && talkAboutResult.ok
+        talkAboutMarks: talkAboutResultIsLatest && talkAboutResult?.ok
           ? talkAboutResult.marks
           : current.talkAboutMarks,
-        coupleHighlights: highlightsResult.ok ? highlightsResult.highlights : current.coupleHighlights,
+        coupleHighlights: highlightsResult?.ok ? highlightsResult.highlights : current.coupleHighlights,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
       // date depends on the channel, which the caller tracks separately.
       setSharedSyncStatus(realtimeHealthyRef.current ? 'live' : 'delayed');
       if (talkAboutResultIsLatest) {
-        setTalkAboutSyncStatus(talkAboutResult.ok ? 'ready' : 'unavailable');
+        setTalkAboutSyncStatus(talkAboutResult?.ok ? 'ready' : 'unavailable');
       }
       replaceStateImmediately(nextState);
       return true;
@@ -1856,9 +1900,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const talkAboutRequestSequence = slice === 'talk-about' || slice === 'profile'
         ? ++talkAboutRefreshSequenceRef.current
         : null;
+      const recordsRequestSequence = slice === 'records'
+        ? ++recordsRefreshSequenceRef.current
+        : null;
       const isLatestTalkAboutRefresh = () => isCurrentRefresh()
         && talkAboutRequestSequence !== null
         && talkAboutRefreshSequenceRef.current === talkAboutRequestSequence;
+      const isLatestRecordsRefresh = () => isCurrentRefresh()
+        && recordsRequestSequence !== null
+        && recordsRefreshSequenceRef.current === recordsRequestSequence;
       try {
         if (slice === 'profile') {
           const result = await fetchFullStateResultFromDB(authUserId);
@@ -1885,7 +1935,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         if (slice === 'records') {
           const result = await fetchRecordsResultFromDB(coupleId);
-          if (!isCurrentRefresh()) return;
+          if (!isLatestRecordsRefresh()) return;
           if (!result.ok) {
             quarantineSharedAccess(workspace);
             return;
@@ -1899,7 +1949,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })),
             { userId: authUserId, role },
           );
-          if (notificationsArmed) {
+          if (notificationsArmed && isLatestRecordsRefresh()) {
             const previousIds = new Set(stateRef.current.records.map((record) => record.id));
             result.records
               .filter((record) => record.userId !== authUserId && !record.isPrivate && !previousIds.has(record.id))
@@ -1913,11 +1963,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 });
               });
           }
-          if (isCurrentRefresh()) {
-            updateStateImmediately((current) =>
-              isCurrentRefresh() ? { ...current, records } : current,
-            );
-          }
+          updateStateImmediately((current) =>
+            isLatestRecordsRefresh() ? { ...current, records } : current,
+          );
           return;
         }
         if (slice === 'events') {
@@ -1985,6 +2033,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         if (slice === 'talk-about' || slice === 'profile') {
           if (!isLatestTalkAboutRefresh()) return;
+        } else if (slice === 'records') {
+          // A superseded records request may reject after a newer authoritative
+          // read has already committed. Treating that stale failure as current
+          // would quarantine (and blank) a workspace whose newest read passed.
+          if (!isLatestRecordsRefresh()) return;
         } else if (!isCurrentRefresh()) return;
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed.`);
         if (slice === 'talk-about') {
@@ -2065,8 +2118,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return recovered;
     };
 
-    // One channel covers the shared tables and the current user's own
-    // membership row. A partner disconnect updates that row and revokes access.
+    // Release A compatibility is deliberately isolated. Once migration 072
+    // removes daily_records from the publication this channel may fail, but it
+    // cannot take the authoritative invalidation/membership channel down with it.
+    const legacyRecordsChannel = client
+      .channel(`couple-records-compat:${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
+        () => scheduleRefresh('records'),
+      )
+      .subscribe();
+
+    // The authoritative channel covers only sources that remain published after
+    // migration 072 plus the current user's own membership row. A partner
+    // disconnect updates that row and revokes access.
     const channel = client
       .channel(`couple-sync:${coupleId}`)
       .on(
@@ -2079,9 +2145,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
+        { event: 'INSERT', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
         (payload) => {
           const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'records') scheduleRefresh('records');
           if (invalidation.slice === 'events') scheduleRefresh('events');
           if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
           if (invalidation.slice === 'highlights') scheduleRefresh('highlights');
@@ -2090,8 +2157,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
-        () => scheduleRefresh('records'),
+        { event: 'UPDATE', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
+        (payload) => {
+          const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'records') scheduleRefresh('records');
+          if (invalidation.slice === 'events') scheduleRefresh('events');
+          if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
+          if (invalidation.slice === 'highlights') scheduleRefresh('highlights');
+          if (invalidation.slice === 'profile') scheduleRefresh('profile');
+        },
       )
       // No direct `events` subscription. Realtime does not apply RLS to DELETE
       // payloads, so subscribing to the table told the partner exactly when the
@@ -2155,6 +2229,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('online', handleVisibility);
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
+      void client.removeChannel(legacyRecordsChannel);
       void client.removeChannel(channel);
     };
   }, [
@@ -2780,9 +2855,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
       }
       if (!isCurrentLinkedCouple(workspace)) return staleResult;
+      recordsRefreshSequenceRef.current += 1;
       updateStateImmediately((current) =>
         isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-          ? { ...current, records: [...current.records, savedRecord] }
+          ? { ...current, records: mergeCreatedRecordSnapshot(current.records, savedRecord) }
           : current,
       );
       return {
@@ -2868,9 +2944,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     const recordToCommit = finalRecord;
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-        ? { ...current, records: [...current.records, recordToCommit] }
+        ? { ...current, records: mergeCreatedRecordSnapshot(current.records, recordToCommit) }
         : current,
     );
     return isCurrentLinkedCouple(workspace)
@@ -3294,6 +3371,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
     }
 
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? {
@@ -3362,6 +3440,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return recordFailure(reason);
     }
 
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? { ...current, records: current.records.filter((record) => record.id !== id) }
@@ -3573,6 +3652,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // media response may finish after a newer revision has reattached one of the
     // requested paths; in that case the guard keeps the newer state and cleanup
     // must be skipped rather than deleting an object that state still references.
+    recordsRefreshSequenceRef.current += 1;
     const nextState = updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? {

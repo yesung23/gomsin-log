@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Executable proof for the real fresh active chain. Migration 071 is applied
- * after the 069/070 upgrade-contract checks so both the old and final states are
- * exercised in one throwaway cluster.
+ * after the 069/070 upgrade-contract checks so both the old and final cycle
+ * states are exercised, then 072's private-capable Realtime boundary is driven
+ * through real triggers, publication metadata, privileges and RLS actors in the
+ * same throwaway cluster.
  *
  * The string-level tests next to these migrations prove the SQL text says what
  * we think it says. They cannot prove the policies DENY anything, because a
@@ -131,6 +133,7 @@ const ORDER = [
   '070_cycle_consent_atomic_write_gate.sql',
 ];
 const FINAL_MIGRATION = '071_disable_automatic_cycle_projection.sql';
+const REALTIME_PRIVACY_MIGRATION = '072_close_private_capable_realtime_metadata.sql';
 
 /**
  * The one deviation the README prescribes for a fresh database.
@@ -229,6 +232,12 @@ if (!have('initdb') || !have('pg_ctl') || !have('psql')) {
 }
 
 for (const file of ORDER) {
+  if (!existsSync(join(MIGRATIONS, file))) {
+    console.error(`MISSING MIGRATION: ${file}`);
+    process.exit(2);
+  }
+}
+for (const file of [FINAL_MIGRATION, REALTIME_PRIVACY_MIGRATION]) {
   if (!existsSync(join(MIGRATIONS, file))) {
     console.error(`MISSING MIGRATION: ${file}`);
     process.exit(2);
@@ -427,8 +436,8 @@ function checkVisible(userId, predicate, expected, message) {
 // Derived from ORDER rather than typed, because the typed version was already
 // wrong: it still said 043..050 with 051 in the chain, and had said 043..045
 // long after that stopped being true.
-const chainSpan = `${ORDER[0].slice(0, 3)}..${FINAL_MIGRATION.slice(0, 3)}`;
-console.log(`active fresh-chain harness — ${ORDER.length + 1} migrations (${chainSpan}, 041/042 frozen) on throwaway PostgreSQL 17\n`);
+const chainSpan = `${ORDER[0].slice(0, 3)}..${REALTIME_PRIVACY_MIGRATION.slice(0, 3)}`;
+console.log(`active fresh-chain harness — ${ORDER.length + 2} migrations (${chainSpan}, 041/042 frozen) on throwaway PostgreSQL 17\n`);
 
 execFileSync('initdb', ['-D', dataDir, '-U', 'postgres', '--no-sync', '-A', 'trust'], {
   stdio: 'ignore', env: PG_ENV,
@@ -5670,6 +5679,301 @@ for (const table of rawCycleTables) {
     `071 preserves every raw row and value in ${table}`,
   );
 }
+
+// ---------------------------------------------------------------------------
+// 072 — private-capable source tables emit only content-free visible changes
+// ---------------------------------------------------------------------------
+
+check(
+  mustSql(`
+    SELECT count(*)
+    FROM pg_catalog.pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename IN ('daily_records', 'couple_tasks')
+  `, '072 publication precondition') === '2',
+  '072 precondition has both private-capable source tables in Realtime',
+);
+
+const applied072 = psqlScript(readFileSync(join(MIGRATIONS, REALTIME_PRIVACY_MIGRATION), 'utf8'));
+if (!applied072.ok) {
+  throw new Error(`072 migration failed:\n${applied072.stderr.trim()}`);
+}
+
+// Earlier account-deletion cases intentionally remove C and couple 2. Restore
+// that unrelated actor only after those assertions so this final actor matrix
+// cannot accidentally inherit a missing-row denial and call it an RLS pass.
+mustSql(`
+  INSERT INTO auth.users (id, email)
+  VALUES ('${C}', 'c-realtime-072@example.test')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.profiles (id, display_name, role)
+  VALUES ('${C}', 'C realtime 072', 'gomsin')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.couples (id)
+  VALUES ('${COUPLE2}')
+  ON CONFLICT (id) DO NOTHING;
+  INSERT INTO public.couple_members (couple_id, user_id, role, status)
+  VALUES ('${COUPLE2}', '${C}', 'gomsin', 'active')
+  ON CONFLICT DO NOTHING;
+`, '072 restore unrelated actor fixture');
+
+check(
+  mustSql(`
+    SELECT count(*)
+    FROM pg_catalog.pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename IN ('daily_records', 'couple_tasks')
+  `, '072 private source publication state') === '0',
+  '072 removes both private-capable source tables from Realtime',
+);
+check(
+  mustSql(`
+    SELECT count(*)
+    FROM pg_catalog.pg_publication_tables
+    WHERE pubname = 'supabase_realtime'
+      AND schemaname = 'public'
+      AND tablename = 'collaboration_invalidations'
+  `, '072 invalidation publication state') === '1',
+  '072 keeps the content-free invalidation table in Realtime',
+);
+
+for (const [role, invoke] of [
+  ['authenticated', () => asUser(A, 'SELECT public.emit_private_capable_collaboration_invalidation()')],
+  ['anon', () => asAnon('SELECT public.emit_private_capable_collaboration_invalidation()')],
+  ['service_role', () => asServiceRole('SELECT public.emit_private_capable_collaboration_invalidation()')],
+]) {
+  check(!invoke().ok, `072 ${role} cannot invoke the trigger function directly`);
+}
+
+const BASELINE_INVALIDATION = '2000-01-01 00:00:00+00';
+function resetInvalidation(coupleId, slice) {
+  mustSql(`
+    INSERT INTO public.collaboration_invalidations (couple_id, slice, updated_at)
+    VALUES ('${coupleId}', '${slice}', TIMESTAMPTZ '${BASELINE_INVALIDATION}')
+    ON CONFLICT (couple_id, slice)
+    DO UPDATE SET updated_at = EXCLUDED.updated_at
+  `, `072 reset ${slice} invalidation`);
+}
+
+function invalidationIsBaseline(coupleId, slice) {
+  return mustSql(`
+    SELECT updated_at = TIMESTAMPTZ '${BASELINE_INVALIDATION}'
+    FROM public.collaboration_invalidations
+    WHERE couple_id = '${coupleId}' AND slice = '${slice}'
+  `, `072 compare ${slice} invalidation`) === 't';
+}
+
+function checkSilentMutation(coupleId, slice, statement, label) {
+  resetInvalidation(coupleId, slice);
+  mustSql(statement, label);
+  check(
+    invalidationIsBaseline(coupleId, slice),
+    `${label} emits no observable invalidation`,
+  );
+}
+
+function checkVisibleMutation(coupleId, slice, statement, label) {
+  resetInvalidation(coupleId, slice);
+  mustSql(statement, label);
+  check(
+    !invalidationIsBaseline(coupleId, slice),
+    `${label} emits one content-free invalidation state change`,
+  );
+}
+
+const R_PRIVATE = '72000000-0000-4000-8000-000000000001';
+const R_SHARED = '72000000-0000-4000-8000-000000000002';
+const R_MOVED = '72000000-0000-4000-8000-000000000003';
+const T_PRIVATE = '72000000-0000-4000-8000-000000000011';
+const T_SHARED = '72000000-0000-4000-8000-000000000012';
+
+checkSilentMutation(COUPLE1, 'records', `
+  INSERT INTO public.daily_records (
+    id, user_id, couple_id, record_date, log_text, is_private
+  ) VALUES (
+    '${R_PRIVATE}', '${A}', '${COUPLE1}', CURRENT_DATE, 'private 072', true
+  )
+`, '072 private record INSERT');
+checkSilentMutation(COUPLE1, 'records', `
+  UPDATE public.daily_records SET log_text = 'private 072 edited'
+  WHERE id = '${R_PRIVATE}'
+`, '072 private-to-private record UPDATE');
+checkSilentMutation(COUPLE1, 'records', `
+  DELETE FROM public.daily_records WHERE id = '${R_PRIVATE}'
+`, '072 private record DELETE');
+
+checkVisibleMutation(COUPLE1, 'records', `
+  INSERT INTO public.daily_records (
+    id, user_id, couple_id, record_date, log_text, is_private
+  ) VALUES (
+    '${R_SHARED}', '${A}', '${COUPLE1}', CURRENT_DATE, 'shared 072', false
+  )
+`, '072 shared record INSERT');
+checkVisibleMutation(COUPLE1, 'records', `
+  UPDATE public.daily_records SET log_text = 'shared 072 edited'
+  WHERE id = '${R_SHARED}'
+`, '072 shared-to-shared record UPDATE');
+checkVisibleMutation(COUPLE1, 'records', `
+  UPDATE public.daily_records SET is_private = true
+  WHERE id = '${R_SHARED}'
+`, '072 shared-to-private record UPDATE');
+checkVisibleMutation(COUPLE1, 'records', `
+  UPDATE public.daily_records SET is_private = false
+  WHERE id = '${R_SHARED}'
+`, '072 private-to-shared record UPDATE');
+checkVisibleMutation(COUPLE1, 'records', `
+  DELETE FROM public.daily_records WHERE id = '${R_SHARED}'
+`, '072 shared record DELETE');
+
+mustSql(`
+  INSERT INTO public.daily_records (
+    id, user_id, couple_id, record_date, log_text, is_private
+  ) VALUES (
+    '${R_MOVED}', '${A}', '${COUPLE1}', CURRENT_DATE, 'legacy moved 072', false
+  )
+`, '072 cross-couple fixture');
+resetInvalidation(COUPLE1, 'records');
+resetInvalidation(COUPLE2, 'records');
+mustSql(`
+  UPDATE public.daily_records SET couple_id = '${COUPLE2}'
+  WHERE id = '${R_MOVED}'
+`, '072 synthetic legacy cross-couple record UPDATE');
+check(
+  !invalidationIsBaseline(COUPLE1, 'records'),
+  '072 a synthetic visible cross-couple record move invalidates the old couple',
+);
+check(
+  !invalidationIsBaseline(COUPLE2, 'records'),
+  '072 a synthetic visible cross-couple record move invalidates the new couple',
+);
+
+checkSilentMutation(COUPLE1, 'tasks', `
+  INSERT INTO public.couple_tasks (
+    id, couple_id, created_by, title, due_date, is_private
+  ) VALUES (
+    '${T_PRIVATE}', '${COUPLE1}', '${A}', 'private task 072', CURRENT_DATE, true
+  )
+`, '072 private task INSERT');
+checkSilentMutation(COUPLE1, 'tasks', `
+  UPDATE public.couple_tasks SET title = 'private task 072 edited'
+  WHERE id = '${T_PRIVATE}'
+`, '072 private-to-private task UPDATE');
+checkSilentMutation(COUPLE1, 'tasks', `
+  DELETE FROM public.couple_tasks WHERE id = '${T_PRIVATE}'
+`, '072 private task DELETE');
+
+checkVisibleMutation(COUPLE1, 'tasks', `
+  INSERT INTO public.couple_tasks (
+    id, couple_id, created_by, title, due_date, is_private
+  ) VALUES (
+    '${T_SHARED}', '${COUPLE1}', '${A}', 'shared task 072', CURRENT_DATE, false
+  )
+`, '072 shared task INSERT');
+checkVisibleMutation(COUPLE1, 'tasks', `
+  UPDATE public.couple_tasks SET completed = true
+  WHERE id = '${T_SHARED}'
+`, '072 shared-to-shared task UPDATE');
+checkVisibleMutation(COUPLE1, 'tasks', `
+  UPDATE public.couple_tasks SET is_private = true
+  WHERE id = '${T_SHARED}'
+`, '072 shared-to-private task UPDATE');
+checkVisibleMutation(COUPLE1, 'tasks', `
+  UPDATE public.couple_tasks SET is_private = false
+  WHERE id = '${T_SHARED}'
+`, '072 private-to-shared task UPDATE');
+checkVisibleMutation(COUPLE1, 'tasks', `
+  DELETE FROM public.couple_tasks WHERE id = '${T_SHARED}'
+`, '072 shared task DELETE');
+
+resetInvalidation(COUPLE1, 'records');
+resetInvalidation(COUPLE2, 'records');
+resetInvalidation(COUPLE1, 'tasks');
+resetInvalidation(COUPLE2, 'tasks');
+const visibleInvalidationCount = (actor, coupleId) => {
+  const result = asUser(actor, `
+    SELECT count(*) FROM public.collaboration_invalidations
+    WHERE couple_id = '${coupleId}' AND slice IN ('records', 'tasks')
+  `);
+  return result.ok ? result.stdout.trim() : `ERROR:${result.stderr.trim()}`;
+};
+check(
+  visibleInvalidationCount(A, COUPLE1) === '2',
+  '072 owner reads only their active couple records/tasks invalidations',
+);
+check(
+  visibleInvalidationCount(B, COUPLE1) === '2',
+  '072 active partner reads the same content-free records/tasks invalidations',
+);
+check(
+  visibleInvalidationCount(C, COUPLE1) === '0',
+  '072 unrelated user cannot read another couple invalidation',
+);
+check(
+  visibleInvalidationCount(A, COUPLE2) === '0',
+  '072 owner cannot read an unrelated couple invalidation',
+);
+check(
+  visibleInvalidationCount(C, COUPLE2) === '2',
+  '072 unrelated user can read only their own active couple invalidations',
+);
+check(
+  !asAnon('SELECT count(*) FROM public.collaboration_invalidations').ok,
+  '072 anon cannot read collaboration invalidations',
+);
+mustSql(`
+  UPDATE public.couple_members SET status = 'disconnected'
+  WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'
+`, '072 disconnect partner');
+check(
+  visibleInvalidationCount(B, COUPLE1) === '0',
+  '072 former partner cannot read collaboration invalidations',
+);
+mustSql(`
+  UPDATE public.couple_members SET status = 'active'
+  WHERE couple_id = '${COUPLE1}' AND user_id = '${B}'
+`, '072 restore partner');
+
+// A source-row DELETE trigger runs during the parent's ON DELETE CASCADE too.
+// It must not try to recreate an invalidation whose parent couple has already
+// disappeared: account deletion calls this exact RPC in a later transaction.
+const CASCADE_USER = '72000000-0000-4000-8000-000000000021';
+const CASCADE_COUPLE = '72000000-0000-4000-8000-000000000022';
+const CASCADE_RECORD = '72000000-0000-4000-8000-000000000023';
+const CASCADE_TASK = '72000000-0000-4000-8000-000000000024';
+mustSql(`
+  INSERT INTO auth.users (id, email)
+  VALUES ('${CASCADE_USER}', 'cascade-realtime-072@example.test');
+  INSERT INTO public.profiles (id, display_name, role)
+  VALUES ('${CASCADE_USER}', 'Cascade realtime 072', 'gomsin');
+  INSERT INTO public.couples (id) VALUES ('${CASCADE_COUPLE}');
+  INSERT INTO public.couple_members (couple_id, user_id, role, status)
+  VALUES ('${CASCADE_COUPLE}', '${CASCADE_USER}', 'gomsin', 'active');
+  INSERT INTO public.daily_records (
+    id, user_id, couple_id, record_date, log_text, is_private
+  ) VALUES (
+    '${CASCADE_RECORD}', '${CASCADE_USER}', '${CASCADE_COUPLE}', CURRENT_DATE,
+    'shared cascade record 072', false
+  );
+  INSERT INTO public.couple_tasks (
+    id, couple_id, created_by, title, due_date, is_private
+  ) VALUES (
+    '${CASCADE_TASK}', '${CASCADE_COUPLE}', '${CASCADE_USER}',
+    'shared cascade task 072', CURRENT_DATE, false
+  );
+`, '072 seed sole-couple cascade fixture');
+const cascadeCleanup = asServiceRole(`
+  SELECT public.cleanup_account_solo_couples('${CASCADE_USER}')
+`);
+check(
+  cascadeCleanup.ok && cascadeCleanup.stdout.trim() === '1',
+  '072 shared record/task triggers do not block sole-couple account cleanup cascade',
+);
+check(
+  mustSql(`SELECT count(*) FROM public.couples WHERE id = '${CASCADE_COUPLE}'`, '072 cascade couple result') === '0',
+  '072 sole-couple cleanup removes the parent after shared child invalidations existed',
+);
 
 // ---------------------------------------------------------------------------
 // Report

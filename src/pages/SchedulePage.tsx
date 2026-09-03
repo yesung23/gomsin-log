@@ -54,6 +54,10 @@ const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
 type TaskLoadState = 'idle' | 'loading' | 'ready' | 'error' | 'forbidden';
 
+const TASK_REALTIME_DEBOUNCE_MS = 250;
+const TASK_RECOVERY_BASE_DELAY_MS = 2_000;
+const TASK_RECOVERY_MAX_DELAY_MS = 30_000;
+
 export function SchedulePage() {
   const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
   const { profile, events, authenticatedUser } = state;
@@ -168,6 +172,8 @@ export function SchedulePage() {
   const [isSavingTask, setIsSavingTask] = useState(false);
   const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(new Set());
   const taskRequestSequenceRef = useRef(0);
+  /** Advances only when a task snapshot actually commits, not when a read starts. */
+  const taskStateSequenceRef = useRef(0);
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
@@ -201,6 +207,7 @@ export function SchedulePage() {
    */
   useLayoutEffect(() => {
     taskRequestSequenceRef.current += 1;
+    taskStateSequenceRef.current += 1;
     setTasks([]);
     setPendingTaskIds(new Set());
     setTaskTitle('');
@@ -222,26 +229,45 @@ export function SchedulePage() {
     return () => { cancelled = true; };
   }, [authenticatedUser?.id, scheduleAccessKey]);
 
-  const refreshTasks = useCallback(async ({ announce = false }: { announce?: boolean } = {}) => {
+  const refreshTasks = useCallback(async (
+    { announce = false }: { announce?: boolean } = {},
+  ): Promise<Exclude<TaskLoadState, 'loading'>> => {
     const coupleId = profile.couple.coupleId;
     if (!authenticatedUser?.id || !coupleId || !activeCouple) {
       taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
       setTasks([]);
       setTaskLoadState('idle');
-      return;
+      return 'idle';
     }
     const access = captureAccess();
     const requestSequence = ++taskRequestSequenceRef.current;
     if (announce) setTaskLoadState('loading');
-    const result = await fetchTasks(coupleId);
-    if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return;
-    if (result.ok) {
-      setTasks(result.tasks);
-      setTaskLoadState('ready');
-      return;
+    try {
+      const result = await fetchTasks(coupleId);
+      if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return 'idle';
+      if (result.ok) {
+        taskStateSequenceRef.current += 1;
+        setTasks(result.tasks);
+        setTaskLoadState('ready');
+        return 'ready';
+      }
+      if (result.reason === 'forbidden') {
+        taskStateSequenceRef.current += 1;
+        setTasks([]);
+      }
+      setTaskLoadState(result.reason);
+      return result.reason;
+    } catch (error) {
+      if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return 'idle';
+      const reason = classifyServerError(error).kind === 'forbidden' ? 'forbidden' : 'error';
+      if (reason === 'forbidden') {
+        taskStateSequenceRef.current += 1;
+        setTasks([]);
+      }
+      setTaskLoadState(reason);
+      return reason;
     }
-    if (result.reason === 'forbidden') setTasks([]);
-    setTaskLoadState(result.reason);
   }, [activeCouple, authenticatedUser?.id, captureAccess, isCurrentAccess, profile.couple.coupleId]);
 
   useEffect(() => {
@@ -249,17 +275,97 @@ export function SchedulePage() {
     const client = supabase;
     const coupleId = profile.couple.coupleId;
     if (!client || !activeCouple || !coupleId) return;
-    let subscribed = true;
-    const channel = client.channel(`couple-tasks:${coupleId}`)
+    const access = captureAccess();
+    let disposed = false;
+    let subscribed = false;
+    let channelEventsAllowed = true;
+    let debounceTimer: number | undefined;
+    let recoveryTimer: number | undefined;
+    let recoveryAttempt = 0;
+
+    const isCurrentSubscription = () => !disposed && isCurrentAccess(access);
+    const clearDebounce = () => {
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    };
+    const clearRecovery = () => {
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
+    };
+    const refreshSoon = () => {
+      if (!isCurrentSubscription()) return;
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = undefined;
+        void refreshTasks();
+      }, TASK_REALTIME_DEBOUNCE_MS);
+    };
+    const scheduleRecovery = () => {
+      if (!isCurrentSubscription() || subscribed || recoveryTimer !== undefined) return;
+      const delay = Math.min(
+        TASK_RECOVERY_MAX_DELAY_MS,
+        TASK_RECOVERY_BASE_DELAY_MS * 2 ** recoveryAttempt,
+      );
+      recoveryAttempt += 1;
+      recoveryTimer = window.setTimeout(() => {
+        recoveryTimer = undefined;
+        void refreshTasks().finally(() => {
+          if (isCurrentSubscription() && !subscribed) scheduleRecovery();
+        });
+      }, delay);
+    };
+    const handleInvalidation = (payload: { new?: unknown }) => {
+      if (!channelEventsAllowed) return;
+      const next = payload.new;
+      if (!next || typeof next !== 'object' || (next as { slice?: unknown }).slice !== 'tasks') return;
+      refreshSoon();
+    };
+    // Keep the pre-072 source subscription in an isolated compatibility
+    // channel. When 072 removes couple_tasks from the publication, a failure in
+    // this channel cannot disable the authoritative invalidation channel.
+    const legacyTasksChannel = client.channel(`couple-tasks-compat:${coupleId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => {
-        if (subscribed) void refreshTasks();
+        if (channelEventsAllowed) refreshSoon();
       })
       .subscribe();
+    const channel = client.channel(`couple-tasks:${coupleId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` }, handleInvalidation)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` }, handleInvalidation)
+      .subscribe((status) => {
+        if (!isCurrentSubscription()) return;
+        if (status === 'SUBSCRIBED') {
+          subscribed = true;
+          channelEventsAllowed = true;
+          clearRecovery();
+          recoveryAttempt = 0;
+          void refreshTasks();
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          subscribed = false;
+          channelEventsAllowed = false;
+          scheduleRecovery();
+        }
+      });
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshSoon();
+    };
+    const handleOnline = () => refreshSoon();
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnline);
     return () => {
+      disposed = true;
       subscribed = false;
+      channelEventsAllowed = false;
+      clearDebounce();
+      clearRecovery();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
+      void client.removeChannel(legacyTasksChannel);
       void client.removeChannel(channel);
     };
-  }, [activeCouple, profile.couple.coupleId, refreshTasks]);
+  }, [activeCouple, captureAccess, isCurrentAccess, profile.couple.coupleId, refreshTasks]);
 
   const previousSyncStatusRef = useRef(sharedSyncStatus);
   const loadStateRef = useRef(loadState);
@@ -590,6 +696,7 @@ export function SchedulePage() {
       return;
     }
     const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
     setIsSavingTask(true);
     try {
       const saved = await createTask({
@@ -606,7 +713,30 @@ export function SchedulePage() {
         toast.error('할 일을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
         return;
       }
-      setTasks((current) => [...current, saved]);
+      if (taskRequestSequenceRef.current !== mutationSequence) {
+        // An invalidation/foreground read observed database state while this
+        // response was in flight. Re-read after the mutation response instead
+        // of appending the same row twice or trusting an older snapshot.
+        const reconciliation = await refreshTasks();
+        if (!isCurrentAccess(access)) return;
+        if (reconciliation === 'error') {
+          taskRequestSequenceRef.current += 1;
+          taskStateSequenceRef.current += 1;
+          setTasks((current) => current.some((entry) => entry.id === saved.id)
+            ? current
+            : [...current, saved]);
+          toast.error('저장은 됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+        }
+        setTaskTitle('');
+        setTaskTime('');
+        if (reconciliation === 'ready') toast.success('우리 할 일에 추가했습니다.');
+        return;
+      }
+      taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
+      setTasks((current) => current.some((entry) => entry.id === saved.id)
+        ? current
+        : [...current, saved]);
       setTaskTitle('');
       setTaskTime('');
       toast.success('우리 할 일에 추가했습니다.');
@@ -618,6 +748,8 @@ export function SchedulePage() {
   const handleToggleTask = async (task: CoupleTask) => {
     if (pendingTaskIds.has(task.id) || isOffline || taskLoadState !== 'ready' || !activeCouple) return;
     const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
+    const mutationStateSequence = taskStateSequenceRef.current;
     setPendingTaskIds((current) => new Set(current).add(task.id));
     try {
       const saved = await updateTask(task, { completed: !task.completed });
@@ -626,6 +758,24 @@ export function SchedulePage() {
         toast.error('할 일 상태를 저장하지 못했어요.');
         return;
       }
+      if (taskRequestSequenceRef.current !== mutationSequence) {
+        // A newer read may include a later edit from either device. The delayed
+        // mutation response has no server revision, so only a post-response
+        // authoritative read can decide the final row without clobbering it.
+        const reconciliation = await refreshTasks();
+        if (!isCurrentAccess(access)) return;
+        if (reconciliation === 'error') {
+          if (taskStateSequenceRef.current === mutationStateSequence) {
+            taskRequestSequenceRef.current += 1;
+            taskStateSequenceRef.current += 1;
+            setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
+          }
+          toast.error('변경은 저장됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+        }
+        return;
+      }
+      taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
       setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
     } finally {
       if (isCurrentAccess(access)) {
@@ -647,11 +797,27 @@ export function SchedulePage() {
       || !activeCouple
     ) return;
     const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
     setPendingTaskIds((current) => new Set(current).add(task.id));
     try {
       const deleted = await deleteTask(task);
       if (!isCurrentAccess(access)) return;
-      if (deleted) setTasks((current) => current.filter((entry) => entry.id !== task.id));
+      if (deleted) {
+        if (taskRequestSequenceRef.current !== mutationSequence) {
+          const reconciliation = await refreshTasks();
+          if (!isCurrentAccess(access)) return;
+          if (reconciliation === 'error') {
+            taskRequestSequenceRef.current += 1;
+            taskStateSequenceRef.current += 1;
+            setTasks((current) => current.filter((entry) => entry.id !== task.id));
+            toast.error('삭제는 됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+          }
+          return;
+        }
+        taskRequestSequenceRef.current += 1;
+        taskStateSequenceRef.current += 1;
+        setTasks((current) => current.filter((entry) => entry.id !== task.id));
+      }
       else toast.error('할 일을 삭제하지 못했어요.');
     } finally {
       if (isCurrentAccess(access)) {

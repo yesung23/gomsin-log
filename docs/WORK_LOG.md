@@ -3629,6 +3629,125 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · 온디바이스 하루 전체 exact-source 발췌·원문 이동 gate 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary exact excerpt and native boundary
+- Step: 120→40 연속 원문 발췌, 하루 전체 순서·출처 보존, Swift bridge·simulator 검증
+- Previous Gate: 모델 출력은 원문 그대로만 통과하는 semantic firewall
+- This Gate: 최대 20개 partner-readable 기록의 1:1 온디바이스 발췌와 exact-original navigation local PASS; 실기기 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7; AI는 편집·압축 보조이고 자동 중요도 판정 주체가 아님
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md` M6, `docs/kiro/AI_HANDOFF.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, base `7ba2df809220180d704086921ae3ed4fe503cd98`, exact dirty-file inventory, native package call path
+- Latest relevant Work Log checked: 2026-09-03 온디바이스 입력 override와 semantic firewall 항목, Realtime metadata gate
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. 현재 파트너에게 이미 공유된 기록 본문의 건강·위치 표현 허용은 2026-09-03 제품 오너의 최신 명시적 승인 범위다.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded independent Sol architecture/security reviewer
+- Model: GPT-5.6 Sol primary; Sol independent reviewer
+- Role: primary TDD·native integration·verification owner, reviewer는 exact-source·Unicode·Swift type·fallback 경계 독립 감사
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `7ba2df809220180d704086921ae3ed4fe503cd98`
+- Old HEAD: `7ba2df809220180d704086921ae3ed4fe503cd98`
+- New HEAD / Reviewed HEAD: `68dc6c1fa20233157e68acc2027c768c2cc2eb9c`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/dailySummary/contract.ts`, `rules.ts`, `semanticGuard.ts`, `verify.ts`와 테스트
+- function/component/migration: 120 UTF-16 source normalization, grapheme-safe exact contiguous excerpt, omission boundary, 40자 decorated-output ceiling
+- what changed/reviewed: 모델 결과는 같은 index 원문의 연속 부분 문자열이어야 하고 앞·뒤 생략은 실제 원문 경계를 반영한다. 위험 Unicode, 잘린 단어/기호, 합성 punctuation, grapheme 파손, 40자 초과를 whole-batch reject한다.
+- why: 많은 하루 기록을 짧게 훑되 사실·부정·수량·출처를 바꾸지 않기 위해
+- file: `src/lib/dailySummary/useOnDeviceDailySummary.ts`, `src/features/story/StoryRoute.tsx`, `StoryViewer.tsx`, `storyDailySummary.test.tsx`
+- function/component/migration: eligible corpus, 5개 배치, 최대 20개, 배치당 4초, whole-day atomic fallback, exact-original route
+- what changed/reviewed: 현재 active partner의 today/readable/persisted/non-private 기록을 시간순으로 유지하고 한 기록당 한 항목으로 표시한다. bodyless source 또는 어느 배치 실패도 모델 결과를 섞지 않고 결정론적 목록으로 복귀한다.
+- why: AI가 기록을 누락·병합·재정렬하거나 잘못된 원문으로 연결하지 못하게 하기 위해
+- file: `packages/capacitor-on-device-summary/**`, `ios/App/Podfile.lock`
+- function/component/migration: Foundation Models prompt/schema, strict native dictionary decoding, plugin package version
+- what changed/reviewed: 원문 index와 excerpt만 반환하는 native 계약으로 조이고 exact key set, integer `NSNumber`, true CFBoolean을 엄격히 확인한다. network/storage/logging/cloud fallback은 추가하지 않았다.
+- why: JavaScript 검증 전 native bridge에서 형태·타입 우회나 사용자 본문 유출을 막기 위해
+- file: `control-tower/reports/codex/2026-09-03_1305_on-device-daily-excerpt-closure_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 구현·검증·실기기/Production 미확인 경계를 기록
+- why: 코드 존재와 실제 지원 iPhone release 증거를 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스를 E2EE 또는 완전한 보안으로 표현하지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: current-partner shared body의 건강·위치 문구는 허용하되 owner-only structured health, GPS/EXIF metadata, private/unreadable/former-partner row는 제외; AI 중요도 선정·drop·merge·reorder 금지
+- Production: push·merge·deploy·Supabase·TestFlight·App Store·remote flag 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, `.gstack/`, `.unlazy/`를 stage하지 않음
+
+#### VERIFICATION
+- command: daily-summary focused Vitest 8 files
+- PASS / FAIL / UNVERIFIED: PASS — 8 files / 211 tests
+- what it actually proves: corpus·contract·Unicode·semantic output·batch/timeout/atomic fallback·exact-original route의 JavaScript 회귀
+- command: Segmenter preflight delta focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 78 tests
+- what it actually proves: Segmenter가 없는 환경에서 41–120자 입력을 native에 넘기지 않는 fail-closed 보정
+- command: Story integration 5회 반복
+- PASS / FAIL / UNVERIFIED: PASS — 매회 38/38
+- what it actually proves: 테스트 환경에서 비동기 Story 요약 상태가 반복 실행에도 결정적임
+- command: native configuration tests
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 106 tests
+- what it actually proves: Swift/package/Pod wiring의 저장소 계약
+- command: exact target ESLint; `npm run typecheck`; scoped `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 정적 규칙, 전체 TypeScript, whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; StoryRoute 26.82 kB / gzip 9.40 kB
+- what it actually proves: production-mode 번들 생성 가능; 실제 backend/Production 연결은 증명하지 않음
+- command: unsigned iOS Simulator clean Xcode build
+- PASS / FAIL / UNVERIFIED: PASS — exit 0
+- what it actually proves: 현재 Xcode/Simulator에서 native package가 compile·link됨; 실물 Foundation Models 실행은 증명하지 않음
+- command: independent Sol architecture/security review, reviewer 반례 TDD 후 fresh re-review
+- PASS / FAIL / UNVERIFIED: initial HOLD 4건 수정 후 FINAL LOCAL PASS — actionable CRITICAL/HIGH/MEDIUM 0, final focused 78/78
+- what it actually proves: appended punctuation, unsafe cut, bodyless synthesis, truncation 표시와 Segmenter fail-closed를 포함한 final local delta의 독립 검토
+- command: `npm run test -- --run`
+- PASS / FAIL / UNVERIFIED: FAIL snapshot — 296 files, 4,218 passed / 3 failed / 4,221 total; 기능 관련 `storyProjection` Segmenter 실패는 위 78/78로 수정·재검증, 별도 lifecycle/migration 2건은 다음 gate에서 조사
+- what it actually proves: 당시 전체 suite의 나머지 두 안정성 regression을 발견했으며 전체 Release Candidate PASS는 아직 아님
+- command: physical supported iPhone Foundation Models/Korean/offline/latency/thermal/battery/memory
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실기기 활성화 조건은 아직 충족되지 않음
+
+#### REVIEW IMPACT
+- FULL: JavaScript source/output contract와 Swift bridge 의미가 모두 바뀌어 이전 40자 firewall review를 승계하지 않고 fresh independent review를 수행했다.
+- whether an earlier review is stale: final implementation HEAD `68dc6c1`에 대해서는 NO; 이후 daily-summary/native 파일 변경 시 재검토 필요
+
+#### BLOCKERS
+- code: full suite의 `coupleLifecycleTransitions`와 `migrationSecurityContracts` 실패 2건을 별도 안정성 gate에서 조사 중
+- environment: supported physical iPhone Foundation Models, Korean quality, offline/no-network, cancel latency, thermal/battery/memory 미검증
+- external/manual: 검증 build 외 feature flag 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: commit `68dc6c1`의 on-device exact-excerpt local/simulator/review PASS; feature default OFF
+
+#### REMAINING
+- 두 full-suite 실패 root cause 수정 후 전체 suite fresh PASS
+- 지원 실물 iPhone에서 feature availability·한국어·오프라인·timeout·성능·메모리 검증
+- 실제 활성화 전 개인정보 문구와 지원기기/실패 fallback 제품 QA
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded verifier/reviewer
+- tool/model: systematic root-cause investigation, targeted TDD, fresh PostgreSQL chain and full-suite verification
+- 기준 SHA: `68dc6c1fa20233157e68acc2027c768c2cc2eb9c`
+- exact next task: couple lifecycle remote-revocation test와 migration 072 schema-cache reload test의 원인을 분리 확정하고 Realtime 의미를 보존하는 최소 수정
+
+#### DO NOT ADVANCE UNTIL
+- 두 실패를 단순 기대값 변경으로 덮지 않고 실제 subscription/migration contract를 확인
+- migration 072 remote 적용이나 compatible-client rollout을 수행하지 않음
+- 실물 기기 증거 없이 on-device feature를 기본 ON 또는 release-ready로 판정하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

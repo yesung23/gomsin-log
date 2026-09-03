@@ -386,9 +386,73 @@ describe('fetchFullStateFromDB', () => {
     });
     expect('memo' in (result.profile!.couple.partnerMilitary ?? {})).toBe(false);
     expect(mockRpc).toHaveBeenNthCalledWith(2, 'get_partner_service_info');
-    expect(memberChain.limit.mock.invocationCallOrder[0]).toBeGreaterThan(
+    expect(memberChain.limit).toHaveBeenCalledTimes(2);
+    expect(memberChain.limit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRpc.mock.invocationCallOrder[0],
+    );
+    expect(memberChain.limit.mock.invocationCallOrder[1]).toBeGreaterThan(
       mockRpc.mock.invocationCallOrder[1],
     );
+  });
+
+  it.each([
+    {
+      label: 'a different partner',
+      after: {
+        data: [{ user_id: 'partner-c', joined_at: '2026-09-03T12:00:00Z' }],
+        error: null,
+      },
+    },
+    {
+      label: 'zero partners',
+      after: { data: [], error: null },
+    },
+    {
+      label: 'a lookup error',
+      after: { data: null, error: { code: '42501', message: 'permission denied' } },
+    },
+  ])('rejects presentation when post-projection membership reports $label', async ({ after }) => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const partnerLookup = vi.fn()
+      .mockResolvedValueOnce({
+        data: [{ user_id: 'partner-b', joined_at: '2026-08-20T12:00:00Z' }],
+        error: null,
+      })
+      .mockResolvedValueOnce(after);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      partnerLookup,
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ display_name: 'Partner B', username: 'partner_b' }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          branch: 'army',
+          military_status: 'serving',
+          discharge_date_source: 'manual',
+        }],
+        error: null,
+      });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result).toMatchObject({ ok: false, stage: 'partner-membership' });
+    expect(mockFetchRecordsResultFromDB).not.toHaveBeenCalled();
   });
 
   it('keeps exact membership identity when the presentation profile has no row', async () => {
@@ -418,7 +482,7 @@ describe('fetchFullStateFromDB', () => {
     });
   });
 
-  it('discards stale presentation when final membership authority has zero rows', async () => {
+  it('does not read partner presentation when initial membership authority has zero rows', async () => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);
     const memberChain = setupMemberMock(
@@ -461,6 +525,7 @@ describe('fetchFullStateFromDB', () => {
     expect(result.profile!.couple.partnerJoinedAt).toBeUndefined();
     expect(result.profile!.couple.partnerUsername).toBeUndefined();
     expect(result.profile!.couple.partnerMilitary).toBeUndefined();
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -284,51 +284,79 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         return syncFailure('couple', coupleError);
       }
 
-      // Fetch Partner Profile
-      const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
-      if (partnerError) return syncFailure('partner', partnerError);
-      
-      const hasPartnerPresentation = !!(partnerData && partnerData.length > 0);
-      let partnerName = '';
-      let partnerUsername: string | undefined;
-      if (hasPartnerPresentation) {
-        partnerName = partnerData[0].display_name || '';
-        if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
-          partnerUsername = partnerData[0].username;
-        }
-      }
-
-      let partnerMilitary: PartnerServiceInfo | undefined;
-      const currentRole = memberData.role || profileData.role;
-      if (hasPartnerPresentation && currentRole === 'gomsin') {
-        const serviceResult = await supabase.rpc('get_partner_service_info');
-        if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
-          return syncFailure('partner', serviceResult.error);
-        }
-        partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
-      }
-
-      // Presentation RPCs are not identity authority. Verify the exact active,
-      // non-self member last so connected state and partner identity enter one
-      // FullStateResult snapshot or do not enter state at all.
-      const partnerMembership = await fetchPartnerMembershipResult(memberData.couple_id, userId);
-      if (!partnerMembership.ok) {
-        return syncFailure('partner-membership', partnerMembership.error);
-      }
-      const verifiedPartner = partnerMembership.partner;
-
       couple = {
         coupleId: memberData.couple_id,
-        partnerName: verifiedPartner ? partnerName : '',
-        ...(verifiedPartner ? { partnerUserId: verifiedPartner.userId } : {}),
-        ...(verifiedPartner?.joinedAt ? { partnerJoinedAt: verifiedPartner.joinedAt } : {}),
-        ...(verifiedPartner && partnerUsername ? { partnerUsername } : {}),
-        ...(verifiedPartner && partnerMilitary ? { partnerMilitary } : {}),
+        partnerName: '',
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
-        connected: !!verifiedPartner,
-        status: verifiedPartner ? 'active' : 'pending',
+        connected: false,
+        status: 'pending',
       };
+
+      // Presentation RPCs return no subject id, so they can never establish which
+      // partner their fields describe. Bracket every presentation read with the
+      // strict membership authority and publish only when both reads identify the
+      // same active partner. A verified initial absence is the stable pending path
+      // and intentionally skips all partner presentation RPCs.
+      const membershipBeforePresentation = await fetchPartnerMembershipResult(
+        memberData.couple_id,
+        userId,
+      );
+      if (!membershipBeforePresentation.ok) {
+        return syncFailure('partner-membership', membershipBeforePresentation.error);
+      }
+      const expectedPartner = membershipBeforePresentation.partner;
+
+      if (expectedPartner) {
+        const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
+        if (partnerError) return syncFailure('partner', partnerError);
+
+        const hasPartnerPresentation = !!(partnerData && partnerData.length > 0);
+        let partnerName = '';
+        let partnerUsername: string | undefined;
+        if (hasPartnerPresentation) {
+          partnerName = partnerData[0].display_name || '';
+          if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
+            partnerUsername = partnerData[0].username;
+          }
+        }
+
+        let partnerMilitary: PartnerServiceInfo | undefined;
+        const currentRole = memberData.role || profileData.role;
+        if (hasPartnerPresentation && currentRole === 'gomsin') {
+          const serviceResult = await supabase.rpc('get_partner_service_info');
+          if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
+            return syncFailure('partner', serviceResult.error);
+          }
+          partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
+        }
+
+        const membershipAfterPresentation = await fetchPartnerMembershipResult(
+          memberData.couple_id,
+          userId,
+        );
+        if (!membershipAfterPresentation.ok) {
+          return syncFailure('partner-membership', membershipAfterPresentation.error);
+        }
+        const verifiedPartner = membershipAfterPresentation.partner;
+        if (!verifiedPartner || verifiedPartner.userId !== expectedPartner.userId) {
+          return syncFailure(
+            'partner-membership',
+            new Error('Partner membership changed during hydration'),
+          );
+        }
+
+        couple = {
+          ...couple,
+          partnerName,
+          partnerUserId: verifiedPartner.userId,
+          ...(verifiedPartner.joinedAt ? { partnerJoinedAt: verifiedPartner.joinedAt } : {}),
+          ...(partnerUsername ? { partnerUsername } : {}),
+          ...(partnerMilitary ? { partnerMilitary } : {}),
+          connected: true,
+          status: 'active',
+        };
+      }
     }
 
     // 3. Fetch Contact Preferences

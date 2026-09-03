@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
+import { useEffect } from 'react';
 import type { AppState } from '@/types';
 import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 import {
@@ -235,13 +236,19 @@ function deferred<T>() {
 function Probe({
   files = [] as File[],
   allOrNothingMedia = false,
-}: { files?: File[]; allOrNothingMedia?: boolean }) {
+  onCommit,
+}: {
+  files?: File[];
+  allOrNothingMedia?: boolean;
+  onCommit?: (state: AppState) => void;
+}) {
   const {
     state,
     isReady,
     authSyncUnavailable,
     sharedSyncStatus,
     talkAboutSyncStatus,
+    coupleLifecycle,
     signOut,
     disconnect,
     updateProfile,
@@ -259,12 +266,16 @@ function Probe({
     unmarkTalkAbout,
     resolveTalkAbout,
   } = useStore();
+  useEffect(() => {
+    onCommit?.(state);
+  }, [onCommit, state]);
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
       <span data-testid="authSync">{authSyncUnavailable ? 'unavailable' : 'available'}</span>
       <span data-testid="syncStatus">{sharedSyncStatus}</span>
       <span data-testid="talkSyncStatus">{talkAboutSyncStatus}</span>
+      <span data-testid="coupleLifecycle">{coupleLifecycle}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
@@ -277,7 +288,9 @@ function Probe({
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
       <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
       <span data-testid="trips">{state.trips.map((trip) => trip.id).join(',')}</span>
+      <span data-testid="highlights">{(state.coupleHighlights ?? []).map((highlight) => highlight.id).join(',')}</span>
       <span data-testid="talkAboutMarks">{(state.talkAboutMarks ?? []).map((mark) => mark.id).join(',')}</span>
+      <span data-testid="highlightedRecord">{state.highlightedRecordId ?? 'none'}</span>
       <span data-testid="attachments">
         {state.records
           .flatMap((r) => r.attachments || [])
@@ -948,6 +961,184 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
     expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-old');
     expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('ready');
+  });
+
+  it.each([
+    {
+      label: 'pending',
+      nextCouple: {
+        coupleId: 'couple-1', partnerName: '', coupleCode: '',
+        connected: false, status: 'pending' as const,
+      },
+      expectedLifecycle: 'pending',
+    },
+    {
+      label: 'disconnected',
+      nextCouple: {
+        partnerName: '', coupleCode: '', connected: false, status: 'disconnected' as const,
+      },
+      expectedLifecycle: 'disconnected',
+    },
+  ])('publishes a successful $label profile refresh without any stale couple slice', async ({
+    nextCouple,
+    expectedLifecycle,
+  }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const committedFrames: Array<{
+      partnerId?: string;
+      recordIds: string[];
+      eventIds: string[];
+      tripIds: string[];
+      highlightIds: string[];
+      talkAboutIds: string[];
+      highlightedRecordId?: string;
+    }> = [];
+    const captureFrame = (next: AppState) => {
+      if (next.authenticatedUser?.id !== 'user-a') return;
+      committedFrames.push({
+        partnerId: next.profile.couple.partnerUserId,
+        recordIds: next.records.map((record) => record.id),
+        eventIds: next.events.map((event) => event.id),
+        tripIds: next.trips.map((trip) => trip.id),
+        highlightIds: (next.coupleHighlights ?? []).map((highlight) => highlight.id),
+        talkAboutIds: next.talkAboutMarks.map((mark) => mark.id),
+        highlightedRecordId: next.highlightedRecordId,
+      });
+    };
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{
+        id: 'record-former-partner', userId: 'partner-b', date: '2026-09-03', time: '09:00',
+        authorRole: 'soldier', log: 'stale', isPrivate: false, createdAt: '2026-09-03T00:00:00Z',
+      }] as never,
+      events: [{ id: 'event-former-partner', createdBy: 'partner-b', isPrivate: false }] as never,
+      trips: [{ id: 'trip-former-partner' }] as never,
+      coupleHighlights: [{ id: 'highlight-former-partner' }] as never,
+      talkAboutMarks: [{
+        id: 'mark-former-partner', recordId: 'record-former-partner', coupleId: 'couple-1',
+        actorUserId: 'partner-b', createdAt: '2026-09-03T00:00:00Z', isCompleted: false,
+      }],
+      highlightedRecordId: 'record-former-partner',
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: 'Partner B', partnerUserId: 'partner-b',
+          partnerMilitary: {
+            branch: 'army', militaryStatus: 'serving', dischargeDateSource: 'manual',
+          },
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe onCommit={captureFrame} /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('highlightedRecord')).toHaveTextContent('record-former-partner'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    committedFrames.length = 0;
+    if (expectedLifecycle === 'pending') {
+      fetchMyCoupleState.mockResolvedValueOnce({
+        ok: true,
+        state: {
+          coupleId: 'couple-1',
+          role: 'gomsin',
+          memberStatus: 'active',
+          partnerPresent: false,
+          invitationActive: true,
+          invitationExpiresAt: '2026-09-04T00:00:00Z',
+        },
+      });
+    }
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      state: serverState({
+        records: [],
+        events: [],
+        trips: [],
+        coupleHighlights: [],
+        talkAboutMarks: [],
+        profile: {
+          myName: '춘향', role: 'gomsin', couple: nextCouple,
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('none'));
+    expect(screen.getByTestId('records')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('events')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('trips')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('highlights')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('talkAboutMarks')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('highlightedRecord')).toHaveTextContent('none');
+    expect(screen.getByTestId('partner')).toHaveTextContent('none');
+    expect(screen.getByTestId('partnerMilitary')).toHaveTextContent('none');
+    expect(screen.getByTestId('coupleLifecycle')).toHaveTextContent(expectedLifecycle);
+    expect(committedFrames.every((frame) => frame.partnerId !== undefined || (
+      !frame.recordIds.includes('record-former-partner')
+      && !frame.eventIds.includes('event-former-partner')
+      && !frame.tripIds.includes('trip-former-partner')
+      && !frame.highlightIds.includes('highlight-former-partner')
+      && !frame.talkAboutIds.includes('mark-former-partner')
+      && frame.highlightedRecordId !== 'record-former-partner'
+    ))).toBe(true);
+  });
+
+  it('preserves the last-known-good workspace when partner membership refresh is unavailable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-known-good' }] as never,
+      events: [{ id: 'event-known-good' }] as never,
+      trips: [{ id: 'trip-known-good' }] as never,
+      coupleHighlights: [{ id: 'highlight-known-good' }] as never,
+      talkAboutMarks: [{
+        id: 'mark-known-good', recordId: 'record-known-good', coupleId: 'couple-1',
+        actorUserId: 'partner-b', createdAt: '2026-09-03T00:00:00Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: 'Partner B', partnerUserId: 'partner-b',
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      reason: 'offline',
+      stage: 'partner-membership',
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b');
+    expect(screen.getByTestId('records')).toHaveTextContent('record-known-good');
+    expect(screen.getByTestId('events')).toHaveTextContent('event-known-good');
+    expect(screen.getByTestId('trips')).toHaveTextContent('trip-known-good');
+    expect(screen.getByTestId('highlights')).toHaveTextContent('highlight-known-good');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-known-good');
   });
 
   it('keeps the last verified profile until an identity-bearing profile refresh completes', async () => {

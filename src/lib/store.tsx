@@ -1943,6 +1943,40 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
           const talkAboutMarks = result.state.talkAboutMarks;
           setTalkAboutSyncStatus('ready');
+          const hasVerifiedPartner = profile.couple.connected
+            && profile.couple.status === 'active';
+          if (!hasVerifiedPartner) {
+            // This full-state read is the successful membership authority for the
+            // profile invalidation. Publish its entire couple-scoped snapshot in
+            // one AppState replacement; updating only the profile would pair a
+            // pending/disconnected identity with the former partner's content.
+            const records = Array.isArray(result.state.records) ? result.state.records : [];
+            const events = Array.isArray(result.state.events) ? result.state.events : [];
+            const trips = Array.isArray(result.state.trips) ? result.state.trips : [];
+            const coupleHighlights = Array.isArray(result.state.coupleHighlights)
+              ? result.state.coupleHighlights
+              : [];
+            setCoupleLifecycle(profile.couple.status === 'pending' ? 'pending' : 'disconnected');
+            setInvitationExpiresAt(null);
+            updateStateImmediately((current) => {
+              if (!isLatestTalkAboutRefresh()) return current;
+              const highlightedRecordId = current.highlightedRecordId
+                && records.some((record) => record.id === current.highlightedRecordId)
+                ? current.highlightedRecordId
+                : undefined;
+              return {
+                ...current,
+                profile,
+                records,
+                events,
+                trips,
+                coupleHighlights,
+                talkAboutMarks,
+                highlightedRecordId,
+              };
+            });
+            return;
+          }
           updateStateImmediately((current) =>
             isLatestTalkAboutRefresh()
               ? { ...current, profile, talkAboutMarks }

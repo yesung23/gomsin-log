@@ -396,7 +396,7 @@ export function PaperHome() {
           </div>
 
           {feedStatus === 'empty' ? (
-            <p className="px-8 py-10 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+            <p className="px-8 py-6 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
               최근 {FEED_DAYS}일에 공유된 기록이 없어요
             </p>
           ) : (
@@ -430,7 +430,7 @@ export function PaperHome() {
       ) : feedStatus ? (
         <p
           role="status"
-          className="px-8 py-10 text-center text-label leading-relaxed"
+          className="px-8 py-6 text-center text-label leading-relaxed"
           style={{ color: 'var(--ink-soft)' }}
         >
           {feedStatus === 'identity'

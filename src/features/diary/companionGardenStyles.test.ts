@@ -21,11 +21,11 @@ describe('companion garden motion CSS', () => {
     const reducedAt = css.lastIndexOf('@media (prefers-reduced-motion: reduce)');
     expect(reducedAt).toBeGreaterThan(-1);
     const reduced = css.slice(reducedAt);
-    expect(reduced).toContain('.garden-companion-position');
     expect(reduced).toContain('.garden-companion-walking');
     expect(reduced).toContain('.garden-companion-lifted');
     expect(reduced).toContain('.garden-companion-pressed');
     expect(reduced).toContain('animation: none');
     expect(reduced).toContain('transition: none');
+    expect(reduced).not.toMatch(/\.garden-companion-position\s*\{[^}]*transition:\s*none/s);
   });
 });

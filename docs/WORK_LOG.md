@@ -3409,6 +3409,119 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · 정원 캐릭터 자연스러운 pair-safe 움직임·접근성 gate 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A interaction/accessibility reliability
+- Workstream: Diary companion garden D2 motion
+- Step: 두 캐릭터의 자율 이동·직접 이동·드래그·reduced motion을 실제 DOM geometry로 통합
+- Previous Gate: 로컬 캐릭터 꾸미기·직접 상호작용 surface와 exact paper-pair asset 연결
+- This Gate: pair-safe motion과 접근성의 unit/browser 독립 review PASS
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 점수·streak·유료 재화·결제 기능 추가 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `AGENTS.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, base HEAD `4fecfdfbc8562a8bf069adc40768e5182f3ce932`, exact seven-file dirty inventory
+- Latest relevant Work Log checked: 2026-09-03 Garden local customization·interrupt-resume 항목
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded motion Worker + two independent read-only review passes
+- Model: GPT-5.6 Sol primary; configured Worker and independent Reviewers
+- Role: motion implementation은 bounded Worker, 실패 재현·client-box correction·통합 검증은 primary, final verdict는 fresh reviewer
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `4fecfdfbc8562a8bf069adc40768e5182f3ce932`
+- Old HEAD: `4fecfdfbc8562a8bf069adc40768e5182f3ce932`
+- New HEAD / Reviewed HEAD: feature/report commit pending; exact seven-file unstaged snapshot independently reviewed PASS
+
+#### CHANGED / REVIEWED
+- file: `src/features/diary/companionGardenMotion.ts`, `src/features/diary/companionGardenMotion.test.ts`
+- function/component/migration: physical bounds, AABB/swept-path safety, pair reconciliation, destination/cadence model
+- what changed/reviewed: 실측 footprint와 장면 크기로 4px 간격·경계·이동 경로를 검증하고, 한 번에 한 캐릭터만 52–140px를 자연 속도로 움직이며 짧은 휴식과 긴 휴식을 섞는다.
+- why: 반복적 순간이동, 겹침, 경계 이탈, 과도한 배터리 사용을 구조적으로 줄이기 위해
+- file: `src/features/diary/CompanionGardenView.tsx`, `src/features/diary/CompanionGardenView.test.tsx`
+- function/component/migration: one-timer scheduler, measured client-box geometry, pointer/keyboard/action-sheet controls, reduced motion
+- what changed/reviewed: clientWidth/clientHeight와 rect+client offsets를 freeze·resize·drag에 공통 사용하고, long press pickup·두 번째 pointer·pointercancel/lost capture·키보드 이동·focus restore를 fail-safe 처리한다.
+- why: border-box/client-box 왕복 오차와 상호작용 중 race 없이 자연스럽고 보조기술로도 같은 기능에 접근하게 하기 위해
+- file: `e2e/companionGarden.spec.ts`
+- function/component/migration: actual Chrome portrait/small-phone/short-landscape/reduced-motion motion matrix
+- what changed/reviewed: 자율 이동, 매 frame non-overlap, 리사이즈 Y 불변, drag 후 자율 이동 재개, 3.999px 실측 간격, 44px hit target, overflow와 reduced-motion을 검증한다.
+- why: jsdom이 증명할 수 없는 실제 layout·transform·hit area·animation 경계를 확인하기 위해
+- file: `src/features/diary/companionGardenStyles.test.ts`, `src/styles/index.css`
+- function/component/migration: compositor promotion policy
+- what changed/reviewed: 지속적인 `will-change` layer promotion을 제거하고 움직이는 순간의 transform만 사용한다.
+- why: 두 캐릭터가 상시 GPU layer를 점유하지 않도록 하기 위해
+- file: `control-tower/reports/codex/2026-09-03_1106_companion-garden-motion-accessibility-closure_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 발견·수정·검증·잔여 실기기/성능 경계를 기록
+- why: 코드 테스트와 실제 기기·Production 증거를 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음; 정원 상태는 기존 로컬 계약 유지
+- product semantics: 캐릭터·악세사리·종이의 소유권/가격/결제 없음; 점수·streak·feeding·mission·확률형 뽑기 없음
+- Production: push·merge·deploy·Supabase·TestFlight·App Store 변경 없음
+
+#### VERIFICATION
+- command: 신규 drag client-box unit를 구현 전 실행
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — outer 계산 21.76%, 기대 inner 계산 20%
+- what it actually proves: 드래그에만 남은 border/client 좌표 불일치를 재현
+- command: Garden focused Vitest 7 files
+- PASS / FAIL / UNVERIFIED: PASS — 7 files / 119 tests
+- what it actually proves: motion math, scheduler, pointer cleanup, reduced motion, wiring·route·asset 회귀
+- command: system Chrome `e2e/companionGarden.spec.ts --project=chromium-390`
+- PASS / FAIL / UNVERIFIED: PASS — 7/7, 56.9s
+- what it actually proves: 실제 browser transform·DOM gap·viewport·drag/post-drag scheduler·접근성 surface
+- command: exact changed TS/TSX files ESLint; `npm run typecheck`; scoped `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 lint, 전체 TypeScript, whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; Garden route 28.67 kB / gzip 10.38 kB
+- what it actually proves: production-mode bundle 생성 가능; 실제 backend/Production 연결은 증명하지 않음
+- command: fresh independent seven-file review after drag correction
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0
+- what it actually proves: exact local delta의 correctness/race/a11y 회귀 검토
+- command: physical iPhone touch/VoiceOver/battery profile
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실제 기기 촉감·VoiceOver·장시간 배터리는 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- FULL: motion/state/interaction 구현 전체가 바뀌어 이전 Garden review는 승계하지 않고 fresh exact-delta review를 수행했다.
+- whether an earlier review is stale: NO for final local snapshot; 이후 Garden 코드 변경 시 재검토 필요
+
+#### BLOCKERS
+- code: 이 gate에서 알려진 blocker 없음
+- environment: physical iPhone VoiceOver·장시간 energy profile 미완료
+- external/manual: exact character의 상업적 권리/provenance는 여전히 별도 manual gate
+
+#### STOPPED AT
+- exact completed boundary: local pair-safe Garden motion + actual Chrome accessibility/responsive gate PASS
+
+#### REMAINING
+- 1.489 MB paper-pair WebP와 전역 CSS 332.83 kB의 별도 성능 최적화 판단
+- 실물 iPhone touch, VoiceOver, reduced motion, 10분 이상 energy profile
+- 향후 건물 interaction/유료 entitlement는 승인된 catalog·StoreKit·권리 gate 이후 별도 구현
+
+#### NEXT ACTION
+- next owner: Codex primary + privacy/data Worker/Verifier/Reviewer
+- tool/model: Realtime private-metadata Level-4 implementation and independent security review
+- 기준 SHA: 이 Garden feature/report commit
+- exact next task: records/tasks의 private-capable direct Realtime를 content-free invalidation + RLS refetch로 단계적 전환
+
+#### DO NOT ADVANCE UNTIL
+- remote migration ledger/publication/adoption을 확인하기 전 source publication 제거를 Production에 적용하지 않음
+- 실제 기기 증거 없이 battery/VoiceOver PASS를 주장하지 않음
+- 상업적 캐릭터 권리 확인 전 유료 판매 또는 App Store 제출 금지
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

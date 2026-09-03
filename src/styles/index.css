@@ -1055,10 +1055,6 @@ input[type='range']::-webkit-slider-thumb {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .garden-companion-position {
-    transition: none !important;
-  }
-
   .garden-companion-walking .garden-character-frame--walk,
   .garden-companion-lifted .garden-character-frame--lift {
     animation: none !important;

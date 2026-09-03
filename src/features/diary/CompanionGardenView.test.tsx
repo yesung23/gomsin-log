@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CompanionGardenView } from './CompanionGardenView';
 import { deriveCompanionGardenState } from './companionGarden';
@@ -7,11 +8,29 @@ import {
   GARDEN_COMPANION_SIZE,
   companionsOverlap,
   getPhysicalGardenBounds,
+  type GardenPoint,
 } from './companionGardenMotion';
 import type { GardenAccessory, GardenAccessoryState } from '@/lib/companionGardenLocalState';
 
 const AVAILABLE = deriveCompanionGardenState(100);
 const DEFAULT_ACCESSORIES: GardenAccessoryState = { version: 1, peach: 'none', sage: 'none' };
+const ORIGINAL_RESIZE_OBSERVER = globalThis.ResizeObserver;
+const ORIGINAL_GET_BOUNDING_CLIENT_RECT = HTMLElement.prototype.getBoundingClientRect;
+const ORIGINAL_CLIENT_WIDTH_DESCRIPTOR = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+const ORIGINAL_CLIENT_HEIGHT_DESCRIPTOR = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+const ORIGINAL_CLIENT_LEFT_DESCRIPTOR = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientLeft');
+const ORIGINAL_CLIENT_TOP_DESCRIPTOR = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientTop');
+
+type SceneBorder = { left: number; top: number; right: number; bottom: number };
+
+type GardenLayout = {
+  scene: DOMRect;
+  sceneBorder: SceneBorder;
+  points: Partial<Record<'peach' | 'sage', GardenPoint>>;
+  footprints: Record<'peach' | 'sage', { width: number; height: number }>;
+};
+
+let gardenLayout: GardenLayout;
 
 class TestPointerEvent extends MouseEvent {
   pointerId: number;
@@ -25,20 +44,190 @@ class TestPointerEvent extends MouseEvent {
 }
 
 function mockReducedMotion(matches: boolean) {
+  let reduced = matches;
+  const listeners = new Set<() => void>();
+  const media = {
+    get matches() {
+      return reduced;
+    },
+    media: '(prefers-reduced-motion: reduce)',
+    onchange: null,
+    addEventListener: vi.fn((type: string, listener: () => void) => {
+      if (type === 'change') listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((type: string, listener: () => void) => {
+      if (type === 'change') listeners.delete(listener);
+    }),
+    addListener: vi.fn((listener: () => void) => listeners.add(listener)),
+    removeListener: vi.fn((listener: () => void) => listeners.delete(listener)),
+    dispatchEvent: vi.fn(),
+  };
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     writable: true,
-    value: vi.fn().mockImplementation((query: string) => ({
-      matches: query === '(prefers-reduced-motion: reduce)' ? matches : false,
-      media: query,
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })),
+    value: vi.fn().mockImplementation((query: string) => (
+      query === '(prefers-reduced-motion: reduce)'
+        ? media
+        : { ...media, matches: false, media: query }
+    )),
   });
+  return {
+    set(next: boolean) {
+      reduced = next;
+      for (const listener of listeners) listener();
+    },
+    listenerCount: () => listeners.size,
+  };
+}
+
+function rect(left: number, top: number, width: number, height: number): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function sceneClientBox(scene: DOMRect, border: SceneBorder) {
+  return {
+    left: scene.left + border.left,
+    top: scene.top + border.top,
+    width: Math.max(0, scene.width - border.left - border.right),
+    height: Math.max(0, scene.height - border.top - border.bottom),
+  };
+}
+
+function rectForGardenPoint(
+  point: { x: number; y: number },
+  scene: DOMRect,
+  width = 49,
+  height = 56,
+  border: SceneBorder = gardenLayout.sceneBorder,
+): DOMRect {
+  const client = sceneClientBox(scene, border);
+  const centerX = client.left + (point.x / 100) * client.width;
+  const bottom = client.top + (point.y / 100) * client.height;
+  return rect(centerX - width / 2, bottom - height, width, height);
+}
+
+function restoreHTMLElementMetric(name: 'clientWidth' | 'clientHeight' | 'clientLeft' | 'clientTop', descriptor?: PropertyDescriptor) {
+  if (descriptor) Object.defineProperty(HTMLElement.prototype, name, descriptor);
+  else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+}
+
+function installGardenLayout() {
+  gardenLayout = {
+    scene: rect(0, 0, 320, 602),
+    sceneBorder: { left: 0, top: 1, right: 0, bottom: 1 },
+    points: {},
+    footprints: {
+      peach: { width: 49, height: 56 },
+      sage: { width: 49, height: 56 },
+    },
+  };
+  Object.defineProperties(HTMLElement.prototype, {
+    clientWidth: {
+      configurable: true,
+      get() {
+        if (this.getAttribute('data-testid') !== 'garden-scene') return 0;
+        return sceneClientBox(this.getBoundingClientRect(), gardenLayout.sceneBorder).width;
+      },
+    },
+    clientHeight: {
+      configurable: true,
+      get() {
+        if (this.getAttribute('data-testid') !== 'garden-scene') return 0;
+        return sceneClientBox(this.getBoundingClientRect(), gardenLayout.sceneBorder).height;
+      },
+    },
+    clientLeft: {
+      configurable: true,
+      get() {
+        return this.getAttribute('data-testid') === 'garden-scene' ? gardenLayout.sceneBorder.left : 0;
+      },
+    },
+    clientTop: {
+      configurable: true,
+      get() {
+        return this.getAttribute('data-testid') === 'garden-scene' ? gardenLayout.sceneBorder.top : 0;
+      },
+    },
+  });
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function getGardenRect() {
+    const testId = this.getAttribute('data-testid');
+    if (testId === 'garden-scene') return gardenLayout.scene;
+    const match = testId?.match(/^garden-companion-position-(peach|sage)$/);
+    if (!match) return ORIGINAL_GET_BOUNDING_CLIENT_RECT.call(this);
+    const id = match[1] as 'peach' | 'sage';
+    const footprint = gardenLayout.footprints[id];
+    const forcedPoint = gardenLayout.points[id];
+    if (forcedPoint) {
+      return rectForGardenPoint(forcedPoint, gardenLayout.scene, footprint.width, footprint.height);
+    }
+    const transform = this.style.transform.match(
+      /translate3d\(([-+\d.e]+)px,\s*([-+\d.e]+)px,\s*0(?:px)?\)/,
+    );
+    if (!transform) return rect(Number.NaN, Number.NaN, footprint.width, footprint.height);
+    const client = sceneClientBox(gardenLayout.scene, gardenLayout.sceneBorder);
+    const centerX = client.left + Number(transform[1]);
+    const bottom = client.top + Number(transform[2]);
+    return rect(centerX - footprint.width / 2, bottom - footprint.height, footprint.width, footprint.height);
+  });
+}
+
+function seededRandom(seed: number): () => number {
+  let value = seed >>> 0;
+  return () => {
+    value += 0x6d2b79f5;
+    let mixed = value;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function installResizeObserverMock() {
+  const instances: Array<{
+    callback: ResizeObserverCallback;
+    observed: Set<Element>;
+    disconnected: boolean;
+  }> = [];
+  class TestResizeObserver {
+    private readonly record: (typeof instances)[number];
+
+    constructor(callback: ResizeObserverCallback) {
+      this.record = { callback, observed: new Set(), disconnected: false };
+      instances.push(this.record);
+    }
+
+    observe = vi.fn((target: Element) => this.record.observed.add(target));
+    unobserve = vi.fn((target: Element) => this.record.observed.delete(target));
+    disconnect = vi.fn(() => {
+      this.record.disconnected = true;
+      this.record.observed.clear();
+    });
+  }
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: TestResizeObserver,
+  });
+  return {
+    instances,
+    trigger(target: Element) {
+      for (const instance of instances) {
+        if (!instance.disconnected && instance.observed.has(target)) {
+          instance.callback([], {} as ResizeObserver);
+        }
+      }
+    },
+  };
 }
 
 function ControlledGarden({ initial = DEFAULT_ACCESSORIES }: { initial?: GardenAccessoryState }) {
@@ -56,12 +245,30 @@ beforeEach(() => {
     writable: true,
     value: TestPointerEvent,
   });
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  });
+  installGardenLayout();
   mockReducedMotion(false);
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  restoreHTMLElementMetric('clientWidth', ORIGINAL_CLIENT_WIDTH_DESCRIPTOR);
+  restoreHTMLElementMetric('clientHeight', ORIGINAL_CLIENT_HEIGHT_DESCRIPTOR);
+  restoreHTMLElementMetric('clientLeft', ORIGINAL_CLIENT_LEFT_DESCRIPTOR);
+  restoreHTMLElementMetric('clientTop', ORIGINAL_CLIENT_TOP_DESCRIPTOR);
+  Object.defineProperty(document, 'visibilityState', {
+    configurable: true,
+    value: 'visible',
+  });
+  Object.defineProperty(globalThis, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: ORIGINAL_RESIZE_OBSERVER,
+  });
 });
 
 describe('interactive companion garden characters', () => {
@@ -91,6 +298,17 @@ describe('interactive companion garden characters', () => {
     expect(companions).toHaveLength(2);
     expect(companions.map((node) => node.getAttribute('data-companion'))).toEqual(['peach', 'sage']);
     expect(companions.every((node) => node.getAttribute('data-lifted') === 'false')).toBe(true);
+  });
+
+  it('moves scene positions with translate3d without permanently promoting a layer', () => {
+    render(<ControlledGarden />);
+    const position = screen.getByTestId('garden-companion-position-peach');
+
+    expect(position.style.left).toBe('0px');
+    expect(position.style.top).toBe('0px');
+    expect(position.style.transform).toContain('translate3d(');
+    expect(position.style.transitionProperty).toBe('transform');
+    expect(position.style.willChange).toBe('');
   });
 
   it('renders both approved front-facing crops from the exact historical WebP', () => {
@@ -135,6 +353,66 @@ describe('interactive companion garden characters', () => {
 
     fireEvent.pointerUp(peach, { pointerId: 1, pointerType: 'mouse', clientX: 100, clientY: 100 });
     expect(peach).toHaveAttribute('data-lifted', 'false');
+  });
+
+  it('keeps one active pointer pickup and ignores a second pointer', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.pointerDown(peach, { pointerId: 41, pointerType: 'touch', button: 0, clientX: 90, clientY: 450 });
+    fireEvent.pointerDown(sage, { pointerId: 42, pointerType: 'touch', button: 0, clientX: 280, clientY: 450 });
+    act(() => vi.advanceTimersByTime(500));
+
+    expect(peach).toHaveAttribute('data-pressed', 'true');
+    expect(peach).toHaveAttribute('data-lifted', 'true');
+    expect(sage).toHaveAttribute('data-pressed', 'false');
+    expect(sage).toHaveAttribute('data-lifted', 'false');
+
+    fireEvent.pointerUp(sage, { pointerId: 42, pointerType: 'touch', clientX: 280, clientY: 450 });
+    expect(peach).toHaveAttribute('data-lifted', 'true');
+    fireEvent.pointerUp(peach, { pointerId: 41, pointerType: 'touch', clientX: 90, clientY: 450 });
+    expect(peach).toHaveAttribute('data-lifted', 'false');
+  });
+
+  it.each(['touch', 'pen'] as const)(
+    'consumes the delayed compatibility click from an ignored second %s pointer without sticking',
+    (secondPointerType) => {
+      vi.useFakeTimers();
+      render(<ControlledGarden />);
+      const peach = screen.getByTestId('garden-companion-peach');
+      const sage = screen.getByTestId('garden-companion-sage');
+
+      fireEvent.pointerDown(peach, { pointerId: 51, pointerType: 'touch', button: 0, clientX: 90, clientY: 450 });
+      fireEvent.pointerDown(sage, { pointerId: 52, pointerType: secondPointerType, button: 0, clientX: 280, clientY: 450 });
+      fireEvent.pointerUp(peach, { pointerId: 51, pointerType: 'touch', clientX: 90, clientY: 450 });
+      fireEvent.pointerUp(sage, { pointerId: 52, pointerType: secondPointerType, clientX: 280, clientY: 450 });
+      act(() => vi.advanceTimersByTime(200));
+      fireEvent.click(sage, { detail: 1 });
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+      fireEvent.pointerDown(sage, { pointerId: 53, pointerType: secondPointerType, button: 0, clientX: 280, clientY: 450 });
+      fireEvent.pointerUp(sage, { pointerId: 53, pointerType: secondPointerType, clientX: 280, clientY: 450 });
+      fireEvent.click(sage, { detail: 1 });
+      expect(screen.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeInTheDocument();
+    },
+  );
+
+  it('keeps an assistive detail-zero activation available while an ignored touch click is pending', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.pointerDown(peach, { pointerId: 61, pointerType: 'touch', button: 0, clientX: 90, clientY: 450 });
+    fireEvent.pointerDown(sage, { pointerId: 62, pointerType: 'touch', button: 0, clientX: 280, clientY: 450 });
+    fireEvent.pointerUp(peach, { pointerId: 61, pointerType: 'touch', clientX: 90, clientY: 450 });
+    fireEvent.pointerUp(sage, { pointerId: 62, pointerType: 'touch', clientX: 280, clientY: 450 });
+    fireEvent.click(sage, { detail: 0 });
+
+    expect(screen.getByRole('dialog', { name: '둘째 친구와 함께 놀기' })).toBeInTheDocument();
   });
 
   it('opens the same accessible action sheet after a quick pointer tap', () => {
@@ -266,6 +544,40 @@ describe('interactive companion garden characters', () => {
     fireEvent.pointerUp(sage, { pointerId: 8, pointerType: 'touch', clientX: 320, clientY: 100 });
   });
 
+  it('maps pointer drag coordinates through the inner scene box instead of its border box', () => {
+    mockReducedMotion(true);
+    vi.useFakeTimers();
+    gardenLayout.scene = rect(10, 20, 340, 640);
+    gardenLayout.sceneBorder = { left: 10, top: 20, right: 10, bottom: 20 };
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+
+    // Inner scene: left 20, top 40, 320×600. This pointer is exactly (20%, 80%).
+    fireEvent.pointerDown(peach, {
+      pointerId: 70,
+      pointerType: 'touch',
+      button: 0,
+      clientX: 84,
+      clientY: 520,
+    });
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.pointerMove(peach, {
+      pointerId: 70,
+      pointerType: 'touch',
+      clientX: 84,
+      clientY: 520,
+    });
+
+    expect(Number(peach.getAttribute('data-x'))).toBeCloseTo(20, 2);
+    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo(80, 2);
+    fireEvent.pointerUp(peach, {
+      pointerId: 70,
+      pointerType: 'touch',
+      clientX: 84,
+      clientY: 520,
+    });
+  });
+
   it('keeps dragged companions from stacking on the other rendered sprite', () => {
     // This test owns the drag constraint; disable autonomous timers so wandering
     // cannot race the explicit pointer move and make the assertion flaky.
@@ -274,7 +586,7 @@ describe('interactive companion garden characters', () => {
     render(<ControlledGarden />);
     const scene = screen.getByTestId('garden-scene');
     vi.spyOn(scene, 'getBoundingClientRect').mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 600, width: 375, height: 600,
+      x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 602, width: 375, height: 602,
       toJSON: () => ({}),
     });
     const peach = screen.getByTestId('garden-companion-peach');
@@ -327,12 +639,37 @@ describe('interactive companion garden characters', () => {
     fireEvent.pointerUp(peach, { pointerId: 13, pointerType: 'touch', clientX: 318.2, clientY: 133.2 });
   });
 
+  it('clips a large drag delta before it can cross through the other companion', () => {
+    mockReducedMotion(true);
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const scene = screen.getByTestId('garden-scene');
+    vi.spyOn(scene, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 320, 600));
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.pointerDown(peach, { pointerId: 43, pointerType: 'touch', button: 0, clientX: 83, clientY: 468 });
+    act(() => vi.advanceTimersByTime(500));
+    fireEvent.pointerMove(peach, { pointerId: 43, pointerType: 'touch', clientX: 310, clientY: 468 });
+
+    const peachX = Number(peach.getAttribute('data-x'));
+    const sageX = Number(sage.getAttribute('data-x'));
+    expect(peachX).toBeGreaterThan(26);
+    expect(peachX).toBeLessThan(sageX);
+    expect(companionsOverlap(
+      { x: peachX, y: Number(peach.getAttribute('data-y')) },
+      { x: sageX, y: Number(sage.getAttribute('data-y')) },
+      { width: 320, height: 600 },
+    )).toBe(false);
+    fireEvent.pointerUp(peach, { pointerId: 43, pointerType: 'touch', clientX: 310, clientY: 468 });
+  });
+
   it('freezes the rendered position before a long press interrupts wandering', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);
     const scene = screen.getByTestId('garden-scene');
     vi.spyOn(scene, 'getBoundingClientRect').mockReturnValue({
-      x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 600, width: 375, height: 600,
+      x: 0, y: 0, left: 0, top: 0, right: 375, bottom: 602, width: 375, height: 602,
       toJSON: () => ({}),
     });
     const position = screen.getByTestId('garden-companion-position-peach');
@@ -341,11 +678,13 @@ describe('interactive companion garden characters', () => {
       toJSON: () => ({}),
     });
     const peach = screen.getByTestId('garden-companion-peach');
+    expect(scene.clientHeight).toBe(600);
+    expect(scene.clientTop).toBe(1);
 
     fireEvent.pointerDown(peach, { pointerId: 9, pointerType: 'touch', button: 0, clientX: 90, clientY: 240 });
 
     expect(Number(peach.getAttribute('data-x'))).toBeCloseTo((41 + 49) / 375 * 100, 2);
-    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo(292 / 600 * 100, 2);
+    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo((292 - 1) / 600 * 100, 2);
     fireEvent.pointerUp(peach, { pointerId: 9, pointerType: 'touch', clientX: 90, clientY: 240 });
   });
 
@@ -429,7 +768,57 @@ describe('interactive companion garden characters', () => {
     };
     expect(peachPoint.x).toBeGreaterThanOrEqual(GARDEN_BOUNDS.minX);
     expect(peachPoint.x).toBeLessThanOrEqual(GARDEN_BOUNDS.maxX);
+    expect(peachPoint.x).toBeLessThan(sagePoint.x);
     expect(companionsOverlap(peachPoint, sagePoint, { width: 320, height: 600 }, GARDEN_COMPANION_SIZE.gap)).toBe(false);
+  });
+
+  it('revalidates rapid directional moves and a companion switch from both rendered positions', () => {
+    gardenLayout.scene = rect(0, 0, 375, 602);
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    fireEvent.click(peach, { detail: 0 });
+    for (let step = 0; step < 4; step += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }));
+    }
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구 위쪽으로 이동' }));
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구 위쪽으로 이동' }));
+    expect(peach).toHaveAttribute('data-x', '58.00');
+    expect(peach).toHaveAttribute('data-y', '62.00');
+
+    // Reviewer path: the state target is (58,62), but CSS is still rendered at
+    // (58,70) on the way from (58,78). A right move from the stale target would
+    // accept (66,62) and cut diagonally through the other rendered companion.
+    const scene = gardenLayout.scene;
+    vi.spyOn(screen.getByTestId('garden-companion-position-peach'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 58, y: 70 }, scene));
+    vi.spyOn(screen.getByTestId('garden-companion-position-sage'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 74, y: 74 }, scene));
+
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }));
+    const peachAfterRapidMove = {
+      x: Number(peach.getAttribute('data-x')),
+      y: Number(peach.getAttribute('data-y')),
+    };
+    expect(peachAfterRapidMove.x).toBeLessThan(66);
+    expect(peachAfterRapidMove.y).toBe(70);
+    expect(companionsOverlap(
+      peachAfterRapidMove,
+      { x: 74, y: 74 },
+      { width: 375, height: 600 },
+      GARDEN_COMPANION_SIZE.gap,
+    )).toBe(false);
+
+    fireEvent.click(screen.getByRole('button', { name: '둘째 친구', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }));
+    expect(Number(sage.getAttribute('data-x'))).toBeGreaterThan(66);
+    expect(companionsOverlap(
+      { x: Number(peach.getAttribute('data-x')), y: Number(peach.getAttribute('data-y')) },
+      { x: Number(sage.getAttribute('data-x')), y: Number(sage.getAttribute('data-y')) },
+      { width: 375, height: 600 },
+      GARDEN_COMPANION_SIZE.gap,
+    )).toBe(false);
   });
 
   it('names the modal, closes it with Escape, and restores focus to its trigger', () => {
@@ -462,12 +851,14 @@ describe('interactive companion garden characters', () => {
     expect(sage).toHaveAttribute('data-move-count', '0');
     expect(peach).toHaveAttribute('data-wandering', 'false');
     expect(sage).toHaveAttribute('data-wandering', 'false');
+    expect(vi.getTimerCount()).toBe(0);
 
     fireEvent.click(screen.getByRole('button', { name: '첫째 친구와 함께 놀기 닫기' }));
-    act(() => vi.advanceTimersByTime(901));
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+    act(() => vi.advanceTimersByTime(5_000));
 
-    expect(Number(peach.getAttribute('data-move-count'))).toBeGreaterThan(0);
-    expect(Number(sage.getAttribute('data-move-count'))).toBeGreaterThan(0);
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(1);
   });
 
   it('clears pickup state when availability is withdrawn and restored', () => {
@@ -501,6 +892,170 @@ describe('interactive companion garden characters', () => {
 
     expect(peach).toHaveAttribute('data-lifted', 'false');
     expect(peach).toHaveAttribute('data-pressed', 'false');
+  });
+
+  it('observes live geometry and atomically separates the pair after resize and orientation changes', () => {
+    const resizeObserver = installResizeObserverMock();
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const sceneNode = screen.getByTestId('garden-scene');
+    const peachPosition = screen.getByTestId('garden-companion-position-peach');
+    const sagePosition = screen.getByTestId('garden-companion-position-sage');
+    const landscapeScene = rect(0, 0, 430, 182);
+    gardenLayout.scene = landscapeScene;
+    vi.spyOn(sceneNode, 'getBoundingClientRect').mockReturnValue(landscapeScene);
+    vi.spyOn(peachPosition, 'getBoundingClientRect').mockReturnValue(rectForGardenPoint({ x: 50, y: 74 }, landscapeScene, 47, 55));
+    vi.spyOn(sagePosition, 'getBoundingClientRect').mockReturnValue(rectForGardenPoint({ x: 50, y: 74 }, landscapeScene, 51, 57));
+
+    expect(resizeObserver.instances.some((instance) => (
+      !instance.disconnected
+      && instance.observed.has(sceneNode)
+      && instance.observed.has(peachPosition)
+      && instance.observed.has(sagePosition)
+    ))).toBe(true);
+
+    act(() => resizeObserver.trigger(sceneNode));
+    let peachPoint = {
+      x: Number(screen.getByTestId('garden-companion-peach').getAttribute('data-x')),
+      y: Number(screen.getByTestId('garden-companion-peach').getAttribute('data-y')),
+    };
+    let sagePoint = {
+      x: Number(screen.getByTestId('garden-companion-sage').getAttribute('data-x')),
+      y: Number(screen.getByTestId('garden-companion-sage').getAttribute('data-y')),
+    };
+    expect(companionsOverlap(
+      peachPoint,
+      sagePoint,
+      { width: 430, height: 180 },
+      GARDEN_COMPANION_SIZE.gap,
+      { width: 47, height: 55 },
+      { width: 51, height: 57 },
+    )).toBe(false);
+    expect(peachPoint).not.toEqual({ x: 26, y: 78 });
+
+    act(() => window.dispatchEvent(new Event('resize')));
+    act(() => window.dispatchEvent(new Event('orientationchange')));
+    peachPoint = {
+      x: Number(screen.getByTestId('garden-companion-peach').getAttribute('data-x')),
+      y: Number(screen.getByTestId('garden-companion-peach').getAttribute('data-y')),
+    };
+    sagePoint = {
+      x: Number(screen.getByTestId('garden-companion-sage').getAttribute('data-x')),
+      y: Number(screen.getByTestId('garden-companion-sage').getAttribute('data-y')),
+    };
+    expect(companionsOverlap(peachPoint, sagePoint, { width: 430, height: 180 })).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it('keeps both rendered Y anchors invariant across repeated unchanged resize freezes and horizontal moves', () => {
+    const resizeObserver = installResizeObserverMock();
+    mockReducedMotion(true);
+    render(<ControlledGarden />);
+    const scene = screen.getByTestId('garden-scene');
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+    const peachPosition = screen.getByTestId('garden-companion-position-peach');
+    const sagePosition = screen.getByTestId('garden-companion-position-sage');
+    const before = {
+      peachDataY: Number(peach.getAttribute('data-y')),
+      sageDataY: Number(sage.getAttribute('data-y')),
+      peachBottom: peachPosition.getBoundingClientRect().bottom,
+      sageBottom: sagePosition.getBoundingClientRect().bottom,
+    };
+
+    for (let event = 0; event < 10; event += 1) {
+      act(() => resizeObserver.trigger(scene));
+    }
+
+    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo(before.peachDataY, 6);
+    expect(Number(sage.getAttribute('data-y'))).toBeCloseTo(before.sageDataY, 6);
+    expect(peachPosition.getBoundingClientRect().bottom).toBeCloseTo(before.peachBottom, 6);
+    expect(sagePosition.getBoundingClientRect().bottom).toBeCloseTo(before.sageBottom, 6);
+
+    fireEvent.click(peach, { detail: 0 });
+    for (let move = 0; move < 5; move += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '첫째 친구 오른쪽으로 이동' }));
+      fireEvent.click(screen.getByRole('button', { name: '첫째 친구 왼쪽으로 이동' }));
+    }
+    fireEvent.click(screen.getByRole('button', { name: '둘째 친구', exact: true }));
+    for (let move = 0; move < 5; move += 1) {
+      fireEvent.click(screen.getByRole('button', { name: '둘째 친구 왼쪽으로 이동' }));
+      fireEvent.click(screen.getByRole('button', { name: '둘째 친구 오른쪽으로 이동' }));
+    }
+
+    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo(before.peachDataY, 6);
+    expect(Number(sage.getAttribute('data-y'))).toBeCloseTo(before.sageDataY, 6);
+    expect(peachPosition.getBoundingClientRect().bottom).toBeCloseTo(before.peachBottom, 6);
+    expect(sagePosition.getBoundingClientRect().bottom).toBeCloseTo(before.sageBottom, 6);
+  });
+
+  it('freezes rendered positions while hidden and starts a fresh idle after becoming visible', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    render(<ControlledGarden />);
+    const sceneNode = screen.getByTestId('garden-scene');
+    const scene = rect(0, 0, 375, 602);
+    gardenLayout.scene = scene;
+    vi.spyOn(sceneNode, 'getBoundingClientRect').mockReturnValue(scene);
+    vi.spyOn(screen.getByTestId('garden-companion-position-peach'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 35, y: 70 }, scene));
+    vi.spyOn(screen.getByTestId('garden-companion-position-sage'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 70, y: 72 }, scene));
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+
+    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-x', '35.00');
+    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-x', '70.00');
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-move-count', '0');
+    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-move-count', '0');
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => document.dispatchEvent(new Event('visibilitychange')));
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-move-count', '0');
+    expect(screen.getByTestId('garden-companion-sage')).toHaveAttribute('data-move-count', '0');
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(
+      Number(screen.getByTestId('garden-companion-peach').getAttribute('data-move-count'))
+      + Number(screen.getByTestId('garden-companion-sage').getAttribute('data-move-count')),
+    ).toBe(1);
+  });
+
+  it('cleans scheduler, visibility, resize, and orientation resources across StrictMode remounts', () => {
+    const resizeObserver = installResizeObserverMock();
+    const reducedMotion = mockReducedMotion(false);
+    vi.useFakeTimers();
+    const documentAdd = vi.spyOn(document, 'addEventListener');
+    const documentRemove = vi.spyOn(document, 'removeEventListener');
+    const windowAdd = vi.spyOn(window, 'addEventListener');
+    const windowRemove = vi.spyOn(window, 'removeEventListener');
+    const view = render(<StrictMode><ControlledGarden /></StrictMode>);
+
+    expect(vi.getTimerCount()).toBe(1);
+    expect(resizeObserver.instances.filter((instance) => !instance.disconnected)).toHaveLength(1);
+    expect(documentAdd.mock.calls.filter(([type]) => type === 'visibilitychange').length).toBeGreaterThan(0);
+    expect(windowAdd.mock.calls.filter(([type]) => type === 'resize').length).toBeGreaterThan(0);
+    expect(windowAdd.mock.calls.filter(([type]) => type === 'orientationchange').length).toBeGreaterThan(0);
+    expect(reducedMotion.listenerCount()).toBe(1);
+
+    view.unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
+    expect(resizeObserver.instances.every((instance) => instance.disconnected)).toBe(true);
+    expect(reducedMotion.listenerCount()).toBe(0);
+    expect(documentRemove.mock.calls.filter(([type]) => type === 'visibilitychange')).toHaveLength(
+      documentAdd.mock.calls.filter(([type]) => type === 'visibilitychange').length,
+    );
+    expect(windowRemove.mock.calls.filter(([type]) => type === 'resize')).toHaveLength(
+      windowAdd.mock.calls.filter(([type]) => type === 'resize').length,
+    );
+    expect(windowRemove.mock.calls.filter(([type]) => type === 'orientationchange')).toHaveLength(
+      windowAdd.mock.calls.filter(([type]) => type === 'orientationchange').length,
+    );
   });
 });
 
@@ -536,26 +1091,118 @@ describe('garden availability announcements', () => {
 });
 
 describe('autonomous companion wandering', () => {
-  it('moves both companions after short independent startup delays', () => {
+  it('keeps invalid rendered geometry stopped and starts a full idle only after valid recovery', () => {
+    const resizeObserver = installResizeObserverMock();
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.15);
+    gardenLayout.scene = rect(0, 0, 0, 0);
+    render(<ControlledGarden />);
+    const scene = screen.getByTestId('garden-scene');
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+
+    gardenLayout.scene = rect(0, 0, 40, 42);
+    act(() => resizeObserver.trigger(scene));
+    expect(vi.getTimerCount()).toBe(0);
+
+    gardenLayout.scene = rect(0, 0, 375, 602);
+    gardenLayout.points.peach = { x: Number.NaN, y: 78 };
+    act(() => resizeObserver.trigger(scene));
+    expect(vi.getTimerCount()).toBe(0);
+
+    gardenLayout.points = {};
+    act(() => resizeObserver.trigger(scene));
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+    act(() => vi.advanceTimersByTime(1));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(1);
+  });
+
+  it('does not busy-retry when valid pair geometry has no safe autonomous destination', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.15);
+    gardenLayout.scene = rect(0, 0, 110, 72);
+    gardenLayout.points = { peach: { x: 24, y: 80 }, sage: { x: 76, y: 80 } };
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+    expect(vi.getTimerCount()).toBeLessThanOrEqual(1);
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(0);
+  });
+
+  it('runs the actual React scheduler for a seeded 60s with one timer and low pair duty', () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockImplementation(seededRandom(0xd2c0ffee));
+    gardenLayout.scene = rect(0, 0, 375, 602);
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+    const movers: Array<'peach' | 'sage'> = [];
+    const previousCounts = { peach: 0, sage: 0 };
+    let movingTicks = 0;
+
+    for (let elapsed = 0; elapsed < 60_000; elapsed += 100) {
+      act(() => vi.advanceTimersByTime(100));
+      const counts = {
+        peach: Number(peach.getAttribute('data-move-count')),
+        sage: Number(sage.getAttribute('data-move-count')),
+      };
+      for (const id of ['peach', 'sage'] as const) {
+        if (counts[id] > previousCounts[id]) movers.push(id);
+        previousCounts[id] = counts[id];
+      }
+      const movingCount = [peach, sage]
+        .filter((node) => node.getAttribute('data-wandering') === 'true').length;
+      expect(movingCount).toBeLessThanOrEqual(1);
+      expect(vi.getTimerCount()).toBeLessThanOrEqual(1);
+      if (movingCount === 1) movingTicks += 1;
+    }
+
+    expect(movers.length).toBeLessThanOrEqual(12);
+    expect(previousCounts.peach).toBeGreaterThanOrEqual(1);
+    expect(previousCounts.sage).toBeGreaterThanOrEqual(1);
+    expect(movingTicks * 100 / 60_000).toBeLessThanOrEqual(0.45);
+    let streak = 0;
+    let prior: 'peach' | 'sage' | null = null;
+    for (const mover of movers) {
+      streak = mover === prior ? streak + 1 : 1;
+      expect(streak).toBeLessThanOrEqual(2);
+      prior = mover;
+    }
+  });
+
+  it('uses one scheduler timer and never moves both companions at once', () => {
     vi.useFakeTimers();
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
     render(<ControlledGarden />);
 
     const peach = screen.getByTestId('garden-companion-peach');
     const sage = screen.getByTestId('garden-companion-sage');
-    const peachStart = [peach.getAttribute('data-x'), peach.getAttribute('data-y')];
-    const sageStart = [sage.getAttribute('data-x'), sage.getAttribute('data-y')];
     expect(peach).toHaveAttribute('data-move-count', '0');
     expect(sage).toHaveAttribute('data-move-count', '0');
+    expect(vi.getTimerCount()).toBe(1);
 
-    act(() => vi.advanceTimersByTime(901));
+    act(() => vi.advanceTimersByTime(3_500));
 
-    expect(Number(peach.getAttribute('data-move-count'))).toBeGreaterThanOrEqual(1);
-    expect(Number(sage.getAttribute('data-move-count'))).toBeGreaterThanOrEqual(1);
-    expect([peach.getAttribute('data-x'), peach.getAttribute('data-y')]).not.toEqual(peachStart);
-    expect([sage.getAttribute('data-x'), sage.getAttribute('data-y')]).not.toEqual(sageStart);
-    expect(peach).toHaveAttribute('data-wandering', 'true');
-    expect(sage).toHaveAttribute('data-wandering', 'true');
+    const moving = [peach, sage].filter((node) => node.getAttribute('data-wandering') === 'true');
+    expect(moving).toHaveLength(1);
+    expect(Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count'))).toBe(1);
+    expect(companionsOverlap(
+      { x: Number(peach.getAttribute('data-x')), y: Number(peach.getAttribute('data-y')) },
+      { x: Number(sage.getAttribute('data-x')), y: Number(sage.getAttribute('data-y')) },
+      { width: 320, height: 600 },
+    )).toBe(false);
+    expect(vi.getTimerCount()).toBe(1);
   });
 
   it('respects prefers-reduced-motion by keeping both companions stationary', () => {
@@ -571,5 +1218,45 @@ describe('autonomous companion wandering', () => {
     expect(sage).toHaveAttribute('data-move-count', '0');
     expect(peach).toHaveAttribute('data-wandering', 'false');
     expect(sage).toHaveAttribute('data-wandering', 'false');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('dynamically freezes at rendered positions when reduced motion turns on and keeps direct actions usable', () => {
+    const reducedMotion = mockReducedMotion(false);
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    render(<ControlledGarden />);
+    const sceneNode = screen.getByTestId('garden-scene');
+    const scene = rect(0, 0, 375, 602);
+    gardenLayout.scene = scene;
+    vi.spyOn(sceneNode, 'getBoundingClientRect').mockReturnValue(scene);
+    vi.spyOn(screen.getByTestId('garden-companion-position-peach'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 35, y: 70 }, scene));
+    vi.spyOn(screen.getByTestId('garden-companion-position-sage'), 'getBoundingClientRect')
+      .mockReturnValue(rectForGardenPoint({ x: 70, y: 72 }, scene));
+
+    act(() => vi.advanceTimersByTime(3_500));
+    const movesBefore = Number(screen.getByTestId('garden-companion-peach').getAttribute('data-move-count'))
+      + Number(screen.getByTestId('garden-companion-sage').getAttribute('data-move-count'));
+    expect(movesBefore).toBe(1);
+
+    act(() => reducedMotion.set(true));
+
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+    expect(peach).toHaveAttribute('data-x', '35.00');
+    expect(sage).toHaveAttribute('data-x', '70.00');
+    expect(peach).toHaveAttribute('data-wandering', 'false');
+    expect(sage).toHaveAttribute('data-wandering', 'false');
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(30_000));
+    expect(
+      Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count')),
+    ).toBe(movesBefore);
+
+    fireEvent.click(peach, { detail: 0 });
+    const beforeMove = Number(peach.getAttribute('data-x'));
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구 왼쪽으로 이동' }));
+    expect(Number(peach.getAttribute('data-x'))).toBeLessThan(beforeMove);
   });
 });

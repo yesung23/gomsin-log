@@ -56,16 +56,16 @@ async function boot(
  *
  * The first version of this file waited a flat 500ms and captured the SIGN-IN
  * screen 37 times -- the store had not finished restoring the session yet, and a
- * fixed sleep is not a readiness signal. The tab bar only exists once `isReady` is
+ * fixed sleep is not a readiness signal. The bottom navigation only exists once `isReady` is
  * true and a real screen has rendered, so waiting for it is the honest gate.
  */
 async function ready(page: Page) {
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
     이름이 아니라 **의미 구조**를 본다: `navigation` 안에 다섯 `link`가 있는가.
     보이는 라벨을 없애더라도 한국어 접근성 이름과 링크 의미는 남아야 하며, 칸 하나가
-    사라지거나 거짓 `tab` 역할이 돌아오면 여기서 걸린다.
+    사라지거나 링크 하나가 사라지면 여기서 걸린다.
   */
   const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
   await expect(navigation).toBeVisible({ timeout: 20_000 });

@@ -237,7 +237,7 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
   page.on('pageerror', (error) => pageErrors.push(error.message));
   const unrouted = await openGarden(context, page);
 
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: '하단 내비게이션' })).toHaveCount(0);
   await expect(page.getByTestId('garden-scene')).not.toHaveClass(/aspect-\[4\/3\]/);
   await expect(page.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '0 0 175 185');
   await expect(page.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '0 0 175 185');
@@ -436,7 +436,7 @@ test('quiet garden remains usable in landscape', async ({ browser }) => {
   const page = await context.newPage();
   const unrouted = await openGarden(context, page);
 
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toHaveCount(0);
+  await expect(page.getByRole('navigation', { name: '하단 내비게이션' })).toHaveCount(0);
   const scene = page.getByTestId('garden-scene');
   const sceneBox = await scene.boundingBox();
   expect(sceneBox).not.toBeNull();

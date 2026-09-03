@@ -35,7 +35,7 @@ test('a signed-in account with no space is offered a way to make one, not a dead
 
   /*
    * The failure this guards: an account that authenticated but has no couple used to
-   * be the worst state in the app, because every tab gates on a coupleId and a
+   * be the worst state in the app, because every destination gates on a coupleId and a
    * screen that only says "연결이 필요해요" with no button is indistinguishable from
    * a broken app.
    */
@@ -70,7 +70,7 @@ test('the connected pair sees the same shared record, which is the entire produc
   await b.close();
 });
 
-test('every bottom tab reaches a working screen, with no dead tab', async ({ browser }) => {
+test('every bottom-navigation destination reaches a working screen, with no dead end', async ({ browser }) => {
   const context = await browser.newContext();
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
@@ -80,25 +80,26 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   await bootedInto(page, '/home');
 
   /*
-   * Clicking the real tabs rather than calling `goto` for each route: a tab that
+   * Clicking the real destination links rather than calling `goto` for each route: a link that
    * navigates nowhere, or lands on a blank screen, is invisible to a route-by-route
    * check but is exactly what a user hits.
    */
   /*
     V4의 다섯 칸은 `홈 · 찾기 · 일기장 · 일정 · 우리`다 (`MobileShell`).
   */
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
   for (const label of ['찾기', '일기장', '일정', '우리', '홈']) {
-    await page.getByRole('tab', { name: label }).click();
+    await navigation.getByRole('link', { name: label }).click();
     await expect(page.locator('main')).not.toBeEmpty();
     // A screen with no interactive control is a dead end even if it rendered.
     const controls = await page.locator('main button, main a[href], main input').count();
-    expect(controls, `${label} tab has no operable control`).toBeGreaterThan(0);
+    expect(controls, `${label} destination has no operable control`).toBeGreaterThan(0);
   }
 
   /*
     일기장(/diary)에서 상점(/shop) 진입과 복귀를 확인한다.
   */
-  await page.getByRole('tab', { name: '일기장' }).click();
+  await navigation.getByRole('link', { name: '일기장' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
   await page.getByRole('button', { name: '상점 열기' }).click();
   await page.waitForURL(/\/shop$/, { timeout: 20_000 });
@@ -109,7 +110,7 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   /*
     기록 작성 진입점(홈 스토리 레일의 + 배지)이 컴포저(/compose)를 열고 닫는 것을 확인한다.
   */
-  await page.getByRole('tab', { name: '홈' }).click();
+  await navigation.getByRole('link', { name: '홈' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
   await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.waitForURL(/\/compose$/, { timeout: 20_000 });
@@ -118,7 +119,7 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   await page.getByRole('button', { name: '닫기' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
-  expect(errors, 'errors while walking the tab bar').toEqual([]);
+  expect(errors, 'errors while walking the bottom navigation').toEqual([]);
   await context.close();
 });
 
@@ -250,7 +251,7 @@ test('the primary action on each core screen is present and enabled for a real c
    */
   const checks: Array<{ route: string; name: RegExp; what: string }> = [
     // `기록 남기기` is the one name the authoring action carries everywhere
-    // (CTA, tab-bar action, sheet) since the one-tap-everywhere unification.
+    // (CTA, navigation action, sheet) since the one-tap-everywhere unification.
     // Matching a stale label here reports the record screen as having no way
     // to write -- a false alarm about the app's single most important action.
     { route: '/record', name: /기록 남기기/, what: '기록 작성' },
@@ -261,17 +262,18 @@ test('the primary action on each core screen is present and enabled for a real c
   for (const { route, name, what } of checks) {
     await bootedInto(page, route);
     /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
     const control = page.getByRole('button', { name }).first();
     await expect(control, `${what}: control missing on ${route}`).toBeVisible();
     await expect(control, `${what}: control disabled for a connected couple`).toBeEnabled();
@@ -330,7 +332,7 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await bootedInto(page, '/trips/trip-ocr');
-  await expect(page.getByRole('button', { name: '사진으로 바로 추가' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: '사진에서 초안 만들기' })).toBeVisible({ timeout: 20_000 });
 
   await page.getByLabel('지도 캡처 선택').setInputFiles({
     name: 'map-capture.png',
@@ -338,6 +340,11 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
     buffer: screenshot,
   });
 
+  const draftDialog = page.getByRole('dialog', { name: /일차 일정 추가/ });
+  await expect(draftDialog).toBeVisible({ timeout: 45_000 });
+  await expect(draftDialog.getByRole('textbox', { name: '장소 또는 제목 *' })).not.toHaveValue('');
+  await draftDialog.getByRole('button', { name: '저장' }).click();
+  await expect(draftDialog).toHaveCount(0);
   await expect(page.getByText('사진에서 자동 추가 · 눌러서 수정')).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText(/사진 읽는 중/)).toHaveCount(0);
   const editButton = page.locator('button[aria-label$="일정 수정"]');
@@ -458,17 +465,18 @@ test('every interactive control clears the 44px tap target, hit area included', 
   for (const route of ['/home', '/record', '/schedule', '/trips', '/us', '/service', '/my', '/settings']) {
     await bootedInto(page, route);
     /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 
     const bad = await page.evaluate(() => {
       const out: string[] = [];

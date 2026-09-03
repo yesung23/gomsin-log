@@ -12,17 +12,18 @@ const REPORTED = '일하느라 ㅈ같았는데, 손님이 먹을 것을 줘서 �
 async function openComposer(page: import('@playwright/test').Page) {
   await page.goto('/');
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
   /*
     컴포저는 홈 안의 접힌 카드가 아니라 `/compose` 전체 화면이다 (V4). 홈에서 여는
     문은 스토리 레일 내 스토리에 붙은 `+` 이고, 그 접근 이름이 `기록 남기기` 다.
@@ -214,17 +215,18 @@ test('one tap on 저장 saves, even though the tap itself reveals the reading', 
 
   await page.goto('/');
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
   await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.getByPlaceholder('오늘 어땠어?').fill(REPORTED);
 
@@ -261,17 +263,18 @@ test('a saved record can have its emotion flow corrected afterwards', async ({ b
   const page = await context.newPage();
   await page.goto('/record');
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 
   const entry = page.getByText('고쳐야 하는 기록', { exact: true }).first();
   await expect(entry).toBeVisible({ timeout: 20_000 });
@@ -313,17 +316,18 @@ test("군화의 홈은 곰신과 같은 화면이고, 먼저 가리키는 링만
   const page = await context.newPage();
   await page.goto('/');
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 
   /*
    * 이 테스트가 지키던 것이 무엇이었고, 지금은 무엇인가 (2026-08-23).
@@ -379,7 +383,7 @@ test("군화의 홈은 곰신과 같은 화면이고, 먼저 가리키는 링만
   await context.close();
 });
 
-test('the 일정 tab exists and stays lit on 여행 and on a trip detail', async ({ browser }) => {
+test('the 일정 destination exists and stays current on 여행 and on a trip detail', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
     ...CREATOR,
@@ -393,39 +397,40 @@ test('the 일정 tab exists and stays lit on 여행 and on a trip detail', async
 
   await page.goto('/');
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 
   /**
    * Scoped to the bottom bar by its own aria-label.
    *
    * During a lazy-route swap the outgoing and incoming screens can both be in the
    * tree for a frame, and an unscoped role query hits strict mode instead of
-   * retrying. Re-locating through the nav each time is both stable and a more
+   * retrying. Re-locating through the navigation each time is both stable and a more
    * honest description of what is being asserted.
    */
-  const bottomTab = (name: string) =>
-    page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
+  const bottomLink = (name: string) =>
+    page.getByRole('navigation', { name: '하단 내비게이션' }).getByRole('link', { name });
 
-  // 일정 is reachable from the tab bar -- it had no tab at all before.
-  await expect(bottomTab('일정')).toBeVisible();
-  await bottomTab('일정').click();
+  // 일정 is reachable from the bottom navigation -- it had no destination link at all before.
+  await expect(bottomLink('일정')).toBeVisible();
+  await bottomLink('일정').click();
   await page.waitForURL(/\/schedule$/, { timeout: 20_000 });
-  await expect(bottomTab('일정')).toHaveAttribute('aria-selected', 'true');
+  await expect(bottomLink('일정')).toHaveAttribute('aria-current', 'page');
 
-  // 여행 is one tap from there, and the 일정 tab stays lit.
+  // 여행 is one tap from there, and the 일정 link stays current.
   await page.getByRole('tab', { name: '여행 목록' }).click();
   await page.waitForURL(/\/trips$/, { timeout: 20_000 });
-  await expect(bottomTab('일정')).toHaveAttribute('aria-selected', 'true');
+  await expect(bottomLink('일정')).toHaveAttribute('aria-current', 'page');
 
   // Past, present and future are all visible at once.
   await expect(page.getByTestId('trip-phase-current')).toContainText('지금 여행');
@@ -435,6 +440,6 @@ test('the 일정 tab exists and stays lit on 여행 and on a trip detail', async
   // A trip detail keeps the section lit rather than going dark.
   await page.getByTestId('trip-card-trip-now').click();
   await page.waitForURL(/\/trips\/trip-now$/, { timeout: 20_000 });
-  await expect(bottomTab('일정')).toHaveAttribute('aria-selected', 'true');
+  await expect(bottomLink('일정')).toHaveAttribute('aria-current', 'page');
   await context.close();
 });

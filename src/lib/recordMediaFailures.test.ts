@@ -63,7 +63,7 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
   beforeEach(() => {
     mockUpload.mockReset();
     mockSanitizePhoto.mockReset().mockImplementation(async (file: File) => ({
-      file: new File([file], 'sanitized.jpg', { type: 'image/jpeg' }),
+      file: new File([file], 'photo.jpg', { type: 'image/jpeg' }),
       ext: 'jpg',
     }));
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -126,7 +126,7 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     expect(attachment.path.endsWith('.jpg')).toBe(true);
     expect(mockUpload).toHaveBeenCalledWith(
       attachment.path,
-      expect.objectContaining({ type: 'image/jpeg' }),
+      expect.objectContaining({ name: 'photo.jpg', type: 'image/jpeg' }),
       { contentType: 'image/jpeg', upsert: false },
     );
   });

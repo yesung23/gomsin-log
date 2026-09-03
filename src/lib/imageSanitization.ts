@@ -66,9 +66,8 @@ export function calculateSanitizedPhotoSize(
   };
 }
 
-export function sanitizedPhotoName(originalName: string): string {
-  const withoutExtension = originalName.replace(/\.[^.]+$/, '').trim();
-  return `${withoutExtension || 'photo'}.${SANITIZED_PHOTO_EXTENSION}`;
+export function sanitizedPhotoName(_originalName?: string): string {
+  return `photo.${SANITIZED_PHOTO_EXTENSION}`;
 }
 
 async function decodeWithImageElement(file: File): Promise<DecodedPhoto> {

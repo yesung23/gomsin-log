@@ -43,13 +43,14 @@ describe('privacy-preserving photo sanitization', () => {
     expect(SANITIZED_PHOTO_MAX_EDGE).toBe(2048);
   });
 
-  it('uses a neutral jpg filename for a blank source name', () => {
-    expect(sanitizedPhotoName('vacation.HEIC')).toBe('vacation.jpg');
+  it('always uses a neutral jpg filename regardless of source basename', () => {
+    expect(sanitizedPhotoName('vacation.HEIC')).toBe('photo.jpg');
     expect(sanitizedPhotoName('')).toBe('photo.jpg');
+    expect(sanitizedPhotoName('camera.heic')).toBe('photo.jpg');
   });
 
   it('draws decoded pixels into a fresh JPEG instead of returning the source file', async () => {
-    const source = new File(['source bytes with EXIF'], 'camera.heic', { type: 'image/heic' });
+    const source = new File(['source bytes with EXIF'], 'vacation.HEIC', { type: 'image/heic' });
     const { runtime, canvas, release, drawImage, fillRect } = runtimeFor(4032, 3024);
 
     const result = await sanitizePhotoForUpload(source, runtime);
@@ -58,7 +59,10 @@ describe('privacy-preserving photo sanitization', () => {
     const sanitized = result as { file: File; ext: string };
     expect(sanitized.file).not.toBe(source);
     expect(sanitized.file.type).toBe(SANITIZED_PHOTO_MIME);
-    expect(sanitized.file.name).toBe('camera.jpg');
+    expect(sanitized.file.name).toBe('photo.jpg');
+    expect(sanitized.file.name).not.toContain('vacation');
+    expect(sanitized.file.name).not.toContain('HEIC');
+    expect(sanitized.file.name).not.toContain('heic');
     expect(sanitized.ext).toBe('jpg');
     expect(canvas.width).toBe(2048);
     expect(canvas.height).toBe(1536);

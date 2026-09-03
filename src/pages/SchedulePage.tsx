@@ -42,6 +42,7 @@ import { supabase } from '@/lib/supabase';
 import { useDialogFocus } from '@/lib/useDialogFocus';
 import type { CoupleEvent, CoupleTask, EventType } from '@/types';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent' | 'info' | 'success' | 'warning' }> = {
   anniversary: { label: '기념일', tone: 'accent' },
@@ -63,6 +64,9 @@ export function SchedulePage() {
   const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
   const { profile, events, authenticatedUser } = state;
   const today = toLocalDateString(localToday());
+  const relationshipContext = resolveRelationshipContext(profile.couple.relationshipContext);
+  const isMilitaryRelationship = relationshipContext === 'military';
+  const defaultEventType: EventType = isMilitaryRelationship ? 'visit' : 'date';
   const activeCouple = Boolean(
     authenticatedUser?.id &&
       profile.couple.coupleId &&
@@ -75,7 +79,7 @@ export function SchedulePage() {
       profile.couple.status !== 'disconnected',
   );
   const scheduleAccessKey = authenticatedUser?.id
-    ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}`
+    ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}:${relationshipContext || 'invalid'}`
     : '';
   const accessKeyRef = useRef(scheduleAccessKey);
   const accessGenerationRef = useRef(0);
@@ -105,7 +109,7 @@ export function SchedulePage() {
   const eventModalTriggerRef = useRef<HTMLElement | null>(null);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [eventType, setEventType] = useState<EventType>('visit');
+  const [eventType, setEventType] = useState<EventType>(defaultEventType);
   /*
     여러 날을 한 번에 고르기 (2026-08-22).
 
@@ -191,7 +195,7 @@ export function SchedulePage() {
     setShowEventModal(false);
     setEditingEventId(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(today);
     setEventEndDate('');
     setIsPrivate(false);
@@ -199,7 +203,7 @@ export function SchedulePage() {
     setFormError(null);
     setIsSaving(false);
     setDeletingEventId(null);
-  }, [scheduleAccessKey, today]);
+  }, [defaultEventType, scheduleAccessKey, today]);
 
   /*
    * Tasks are component-local rather than part of the shared store. Clear them
@@ -487,7 +491,7 @@ export function SchedulePage() {
     eventModalTriggerRef.current = document.querySelector<HTMLElement>(`[data-cal-date="${runs[0].start}"]`);
     setEditingEventId(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(runs[0].start);
     setEventEndDate(runs[0].end ?? '');
     setPendingRuns(runs.length > 1 ? runs : null);
@@ -506,7 +510,7 @@ export function SchedulePage() {
     setEditingEventId(null);
     setPendingRuns(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(selectedDate);
     setEventEndDate('');
     setIsPrivate(!activeCouple);
@@ -1409,12 +1413,18 @@ export function SchedulePage() {
               <div className="space-y-3">
                 <div>
                   <label htmlFor="event-title" className="block text-caption text-muted-foreground font-medium mb-1">일정 제목 *</label>
-                  <input ref={eventTitleRef} id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
+                  <input ref={eventTitleRef} id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={isMilitaryRelationship ? '예: 첫 휴가 / 주말 데이트' : '예: 주말 데이트 / 함께할 일정'} className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
                 </div>
                 <div>
                   <label htmlFor="event-type" className="block text-caption text-muted-foreground font-medium mb-1">일정 유형</label>
                   <select id="event-type" value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11">
-                    {(Object.entries(EVENT_BADGES) as [EventType, { label: string }][]).map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
+                    {(Object.entries(EVENT_BADGES) as [EventType, { label: string }][])
+                      .filter(([value]) => (
+                        isMilitaryRelationship
+                        || value !== 'visit'
+                        || (editingEventId !== null && eventType === 'visit')
+                      ))
+                      .map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
                   </select>
                 </div>
                 <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">

@@ -73,6 +73,7 @@ function baseState(): AppState {
         coupleCode: 'ABC',
         connected: true,
         status: 'active',
+        relationshipContext: 'military',
       },
       military: {
         branch: 'army',
@@ -120,6 +121,35 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByTestId('profile-sticky-header').className).toContain('sticky');
     // The bottom navigation owns the Find tab; this component test does not mount the app shell.
     expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
+  });
+
+  it('일반 커플은 내부 soldier 슬롯과 잔존 복무값을 우리 화면에 노출하지 않는다', () => {
+    const base = baseState();
+    storeState = {
+      ...base,
+      profile: {
+        ...base.profile,
+        role: 'soldier',
+        couple: {
+          ...base.profile.couple,
+          relationshipContext: 'general',
+        },
+      },
+    } as AppState;
+    localStorage.setItem('gomsin.display.third-slot.user-me', 'discharge');
+
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByText('전역까지')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/복무|입대|전역|군화|곰신/);
+    expect(screen.getByRole('button', { name: '게시물 만들기' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '게시물' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '사진' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '여행' })).toBeInTheDocument();
   });
 
   it('마이 메뉴 열기 버튼은 접근 가능한 종이 시트를 열고 닫기 버튼으로 닫힌다', () => {

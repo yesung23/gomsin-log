@@ -51,6 +51,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 let currentRole: Role = 'gomsin';
+let relationshipContext: 'military' | 'general' = 'military';
 
 function makeState(): AppState {
   return {
@@ -68,6 +69,7 @@ function makeState(): AppState {
         coupleCode: '',
         connected: true,
         status: 'active',
+        relationshipContext,
       },
       military: { branch: 'army', militaryStatus: 'unknown', dischargeDateSource: 'unknown' },
       contact: {
@@ -125,6 +127,7 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
     navigate.mockReset();
     setPartnerUsername.mockReset().mockResolvedValue(true);
     currentRole = 'gomsin';
+    relationshipContext = 'military';
   });
 
   for (const { to, label } of ORPHANED_ROUTES) {
@@ -150,6 +153,28 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
     for (const { label } of ORPHANED_ROUTES) {
       expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
     }
+  });
+
+  it('keeps military routes and internal role labels out of general-couple settings', async () => {
+    relationshipContext = 'general';
+    currentRole = 'soldier';
+    const user = userEvent.setup();
+    renderSettings();
+
+    expect(screen.queryByRole('button', { name: '복무 현황 · D-Day' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '복무 정보 수정' })).toBeNull();
+    expect(screen.queryByText('군화')).toBeNull();
+    expect(screen.queryByText(/^곰신$/)).toBeNull();
+    expect(screen.queryByText(/님 \((군화|곰신)\)/)).toBeNull();
+    expect(screen.getByRole('button', { name: '일정 관리' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '여행 플래너' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '내 프로필 수정' }));
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    expect(within(dialog).getByRole('textbox', { name: '상대방 영어 아이디' })).toBeTruthy();
+    expect(within(dialog).queryByRole('option', { name: '전역' })).toBeNull();
+    expect(within(dialog).getByRole('option', { name: '함께한 날' })).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '만남' })).toBeTruthy();
   });
 
   it('groups them under a labelled shortcut section', () => {

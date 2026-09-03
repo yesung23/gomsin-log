@@ -50,7 +50,11 @@ const SERVING: MilitaryInfo = {
   dischargeDateSource: 'manual',
 };
 
-function stateWith(military: MilitaryInfo, role: 'gomsin' | 'soldier' = 'gomsin'): AppState {
+function stateWith(
+  military: MilitaryInfo,
+  role: 'gomsin' | 'soldier' = 'gomsin',
+  relationshipContext: 'military' | 'general' = 'military',
+): AppState {
   return {
     records: [], events: [], trips: [],
     authenticatedUser: { id: 'user-me' },
@@ -58,7 +62,13 @@ function stateWith(military: MilitaryInfo, role: 'gomsin' | 'soldier' = 'gomsin'
       id: 'user-me',
       myName: '나',
       role,
-      couple: { partnerName: '춘향', coupleCode: '', connected: true, status: 'active' },
+      couple: {
+        partnerName: '춘향',
+        coupleCode: '',
+        connected: true,
+        status: 'active',
+        relationshipContext,
+      },
       military,
       contact: {
         weekdayStart: '18:00', weekdayEnd: '21:00',
@@ -101,6 +111,17 @@ describe('컨디션은 양쪽 모두의 것이다', () => {
     renderMe();
     expect(screen.queryByTestId('cycle-tracker')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/생리 기간|생리 예상|가임|배란/);
+  });
+
+  it('일반 커플은 내부 soldier 슬롯이어도 자기 주기 도구를 쓰고 복무 카드를 보지 않는다', () => {
+    currentState = stateWith(SERVING, 'soldier', 'general');
+    renderMe();
+
+    expect(screen.getByTestId('care-mine')).toBeInTheDocument();
+    expect(screen.getByTestId('care-partner')).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-tracker')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /복무 현황 열기/ })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/복무|입대|전역|군화|곰신/);
   });
 });
 

@@ -11,10 +11,10 @@ describe('companion starter reveal pool and draw logic', () => {
     expect(STARTER_ACCESSORY_IDS).toEqual(['boots', 'sneakers', 'letter', 'dogtag', 'plane']);
     expect(STARTER_ACCESSORY_OPTIONS.map((opt) => opt.id)).toEqual(STARTER_ACCESSORY_IDS);
     expect(STARTER_ACCESSORY_OPTIONS.map((opt) => opt.label)).toEqual([
-      '군화',
+      '검정 부츠',
       '운동화',
       '하트 편지',
-      '군번줄',
+      '메탈 펜던트',
       '종이비행기',
     ]);
   });

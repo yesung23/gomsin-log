@@ -23,6 +23,7 @@ import type { Role } from '@/types';
 
 let lifecycle: CoupleLifecycle = 'connected';
 let role: Role = 'gomsin';
+let relationshipContext: 'military' | 'general' = 'military';
 let coupleId: string | undefined = 'couple-1';
 let connected = true;
 let status: 'active' | 'pending' | 'disconnected' = 'active';
@@ -52,6 +53,7 @@ vi.mock('@/lib/useStore', () => ({
           coupleCode: '',
           connected,
           status,
+          relationshipContext,
         },
         military: { branch: 'army', militaryStatus: 'unknown', dischargeDateSource: 'unknown' },
         contact: { weekdayStart: '18:00', weekdayEnd: '21:00', weekendStart: '12:00', weekendEnd: '21:00', enabled: true },
@@ -70,6 +72,7 @@ function renderMy() {
 describe('마이 couple status line', () => {
   beforeEach(() => {
     role = 'gomsin';
+    relationshipContext = 'military';
     lifecycle = 'connected';
     coupleId = 'couple-1';
     connected = true;
@@ -128,5 +131,17 @@ describe('마이 couple status line', () => {
       expect(screen.queryByText('몽룡님과 연결됨'), state).not.toBeInTheDocument();
       view.unmount();
     }
+  });
+
+  it('never exposes internal military role slots or service actions to a general couple', () => {
+    role = 'soldier';
+    relationshipContext = 'general';
+    renderMy();
+
+    expect(screen.queryByText('군화')).not.toBeInTheDocument();
+    expect(screen.queryByText('곰신')).not.toBeInTheDocument();
+    expect(screen.queryByText('복무와 일정')).not.toBeInTheDocument();
+    expect(screen.queryByText('복무 현황 · D-Day')).not.toBeInTheDocument();
+    expect(screen.getByText('몽룡님과 연결됨')).toBeInTheDocument();
   });
 });

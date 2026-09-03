@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reloadCalls = vi.fn();
 /** Result the mocked `reloadEvents` returns; a test can flip it mid-run. */
@@ -31,6 +31,7 @@ const state = {
       coupleCode: '',
       connected: true,
       status: 'active' as const,
+      relationshipContext: 'military' as 'military' | 'general',
     },
     military: {},
     contact: {},
@@ -65,6 +66,10 @@ vi.mock('@/lib/useStore', () => ({
 }));
 
 const { SchedulePage } = await import('@/pages/SchedulePage');
+
+afterEach(() => {
+  state.profile.couple.relationshipContext = 'military';
+});
 
 /**
  * `일정 추가` 는 글자가 없는 펜 아이콘이다 (2026-08-23).
@@ -121,6 +126,22 @@ function renderSchedulePage() {
     </MemoryRouter>,
   );
 }
+
+describe('SchedulePage general couple presentation', () => {
+  it('새 일정은 데이트로 시작하고 군 전용 면회 유형을 제안하지 않는다', async () => {
+    state.profile.couple.relationshipContext = 'general';
+    setOnLine(true);
+    renderSchedulePage();
+
+    await pickDay();
+
+    const type = screen.getByRole('combobox', { name: '일정 유형' });
+    expect(type).toHaveValue('date');
+    expect(screen.queryByRole('option', { name: '면회' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '데이트' })).toBeInTheDocument();
+    expect(screen.getByLabelText('일정 제목 *')).not.toHaveAttribute('placeholder', expect.stringContaining('면회'));
+  });
+});
 
 describe('SchedulePage loading lifecycle', () => {
   beforeEach(() => {

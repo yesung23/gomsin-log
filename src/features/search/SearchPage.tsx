@@ -23,6 +23,7 @@ import { CycleSupportSection } from '@/components/CycleSupportSection';
 import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent, Branch, MilitaryStatus } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 /**
  * 찾기 — `우리`의 색인.
@@ -40,8 +41,9 @@ import { AppBar, AppBarAction } from '@/components/ui/AppBar';
  *      검색은 원래부터 기기의 일이다.
  *   2. **최근 검색을 저장하지 않는다.** 자기 일기에서 무엇을 찾았는지는 그 자체로 사적인
  *      사실이고, 폰을 옆에서 보는 사람에게 가장 먼저 읽히는 흔적이다.
- *   3. **역할별 기본 surface와 검색 결과를 섞지 않는다.** 검색어가 없을 때만 군화의
- *      복무 정보 또는 곰신의 주기 표면을 보여주고, 찾는 동안에는 검색 결과만 보여준다.
+ *   3. **관계 맥락별 기본 surface와 검색 결과를 섞지 않는다.** 검색어가 없을 때 군 복무
+ *      커플은 역할에 맞는 복무/컨디션 정보를 보고, 일반 커플은 역할과 무관하게 컨디션
+ *      도구를 본다. 찾는 동안에는 검색 결과만 보여준다.
  *
  * 한 칸으로 둘을 받는다 -- `8/14` 같은 날짜면 그날을 열고, 아니면 쓴 말에서 찾는다.
  * 토글을 두면 사용자가 무엇을 고를지 먼저 정해야 하는데, 찾을 때 사람은 그냥 기억나는
@@ -606,6 +608,9 @@ function GomsinSearchSurface({
   connected,
   partnerName,
   partnerMilitary,
+  showPartnerService = true,
+  surfaceTestId = 'gomsin-search-surface',
+  recipientLabel = '군화',
 }: {
   authenticated: boolean;
   userId?: string;
@@ -613,10 +618,15 @@ function GomsinSearchSurface({
   connected: boolean;
   partnerName: string;
   partnerMilitary?: MilitaryInfo;
+  showPartnerService?: boolean;
+  surfaceTestId?: string;
+  recipientLabel?: string;
 }) {
-  const hasPartnerService = connected && computeServiceProgress(partnerMilitary, localToday()) !== null;
+  const hasPartnerService = showPartnerService
+    && connected
+    && computeServiceProgress(partnerMilitary, localToday()) !== null;
   return (
-    <div className="space-y-4" data-testid="gomsin-search-surface">
+    <div className="space-y-4" data-testid={surfaceTestId}>
       {hasPartnerService ? (
         <InlineServiceInfo
           military={partnerMilitary!}
@@ -631,6 +641,7 @@ function GomsinSearchSurface({
         userId={userId}
         coupleId={coupleId}
         connected={connected}
+        recipientLabel={recipientLabel}
       />
       {/* 상대방이 보낸 배려 신호 */}
       <CycleSupportSection
@@ -702,6 +713,9 @@ function SearchPageBody() {
 
   const result = useMemo(() => searchRecords(records, query, today), [records, query, today]);
   const isSoldier = state.profile.role === 'soldier';
+  const isMilitaryRelationship = resolveRelationshipContext(
+    state.profile.couple.relationshipContext,
+  ) === 'military';
 
   const openRecord = (record: DailyRecord) => {
     // §7.5 -- 근사치가 아니라 정확히 그 기록. `?record=` 는 새로고침과 딥링크에도 남는다.
@@ -775,7 +789,18 @@ function SearchPageBody() {
       <div id="record-search-results">
         {result.kind === 'empty' ? (
           <div className="px-4 py-3">
-            {isSoldier ? (
+            {!isMilitaryRelationship ? (
+              <GomsinSearchSurface
+                authenticated={Boolean(state.authenticatedUser?.id)}
+                userId={state.authenticatedUser?.id}
+                coupleId={state.profile.couple?.coupleId}
+                connected={Boolean(state.profile.couple?.connected)}
+                partnerName={state.profile.couple?.partnerName || ''}
+                showPartnerService={false}
+                surfaceTestId="general-search-surface"
+                recipientLabel="상대방"
+              />
+            ) : isSoldier ? (
               <SoldierSearchSurface
                 military={state.profile.military}
                 contact={state.profile.contact}

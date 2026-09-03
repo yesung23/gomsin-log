@@ -26,6 +26,7 @@ import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } 
 import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
 import { useDialogFocus } from '@/lib/useDialogFocus';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
 
@@ -444,7 +445,12 @@ export function SharedProfile() {
     ? profilePostRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
   const highlights = state.coupleHighlights ?? [];
-  const effectiveMilitary = resolveEffectiveMilitary(profile);
+  const isMilitaryRelationship = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  ) === 'military';
+  const effectiveMilitary = isMilitaryRelationship
+    ? resolveEffectiveMilitary(profile)
+    : undefined;
   const hasMilitary = Boolean(effectiveDischargeDate(effectiveMilitary));
   const stats = useMemo(
     () => buildCoupleStats({

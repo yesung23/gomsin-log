@@ -114,7 +114,7 @@ describe('free local companion shop', () => {
     await waitFor(() => {
       expect(screen.getByRole('status')).toBeInTheDocument();
     });
-    expect(screen.getByRole('status')).toHaveTextContent('군화를 무료로 받았어요.');
+    expect(screen.getByRole('status')).toHaveTextContent('검정 부츠를 무료로 받았어요.');
     expect(screen.getByTestId('starter-reveal-result')).toBeInTheDocument();
   });
 
@@ -158,7 +158,7 @@ describe('free local companion shop', () => {
     }));
     renderShop();
 
-    expect(screen.getByText('군화')).toBeInTheDocument();
+    expect(screen.getByText('검정 부츠')).toBeInTheDocument();
     const drawButton = screen.getByRole('button', { name: '회전 뽑기로 장식 받기' });
     expect(drawButton).toBeEnabled();
     await user.click(drawButton);
@@ -322,7 +322,7 @@ describe('free local companion shop', () => {
 
       expect(screen.getByTestId('accessory-roulette-wheel')).not.toHaveClass('accessory-roulette-spinning');
       expect(screen.getByTestId('starter-reveal-result')).toBeInTheDocument();
-      expect(screen.getByRole('status')).toHaveTextContent('군화를 무료로 받았어요.');
+      expect(screen.getByRole('status')).toHaveTextContent('검정 부츠를 무료로 받았어요.');
     } finally {
       window.matchMedia = originalMatchMedia;
     }

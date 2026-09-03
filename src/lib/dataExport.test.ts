@@ -54,4 +54,30 @@ describe('personal data export ownership', () => {
     expect(result.records[0].attachments[0].path).toBe('couple/record/photo.jpg');
     expect(JSON.stringify(result)).not.toContain('signed.example');
   });
+
+  it('does not export military fields for a general couple that uses the internal soldier slot', () => {
+    const base = baseState();
+    const state: AppState = {
+      ...base,
+      profile: {
+        ...base.profile,
+        role: 'soldier',
+        couple: {
+          ...base.profile.couple,
+          relationshipContext: 'general',
+        },
+        military: {
+          branch: 'army',
+          militaryStatus: 'serving',
+          enlistmentDate: '2025-01-01',
+          expectedDischargeDate: '2026-06-01',
+          dischargeDateSource: 'manual',
+        },
+      },
+    };
+
+    const result = buildPersonalExport(state, 'user-a');
+
+    expect(result.profile.military).toBeNull();
+  });
 });

@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Settings } from 'lucide-react';
+import { ChevronRight, Heart, Settings } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { useStore } from '@/lib/useStore';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 export function MyPage() {
   const navigate = useNavigate();
@@ -12,6 +13,9 @@ export function MyPage() {
   const { profile } = state;
 
   const isGomsin = profile.role === 'gomsin';
+  const isMilitaryRelationship = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  ) === 'military';
   const roleLabel = isGomsin ? '곰신' : '군화';
   const connected = Boolean(
     profile.couple.coupleId
@@ -74,15 +78,21 @@ export function MyPage() {
             label="내 사진"
           >
             <span className="text-coral-strong font-extrabold text-heading">
-              {isGomsin ? '🌸' : '🪖'}
+              {isMilitaryRelationship ? (
+                isGomsin ? '🌸' : '🪖'
+              ) : (
+                <Heart size={22} aria-hidden="true" />
+              )}
             </span>
           </AvatarPicker>
           <div className="min-w-0 flex-1">
             <h2 className="text-heading text-foreground">{profile.myName || '나'}</h2>
             <div className="flex items-center gap-2 mt-0.5 text-caption text-muted-foreground">
-              <span className="text-coral-strong font-bold text-caption">
-                {roleLabel}
-              </span>
+              {isMilitaryRelationship ? (
+                <span className="text-coral-strong font-bold text-caption">
+                  {roleLabel}
+                </span>
+              ) : null}
               {connected ? (
                 <span className="text-foreground font-semibold">{coupleStatusLabel}</span>
               ) : (
@@ -101,7 +111,7 @@ export function MyPage() {
           때문이다.
         */}
 
-        {!isGomsin && (
+        {isMilitaryRelationship && !isGomsin && (
           <section className="space-y-3">
             <SectionHeader title="복무와 일정" caption="필요할 때 바로 확인" />
             <RowGroup boxed>

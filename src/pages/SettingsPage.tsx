@@ -9,7 +9,7 @@ import { AppBar } from '@/components/ui/AppBar';
 import {
   Shield, Unlink, Trash2, User, FileText, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
-  CalendarDays, Plane, X, HelpCircle,
+  CalendarDays, Plane, X, HelpCircle, Heart,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -48,6 +48,7 @@ import { NotificationPreferencesSection } from '@/components/NotificationPrefere
 import { ProfileCaptionEditor } from '@/components/ProfileCaptionEditor';
 import { isValidUsername, normalizeUsername } from '@/lib/profileCaption';
 import type { ProfileDateType } from '@/types';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
@@ -137,7 +138,14 @@ export function SettingsPage() {
   );
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
+  const relationshipContext = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  );
+  const isMilitaryRelationship = relationshipContext === 'military';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
+  const partnerRoleLabel = isMilitaryRelationship
+    ? profile.role === 'gomsin' ? '군화' : '곰신'
+    : '상대방';
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
   const protectionCoupleId = activeCoupleScopeId(profile.couple);
@@ -455,7 +463,11 @@ export function SettingsPage() {
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
   const [editProfileCaption, setEditProfileCaption] = useState(profile.profileCaption || '');
-  const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(profile.profileDateType || '');
+  const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(() => (
+    !isMilitaryRelationship && profile.profileDateType === 'discharge'
+      ? ''
+      : profile.profileDateType || ''
+  ));
   const [editPartnerUsername, setEditPartnerUsername] = useState(profile.couple.partnerUsername || '');
 
   const closeProfileModal = useCallback(() => {
@@ -586,7 +598,9 @@ export function SettingsPage() {
         myName: nextName,
         couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
         profileCaption: editProfileCaption.trim() || undefined,
-        profileDateType: editProfileDateType || undefined,
+        profileDateType: !isMilitaryRelationship && editProfileDateType === 'discharge'
+          ? undefined
+          : editProfileDateType || undefined,
       });
       if (!isCurrentIdentity(identity)) return;
       if (!saved) {
@@ -641,10 +655,14 @@ export function SettingsPage() {
       toast.error('로그인한 계정에서만 커플 공간을 만들 수 있어요.');
       return;
     }
+    if (!relationshipContext) {
+      toast.error('우리 공간 유형을 확인하지 못했어요. 다시 로그인한 뒤 시도해 주세요.');
+      return;
+    }
 
     setIsCreatingSpace(true);
     try {
-      const result = await createCoupleInvitation(profile.role);
+      const result = await createCoupleInvitation(profile.role, relationshipContext);
       if (!isCurrentIdentity(identity)) return;
       if (result.error || !result.coupleId || !result.code) {
         toast.error(result.error || '커플 공간을 만들지 못했어요.');
@@ -686,10 +704,14 @@ export function SettingsPage() {
       toast.error('6자리 초대 코드를 입력해 주세요.');
       return;
     }
+    if (!relationshipContext) {
+      toast.error('우리 공간 유형을 확인하지 못했어요. 다시 로그인한 뒤 시도해 주세요.');
+      return;
+    }
 
     setIsJoiningCouple(true);
     try {
-      const result = await consumeCoupleInvitation(code);
+      const result = await consumeCoupleInvitation(code, relationshipContext);
       if (!isCurrentIdentity(identity)) return;
       if (result.error || !result.coupleId) {
         // An unusable session is not a code problem: route it to the store's
@@ -775,10 +797,16 @@ export function SettingsPage() {
         {/* User Profile Overview */}
         <section className="flex items-center gap-3 py-2">
           <div className="w-11 h-11 rounded-full bg-coral/20 text-coral-strong font-bold flex items-center justify-center text-heading">
-            {profile.role === 'gomsin' ? '🌸' : '🪖'}
+            {isMilitaryRelationship ? (
+              profile.role === 'gomsin' ? '🌸' : '🪖'
+            ) : (
+              <Heart size={22} aria-hidden="true" />
+            )}
           </div>
           <div>
-            <h2 className="text-heading text-foreground">{myName}님 ({roleLabel})</h2>
+            <h2 className="text-heading text-foreground">
+              {myName}님{isMilitaryRelationship ? ` (${roleLabel})` : ''}
+            </h2>
             <p className="text-caption text-muted-foreground mt-0.5">
               {profile.couple.connected
                 ? `파트너 ${partnerName}님과 연결됨`
@@ -953,7 +981,11 @@ export function SettingsPage() {
                 setEditName(profile.myName);
                 setEditAnniversary(profile.couple.anniversaryDate || '');
                 setEditProfileCaption(profile.profileCaption || '');
-                setEditProfileDateType(profile.profileDateType || '');
+                setEditProfileDateType(
+                  !isMilitaryRelationship && profile.profileDateType === 'discharge'
+                    ? ''
+                    : profile.profileDateType || '',
+                );
                 setEditPartnerUsername(profile.couple.partnerUsername || '');
                 setShowProfileModal(true);
               }}
@@ -963,7 +995,7 @@ export function SettingsPage() {
               <span className="text-label font-semibold text-foreground">내 프로필 수정</span>
             </PressableRow>
 
-            {profile.role === 'soldier' && (
+            {isMilitaryRelationship && profile.role === 'soldier' && (
               <PressableRow
                 onClick={() => navigate('/service')}
                 leading={<Shield size={18} className="text-coral" />}
@@ -991,7 +1023,7 @@ export function SettingsPage() {
             <SectionHeader title="상대방 아이디" />
             <div className="rounded-surface border border-border bg-card p-4 space-y-3">
               <div>
-                <h2 className="text-label font-semibold text-foreground">{profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디 정하기</h2>
+                <h2 className="text-label font-semibold text-foreground">{partnerRoleLabel} 아이디 정하기</h2>
                 <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
                   상대방 계정의 아이디를 이 화면에서 정해요. 내 아이디는 상대방이 정해요.
                 </p>
@@ -1000,7 +1032,7 @@ export function SettingsPage() {
                 inputId="partner-username"
                 value={editPartnerUsername}
                 currentUsername={profile.couple.partnerUsername}
-                partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                partnerLabel={partnerRoleLabel}
                 isSaving={isSavingPartnerUsername}
                 onChange={setEditPartnerUsername}
                 onSave={() => void handleSavePartnerUsername()}
@@ -1030,7 +1062,9 @@ export function SettingsPage() {
             {[
               { to: '/schedule', label: '일정 관리', icon: CalendarDays },
               { to: '/trips', label: '여행 플래너', icon: Plane },
-              { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
+              ...(isMilitaryRelationship
+                ? [{ to: '/service', label: '복무 현황 · D-Day', icon: Shield }]
+                : []),
             ].map(({ to, label, icon: Icon }) => (
               <PressableRow
                 key={to}
@@ -1198,14 +1232,14 @@ export function SettingsPage() {
                   <div>
                     <p className="text-caption text-muted-foreground">상대방 아이디 정하기</p>
                     <p className="mt-0.5 text-caption text-muted-foreground">
-                      {profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디를 내가 정해요.
+                      {partnerRoleLabel} 아이디를 내가 정해요.
                     </p>
                   </div>
                   <PartnerUsernameEditor
                     inputId="profile-modal-partner-username"
                     value={editPartnerUsername}
                     currentUsername={profile.couple.partnerUsername}
-                    partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                    partnerLabel={partnerRoleLabel}
                     isSaving={isSavingPartnerUsername}
                     onChange={setEditPartnerUsername}
                     onSave={() => void handleSavePartnerUsername()}
@@ -1218,6 +1252,7 @@ export function SettingsPage() {
                 dateType={editProfileDateType}
                 onCaptionChange={setEditProfileCaption}
                 onDateTypeChange={setEditProfileDateType}
+                allowDischarge={isMilitaryRelationship}
               />
 
               <div className="space-y-2">

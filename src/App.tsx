@@ -17,6 +17,7 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
 import { RouteAccessibilityManager } from '@/components/RouteAccessibilityManager';
+import { MilitaryOnlyRoute } from '@/components/MilitaryOnlyRoute';
 import { AppLoadingState } from '@/components/ui/AppLoadingState';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
@@ -407,7 +408,14 @@ function AppContent() {
               <Route path="/diary/garden" element={<CompanionGardenPage />} />
               <Route path="/shop" element={<ShopPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
-              <Route path="/service" element={<ServicePage />} />
+              <Route
+                path="/service"
+                element={(
+                  <MilitaryOnlyRoute>
+                    <ServicePage />
+                  </MilitaryOnlyRoute>
+                )}
+              />
               <Route path="/us" element={<UsPage />} />
               <Route path="/my" element={<MyPage />} />
               <Route path="/settings" element={<SettingsPage />} />

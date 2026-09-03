@@ -29,10 +29,10 @@ export const GARDEN_ACCESSORY_OPTIONS: readonly { id: GardenAccessory; label: st
   { id: 'bow', label: '리본' },
   { id: 'scarf', label: '목도리' },
   { id: 'flower', label: '꽃' },
-  { id: 'boots', label: '군화' },
+  { id: 'boots', label: '검정 부츠' },
   { id: 'sneakers', label: '운동화' },
   { id: 'letter', label: '하트 편지' },
-  { id: 'dogtag', label: '군번줄' },
+  { id: 'dogtag', label: '메탈 펜던트' },
   { id: 'plane', label: '종이비행기' },
 ] as const;
 

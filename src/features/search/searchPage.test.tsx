@@ -61,12 +61,14 @@ function createRecord(over: Partial<DailyRecord> = {}): DailyRecord {
 
 function stateWith({
   role = 'soldier',
+  relationshipContext = 'military',
   military = SERVING_MILITARY,
   partnerMilitary,
   records = [],
   events = [],
 }: {
   role?: 'soldier' | 'gomsin';
+  relationshipContext?: 'military' | 'general';
   military?: MilitaryInfo;
   partnerMilitary?: MilitaryInfo;
   records?: DailyRecord[];
@@ -87,6 +89,7 @@ function stateWith({
         coupleCode: 'CP1234',
         connected: true,
         status: 'active',
+        relationshipContext,
         ...(partnerMilitary ? { partnerMilitary } : {}),
       },
       military,
@@ -464,6 +467,25 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
     expect(screen.queryByTestId('soldier-service-info')).not.toBeInTheDocument();
     expect(screen.queryByText(/의 복무/)).not.toBeInTheDocument();
     expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
+  });
+});
+
+describe('일반 커플 기본 주 콘텐츠', () => {
+  it('internal soldier 슬롯이어도 복무 UI를 숨기고 역할과 무관한 내 기록·컨디션 도구를 유지한다', () => {
+    currentState = stateWith({
+      role: 'soldier',
+      relationshipContext: 'general',
+      partnerMilitary: SERVING_MILITARY,
+    });
+    renderSearch();
+
+    expect(screen.getByTestId('general-search-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-support-mine')).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-support-partner')).toBeInTheDocument();
+    expect(screen.getByTestId('cycle-tracker-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('soldier-search-surface')).toBeNull();
+    expect(screen.queryByTestId('soldier-service-info')).toBeNull();
+    expect(screen.queryByText(/복무|입대|전역/)).toBeNull();
   });
 });
 

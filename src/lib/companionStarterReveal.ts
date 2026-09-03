@@ -11,10 +11,10 @@ export interface StarterAccessoryOption {
 }
 
 export const STARTER_ACCESSORY_OPTIONS: readonly StarterAccessoryOption[] = [
-  { id: 'boots', label: '군화' },
+  { id: 'boots', label: '검정 부츠' },
   { id: 'sneakers', label: '운동화' },
   { id: 'letter', label: '하트 편지' },
-  { id: 'dogtag', label: '군번줄' },
+  { id: 'dogtag', label: '메탈 펜던트' },
   { id: 'plane', label: '종이비행기' },
 ] as const;
 

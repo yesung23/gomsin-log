@@ -1067,6 +1067,28 @@ input[type='range']::-webkit-slider-thumb {
   75% { transform: rotate(-22deg) scaleX(1.04); }
 }
 
+@keyframes garden-care-pet {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30% { transform: translateY(-1px) rotate(-5deg); }
+  70% { transform: translateY(-1px) rotate(5deg); }
+}
+
+@keyframes garden-care-wave-arm {
+  0%, 100% { transform: rotate(20deg); }
+  50% { transform: rotate(-70deg); }
+}
+
+@keyframes garden-care-play {
+  0%, 100% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-5px) scale(1.04); }
+}
+
+@keyframes garden-care-symbol {
+  0% { opacity: 0; transform: translateY(4px) scale(0.72); }
+  30% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-8px) scale(0.92); }
+}
+
 .garden-surface {
   background-color: var(--garden-surface);
 }
@@ -1201,24 +1223,45 @@ input[type='range']::-webkit-slider-thumb {
   animation: garden-flail-leg-right 0.26s ease-in-out infinite;
 }
 
+.garden-care-reaction {
+  position: absolute;
+  right: -9px;
+  top: -13px;
+  z-index: 3;
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--garden-character-outline);
+  border-radius: 9999px;
+  background: var(--garden-surface);
+  color: var(--garden-ink);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  animation: garden-care-symbol 1.25s ease-out both;
+}
+
+.garden-care-pet .garden-companion-body {
+  animation: garden-care-pet 0.46s ease-in-out 3;
+}
+
+.garden-care-wave .garden-limb-arm-right {
+  animation: garden-care-wave-arm 0.28s ease-in-out 5;
+}
+
+.garden-care-play .garden-companion-body {
+  animation: garden-care-play 0.45s ease-in-out 3;
+}
+
+.garden-care-play .garden-limb-arm-left,
+.garden-care-play .garden-limb-arm-right {
+  animation: garden-care-wave-arm 0.34s ease-in-out 4 alternate;
+}
+
 /* Keep the full sprite usable in the short landscape content viewport. */
 @media (orientation: landscape) and (max-height: 500px) {
-  .garden-landscape-summary {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
-  }
-
-  .garden-landscape-stage-copy {
-    display: none;
-  }
-
   .garden-landscape-scene {
     min-height: 116px;
-  }
-
-  .garden-landscape-footer {
-    padding-top: 0.5rem;
-    padding-bottom: 0.5rem;
   }
 }
 
@@ -1226,6 +1269,11 @@ input[type='range']::-webkit-slider-thumb {
   .garden-companion-walking .garden-companion-body,
   .garden-companion-walking .garden-limb,
   .garden-companion-lifted .garden-limb,
+  .garden-care-pet .garden-companion-body,
+  .garden-care-wave .garden-limb-arm-right,
+  .garden-care-play .garden-companion-body,
+  .garden-care-play .garden-limb,
+  .garden-care-reaction,
   .accessory-roulette-spinning {
     animation: none !important;
   }

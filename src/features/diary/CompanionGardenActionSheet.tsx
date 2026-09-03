@@ -1,5 +1,15 @@
 import { useCallback, useRef, useState, type RefObject } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ShoppingBag, X } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Hand,
+  Heart,
+  ShoppingBag,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { useDialogFocus } from '@/lib/useDialogFocus';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import { cn } from '@/lib/utils';
@@ -14,6 +24,7 @@ import { GardenAccessoryArt } from './GardenAccessoryArt';
 import { isSourceAccessory } from './gardenAccessoryCrops';
 
 export type GardenMoveDirection = 'up' | 'down' | 'left' | 'right';
+export type GardenCareAction = 'pet' | 'wave' | 'play';
 
 const COMPANION_LABELS: Record<GardenCompanionId, string> = {
   peach: '첫째',
@@ -34,6 +45,7 @@ interface CompanionGardenActionSheetProps {
   ownedAccessories: readonly CollectibleGardenAccessory[];
   onSelectCompanion: (companion: GardenCompanionId) => void;
   onAccessoryChange?: (companion: GardenCompanionId, accessory: GardenAccessory) => boolean;
+  onCare: (action: GardenCareAction) => void;
   onMove: (direction: GardenMoveDirection) => boolean;
   onClose: () => void;
   onOpenShop?: () => void;
@@ -51,6 +63,7 @@ export function CompanionGardenActionSheet({
   ownedAccessories,
   onSelectCompanion,
   onAccessoryChange,
+  onCare,
   onMove,
   onClose,
   onOpenShop,
@@ -161,6 +174,42 @@ export function CompanionGardenActionSheet({
             </button>
           ))}
         </div>
+
+        <section className="mt-4" aria-labelledby="garden-care-title">
+          <h3 id="garden-care-title" className="text-label font-semibold text-foreground">돌보기</h3>
+          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
+            한 번 누르면 정원의 친구들이 바로 반응해요.
+          </p>
+          <div role="group" className="mt-3 grid grid-cols-3 gap-2" aria-label="친구 돌보기">
+            <button
+              type="button"
+              onClick={() => onCare('pet')}
+              aria-label={`${label} 친구 쓰다듬기`}
+              className="press-response flex min-h-11 flex-col items-center justify-center gap-1 rounded-control border border-border px-2 py-2 text-caption font-semibold text-foreground"
+            >
+              <Heart size={18} aria-hidden="true" />
+              <span aria-hidden="true">쓰다듬기</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onCare('wave')}
+              aria-label={`${label} 친구에게 인사하기`}
+              className="press-response flex min-h-11 flex-col items-center justify-center gap-1 rounded-control border border-border px-2 py-2 text-caption font-semibold text-foreground"
+            >
+              <Hand size={18} aria-hidden="true" />
+              <span aria-hidden="true">인사하기</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onCare('play')}
+              aria-label="두 친구 같이 놀기"
+              className="press-response flex min-h-11 flex-col items-center justify-center gap-1 rounded-control border border-border px-2 py-2 text-caption font-semibold text-foreground"
+            >
+              <Sparkles size={18} aria-hidden="true" />
+              <span aria-hidden="true">같이 놀기</span>
+            </button>
+          </div>
+        </section>
 
         <section className="mt-3" aria-labelledby="garden-move-title">
           <h3 id="garden-move-title" className="text-label font-semibold text-foreground">친구 움직이기</h3>

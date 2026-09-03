@@ -281,7 +281,7 @@ describe('interactive companion garden characters', () => {
     />);
 
     expect(screen.getByRole('button', { name: '이전 화면으로' })).toBeInTheDocument();
-    expect(screen.getByText('함께한 100일')).toBeInTheDocument();
+    expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '우리 정원' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '든든한 나무' })).not.toBeInTheDocument();
     const playAction = screen.getByRole('button', { name: '꾸미기와 함께 놀기' });
@@ -299,11 +299,64 @@ describe('interactive companion garden characters', () => {
     expect(scene).not.toHaveClass('border-y');
     expect(screen.getByTestId('garden-scene')).not.toHaveAttribute('style');
 
-    // Only visible words on the available garden: “함께한 N일”
+    // The available garden itself stays wordless; names and instructions remain
+    // available to assistive technology and inside the progressive-disclosure sheet.
     const visibleTexts = Array.from(container.querySelectorAll('*:not(.sr-only)'))
       .filter((el) => el.children.length === 0 && !el.closest('.sr-only') && (el.textContent || '').trim().length > 0)
       .map((el) => el.textContent?.trim());
-    expect(visibleTexts).toEqual(['함께한 100일']);
+    expect(visibleTexts).toEqual([]);
+  });
+
+  it('turns care choices into visible, accessible character reactions without scores or chores', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+    const liveRegion = screen.getByTestId('garden-live-region');
+
+    fireEvent.click(peach, { detail: 0 });
+    for (const name of ['첫째 친구 쓰다듬기', '첫째 친구에게 인사하기', '두 친구 같이 놀기']) {
+      const action = screen.getByRole('button', { name });
+      expect(action).toHaveClass('min-h-11');
+    }
+    expect(screen.queryByText(/레벨|경험치|점수|출석|배고픔/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구 쓰다듬기' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(peach).toHaveAttribute('data-care-reaction', 'pet');
+    expect(sage).toHaveAttribute('data-care-reaction', 'none');
+    expect(screen.getByTestId('garden-care-reaction-peach')).toBeInTheDocument();
+    expect(liveRegion).toHaveTextContent('첫째 친구를 쓰다듬었어요');
+
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(peach).toHaveAttribute('data-care-reaction', 'none');
+    expect(screen.queryByTestId('garden-care-reaction-peach')).not.toBeInTheDocument();
+
+    fireEvent.click(sage, { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '두 친구 같이 놀기' }));
+    expect(peach).toHaveAttribute('data-care-reaction', 'play');
+    expect(sage).toHaveAttribute('data-care-reaction', 'play');
+    expect(screen.getByTestId('garden-care-reaction-peach')).toBeInTheDocument();
+    expect(screen.getByTestId('garden-care-reaction-sage')).toBeInTheDocument();
+    expect(liveRegion).toHaveTextContent('두 친구가 함께 신나게 놀아요');
+  });
+
+  it('clears a care reaction timer when the garden becomes unavailable', () => {
+    vi.useFakeTimers();
+    const view = render(<CompanionGardenView state={AVAILABLE} accessories={DEFAULT_ACCESSORIES} />);
+
+    fireEvent.click(screen.getByTestId('garden-companion-peach'), { detail: 0 });
+    fireEvent.click(screen.getByRole('button', { name: '첫째 친구에게 인사하기' }));
+    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-care-reaction', 'wave');
+
+    view.rerender(<CompanionGardenView
+      state={{ isAvailable: false, togetherDays: null, stage: null }}
+      accessories={DEFAULT_ACCESSORIES}
+    />);
+    expect(screen.queryByTestId('garden-care-reaction-peach')).not.toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(2_000));
+    view.rerender(<CompanionGardenView state={AVAILABLE} accessories={DEFAULT_ACCESSORIES} />);
+    expect(screen.getByTestId('garden-companion-peach')).toHaveAttribute('data-care-reaction', 'none');
   });
 
   it('renders exactly two independently addressable companions', () => {

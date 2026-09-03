@@ -79,7 +79,7 @@ describe('companion garden route authority', () => {
   it('verified active couple + valid anniversary renders the real growth state', () => {
     renderGarden();
     expect(screen.getByRole('heading', { level: 1, name: '정원' })).toBeInTheDocument();
-    expect(screen.getByText('함께한 100일')).toBeInTheDocument();
+    expect(screen.queryByText(/함께한 \d+일/)).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { level: 2, name: '든든한 나무' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /친구와 함께 놀기/ })).toHaveLength(2);
     expect(screen.getByTestId('garden-scene').className).not.toContain('aspect-[4/3]');

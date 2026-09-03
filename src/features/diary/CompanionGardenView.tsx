@@ -8,7 +8,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
-import { Palette, Sprout } from 'lucide-react';
+import { Hand, Heart, Palette, Sparkles, Sprout } from 'lucide-react';
 import { AppBar } from '@/components/ui/AppBar';
 import { cn } from '@/lib/utils';
 import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
@@ -23,6 +23,7 @@ import { isSourceAccessory, SOURCE_ACCESSORY_CROPS } from './gardenAccessoryCrop
 import type { CompanionGardenState } from './companionGarden';
 import {
   CompanionGardenActionSheet,
+  type GardenCareAction,
   type GardenMoveDirection,
 } from './CompanionGardenActionSheet';
 import {
@@ -66,6 +67,11 @@ type MeasuredGardenPair = {
   footprints: GardenPairFootprints;
 };
 
+type GardenCareReaction = {
+  kind: GardenCareAction;
+  targets: readonly GardenCompanionId[];
+};
+
 const INITIAL_MOTION: MotionMap = {
   peach: { x: 26, y: 78, moving: false, moveCount: 0, transitionMs: 0 },
   sage: { x: 74, y: 74, moving: false, moveCount: 0, transitionMs: 0 },
@@ -84,6 +90,7 @@ const BUTTON_MOVE_STEP = 8;
 // Keep the guard alive long enough for delayed touch/mouse synthesis; a fresh
 // pointerdown explicitly clears it so the user's next deliberate tap is never lost.
 const SUPPRESSED_CLICK_FALLBACK_MS = 1_000;
+const CARE_REACTION_DURATION_MS = 1_600;
 
 const CHARACTER_POSE_CROPS: Record<GardenCompanionId, Record<'idle', string>> = {
   peach: {
@@ -276,20 +283,37 @@ function CompanionGlyph({
   accessory,
   moving,
   lifted,
+  careReaction,
 }: {
   companion: GardenCompanionId;
   accessory: GardenAccessory;
   moving: boolean;
   lifted: boolean;
+  careReaction: GardenCareAction | null;
 }) {
+  const ReactionIcon = careReaction === 'pet'
+    ? Heart
+    : careReaction === 'wave'
+      ? Hand
+      : Sparkles;
   return (
     <span
       data-testid={`garden-companion-art-${companion}`}
       className={cn(
         'garden-companion-art relative block h-[28px] w-[25px] shrink-0 drop-shadow-sm',
         moving && !lifted && 'garden-companion-walking',
+        careReaction && `garden-care-${careReaction}`,
       )}
     >
+      {careReaction ? (
+        <span
+          data-testid={`garden-care-reaction-${companion}`}
+          className="garden-care-reaction"
+          aria-hidden="true"
+        >
+          <ReactionIcon size={12} strokeWidth={2} />
+        </span>
+      ) : null}
       <span className="garden-companion-limbs pointer-events-none absolute inset-0 block" aria-hidden="true">
         <span
           data-testid={`garden-limb-${companion}-arm-left`}
@@ -334,6 +358,7 @@ function GardenCompanion({
   accessory,
   pressed,
   lifted,
+  careReaction,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -350,6 +375,7 @@ function GardenCompanion({
   accessory: GardenAccessory;
   pressed: boolean;
   lifted: boolean;
+  careReaction: GardenCareAction | null;
   onPointerDown: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerMove: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPointerUp: (id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -398,13 +424,20 @@ function GardenCompanion({
         data-wandering={String(motion.moving)}
         data-pressed={String(pressed)}
         data-lifted={String(lifted)}
+        data-care-reaction={careReaction ?? 'none'}
         className={cn(
           'garden-companion-control inline-flex min-h-11 min-w-11 touch-none select-none items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           pressed && 'garden-companion-pressed',
           lifted && 'garden-companion-lifted',
         )}
       >
-        <CompanionGlyph companion={id} accessory={accessory} moving={motion.moving} lifted={lifted} />
+        <CompanionGlyph
+          companion={id}
+          accessory={accessory}
+          moving={motion.moving}
+          lifted={lifted}
+          careReaction={careReaction}
+        />
       </button>
       <span id={descId} className="sr-only">
         길게 눌러 정원 안을 직접 이동할 수 있어요. 탭하면 함께 놀기 메뉴가 열려요.
@@ -443,6 +476,9 @@ export function CompanionGardenView({
   const suppressedClickTimers = useRef<Partial<Record<GardenCompanionId, ReturnType<typeof setTimeout>>>>({});
   const actionSheetTriggerRef = useRef<HTMLElement | null>(null);
   const [actionSheetCompanion, setActionSheetCompanion] = useState<GardenCompanionId | null>(null);
+  const [careReaction, setCareReaction] = useState<GardenCareReaction | null>(null);
+  const careReactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const careReactionGenerationRef = useRef(0);
   const schedulerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schedulerGenerationRef = useRef(0);
   const geometryReadyRef = useRef(false);
@@ -584,6 +620,7 @@ export function CompanionGardenView({
     if (!state.isAvailable
       || reducedMotion
       || actionSheetCompanion
+      || careReaction
       || !documentVisible
       || pointerInteractionActive
       || !geometryReadyRef.current) return;
@@ -661,6 +698,7 @@ export function CompanionGardenView({
     return invalidateScheduler;
   }, [
     actionSheetCompanion,
+    careReaction,
     commitMotion,
     documentVisible,
     invalidateScheduler,
@@ -672,6 +710,9 @@ export function CompanionGardenView({
 
   useEffect(() => () => {
     invalidateScheduler();
+    careReactionGenerationRef.current += 1;
+    if (careReactionTimerRef.current) clearTimeout(careReactionTimerRef.current);
+    careReactionTimerRef.current = null;
     for (const session of Object.values(pressSessions.current)) {
       if (session?.timer) clearTimeout(session.timer);
     }
@@ -940,8 +981,42 @@ export function CompanionGardenView({
     return true;
   }, [freezeAndReconcilePair, reducedMotion]);
 
+  const careForCompanion = useCallback((
+    companion: GardenCompanionId,
+    action: GardenCareAction,
+  ) => {
+    invalidateScheduler();
+    freezeAndReconcilePair(true);
+    careReactionGenerationRef.current += 1;
+    const generation = careReactionGenerationRef.current;
+    if (careReactionTimerRef.current) clearTimeout(careReactionTimerRef.current);
+
+    const label = companion === 'peach' ? '첫째' : '둘째';
+    setCareReaction({
+      kind: action,
+      targets: action === 'play' ? ['peach', 'sage'] : [companion],
+    });
+    setActionSheetCompanion(null);
+    announce(action === 'pet'
+      ? `${label} 친구를 쓰다듬었어요. 기분 좋게 몸을 흔들어요.`
+      : action === 'wave'
+        ? `${label} 친구가 반갑게 손을 흔들어요.`
+        : '두 친구가 함께 신나게 놀아요.');
+
+    careReactionTimerRef.current = setTimeout(() => {
+      if (careReactionGenerationRef.current !== generation) return;
+      careReactionTimerRef.current = null;
+      setCareReaction(null);
+      setSchedulerEpoch((value) => value + 1);
+    }, CARE_REACTION_DURATION_MS);
+  }, [announce, freezeAndReconcilePair, invalidateScheduler]);
+
   useEffect(() => {
     if (state.isAvailable) return;
+    careReactionGenerationRef.current += 1;
+    if (careReactionTimerRef.current) clearTimeout(careReactionTimerRef.current);
+    careReactionTimerRef.current = null;
+    setCareReaction(null);
     cancelInteraction('peach');
     cancelInteraction('sage');
     setActionSheetCompanion(null);
@@ -973,11 +1048,7 @@ export function CompanionGardenView({
       />
 
       {state.isAvailable ? (
-        <section className="garden-surface flex min-h-0 flex-1 flex-col" aria-label="정원 현황">
-          <div className="garden-landscape-summary px-4 pb-3 pt-4">
-            <p className="garden-ink-muted text-caption font-medium">함께한 {state.togetherDays}일</p>
-          </div>
-
+        <section className="garden-surface flex min-h-0 flex-1 flex-col" aria-label="정원 놀이터">
           <div
             ref={sceneRef}
             data-testid="garden-scene"
@@ -990,6 +1061,7 @@ export function CompanionGardenView({
               accessory={accessories.peach}
               pressed={pressed.peach}
               lifted={lifted.peach}
+              careReaction={careReaction?.targets.includes('peach') ? careReaction.kind : null}
               onPointerDown={beginPointerPickup}
               onPointerMove={movePointerPickup}
               onPointerUp={endPointerPickup}
@@ -1010,6 +1082,7 @@ export function CompanionGardenView({
               accessory={accessories.sage}
               pressed={pressed.sage}
               lifted={lifted.sage}
+              careReaction={careReaction?.targets.includes('sage') ? careReaction.kind : null}
               onPointerDown={beginPointerPickup}
               onPointerMove={movePointerPickup}
               onPointerUp={endPointerPickup}
@@ -1058,6 +1131,7 @@ export function CompanionGardenView({
           ownedAccessories={ownedAccessories}
           onSelectCompanion={setActionSheetCompanion}
           onAccessoryChange={onAccessoryChange}
+          onCare={(action) => careForCompanion(actionSheetCompanion, action)}
           onMove={(direction) => moveCompanion(actionSheetCompanion, direction)}
           onClose={() => setActionSheetCompanion(null)}
           onOpenShop={onOpenShop}

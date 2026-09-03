@@ -51,6 +51,19 @@ describe('companion garden motion CSS', () => {
     expect(reduced).toContain('transition: none');
     expect(reduced).not.toMatch(/\.garden-companion-position\s*\{[^}]*transition:\s*none/s);
     expect(reduced).toContain('.accessory-roulette-spinning');
+    expect(reduced).toContain('.garden-care-reaction');
+  });
+
+  it('defines distinct nurturing reactions without introducing a persistent score surface', () => {
+    expect(css).toContain('@keyframes garden-care-pet');
+    expect(css).toContain('@keyframes garden-care-wave-arm');
+    expect(css).toContain('@keyframes garden-care-play');
+    expect(css).toContain('@keyframes garden-care-symbol');
+    expect(css).toContain('.garden-care-pet');
+    expect(css).toContain('.garden-care-wave');
+    expect(css).toContain('.garden-care-play');
+    expect(css).not.toContain('.garden-care-meter');
+    expect(css).not.toContain('.garden-care-score');
   });
 
   it('defines an accessory-roulette-spin keyframe and spinning class', () => {

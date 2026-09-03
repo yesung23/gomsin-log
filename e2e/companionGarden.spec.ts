@@ -11,7 +11,7 @@ function shiftCalendarDate(date: string, deltaDays: number): string {
 
 const GARDEN_SCENARIO = {
   ...CREATOR,
-  // Inclusive Korean couple-day counting: 99 days before TODAY is 함께한 100일.
+  // A valid shared anniversary unlocks the garden without exposing a day counter.
   anniversaryDate: shiftCalendarDate(TODAY, -99),
 };
 
@@ -35,7 +35,9 @@ async function openGarden(
   }
   await page.goto('/diary/garden');
   await expect(page.locator('#root')).not.toBeEmpty();
-  await expect(page.getByText('함께한 100일')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('garden-scene')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('garden-exact-character-peach')).toBeVisible();
+  await expect(page.getByText(/함께한 \d+일/)).toHaveCount(0);
   return unrouted;
 }
 
@@ -106,28 +108,30 @@ async function longPressAndDrag(page: Page, companionTestId: string) {
 }
 
 async function companionMotionSample(page: Page) {
-  const peach = page.getByTestId('garden-companion-peach');
-  const sage = page.getByTestId('garden-companion-sage');
-  const peachPosition = page.getByTestId('garden-companion-position-peach');
-  const sagePosition = page.getByTestId('garden-companion-position-sage');
-  const [peachMoving, sageMoving, peachBox, sageBox] = await Promise.all([
-    peach.getAttribute('data-wandering'),
-    sage.getAttribute('data-wandering'),
-    peachPosition.boundingBox(),
-    sagePosition.boundingBox(),
-  ]);
-  const gapPx = peachBox && sageBox
-    ? Math.max(
-      sageBox.x - (peachBox.x + peachBox.width),
-      peachBox.x - (sageBox.x + sageBox.width),
-      sageBox.y - (peachBox.y + peachBox.height),
-      peachBox.y - (sageBox.y + sageBox.height),
-    )
-    : Number.NEGATIVE_INFINITY;
-  return {
-    movingCount: [peachMoving, sageMoving].filter((value) => value === 'true').length,
-    gapPx,
-  };
+  // Read both moving characters in one browser task. Four separate protocol
+  // reads could straddle a React motion commit and occasionally return one null
+  // Playwright bounding box even though both persistent DOM nodes were visible.
+  return page.evaluate(() => {
+    const peach = document.querySelector<HTMLElement>('[data-testid="garden-companion-peach"]');
+    const sage = document.querySelector<HTMLElement>('[data-testid="garden-companion-sage"]');
+    const peachPosition = document.querySelector<HTMLElement>('[data-testid="garden-companion-position-peach"]');
+    const sagePosition = document.querySelector<HTMLElement>('[data-testid="garden-companion-position-sage"]');
+    if (!peach || !sage || !peachPosition || !sagePosition) {
+      throw new Error('Garden pair unavailable during motion sample');
+    }
+    const peachBox = peachPosition.getBoundingClientRect();
+    const sageBox = sagePosition.getBoundingClientRect();
+    return {
+      movingCount: [peach.dataset.wandering, sage.dataset.wandering]
+        .filter((value) => value === 'true').length,
+      gapPx: Math.max(
+        sageBox.x - (peachBox.x + peachBox.width),
+        peachBox.x - (sageBox.x + sageBox.width),
+        sageBox.y - (peachBox.y + peachBox.height),
+        peachBox.y - (sageBox.y + sageBox.height),
+      ),
+    };
+  });
 }
 
 async function companionYAnchors(page: Page) {
@@ -281,6 +285,44 @@ test('full-screen garden uses the exact characters, serializes pair-safe wanderi
   await context.close();
 });
 
+test('care actions create distinct one-shot reactions without adding a garden score surface', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const page = await context.newPage();
+  const pageErrors: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  const unrouted = await openGarden(context, page);
+  const peach = page.getByTestId('garden-companion-peach');
+  const sage = page.getByTestId('garden-companion-sage');
+
+  await sage.click();
+  const wave = page.getByRole('button', { name: '둘째 친구에게 인사하기' });
+  const waveBox = await wave.boundingBox();
+  expect(waveBox?.height ?? 0).toBeGreaterThanOrEqual(44);
+  await wave.click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(sage).toHaveAttribute('data-care-reaction', 'wave');
+  await expect(page.getByTestId('garden-care-reaction-sage')).toBeVisible();
+  await expect(page.getByTestId('garden-live-region')).toContainText('둘째 친구가 반갑게 손을 흔들어요');
+  expect(await sage.locator('.garden-limb-arm-right').evaluate((node) => getComputedStyle(node).animationName))
+    .toBe('garden-care-wave-arm');
+  await expect(sage).toHaveAttribute('data-care-reaction', 'none', { timeout: 3_000 });
+
+  await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();
+  await page.getByRole('button', { name: '두 친구 같이 놀기' }).click();
+  await expect(peach).toHaveAttribute('data-care-reaction', 'play');
+  await expect(sage).toHaveAttribute('data-care-reaction', 'play');
+  expect(await peach.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName))
+    .toBe('garden-care-play');
+  expect(await sage.locator('.garden-companion-body').evaluate((node) => getComputedStyle(node).animationName))
+    .toBe('garden-care-play');
+
+  await expect(page.getByText(/레벨|경험치|점수|출석|배고픔/)).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+  expect(pageErrors).toEqual([]);
+  expect(unrouted).toEqual([]);
+  await context.close();
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`garden stays white and readable in ${theme} mode`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -300,12 +342,7 @@ for (const theme of ['light', 'dark'] as const) {
         .toBe('none');
     }
 
-    const together = page.getByText('함께한 100일');
-    const textColors = await together.evaluate((node) => ({
-      foreground: getComputedStyle(node).color,
-      background: getComputedStyle(node.closest('.garden-surface')!).backgroundColor,
-    }));
-    expect(contrastRatio(textColors.foreground, textColors.background)).toBeGreaterThanOrEqual(4.5);
+    await expect(page.getByText(/함께한 \d+일/)).toHaveCount(0);
 
     for (const name of ['이전 화면으로', '꾸미기와 함께 놀기']) {
       const control = page.getByRole('button', { name });

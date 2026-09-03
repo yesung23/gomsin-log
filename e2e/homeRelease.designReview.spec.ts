@@ -8,7 +8,9 @@ test('empty Home keeps both story entries and one useful next action visible', a
   const page = await context.newPage();
 
   await page.goto('/home');
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  const bottomNavigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(bottomNavigation).toBeVisible({ timeout: 20_000 });
+  await expect(bottomNavigation.getByRole('link', { name: '홈' })).toHaveAttribute('aria-current', 'page');
 
   await expect(page.getByRole('button', { name: '내 스토리' })).toBeVisible();
   await expect(page.getByRole('button', { name: /의 스토리$/ })).toBeVisible();

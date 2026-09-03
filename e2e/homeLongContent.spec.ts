@@ -18,7 +18,9 @@ test('Home contains long partner names and records on the smallest supported wid
   const page = await context.newPage();
 
   await page.goto('/home');
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
+  const bottomNavigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(bottomNavigation).toBeVisible({ timeout: 20_000 });
+  await expect(bottomNavigation.getByRole('link', { name: '홈' })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('region', { name: '지금 가장 필요한 것' })).toBeVisible();
   await expect(page.getByText(longRecord.log_text)).toBeVisible();
   await expect(page.getByRole('heading', { name: `${longPartnerName}의 최근 기록` })).toBeVisible();

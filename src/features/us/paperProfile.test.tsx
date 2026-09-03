@@ -114,6 +114,9 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByRole('button', { name: '내 프로필 사진 고르기' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '프로필 편집' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeInTheDocument();
+    for (const name of ['게시물 만들기', '기록 남기기', '마이 메뉴 열기']) {
+      expect(screen.getByRole('button', { name })).toHaveClass('press-response');
+    }
     expect(screen.getByTestId('profile-sticky-header').className).toContain('sticky');
     // The bottom navigation owns the Find tab; this component test does not mount the app shell.
     expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
@@ -342,10 +345,11 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('아이디 설정하기')).toBeInTheDocument();
+    const identityButton = screen.getByRole('button', { name: '@아이디 설정' });
+    expect(identityButton).toHaveClass('press-response');
     expect(screen.getByText('기념일 미설정')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: '아이디 설정하기' }));
+    fireEvent.click(identityButton);
     expect(mockNavigate).toHaveBeenCalledWith('/settings?profile=edit');
   });
 
@@ -489,7 +493,8 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/아직 게시물이 없어요/)).toBeInTheDocument();
+    expect(screen.getByText('아직 게시물이 없어요')).toBeInTheDocument();
+    expect(screen.queryByText(/둘이 간직할 사진과 이야기를/)).not.toBeInTheDocument();
     const create = screen.getByRole('button', { name: '첫 게시물 만들기' });
     fireEvent.click(create);
     const composer = screen.getByRole('dialog', { name: '새 게시물' });
@@ -571,8 +576,8 @@ describe('PaperProfile (우리 화면)', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/상대를 연결하면 둘만의 게시물을 만들 수 있어요/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '상대 연결하기' }));
+    expect(screen.getByText('상대를 연결하면 둘의 게시물이 보여요')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '상대 연결' }));
     expect(mockNavigate).toHaveBeenCalledWith('/settings');
   });
 

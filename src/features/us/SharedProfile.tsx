@@ -597,7 +597,7 @@ export function SharedProfile() {
             }
             data-testid="open-post-composer"
             onClick={(event) => openPostComposer(event.currentTarget)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center"
+            className="press-response flex h-11 w-11 shrink-0 items-center justify-center"
           >
             <Plus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
@@ -606,14 +606,14 @@ export function SharedProfile() {
           {profile.username ? (
             <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
           ) : (
-            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
-              아이디 설정하기
+            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="press-response inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
+              @아이디 설정
             </button>
           )}
           <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
         </div>
         <div className="flex items-center justify-end">
-          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
+          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="press-response flex h-11 w-11 items-center justify-center">
             <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
           </button>
           <button
@@ -625,7 +625,7 @@ export function SharedProfile() {
             aria-controls="profile-paper-menu-dialog"
             data-testid="open-profile-paper-menu"
             onClick={() => setIsPaperMenuOpen(true)}
-            className="flex h-11 w-11 items-center justify-center"
+            className="press-response flex h-11 w-11 items-center justify-center"
           >
             <MoreHorizontal size={22} color="var(--ink)" aria-hidden="true" />
           </button>
@@ -740,9 +740,9 @@ export function SharedProfile() {
                   setSelectedPostId(recordId);
                 }}
                 emptyMessage={profile.couple.connected
-                  ? '아직 게시물이 없어요. 둘이 간직할 사진과 이야기를 골라 보세요.'
-                  : '아직 둘만의 게시물이 없어요. 상대를 연결하면 둘만의 게시물을 만들 수 있어요.'}
-                emptyActionLabel={profile.couple.connected ? '첫 게시물 만들기' : '상대 연결하기'}
+                  ? '아직 게시물이 없어요'
+                  : '상대를 연결하면 둘의 게시물이 보여요'}
+                emptyActionLabel={profile.couple.connected ? '첫 게시물 만들기' : '상대 연결'}
                 onEmptyAction={profile.couple.connected
                   ? openPostComposer
                   : () => navigate('/settings')}

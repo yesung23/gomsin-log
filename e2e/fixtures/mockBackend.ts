@@ -293,6 +293,12 @@ export async function installMockBackend(
 ): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const unrouted: string[] = [];
   const dailyRecordWrites: Array<Record<string, unknown>> = [];
+  let cycleConsent = {
+    granted: false,
+    revision: 0,
+    grantedAt: null as string | null,
+    revokedAt: null as string | null,
+  };
   await installMockRealtime(context);
 
   // Seed the session BEFORE any app script runs, so the very first
@@ -523,16 +529,34 @@ export async function installMockBackend(
         ...payload,
       }]);
     }
+    if (path === '/rest/v1/cycle_sharing_preferences') {
+      if (method === 'GET') return rows(route, []);
+      const body = request.postDataJSON();
+      const payload = (Array.isArray(body) ? body[0] : body) as Record<string, unknown>;
+      return rows(route, [{
+        user_id: payload.user_id,
+        share_current_period: false,
+        share_prediction_window: false,
+        share_fertility_window: false,
+      }]);
+    }
     if (
       path === '/rest/v1/cycle_settings'
       || path === '/rest/v1/cycle_entries'
       // V3 owner-only tables.
       || path === '/rest/v1/cycle_periods'
       || path === '/rest/v1/cycle_daily_logs'
-      || path === '/rest/v1/cycle_sharing_preferences'
-      || path === '/rest/v1/user_sensitive_consents'
     ) {
       return rows(route, []);
+    }
+    if (path === '/rest/v1/user_sensitive_consents') {
+      if (method !== 'GET' || cycleConsent.revision === 0) return rows(route, []);
+      return rows(route, [{
+        version: '2026-08-09',
+        granted_at: cycleConsent.grantedAt,
+        revoked_at: cycleConsent.revokedAt,
+        revision: cycleConsent.revision,
+      }]);
     }
     if (path === '/rest/v1/cycle_support_signals') return rows(route, []);
 
@@ -608,6 +632,47 @@ export async function installMockBackend(
         has_fertility_window: false,
         fertility_window_start: null,
         fertility_window_end: null,
+      }]);
+    }
+
+    if (path === '/rest/v1/rpc/grant_cycle_sensitive_consent') {
+      const failure = failureFor(scenario, 'grant_cycle_sensitive_consent');
+      if (failure) return json(route, failure, failure.status);
+      const payload = request.postDataJSON() as { p_expected_revision?: unknown };
+      const expectedRevision = Number(payload?.p_expected_revision);
+      if (expectedRevision !== cycleConsent.revision) {
+        return rows(route, [{
+          applied: false,
+          granted: cycleConsent.granted,
+          revision: cycleConsent.revision,
+        }]);
+      }
+      cycleConsent = {
+        granted: true,
+        revision: cycleConsent.revision + 1,
+        grantedAt: new Date().toISOString(),
+        revokedAt: null,
+      };
+      return rows(route, [{
+        applied: true,
+        granted: true,
+        revision: cycleConsent.revision,
+      }]);
+    }
+
+    if (path === '/rest/v1/rpc/revoke_cycle_sensitive_consent') {
+      const failure = failureFor(scenario, 'revoke_cycle_sensitive_consent');
+      if (failure) return json(route, failure, failure.status);
+      cycleConsent = {
+        granted: false,
+        revision: cycleConsent.revision + 1,
+        grantedAt: cycleConsent.grantedAt ?? new Date().toISOString(),
+        revokedAt: new Date().toISOString(),
+      };
+      return rows(route, [{
+        applied: true,
+        granted: false,
+        revision: cycleConsent.revision,
       }]);
     }
 

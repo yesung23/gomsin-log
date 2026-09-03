@@ -134,6 +134,32 @@ describe('브리지 이름이 세 곳에서 같다', () => {
 });
 
 describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
+  it('native 입력은 120, 생성된 excerpt는 40 UTF-16 단위로 각각 검증한다', () => {
+    expect(swiftEngine).toContain('maxSourceCharacters = 120');
+    expect(swiftEngine).toContain('maxExcerptCharacters = 40');
+    expect(swiftBridge).toContain('maxSourceCharacters');
+    expect(swiftEngine).toContain('maxExcerptCharacters');
+  });
+
+  it('native bridge도 각 item의 key를 index와 text 두 개로 고정한다', () => {
+    expect(swiftBridge).toContain('Set(entry.keys) == Set(["index", "text"])');
+    expect(swiftBridge).toContain('items entry must contain only index and text');
+  });
+
+  it('fractional number나 JSON boolean을 ordinal index로 축소 변환하지 않는다', () => {
+    expect(swiftBridge).toContain('CFGetTypeID(indexNumber) != CFBooleanGetTypeID()');
+    expect(swiftBridge).toContain('indexNumber.doubleValue == Double(parsed.count)');
+    expect(swiftBridge).not.toContain('.intValue');
+  });
+
+  it('prompt와 Guide가 exact contiguous source excerpt를 요구하고 rewriting/inference를 금지한다', () => {
+    expect(swiftEngine).toContain('정확한 원문 연속 부분 문자열');
+    expect(swiftEngine).toContain('원문을 다시 쓰거나 추론하지 않는다');
+    expect(swiftEngine).toContain('문맥을 덧붙이지 않는다');
+    expect(swiftEngine).toContain('8~38 UTF-16 단위');
+    expect(swiftEngine).toContain('단어, 이모지, 결합문자의 중간');
+  });
+
   it('FoundationModels를 canImport와 @available로만 만진다', () => {
     expect(swiftEngine).toContain('#if canImport(FoundationModels)');
     expect(swiftEngine).toMatch(/@available\(iOS 26\.0, \*\)/);
@@ -181,7 +207,7 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(swiftEngine).toContain('guard produced.count == items.count');
     expect(swiftEngine).toContain('guard line.index == items[position].index');
     expect(swiftEngine).toContain('trimmingCharacters(in: .whitespacesAndNewlines)');
-    expect(swiftEngine).toContain('line.text.utf16.count <= OnDeviceSummary.maxLineCharacters');
+    expect(swiftEngine).toContain('line.text.utf16.count <= OnDeviceSummary.maxExcerptCharacters');
   });
 
   it('취소를 requestId 단위로 다루고 single-flight를 유지한다', () => {
@@ -232,7 +258,7 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
 
   it('경계 상한이 TypeScript 상한과 같은 숫자다', () => {
     expect(swiftEngine).toContain(`static let maxLines = ${ON_DEVICE_SUMMARY_BATCH_SIZE}`);
-    expect(swiftEngine).toContain(`static let maxLineCharacters = ${MAX_DAILY_SUMMARY_LINE_CHARS}`);
+    expect(swiftEngine).toContain(`static let maxExcerptCharacters = ${MAX_DAILY_SUMMARY_LINE_CHARS}`);
   });
 
   it('payload에 식별자를 받을 자리가 없다', () => {

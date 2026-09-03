@@ -283,7 +283,7 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       onJumpToRecord={jumpToRecord}
       onRefineCover={aiSummaryActionVisible ? requestAiSummary : undefined}
       coverRefinementStatus={aiSummaryStatus}
-      coverRefinementReason={mode === 'today' ? aiSummaryReason : undefined}
+      coverRefinementReason={mode === 'today' && aiSummaryReason !== 'disabled' ? aiSummaryReason : undefined}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
       bookmarkDisabledReason={isOffline

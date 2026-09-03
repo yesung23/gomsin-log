@@ -45,7 +45,7 @@ SPEC CHECKSUMS:
   CapacitorCordova: e61ee8c40101b8cd011d0224261606a290c082cf
   CapacitorPushNotifications: 0527809a9619ed775439d5ab2c2d996122b48319
   GomsinlogCapacitorDeviceKeys: 8771b466923fd3832708159b6992be9c78df2597
-  GomsinlogCapacitorOnDeviceSummary: 3a8e1c13ffd2c598f04f4b78dbc4504d0cf07b5b
+  GomsinlogCapacitorOnDeviceSummary: dd6e82dc9e32289b71d41c3214f15da533718a08
 
 PODFILE CHECKSUM: 64b75f905232757392c55f8973ffb1b8e367dfb5
 

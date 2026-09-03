@@ -4,7 +4,7 @@ import Foundation
 import FoundationModels
 #endif
 
-/// On-device rewriting of daily summary lines, and nothing else.
+/// On-device extraction of daily-record excerpts, and nothing else.
 ///
 /// ## What this type is allowed to know
 ///
@@ -70,29 +70,36 @@ enum OnDeviceSummary {
     /// Mirrors `MAX_DAILY_SUMMARY_LINES` in `src/lib/dailySummary/contract.ts`.
     static let maxLines = 5
 
-    /// Mirrors `MAX_DAILY_SUMMARY_LINE_CHARS`. Compared in UTF-16 units so the
-    /// native bound is the same measurement JavaScript's `String.length` uses;
-    /// grapheme counting would quietly admit lines the web side calls too long.
-    static let maxLineCharacters = 40
+    /// Mirrors `MAX_DAILY_SUMMARY_SOURCE_CHARS`, measured in UTF-16 units.
+    static let maxSourceCharacters = 120
 
-    /// Five lines of at most forty Korean characters, plus guided-output
-    /// scaffolding. Bounded because an unexpectedly verbose response is the one
-    /// failure mode that costs the user a visible wait.
+    /// Mirrors `MAX_DAILY_SUMMARY_EXCERPT_CHARS`, measured in UTF-16 units.
+    static let maxExcerptCharacters = 40
+
+    /// Five source lines of at most 120 UTF-16 units yielding excerpts of at
+    /// most 40 units, plus guided-output scaffolding. Bounded because an
+    /// unexpectedly verbose response is the one failure mode that costs the
+    /// user a visible wait.
     static let maximumResponseTokens = 512
 
-    /// Fact-only rewriting. Every clause here has a matching negative check on
+    /// Fact-only extraction. Every clause here has a matching negative check on
     /// the TypeScript side, because instructions are guidance and not a control.
     static let instructions = """
-    당신은 이미 만들어진 하루 기록 목록의 문장을 다듬는 편집기다.
+    당신은 이미 만들어진 하루 기록 목록에서 원문 발췌를 고르는 편집기다.
 
     규칙:
     - 항목 수와 순서를 입력 그대로 유지한다. 항목을 추가·삭제·재배열하지 않는다.
     - index는 입력값을 그대로 복사한다.
+    - 각 text는 입력 원문의 정확한 원문 연속 부분 문자열만 그대로 반환한다.
+    - 원문을 다시 쓰거나 추론하지 않는다. 입력에 없는 문맥을 덧붙이지 않는다.
     - 입력 문장에 없는 사실을 만들지 않는다. 추측·해석·조언·위로를 쓰지 않는다.
     - 감정, 기분, 건강, 통증, 생리주기, 신체 상태, 관계 상태를 추론하거나 평가하지 않는다.
     - 무엇이 더 중요한지 판단하지 않는다. 강조하거나 순서를 바꾸지 않는다.
-    - 각 문장은 한국어로 40자 이내의 사실 서술이다.
-    - 다듬을 것이 없으면 입력 문장을 그대로 반환한다.
+    - 입력 text가 40 UTF-16 단위 이하면 text 전체를 그대로 반환한다.
+    - 입력 text가 40 단위를 넘으면 8~38 UTF-16 단위의 발췌를 고른다.
+    - 단어, 이모지, 결합문자의 중간에서 발췌를 시작하거나 끝내지 않는다.
+    - 말줄임표는 추가하지 않는다. 화면 코드가 생략한 방향을 확인해 붙인다.
+    - 발췌할 것이 없으면 입력 text를 그대로 반환한다.
     """
 
     /// Whether the model can run here. `nil` means it can.
@@ -126,7 +133,9 @@ enum OnDeviceSummary {
     static func prompt(for items: [OnDeviceSummaryLine]) -> String {
         let listed = items.map { "\($0.index). \($0.text)" }.joined(separator: "\n")
         return """
-        다음 목록의 각 문장을 다듬어라. 항목 수와 순서를 그대로 유지하고 index를 그대로 복사하라.
+         다음 목록에서 각 text의 정확한 원문 연속 부분 문자열을 발췌하라. 원문을 다시 쓰거나 추론하거나 문맥을 덧붙이지 마라.
+         40 단위 이하 text는 전체를 그대로 반환하고, 긴 text는 단어·이모지·결합문자를 쪼개지 않은 8~38 단위만 고르라.
+         항목 수와 순서를 그대로 유지하고 index를 그대로 복사하라. 말줄임표는 출력하지 마라.
 
         \(listed)
         """
@@ -135,7 +144,7 @@ enum OnDeviceSummary {
 
 #if canImport(FoundationModels)
 
-/// One rewritten line. `index` is returned as the model produced it, NOT
+/// One extracted line. `index` is returned as the model produced it, NOT
 /// repaired here: the TypeScript verifier compares it against the requested
 /// position, and silently renumbering would hide a reordering from the only
 /// check that can catch it.
@@ -145,7 +154,7 @@ struct RefinedSummaryLine {
     @Guide(description: "입력 항목의 index를 그대로 복사한 값")
     var index: Int
 
-    @Guide(description: "같은 항목을 다듬은 한국어 문장. 40자 이내. 사실만.")
+    @Guide(description: "입력 text의 정확한 원문 연속 부분 문자열. 짧은 text는 전체 그대로, 긴 text는 단어·이모지·결합문자를 쪼개지 않은 8~38 UTF-16 단위. 다시 쓰거나 추론하지 않음.")
     var text: String
 }
 
@@ -220,7 +229,7 @@ extension OnDeviceSummary {
                 throw OnDeviceSummaryError.malformedOutput
             }
             let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, line.text.utf16.count <= OnDeviceSummary.maxLineCharacters else {
+            guard !trimmed.isEmpty, line.text.utf16.count <= OnDeviceSummary.maxExcerptCharacters else {
                 throw OnDeviceSummaryError.malformedOutput
             }
         }

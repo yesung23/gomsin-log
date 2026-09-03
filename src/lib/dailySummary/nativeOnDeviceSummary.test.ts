@@ -19,8 +19,8 @@ import {
  */
 
 const ITEMS = buildOnDeviceItems([
-  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22' },
-  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22' },
+  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오늘 시험 끝났어', sourceWasTruncated: false },
+  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '점심 먹었어', sourceWasTruncated: false },
 ]);
 
 const platform = vi.hoisted(() => ({ native: false, name: 'web', pluginAvailable: false }));

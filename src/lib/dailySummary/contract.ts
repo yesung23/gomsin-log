@@ -28,8 +28,17 @@
 /** Foundation Models 네이티브 호출 한 번에 전달하는 고정 배치 크기. */
 export const ON_DEVICE_SUMMARY_BATCH_SIZE = 5;
 
-/** `momentSummaryText`가 이미 지키는 상한. 모델 출력에도 똑같이 강제한다. */
-export const MAX_DAILY_SUMMARY_LINE_CHARS = 40;
+/** 모델에 보낼 정규화된 원문 본문의 최대 UTF-16 단위. */
+export const MAX_DAILY_SUMMARY_SOURCE_CHARS = 120;
+
+/** 모델이 돌려줄 excerpt core와 화면 표시의 최대 UTF-16 단위. */
+export const MAX_DAILY_SUMMARY_EXCERPT_CHARS = 40;
+
+/** 하루에 모델에 보낼 수 있는 최대 기록 수. 초과하면 모델을 전혀 호출하지 않는다. */
+export const MAX_DAILY_SUMMARY_MODEL_RECORDS = 20;
+
+/** 기존 story projection 테스트와의 이름 호환. 새 bridge 계약은 source/excerpt를 분리한다. */
+export const MAX_DAILY_SUMMARY_LINE_CHARS = MAX_DAILY_SUMMARY_EXCERPT_CHARS;
 
 /**
  * 요약 한 줄. `recordId`는 이 타입을 절대 떠나지 않는다.
@@ -41,6 +50,15 @@ export interface DailySummaryLine {
   text: string;
   time: string;
   date: string;
+  /** 모델에 보낼 정규화된 원문. `null`이면 본문이 없어 모델 호출을 생략한다. */
+  sourceText: string | null;
+  /** 원문이 120 UTF-16 단위에서 잘렸다는 로컬 사실. bridge에는 보내지 않는다. */
+  sourceWasTruncated: boolean;
+}
+
+export interface DailySummarySource {
+  text: string;
+  wasTruncated: boolean;
 }
 
 /**
@@ -73,6 +91,8 @@ export type OnDeviceSummaryFailure =
   | 'framework_missing'
   | 'model_unavailable'
   | 'locale_unsupported'
+  /** 하루 전체는 그대로 보여 주되, 과열·장시간 대기를 막아 모델 호출은 생략한다. */
+  | 'too_many_records'
   | 'timeout'
   | 'cancelled'
   /** 응답이 왔지만 요청과 짝이 맞지 않는다. */
@@ -174,6 +194,30 @@ export function normalizeSummaryLineText(raw: string): string | null {
 }
 
 /**
+ * 기록 본문을 모델 입력으로 정규화한다. 표시용 말줄임표를 넣지 않는다.
+ * 대신 `wasTruncated`를 로컬 line에 남겨 모델이 원문 끝이라고 오해하지 않게 한다.
+ */
+export function normalizeDailySummarySource(raw: string): DailySummarySource | null {
+  const collapsed = collapseSummaryText(raw).normalize('NFC');
+  if (collapsed.length <= MAX_DAILY_SUMMARY_SOURCE_CHARS) {
+    // 40단위를 넘는 원문은 결과가 반드시 부분 발췌다. verifier가 grapheme 경계를 증명할
+    // Segmenter가 없으면 모델을 불렀다가 무조건 버리게 되므로 호출 전에 fail-closed 한다.
+    if (collapsed.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
+      && typeof Intl.Segmenter !== 'function') return null;
+    return { text: collapsed, wasTruncated: false };
+  }
+  if (typeof Intl.Segmenter !== 'function') return null;
+  const segments = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(collapsed)]
+    .map(({ segment }) => segment);
+  let text = '';
+  for (const segment of segments) {
+    if (text.length + segment.length > MAX_DAILY_SUMMARY_SOURCE_CHARS) break;
+    text += segment;
+  }
+  return { text, wasTruncated: true };
+}
+
+/**
  * 요약 줄 → 네이티브 payload.
  *
  * 서수 index는 배열 위치에서 새로 만든다. 입력 줄의 어떤 식별자도 쓰지 않으므로, 이 함수가
@@ -184,9 +228,12 @@ export function buildOnDeviceItems(
 ): OnDeviceSummaryItem[] {
   const items: OnDeviceSummaryItem[] = [];
   for (const [index, line] of lines.slice(0, ON_DEVICE_SUMMARY_BATCH_SIZE).entries()) {
-    const text = normalizeSummaryLineText(line.text);
-    if (text === null) return [];
-    items.push({ index, text });
+    // 첨부만 있는 기록의 deterministic 문장은 앱이 만든 표시 문구이지 사용자 원문이 아니다.
+    // 하루 중 하나라도 본문이 없으면 합성 문구를 모델에 보내지 않고 전체 refinement를 생략한다.
+    if (line.sourceText === null) return [];
+    const source = normalizeDailySummarySource(line.sourceText);
+    if (source === null || source.text.length === 0) return [];
+    items.push({ index, text: source.text });
   }
   return items;
 }
@@ -200,6 +247,7 @@ export function buildOnDeviceItems(
 export function buildAllOnDeviceBatches(
   lines: readonly DailySummaryLine[],
 ): DailySummaryBatch[] | null {
+  if (lines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS) return null;
   const batches: DailySummaryBatch[] = [];
   for (let i = 0; i < lines.length; i += ON_DEVICE_SUMMARY_BATCH_SIZE) {
     const batchLines = lines.slice(i, i + ON_DEVICE_SUMMARY_BATCH_SIZE);

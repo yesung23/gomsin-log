@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { guardSummaryRewrite } from '@/lib/dailySummary/semanticGuard';
+import { guardSummaryExcerpt, guardSummaryRewrite } from '@/lib/dailySummary/semanticGuard';
 
 function expectSafe(source: string, candidate: string) {
   expect(guardSummaryRewrite(source, candidate)).toEqual({ ok: true });
@@ -10,9 +10,65 @@ function expectRejected(source: string, candidate: string) {
 }
 
 describe('온디바이스 요약 의미 방화벽', () => {
-  it('같은 줄의 내부 문자를 모두 보존하며 바깥 공백과 최종 마침표만 정리할 수 있다', () => {
-    expectSafe('오늘은 시험이 끝났고 점심을 먹었어', '오늘은 시험이 끝났고 점심을 먹었어.');
-    expectSafe('오늘, 시험 끝났어', '  오늘, 시험 끝났어.  ');
+  it('긴 원문에서는 단어 경계의 정확한 contiguous excerpt를 허용한다', () => {
+    const source = '오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어';
+    expect(guardSummaryExcerpt(source, '시험이 끝났고 점심을 먹은 다음')).toEqual({
+      ok: true,
+      text: '…시험이 끝났고 점심을 먹은 다음…',
+    });
+  });
+
+  it('확장 grapheme cluster 중간에서 시작하거나 끝나는 발췌를 거부한다', () => {
+    const source = '오늘 하루는 길게 기록했고 가족사진 👨‍👩‍👧‍👦 함께 공원에서 산책하고 저녁을 먹은 뒤 편지를 썼어';
+    expect(guardSummaryExcerpt(source, '👩‍👧‍👦 함께 공원에서 산책하고').ok).toBe(false);
+  });
+
+  it('120자에서 잘린 원문의 마지막 글자를 실제 단어 끝으로 추측하지 않는다', () => {
+    const truncatedSource = '오늘은 기록을 아주 길게 남겼고 여러 이야기를 차례로 적은 다음 마지막단어조각이계속됩니다';
+    expect(guardSummaryExcerpt(
+      truncatedSource,
+      '마지막단어조각이계속됩니다',
+      true,
+    ).ok).toBe(false);
+  });
+
+  it('원문에 없는 마침표는 짧은 원문에도 추가하지 못한다', () => {
+    expect(guardSummaryExcerpt('점심 먹었어', '점심 먹었어.').ok).toBe(false);
+    expectRejected('점심 먹었어', '점심 먹었어.');
+  });
+
+  it.each([
+    [
+      '오늘 기온은 -3°C였고 바람이 불어서 패딩을 입고 천천히 부대로 돌아왔어',
+      '3°C였고 바람이 불어서 패딩을 입고',
+    ],
+    [
+      '오늘 너랑 헤어졌어, 꿈에서 그런 장면을 보고 놀라서 깬 뒤 한동안 잠을 못 잤어',
+      '오늘 너랑 헤어졌어',
+    ],
+  ])('부호나 뒤따르는 문맥을 구두점에서 잘라낸 excerpt는 거부한다: %s -> %s', (source, candidate) => {
+    expect(guardSummaryExcerpt(source, candidate).ok).toBe(false);
+  });
+
+  it('잘린 원문이 40자보다 짧아져도 생략 표시를 붙이고 표시 상한을 넘으면 거부한다', () => {
+    expect(guardSummaryExcerpt('안녕하세요', '안녕하세요', true)).toEqual({
+      ok: true,
+      text: '안녕하세요…',
+    });
+    expect(guardSummaryExcerpt('가'.repeat(40), '가'.repeat(40), true).ok).toBe(false);
+  });
+
+  it.each([
+    ['오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어', '시험이 끝났고 점심을 먹고'],
+    ['오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어', '오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어.'],
+    ['오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어', '점심을'],
+  ])('긴 원문의 fabricated·paraphrased·word-fragment·too-short 출력은 거부한다: %s -> %s', (source, candidate) => {
+    expect(guardSummaryExcerpt(source, candidate).ok).toBe(false);
+  });
+
+  it('같은 줄의 내부 문자를 모두 보존하며 바깥 공백만 정리할 수 있다', () => {
+    expectSafe('오늘은 시험이 끝났고 점심을 먹었어', '오늘은 시험이 끝났고 점심을 먹었어');
+    expectSafe('오늘, 시험 끝났어', '  오늘, 시험 끝났어  ');
     expectSafe('PX에서 간식 사고, 생활관으로 돌아왔어', 'PX에서 간식 사고, 생활관으로 돌아왔어');
   });
 
@@ -52,7 +108,7 @@ describe('온디바이스 요약 의미 방화벽', () => {
 
   it('숫자·시간·날짜·금액·단위·영문 ID를 그대로 보존한다', () => {
     const source = '2026-09-03 14:30에 AB-12로 12,000원 결제하고 3km 걸었어';
-    expectSafe(source, '2026-09-03 14:30에 AB-12로 12,000원 결제하고 3km 걸었어.');
+    expectSafe(source, source);
 
     expectRejected(source, '14:30에 AB-12로 12,000원 결제하고 3km 걸었어');
     expectRejected(source, '2026-09-03 14:31에 AB-12로 12,000원 결제하고 3km 걸었어');
@@ -76,7 +132,7 @@ describe('온디바이스 요약 의미 방화벽', () => {
   });
 
   it('부정과 불확실성 표지를 삭제하거나 바꾸면 거부한다', () => {
-    expectSafe('아마 오늘은 안 갈 것 같아', '아마 오늘은 안 갈 것 같아.');
+    expectSafe('아마 오늘은 안 갈 것 같아', '아마 오늘은 안 갈 것 같아');
     expectRejected('아마 오늘은 안 갈 것 같아', '오늘은 안 갈 것 같아');
     expectRejected('아마 오늘은 안 갈 것 같아', '갈 것 같아');
     expectRejected('아마 오늘은 안 갈 것 같아', '아마 오늘은 안 갈');
@@ -102,14 +158,14 @@ describe('온디바이스 요약 의미 방화벽', () => {
   });
 
   it('민감하게 들리는 표현도 원문에 실제로 있으면 검열하거나 새 뜻으로 취급하지 않는다', () => {
-    expectSafe('요즘 사이가 멀어진 것 같아', '요즘 사이가 멀어진 것 같아.');
-    expectSafe('우울증 진단을 받은 건 아니야', '우울증 진단을 받은 건 아니야.');
-    expectSafe('생리통 7/10이라 서울역 근처 약국에 들렀어', '생리통 7/10이라 서울역 근처 약국에 들렀어.');
+    expectSafe('요즘 사이가 멀어진 것 같아', '요즘 사이가 멀어진 것 같아');
+    expectSafe('우울증 진단을 받은 건 아니야', '우울증 진단을 받은 건 아니야');
+    expectSafe('생리통 7/10이라 서울역 근처 약국에 들렀어', '생리통 7/10이라 서울역 근처 약국에 들렀어');
   });
 
   it('정상 ZWJ 이모지와 정규화 가능한 NFD 텍스트는 원문과 같으면 허용한다', () => {
-    expectSafe('가족 👨‍👩‍👧‍👦 만났어', '가족 👨‍👩‍👧‍👦 만났어.');
-    expectSafe('cafe\u0301 갔어', 'café 갔어.');
+    expectSafe('가족 👨‍👩‍👧‍👦 만났어', '가족 👨‍👩‍👧‍👦 만났어');
+    expectSafe('cafe\u0301 갔어', 'café 갔어');
   });
 
   it.each([

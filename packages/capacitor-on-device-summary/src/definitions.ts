@@ -5,20 +5,22 @@
  *
  *   NOTHING THAT CROSSES THIS BOUNDARY IDENTIFIES A RECORD, A PERSON OR A DAY.
  *
- * `refineLines` receives an ORDINAL INDEX and a already-normalised line of text,
- * and nothing else. No `recordId`, no `userId`, no date, no time, no attachment
- * URL. The TypeScript side rejoins the returned index to the original record id
- * itself (`src/lib/dailySummary/verify.ts`), so the model cannot make a summary
- * line point at a different record even if it returns nonsense.
+ * `refineLines` receives an ORDINAL INDEX and an already-normalised record body
+ * of at most 120 UTF-16 units, and nothing else. No `recordId`, no `userId`, no
+ * date, no time, no attachment URL. The TypeScript side rejoins the returned
+ * index to the original record id itself (`src/lib/dailySummary/verify.ts`), so
+ * the model cannot make a summary line point at a different record even if it
+ * returns nonsense.
  *
- * WHAT THE MODEL MAY DO: rewrite the wording of a line that the app already
- * computed deterministically from a record the viewer is authorised to read.
+ * WHAT THE MODEL MAY DO: select one exact contiguous excerpt from the same
+ * record body. It may not rewrite the body or choose which records matter.
  *
  * WHAT THE MODEL MAY NOT DO, and what the TypeScript verifier rejects rather
  * than trusts: add an item, drop an item, reorder items, return an index outside
- * the request, repeat an index, or exceed the 40-character line limit. The model
- * therefore never decides WHICH moments are summarised or in WHAT ORDER — that
- * is fixed by `src/lib/dailySummary/corpus.ts` before this boundary is reached.
+ * the request, repeat an index, rewrite text, split a word or grapheme, or exceed
+ * the 40-UTF-16-unit excerpt limit. The model therefore never decides WHICH
+ * moments are summarised or in WHAT ORDER — that is fixed by
+ * `src/lib/dailySummary/corpus.ts` before this boundary is reached.
  *
  * PLATFORMS: iOS only, deliberately. There is no Android implementation and no
  * web implementation. `package.json` declares only `capacitor.ios`, so
@@ -40,7 +42,7 @@
 export interface OnDeviceSummaryItem {
   /** Position in the request, `0`-based. The only identifier the model sees. */
   index: number;
-  /** The deterministic line, whitespace-collapsed, 40 characters or fewer. */
+  /** Input: source body <=120 UTF-16 units. Output: exact excerpt core <=40. */
   text: string;
 }
 
@@ -72,7 +74,7 @@ export interface OnDeviceSummaryPlugin {
   }>;
 
   /**
-   * Rewrite each line, returning the same count in the same order.
+   * Extract one exact source excerpt per line, returning the same count and order.
    *
    * `requestId` is an opaque correlation id carrying no content. It is what
    * makes cancellation and single-flight possible: a second call cancels the

@@ -1,7 +1,7 @@
 {
   "name": "@gomsinlog/capacitor-on-device-summary",
   "version": "0.1.0",
-  "description": "iOS-only on-device rewriting of already-computed daily summary lines. No network, no storage, no logging.",
+  "description": "iOS-only on-device extraction of exact daily-record excerpts. No network, no storage, no logging.",
   "private": true,
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",

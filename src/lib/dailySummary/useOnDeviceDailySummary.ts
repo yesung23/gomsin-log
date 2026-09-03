@@ -3,6 +3,7 @@ import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
 import {
   buildAllOnDeviceBatches,
+  MAX_DAILY_SUMMARY_MODEL_RECORDS,
   type OnDeviceSummaryFailure,
   type DailySummaryRefinementReason,
   type DailySummaryRefinementStatus,
@@ -89,24 +90,32 @@ export function useOnDeviceDailySummary(
     });
   }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
 
+  const summaryLines = useMemo(
+    () => corpus.ok ? deterministicSummaryLines(corpus.records) : [],
+    [corpus],
+  );
+
   /*
     내용에서 유도한 키.
 
-    `[recordId, text]` 쌍만 담는다. `time`·`date`는 모델에 가지 않으므로 키에도 넣지 않는다.
+    모델 입력과 로컬 재결합에 필요한 값만 담는다. `time`·`date`는 모델에 가지 않으므로
+    키에도 넣지 않는다.
     스토어의 무관한 갱신으로 records 배열 신원만 바뀌어도 같은 요약을 다시 만들지 않는다.
   */
   const payloadKey = useMemo(() => {
-    if (!corpus.ok) return '[]';
-    return JSON.stringify(
-      deterministicSummaryLines(corpus.records).map((line) => [line.recordId, line.text]),
-    );
-  }, [corpus]);
+    return JSON.stringify(summaryLines.map((line) => [
+      line.recordId,
+      line.text,
+      line.sourceText,
+      line.sourceWasTruncated,
+    ]));
+  }, [summaryLines]);
 
   const nativeGate = onDeviceSummaryGate();
 
   useEffect(() => {
-    const pairs = JSON.parse(payloadKey) as [string, string][];
-    if (pairs.length === 0 || requestVersion <= 0) {
+    const serialized = JSON.parse(payloadKey) as [string, string, string | null, boolean][];
+    if (serialized.length === 0 || requestVersion <= 0) {
       setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
       return;
     }
@@ -114,10 +123,16 @@ export function useOnDeviceDailySummary(
       setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
       return;
     }
+    if (serialized.some(([, , sourceText]) => sourceText === null)) {
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
+      return;
+    }
 
-    const lines: DailySummaryLine[] = pairs.map(([recordId, text]) => ({
+    const lines: DailySummaryLine[] = serialized.map(([recordId, text, sourceText, sourceWasTruncated]) => ({
       recordId,
       text,
+      sourceText,
+      sourceWasTruncated,
       // 표시용 필드는 이 경로에서 쓰이지 않는다. 덮어쓰기 지도는 `recordId`만으로 만들어진다.
       time: '',
       date: '',
@@ -139,15 +154,11 @@ export function useOnDeviceDailySummary(
 
     void (async () => {
       const merged = new Map<string, string>();
-      const deadline = Date.now() + ON_DEVICE_SUMMARY_TIMEOUT_MS;
       for (const batch of batches) {
         if (!active) return;
-        const remainingMs = deadline - Date.now();
-        if (remainingMs <= 0) {
-          fallback('timeout');
-          return;
-        }
-        const outcome = await refineOnDeviceSummary(batch.items, { timeoutMs: remainingMs });
+        // Every batch gets its own native timeout. With at most 20 records this remains bounded,
+        // while a slow first batch cannot steal the budget from a later independent batch.
+        const outcome = await refineOnDeviceSummary(batch.items, { timeoutMs: ON_DEVICE_SUMMARY_TIMEOUT_MS });
         if (!active) return;
         if (!outcome.ok) {
           fallback(outcome.reason);
@@ -190,6 +201,21 @@ export function useOnDeviceDailySummary(
       refined: NO_REFINEMENT,
       status: 'unavailable',
       reason: nativeGate,
+      canRequest: false,
+    };
+  }
+  if (summaryLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: 'too_many_records',
+      canRequest: false,
+    };
+  }
+  if (summaryLines.some((line) => line.sourceText === null)) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'idle',
       canRequest: false,
     };
   }

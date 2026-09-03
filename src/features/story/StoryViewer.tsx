@@ -369,6 +369,7 @@ const REFINEMENT_REASON_LABEL: Record<DailySummaryRefinementReason, string> = {
   framework_missing: '이 앱 빌드에서는 AI 다듬기를 지원하지 않아요',
   model_unavailable: '기기 AI가 아직 준비되지 않았어요',
   locale_unsupported: '한국어 AI 다듬기를 지원하지 않아요',
+  too_many_records: '기록이 많은 날은 모든 항목을 원문 중심으로 보여드려요',
   timeout: 'AI 다듬기가 제시간에 끝나지 않았어요',
   cancelled: 'AI 다듬기가 취소됐어요',
   rejected: 'AI 결과를 안전하게 확인하지 못했어요',
@@ -395,12 +396,12 @@ function CoverCard({
   const remainingCount = total - 5;
 
   const refineLabel = refinementStatus === 'running'
-    ? 'AI 요약 중'
+    ? '기기에서 정리 중'
     : refinementStatus === 'applied'
-      ? 'AI로 다듬었어요'
+      ? '원문 발췌 완료'
       : refinementStatus === 'fallback'
         ? 'AI 다시 시도'
-        : 'AI로 다듬기';
+        : 'AI로 하루 정리';
   const reasonLabel = refinementReason ? REFINEMENT_REASON_LABEL[refinementReason] : undefined;
 
   return (
@@ -430,6 +431,9 @@ function CoverCard({
         </div>
       </div>
       <FoldDivider className="my-4" />
+      <p className="mb-3 text-caption text-muted-foreground">
+        말줄임표(…)는 생략된 문맥을 뜻해요. 줄을 누르면 완전한 원문을 볼 수 있어요.
+      </p>
       <ul className="space-y-3">
         {visibleLines.map((line) => (
           <li key={line.recordId}>

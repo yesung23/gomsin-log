@@ -118,12 +118,12 @@ function open(path: string) {
 }
 
 async function requestAiSummary() {
-  fireEvent.click(screen.getByRole('button', { name: 'AI로 다듬기' }));
+  fireEvent.click(screen.getByRole('button', { name: 'AI로 하루 정리' }));
   await Promise.resolve();
 }
 
 function safeRefinedText(text: string): string {
-  return text.length < 40 ? `${text}.` : text;
+  return text;
 }
 
 function stubPlugin(over: Partial<OnDeviceSummaryPlugin> = {}): OnDeviceSummaryPlugin {
@@ -177,7 +177,7 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'AI로 다듬기' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'AI로 하루 정리' })).toBeTruthy();
     await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
     expect(plugin.refineLines).not.toHaveBeenCalled();
   });
@@ -191,7 +191,7 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     open('/story/partner');
     await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole('button', { name: /오늘 시험 끝났어\./ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
   });
 });
 
@@ -211,9 +211,10 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     await requestAiSummary();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /오늘 시험 끝났어\./ })).toBeTruthy());
-    expect(screen.getByRole('button', { name: /점심 먹었어\./ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'AI로 다듬었어요' })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled();
     // 줄이 늘거나 줄지 않는다.
     expect(screen.queryByRole('button', { name: /사진을 남겼어요\./ })).toBeNull();
   });
@@ -245,15 +246,121 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: /점심 먹었어\./ })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
 
-    // 다듬어진 문장을 눌러도 `recordId`로 정확한 원본 카드가 열린다.
-    await userEvent.click(screen.getByRole('button', { name: /점심 먹었어\./ }));
+    // 검증된 발췌를 눌러도 `recordId`로 정확한 원본 카드가 열린다.
+    await userEvent.click(screen.getByRole('button', { name: /점심 먹었어/ }));
     await waitFor(() => expect(screen.getByTestId('story-location').textContent).toBe('?at=b'));
     expect(screen.getByText('점심 먹었어')).toBeTruthy();
 
     // 규칙 문장을 눌렀을 때와 같은 대상이다.
     __setOnDeviceSummaryPluginForTests(null);
+  });
+
+  it('공유된 원문 본문에 health/location 사실은 포함하되 ID·시각·메타데이터는 보내지 않는다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    const sharedBody = '생리통이 있어 서울역 근처 약국에 들렀어';
+    surface = [record({ id: 'health-location-record', log: sharedBody, time: '14:30' })];
+    surface.push(record({ id: 'second-record', time: '16:00', log: '저녁에 통화할게' }));
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
+    const sent = JSON.stringify(vi.mocked(plugin.refineLines).mock.calls[0][0].items);
+    expect(sent).toContain(sharedBody);
+    for (const forbidden of ['health-location-record', 'second-record', PARTNER, TODAY, '14:30', '16:00', 'http', 'filename']) {
+      expect(sent).not.toContain(forbidden);
+    }
+  });
+
+  it('21개 이상인 하루는 버튼을 먼저 숨기고 모든 deterministic 항목을 유지한다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = Array.from({ length: 21 }, (_, i) => record({ id: `r${i}`, time: `${String(i).padStart(2, '0')}:00`, log: `기록 ${i}` }));
+    records = surface;
+
+    open('/story/partner');
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull());
+    expect(screen.getByRole('status')).toHaveTextContent('기록이 많은 날은 모든 항목을 원문 중심으로 보여드려요');
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /기록 0/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
+  });
+
+  it('본문 없는 첨부 기록이 섞이면 합성 문장을 모델에 보내지 않고 원문 목록만 유지한다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = [
+      record({ id: 'body', log: '직접 쓴 본문' }),
+      record({
+        id: 'photo-only',
+        time: '13:00',
+        log: '',
+        attachments: [{ type: 'photo', name: 'private.jpg', url: 'https://private.example/photo.jpg' }],
+      }),
+    ];
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull();
+    expect(screen.getByRole('button', { name: /사진을 남겼어요/ })).toBeTruthy();
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+  });
+
+  it('각 native batch가 독립적인 4초 예산을 받아 8개를 모두 처리한다', async () => {
+    vi.useFakeTimers();
+    const plugin = stubPlugin({
+      refineLines: vi.fn((options) => new Promise((resolve) => {
+        setTimeout(() => resolve({
+          requestId: options.requestId,
+          items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
+        }), 3500);
+      })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = Array.from({ length: 8 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }));
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
+    expect(plugin.refineLines).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /AI 다시 시도/ })).toBeNull();
+  });
+
+  it('120자를 넘긴 원문은 모델이 앞부분을 그대로 돌려도 suffix ellipsis를 강제한다', async () => {
+    const plugin = stubPlugin({
+      refineLines: vi.fn(async (options) => ({
+        requestId: options.requestId,
+        items: options.items.map((item) => ({
+          index: item.index,
+          text: item.index === 0 ? `${'가 '.repeat(19)}가` : safeRefinedText(item.text),
+        })),
+      })),
+    });
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = [
+      record({ id: 'long', log: '가 '.repeat(61) }),
+      record({ id: 'short', time: '13:00', log: '점심 먹었어' }),
+    ];
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    expect(screen.getByText(`${'가 '.repeat(19)}가…`)).toBeTruthy();
   });
 
   it('다듬기 전과 후의 이동 대상이 같다', async () => {
@@ -270,8 +377,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     __setOnDeviceSummaryPluginForTests(stubPlugin());
     open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: /점심 먹었어\./ })).toBeTruthy());
-    await userEvent.click(screen.getByRole('button', { name: /점심 먹었어\./ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await userEvent.click(screen.getByRole('button', { name: /점심 먹었어/ }));
     await waitFor(() => expect(screen.getByTestId('story-location').textContent).toBe(rulesTarget));
     expect(rulesTarget).toBe('?at=b');
   });
@@ -387,8 +494,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     // 펼친 후 확인
     const moreBtn = await screen.findByRole('button', { name: '3개 더 보기' });
     await userEvent.click(moreBtn);
-    // 8개 모두 다듬어진 문장이 정상 반영됨
-    expect(screen.getAllByRole('button', { name: /원문 \d\./ })).toHaveLength(8);
+    // 8개 모두 검증되어 원래 순서로 반영됨
+    expect(screen.getAllByRole('button', { name: /원문 \d$/ })).toHaveLength(8);
     view.unmount();
   });
 
@@ -423,7 +530,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     // 배치 2 실패로 인해 첫 번째 배치의 내용도 섞이지 않고 전체가 규칙 원문으로 유지됨
     expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /원문 1/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /원문 0\./ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
   });
 
   it('나중 배치 한 줄만 원문 출처 검증에 실패해도 앞 배치까지 모두 fallback한다', async () => {
@@ -453,12 +560,12 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
 
     expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /원문 0\./ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
     expect(screen.queryByText('원문에 없는 관계 해석')).toBeNull();
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('AI 결과를 안전하게 확인하지 못했어요'));
   });
 
-  it('여러 배치가 있어도 전체 4초 예산 하나만 쓰고 남은 시간이 없으면 전체 fallback한다', async () => {
+  it('두 번째 배치도 독립적인 4초가 지나야 timeout되고 전체 fallback한다', async () => {
     vi.useFakeTimers();
     let callCount = 0;
     const plugin = stubPlugin({
@@ -488,13 +595,18 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     });
     expect(plugin.refineLines).toHaveBeenCalledTimes(2);
 
-    // 두 번째 배치는 새 4초가 아니라 첫 배치가 쓰고 남긴 약 1초만 받는다.
+    // 첫 배치가 3초를 썼어도 두 번째 배치는 독립적인 4초 예산을 받는다.
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(1001);
+      await vi.advanceTimersByTimeAsync(3999);
+    });
+    expect(plugin.cancel).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '기기에서 정리 중' })).toBeDisabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
     });
     expect(plugin.cancel).toHaveBeenCalled();
     expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /원문 0\./ })).toBeNull();
+    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
     expect(screen.getByRole('status')).toHaveTextContent('AI 다듬기가 제시간에 끝나지 않았어요');
     expect(screen.getByRole('button', { name: 'AI 다시 시도' })).toBeTruthy();
     view.unmount();
@@ -557,7 +669,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
     const view = open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getAllByRole('button', { name: /원문 [0-4]\./ })).toHaveLength(5));
+    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
 
     surface = [
       ...surface,
@@ -574,10 +686,9 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     );
 
     // effect가 새 요청을 시작하기 전 렌더부터 stale map의 payloadKey가 달라 즉시 숨겨진다.
-    expect(screen.queryByRole('button', { name: /원문 0\./ })).toBeNull();
     expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
-    expect(screen.queryByRole('button', { name: /원문 0\./ })).toBeNull();
+    expect(screen.getByRole('button', { name: '기기에서 정리 중' })).toBeDisabled();
 
     const updatedOptions = vi.mocked(plugin.refineLines).mock.calls[1][0];
     resolveUpdatedFirstBatch?.({
@@ -595,7 +706,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     __setOnDeviceSummaryPluginForTests(plugin);
 
     try {
-      const longLog = `${'a'.repeat(38)}e\u0301b`;
+      const longLog = `${'a'.repeat(118)}👨‍👩‍👧‍👦b`;
       const records8 = [
         ...Array.from({ length: 5 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00`, log: `짧은 원문 ${i}` })),
         record({ id: 'r5', time: '05:00', log: longLog }),
@@ -605,8 +716,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
       records = surface;
 
       open('/story/partner');
-      await requestAiSummary();
-      // 배치 검증이 사전에 실패하여 플러그인을 단 한 번도 호출하지 않음
+      // 배치 검증이 사전에 실패하여 실행 버튼도 내지 않고 플러그인을 단 한 번도 호출하지 않음
+      expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull();
       expect(plugin.refineLines).not.toHaveBeenCalled();
       expect(screen.getByRole('button', { name: /짧은 원문 0/ })).toBeTruthy();
     } finally {
@@ -658,7 +769,7 @@ describe('실패 이유와 재시도 정책', () => {
     expect(screen.queryByRole('button', { name: 'AI 다시 시도' })).toBeNull();
   });
 
-  it('기능이 명시적으로 꺼져 있으면 실행 버튼 없이 이유를 표시한다', () => {
+  it('기능이 명시적으로 꺼져 있으면 내부 운영 상태를 노출하지 않는다', () => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'false');
     __setOnDeviceSummaryPluginForTests(stubPlugin());
     surface = twoToday();
@@ -667,7 +778,8 @@ describe('실패 이유와 재시도 정책', () => {
     open('/story/partner');
 
     expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('AI 다듬기가 꺼져 있어요');
+    expect(screen.queryByText('AI 다듬기가 꺼져 있어요')).toBeNull();
+    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
   });
 });
 

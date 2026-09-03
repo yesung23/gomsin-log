@@ -14,9 +14,9 @@ import {
  */
 
 const LINES: DailySummaryLine[] = [
-  { recordId: 'rec-a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22' },
-  { recordId: 'rec-b', text: '점심 먹었어', time: '13:00', date: '2026-08-22' },
-  { recordId: 'rec-c', text: '사진을 남겼어요', time: '18:00', date: '2026-08-22' },
+  { recordId: 'rec-a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오늘 시험 끝났어', sourceWasTruncated: false },
+  { recordId: 'rec-b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '점심 먹었어', sourceWasTruncated: false },
+  { recordId: 'rec-c', text: '사진을 남겼어요', time: '18:00', date: '2026-08-22', sourceText: '사진을 남겼어요', sourceWasTruncated: false },
 ];
 const ITEMS = buildOnDeviceItems(LINES);
 
@@ -25,16 +25,43 @@ function refined(items: unknown) {
 }
 
 describe('통과하는 응답', () => {
+  it('긴 원문의 정확한 excerpt를 앞뒤 말줄임표와 함께 표시한다', () => {
+    const source = '오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어';
+    const result = verifyRefinedItems(
+      [{ index: 0, text: '시험이 끝났고 점심을 먹은 다음' }],
+      [{ index: 0, text: source }],
+    );
+    expect(result).toEqual({
+      ok: true,
+      texts: ['…시험이 끝났고 점심을 먹은 다음…'],
+    });
+  });
+
   it('개수·순서·index가 그대로면 텍스트를 받아들인다', () => {
     const result = refined([
       { index: 0, text: '오늘 시험 끝났어' },
-      { index: 1, text: '점심 먹었어.' },
+      { index: 1, text: '점심 먹었어' },
       { index: 2, text: '사진을 남겼어요' },
     ]);
     expect(result).toEqual({
       ok: true,
-      texts: ['오늘 시험 끝났어', '점심 먹었어.', '사진을 남겼어요'],
+      texts: ['오늘 시험 끝났어', '점심 먹었어', '사진을 남겼어요'],
     });
+  });
+
+  it('원문에 없는 마침표를 추가하면 exact excerpt가 아니므로 거부한다', () => {
+    expect(verifyRefinedItems(
+      [{ index: 0, text: '점심 먹었어.' }],
+      [{ index: 0, text: '점심 먹었어' }],
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
+  it('120 단위에서 잘린 짧은 prefix에도 생략 표시를 붙인다', () => {
+    expect(verifyRefinedItems(
+      [{ index: 0, text: '안녕하세요' }],
+      [{ index: 0, text: '안녕하세요' }],
+      [true],
+    )).toEqual({ ok: true, texts: ['안녕하세요…'] });
   });
 
   it('바깥 공백은 접어서 받아들인다', () => {
@@ -69,6 +96,14 @@ describe('통과하는 응답', () => {
 });
 
 describe('거부하는 응답', () => {
+  it('장식한 표시가 40자를 넘으면 원문 출처가 맞아도 거부한다', () => {
+    const source = `${'가'.repeat(20)} ${'나'.repeat(20)} ${'다'.repeat(20)}`;
+    expect(verifyRefinedItems(
+      [{ index: 0, text: `${'나'.repeat(20)} ${'다'.repeat(10)}` }],
+      [{ index: 0, text: source }],
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
   it('배열이 아니다', () => {
     expect(refined(null).ok).toBe(false);
     expect(refined({ items: [] })).toEqual({ ok: false, rejection: 'not_an_array' });
@@ -204,9 +239,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
   it('검증과 재결합이 한 번에 이뤄지고, 실패는 지도를 만들지 않는다', () => {
     const good = verifyAndBindRefinedLines(
       [
-        { index: 0, text: '오늘 시험 끝났어.' },
-        { index: 1, text: '점심 먹었어.' },
-        { index: 2, text: '사진을 남겼어요.' },
+        { index: 0, text: '오늘 시험 끝났어' },
+        { index: 1, text: '점심 먹었어' },
+        { index: 2, text: '사진을 남겼어요' },
       ],
       LINES,
       ITEMS,
@@ -214,9 +249,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
     expect(good.ok).toBe(true);
     if (!good.ok) return;
     expect([...good.refined.entries()]).toEqual([
-      ['rec-a', '오늘 시험 끝났어.'],
-      ['rec-b', '점심 먹었어.'],
-      ['rec-c', '사진을 남겼어요.'],
+      ['rec-a', '오늘 시험 끝났어'],
+      ['rec-b', '점심 먹었어'],
+      ['rec-c', '사진을 남겼어요'],
     ]);
 
     const bad = verifyAndBindRefinedLines([{ index: 2, text: 'C' }], LINES, ITEMS);
@@ -235,18 +270,18 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
 
   it('두 번째 배치(batch 2, index 0..2)가 records 6..8에 정확히 매핑된다', () => {
     const batch2Lines: DailySummaryLine[] = [
-      { recordId: 'rec-6', text: '여섯째 기록', time: '14:00', date: '2026-08-22' },
-      { recordId: 'rec-7', text: '일곱째 기록', time: '15:00', date: '2026-08-22' },
-      { recordId: 'rec-8', text: '여덟째 기록', time: '16:00', date: '2026-08-22' },
+      { recordId: 'rec-6', text: '여섯째 기록', time: '14:00', date: '2026-08-22', sourceText: '여섯째 기록', sourceWasTruncated: false },
+      { recordId: 'rec-7', text: '일곱째 기록', time: '15:00', date: '2026-08-22', sourceText: '일곱째 기록', sourceWasTruncated: false },
+      { recordId: 'rec-8', text: '여덟째 기록', time: '16:00', date: '2026-08-22', sourceText: '여덟째 기록', sourceWasTruncated: false },
     ];
     const batch2Items = buildOnDeviceItems(batch2Lines);
     expect(batch2Items.map((it) => it.index)).toEqual([0, 1, 2]);
 
     const bound = verifyAndBindRefinedLines(
       [
-        { index: 0, text: '여섯째 기록.' },
-        { index: 1, text: '일곱째 기록.' },
-        { index: 2, text: '여덟째 기록.' },
+        { index: 0, text: '여섯째 기록' },
+        { index: 1, text: '일곱째 기록' },
+        { index: 2, text: '여덟째 기록' },
       ],
       batch2Lines,
       batch2Items,
@@ -255,9 +290,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
     expect(bound.ok).toBe(true);
     if (!bound.ok) return;
     expect([...bound.refined.entries()]).toEqual([
-      ['rec-6', '여섯째 기록.'],
-      ['rec-7', '일곱째 기록.'],
-      ['rec-8', '여덟째 기록.'],
+      ['rec-6', '여섯째 기록'],
+      ['rec-7', '일곱째 기록'],
+      ['rec-8', '여덟째 기록'],
     ]);
   });
 });

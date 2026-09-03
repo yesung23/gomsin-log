@@ -224,6 +224,14 @@ gate다. M-stage가 P-stage를 대체하거나, 사업계획서의 개발 예정
 > iPhone의 한국어 의미 보존·민감정보 경계·airplane mode·지연·발열·배터리가 검증되기 전에는
 > `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED === 'true'`인 검증 빌드에서만 연다. 값이 없거나
 > 다른 값이면 규칙 요약을 유지한다. 사용자 버튼 trigger와 invalid-output fallback은 그대로다.
+>
+> **2026-09-03 product-owner input override.** 읽기 권한이 있는 현재 파트너의 공유 기록
+> 본문은 건강·주기·성적·정확 장소 표현이 들어 있다는 이유만으로 온디바이스 처리에서
+> 제외하지 않는다. 이는 소유자 전용 구조화 건강 원본, GPS/EXIF, 위치 metadata, 비공개·
+> 복호화 불가 기록의 입력을 허용하지 않는다. 구현 후보는 모든 적격 기록을 시간순 1:1로
+> 유지하고 `120 UTF-16 source → 40 UTF-16 exact excerpt`, 5개씩 최대 20개, 배치당 4초,
+> 하루 단위 atomic fallback과 정확한 원본 이동을 증명해야 한다. 발췌 생략은 UI에서 숨기지
+> 않으며, 실기기 gate 전 default-OFF와 cloud fallback 금지는 유지한다.
 
 M3와 M7은 사업 검증 단계이지만 각각 engineering 산출물을 요구한다. 그 산출물의 소유자는
 아래 `LV`와 `P-MP` 단계다. 두 단계 모두 P10 Beta/Production gate를 대체하지 않는다.

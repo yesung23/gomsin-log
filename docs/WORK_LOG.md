@@ -3212,6 +3212,99 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · 온디바이스 하루 정리의 공유 건강·위치 본문 입력 승인 반영
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary input and provenance contract
+- Step: explicit product-owner override를 canonical 문서에 반영
+- Previous Gate: exact-true/default-OFF 네이티브 adapter와 5개 단위 순차 배치
+- This Gate: 제품 입력·발췌·원본 이동 계약 승인; 구현과 실기기는 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7 AI 보조 역할·온디바이스
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` M6, V5-A, 정밀 위치 gate
+- Current-state checked: `bash scripts/agent/session-start.sh`, branch/HEAD/status/claim
+- Latest relevant Work Log checked: 2026-08-25 하루 요약 5개 초과 progressive disclosure와 상대 신원 권위 결속
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? YES — 기존 §8.1은 민감 분류 가능성만 있어도 그날 전체 모델 경로를 막았다.
+- If YES, what conflict: 제품 오너가 2026-09-03 명시적으로 현재 파트너에게 공유된 기록 본문의 건강·위치 표현은 온디바이스 처리해도 된다고 승인했다. 이 최신 승인을 canonical 문서에 기록한 뒤에만 구현을 진행한다.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + read-only Sol architecture/review agents
+- Model: GPT-5.6 Sol Ultra primary; Sol Max/High bounded reviewers
+- Role: 제품 계약 판정·문서 통합은 primary, 구현 전 privacy architecture는 독립 자문
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `b28a79c36b1698c98a08fcf7e45c21b8aed70aad`
+- Old HEAD: `b28a79c36b1698c98a08fcf7e45c21b8aed70aad`
+- New HEAD / Reviewed HEAD: docs-only commit pending
+
+#### CHANGED / REVIEWED
+- file: `docs/PRODUCT_V5_MASTER_DECISION.md`
+- function/component/migration: §8 온디바이스 요약
+- what changed/reviewed: 적격 공유 본문의 건강·위치 표현 허용, owner-only 구조화 데이터와 metadata 제외, 1:1 exact-source 발췌, 120→40·5×4 후보, atomic fallback, 고지 경계
+- why: 최신 사용자 승인과 “많은 하루 기록을 정리하고 누르면 정확한 기록으로 이동” 요구를 구현 가능한 계약으로 고정
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: M6 pull-forward checkpoint
+- what changed/reviewed: product-owner input override와 구현·실기기 gate를 추가
+- why: 계획서와 코드가 다시 충돌하지 않게 다음 Worker의 범위를 제한
+- file: `control-tower/reports/codex/2026-09-03_1026_on-device-summary-input-override_codex.md`
+- function/component/migration: Control Tower decision record
+- what changed/reviewed: 발견, 결정, 위험, 다음 gate를 사실 상태별로 기록
+- why: 세션 간 추측 대신 canonical trace를 남기기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스를 E2EE라고 부르지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: AI 중요 기록 선정·관계/감정/진단 추론 금지 유지
+- Production: 변경 없음
+
+#### VERIFICATION
+- command: canonical 문서와 최신 관련 Work Log read-only 재확인
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 기존 문서 충돌과 명시적 사용자 override의 범위를 확인
+- command: `git diff --check -- docs/PRODUCT_V5_MASTER_DECISION.md docs/ENGINEERING_ROADMAP.md docs/WORK_LOG.md control-tower/reports/codex/2026-09-03_1026_on-device-summary-input-override_codex.md`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 문서 whitespace integrity만 증명
+- command: physical iPhone Foundation Models
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실제 모델 품질·오프라인·지연·발열·배터리는 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- DELTA: 제품 입력 정책과 다음 구현 계약이 바뀌어 과거 “민감 문구 whole-day reject” 판단은 폐기된다.
+- whether an earlier review is stale: 해당 입력 정책에 한해 YES; exact-source, partner authority, private exclusion, default-OFF review는 유지
+
+#### BLOCKERS
+- code: 120→40 발췌와 batch-per-timeout 미구현
+- environment: 지원 iPhone Foundation Models 실측 미완료
+- external/manual: 검증 빌드 외 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: canonical 제품·엔지니어링 결정 문서 개정; 앱 구현 전
+
+#### REMAINING
+- semantic output firewall 독립 재검토
+- 120→40 exact excerpt, 최대 20개, 배치당 timeout TDD 구현
+- 실제 UI 생략 표시와 exact original navigation 검증
+- 독립 privacy/security review와 실물 iPhone gate
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded Worker/Verifier/Reviewer
+- tool/model: 구현 Worker, 독립 Sol privacy/security reviewer
+- 기준 SHA: docs-only commit 예정 HEAD
+- exact next task: 현재 두 미커밋 코드 gate를 먼저 분리 폐쇄한 뒤 on-device source/excerpt contract 구현
+
+#### DO NOT ADVANCE UNTIL
+- exact-true/default-OFF, private/unreadable/former-partner exclusion, no-cloud, one-record-one-item, atomic fallback을 테스트로 유지
+- 실물 기기 증거 없이 Production 활성화 PASS를 주장하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: Supabase·Vercel·TestFlight·App Store 모두 NOT APPLIED; 실제 배포 flag UNVERIFIED
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

@@ -123,7 +123,17 @@ async function requestAiSummary() {
 }
 
 function safeRefinedText(text: string): string {
-  return text.length > 38 ? text.slice(0, 20) : text;
+  const normalized = text.normalize('NFC').trim();
+  if (normalized.length <= 38) return normalized;
+
+  // Production accepts an excerpt only when omitted context starts at a real
+  // whitespace boundary. Keep the fake model response inside that same
+  // contract instead of cutting a Korean word in half.
+  const boundary = [...normalized.matchAll(/\s/gu)]
+    .map((match) => match.index)
+    .filter((index) => index >= 8 && index <= 38)
+    .at(-1);
+  return boundary === undefined ? normalized : normalized.slice(0, boundary);
 }
 
 function longBody(prefix: string): string {
@@ -204,10 +214,7 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
     await waitFor(() => expect(plugin.availability).toHaveBeenCalledTimes(1));
     expect(plugin.availability).toHaveBeenCalledWith({ locale: 'ko_KR' });
-    const preflightWire = JSON.stringify(vi.mocked(plugin.availability).mock.calls[0][0]);
-    for (const forbidden of [surface[0].log, surface[1].log, 'a', 'b', PARTNER, TODAY]) {
-      expect(preflightWire).not.toContain(forbidden);
-    }
+    expect(vi.mocked(plugin.availability).mock.calls[0][0]).toEqual({ locale: 'ko_KR' });
     expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
     expect(plugin.refineLines).not.toHaveBeenCalled();
 

@@ -178,7 +178,22 @@ export function useOnDeviceDailySummary(
       || nativeGate !== 'ready'
       || !preflightReady
     ) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle', reason: undefined });
+      setResult((previous) => {
+        if (
+          previous.payloadKey === payloadKey
+          && previous.requestVersion === requestVersion
+          && previous.values === NO_REFINEMENT
+          && previous.status === 'idle'
+          && previous.reason === undefined
+        ) return previous;
+        return {
+          payloadKey,
+          requestVersion,
+          values: NO_REFINEMENT,
+          status: 'idle',
+          reason: undefined,
+        };
+      });
       return;
     }
 

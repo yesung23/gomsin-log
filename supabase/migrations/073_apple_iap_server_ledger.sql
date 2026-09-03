@@ -254,6 +254,26 @@ AS $$
   WHERE billing_account_id = p_billing_account_id AND environment = p_environment AND status = 'reserved'
 $$;
 
+-- The deletion request row is intentionally cleared when the relational cleanup
+-- has committed but Auth deletion failed. The Auth metadata flag remains set in
+-- that recovery state, so every IAP authority path must consult both signals.
+CREATE FUNCTION iap_private.is_account_deletion_pending(p_user_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.account_deletion_requests AS deletion
+    WHERE deletion.user_id = p_user_id
+  ) OR COALESCE((
+    SELECT account.raw_app_meta_data @> '{"account_deletion_pending":true}'::JSONB
+    FROM auth.users AS account
+    WHERE account.id = p_user_id
+  ), FALSE)
+$$;
+
 -- Authenticated client path: binds the StoreKit appAccountToken hash to this
 -- account/environment and only returns a catalog row when sale is explicitly on.
 CREATE FUNCTION public.iap_prepare_purchase(
@@ -284,10 +304,7 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM auth.users AS account WHERE account.id = v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account is unavailable';
   END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.account_deletion_requests AS deletion
-    WHERE deletion.user_id = v_uid
-  ) THEN
+  IF iap_private.is_account_deletion_pending(v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
   END IF;
   IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode')
@@ -353,10 +370,7 @@ BEGIN
   IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode') THEN
     RAISE EXCEPTION 'Invalid IAP environment';
   END IF;
-  IF EXISTS (
-    SELECT 1 FROM public.account_deletion_requests AS deletion
-    WHERE deletion.user_id = v_uid
-  ) THEN
+  IF iap_private.is_account_deletion_pending(v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
   END IF;
   SELECT b.billing_account_id INTO v_billing_account_id
@@ -582,10 +596,7 @@ BEGIN
     RAISE EXCEPTION 'Apple account binding mismatch';
   END IF;
 
-  IF EXISTS (
-    SELECT 1 FROM public.account_deletion_requests AS deletion
-    WHERE deletion.user_id = p_user_id
-  ) THEN
+  IF iap_private.is_account_deletion_pending(p_user_id) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
   END IF;
 
@@ -944,6 +955,7 @@ DECLARE
   v_balance BIGINT;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
+  IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode') OR p_amount IS NULL OR p_amount <= 0 OR p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'Invalid export credit reservation';
   END IF;
@@ -994,6 +1006,7 @@ DECLARE
   v_reservation iap_private.export_credit_reservations%ROWTYPE;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
+  IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   SELECT b.billing_account_id INTO v_billing_account_id
   FROM iap_private.apple_account_bindings AS b
   WHERE b.user_id = v_uid AND b.deleted_at IS NULL
@@ -1039,6 +1052,7 @@ DECLARE
   v_reservation iap_private.export_credit_reservations%ROWTYPE;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
+  IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   SELECT b.billing_account_id INTO v_billing_account_id
   FROM iap_private.apple_account_bindings AS b
   WHERE b.user_id = v_uid AND b.deleted_at IS NULL
@@ -1152,6 +1166,7 @@ BEGIN
   JOIN iap_private.apple_transactions AS tx
     ON tx.billing_account_id = b.billing_account_id
   WHERE b.user_id IS NOT NULL
+    AND NOT iap_private.is_account_deletion_pending(b.user_id)
     AND tx.environment IN ('Sandbox', 'Production')
   ORDER BY b.user_id, tx.environment, tx.original_transaction_id;
 END;

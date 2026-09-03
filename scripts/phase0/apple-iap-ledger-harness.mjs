@@ -129,7 +129,10 @@ try {
     CREATE ROLE authenticated NOLOGIN;
     CREATE ROLE service_role NOLOGIN;
     CREATE SCHEMA auth;
-    CREATE TABLE auth.users (id uuid PRIMARY KEY);
+    CREATE TABLE auth.users (
+      id uuid PRIMARY KEY,
+      raw_app_meta_data jsonb NOT NULL DEFAULT '{}'::jsonb
+    );
     CREATE TABLE public.account_deletion_requests (
       user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
       expected_record_ids uuid[] NOT NULL DEFAULT '{}',
@@ -290,6 +293,22 @@ try {
 
   expectOk(callApply({ environment: 'Sandbox', token: TOKEN_A, tx: '1001', product: 'paper.paid', hash: sha('sandbox-1001'), purchase: 1000, signed: 1000, event: 'purchase' }), 'sandbox/prod identifier separation');
   if (scalar("SELECT count(*)::text FROM iap_private.apple_transactions WHERE transaction_id = '1001'", 'environment separation count') !== '2') throw new Error('sandbox and production ledgers were not separate');
+
+  const pendingReservation = jsonResult(actorScalar('authenticated', A, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 1, '20000000-0000-4000-8000-000000000005'::uuid) AS x`, 'reserve before durable deletion flag'), 'reserve before durable deletion flag');
+  expectOk(admin(`UPDATE auth.users SET raw_app_meta_data = '{"account_deletion_pending":true}'::jsonb WHERE id = ${q(A)}::uuid`), 'set durable Auth deletion flag');
+  if (scalar(`SELECT count(*)::text FROM public.account_deletion_requests WHERE user_id = ${q(A)}::uuid`, 'no transient deletion marker') !== '0') throw new Error('durable deletion test unexpectedly retained a transient request row');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_purchase('paper.paid', 'Production')`), 'durable deletion flag blocks purchase prepare');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_get_state('Production')`), 'durable deletion flag blocks state');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_export_credit_reserve('Production', 1, '20000000-0000-4000-8000-000000000006'::uuid)`), 'durable deletion flag blocks credit reserve');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_export_credit_commit(${q(pendingReservation.reservation_id)}::uuid)`), 'durable deletion flag blocks credit commit');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_export_credit_release(${q(pendingReservation.reservation_id)}::uuid)`), 'durable deletion flag blocks credit release');
+  expectFail(callApply({ tx: '7001', product: 'paper.paid', hash: sha('pending-delete-7001'), purchase: 7000, signed: 7000, event: 'purchase' }), 'durable deletion flag blocks reconciliation grant');
+  if (actorScalar('service_role', null, `SELECT count(*)::text FROM public.iap_list_reconciliation_targets() WHERE user_id = ${q(A)}::uuid`, 'durable deletion reconciliation exclusion') !== '0') throw new Error('durable deletion account remained a reconciliation target');
+  const pendingDeletionNotificationId = '00000000-0000-4000-8000-000000000006';
+  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_process_verified_notification(
+    ${q(pendingDeletionNotificationId)}::uuid, 'Production', 'DID_RENEW', NULL, '7002', '7002', 7100, ${q(sha('pending-delete-notification'))},
+    '7002', '7002', 'paper.paid', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 7000, 7100, NULL, NULL, 'purchase', ${q(sha('pending-delete-7002'))}) AS x`), 'durable deletion flag blocks notification grant');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_notifications WHERE notification_uuid = ${q(pendingDeletionNotificationId)}::uuid`, 'pending deletion notification rollback') !== '0') throw new Error('pending deletion notification partially committed');
 
   const before = scalar(`SELECT (SELECT count(*) FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid) || '|' || (SELECT count(*) FROM iap_private.apple_notifications) || '|' || (SELECT count(*) FROM iap_private.export_credit_ledger WHERE billing_account_id = ${q(billingAccountId)}::uuid)`, 'deletion evidence before');
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'authenticated account deletion prep');

@@ -754,12 +754,13 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
     // The count is what keeps the loop below from passing vacuously on a regex
-    // that stopped matching. Seven since the iOS-only on-device summary plugin
-    // was added (six after Gate 3 added CapacitorPushNotifications).
-    expect(pods.length).toBe(7);
+    // that stopped matching. Eight since the iOS-only StoreKit plugin was
+    // added after the on-device summary and push plugins.
+    expect(pods.length).toBe(8);
     const firstPartyPaths = [
       '../../packages/capacitor-device-keys',
       '../../packages/capacitor-on-device-summary',
+      '../../packages/capacitor-storekit',
     ];
     for (const [, , path] of pods) {
       expect(path.startsWith('../../node_modules/') || firstPartyPaths.includes(path)).toBe(true);

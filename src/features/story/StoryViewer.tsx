@@ -362,17 +362,15 @@ const REFINEMENT_REASON_LABEL: Record<DailySummaryRefinementReason, string> = {
   multi_day: '오늘 기록만 AI로 다듬을 수 있어요',
   too_few_moments: '공유 기록이 두 개 이상일 때 AI로 다듬을 수 있어요',
   disabled: 'AI 다듬기가 꺼져 있어요',
-  not_ios: '이 기기에서는 AI 다듬기를 사용할 수 없어요',
-  plugin_missing: '이 기기에서는 AI 다듬기를 준비할 수 없어요',
-  unsupported: '이 기기에서는 AI 다듬기를 사용할 수 없어요',
-  os_too_old: '이 iOS 버전에서는 AI 다듬기를 지원하지 않아요',
-  framework_missing: '이 앱 빌드에서는 AI 다듬기를 지원하지 않아요',
-  model_unavailable: '기기 AI가 아직 준비되지 않았어요',
-  locale_unsupported: '한국어 AI 다듬기를 지원하지 않아요',
-  too_many_records: '기록이 많은 날은 모든 항목을 원문 중심으로 보여드려요',
-  timeout: 'AI 다듬기가 제시간에 끝나지 않았어요',
-  cancelled: 'AI 다듬기가 취소됐어요',
-  rejected: 'AI 결과를 안전하게 확인하지 못했어요',
+  platform_unsupported: '이 기기에서는 긴 문장 줄이기를 지원하지 않아요',
+  device_not_eligible: '이 기기에서는 긴 문장 줄이기를 지원하지 않아요',
+  apple_intelligence_disabled: '기기 설정에서 Apple Intelligence를 켜 주세요',
+  model_not_ready: '기기 AI를 준비하는 중이에요',
+  locale_unsupported: '이 기기의 한국어 처리는 아직 지원하지 않아요',
+  too_many_candidates: '긴 문장이 많아 시간순 정리를 그대로 보여드려요',
+  timeout: '기기 AI가 제시간에 끝나지 않았어요',
+  cancelled: '기기 AI 요청이 취소됐어요',
+  rejected: '기기 AI 결과를 안전하게 확인하지 못했어요',
   native_error: '기기 AI가 응답하지 않았어요',
 };
 
@@ -396,18 +394,25 @@ function CoverCard({
   const remainingCount = total - 5;
 
   const refineLabel = refinementStatus === 'running'
-    ? '기기에서 정리 중'
+    ? '긴 문장 줄이는 중'
     : refinementStatus === 'applied'
-      ? '원문 발췌 완료'
-      : refinementStatus === 'fallback'
-        ? 'AI 다시 시도'
-        : 'AI로 하루 정리';
+      ? '긴 문장 줄이기 완료'
+      : '기기 AI로 긴 문장 줄이기';
   const reasonLabel = refinementReason ? REFINEMENT_REASON_LABEL[refinementReason] : undefined;
+  const statusLabel = refinementStatus === 'running'
+    ? '기기 AI로 긴 문장 줄이는 중 · 1/1 · 기본 시간순 정리는 계속 보여요'
+    : refinementStatus === 'applied'
+      ? '기기 AI로 긴 문장 줄이기 완료 · 원문 연결은 그대로예요'
+      : refinementStatus === 'fallback'
+        ? `${reasonLabel ?? '기기 AI 결과를 적용하지 못했어요'}. 시간순 정리를 그대로 보여드려요.`
+        : reasonLabel;
 
   return (
     <PaperCard className="mt-2">
       <div className="flex min-h-11 items-center justify-between gap-3">
-        <p className="text-caption text-muted-foreground">{card.rangeLabel}</p>
+        <p className="text-caption text-muted-foreground">
+          {card.rangeLabel} 기록 {total}개 · 시간순 정리됨
+        </p>
         <div className="flex max-w-52 flex-col items-end">
           {onRefine ? (
             <button
@@ -418,14 +423,14 @@ function CoverCard({
               className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground disabled:opacity-60"
             >
               {refinementStatus === 'running'
-                ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" />
+                ? <LoaderCircle size={15} className="motion-safe:animate-spin motion-reduce:hidden" aria-hidden="true" />
                 : <Sparkles size={15} aria-hidden="true" />}
               {refineLabel}
             </button>
           ) : null}
-          {reasonLabel ? (
+          {statusLabel ? (
             <p role="status" className="text-right text-caption text-muted-foreground">
-              {reasonLabel}
+              {statusLabel}
             </p>
           ) : null}
         </div>

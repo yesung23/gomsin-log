@@ -160,13 +160,17 @@ describe('/story/partner', () => {
     expect(screen.getByRole('button', { name: '돌아가기' })).toBeTruthy();
   });
 
-  it('다 읽었어요가 영수증을 쓴다', async () => {
-    surface = [record({ id: 'a' })];
+  it('다 읽었어요는 실제로 읽은 기록만 영수증에 쓰고 unreadable은 OUTSTANDING으로 남긴다', async () => {
+    const readable = record({ id: 'readable' });
+    const unreadable = record({ id: 'unreadable', time: '13:00', contentUnavailable: 'key_unavailable' });
+    surface = [readable, unreadable];
     records = surface;
     open('/story/partner');
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('열 수 없는 기록 1개')).toBeTruthy();
     await userEvent.click(screen.getByTestId('story-acknowledge'));
     expect(acknowledge).toHaveBeenCalledTimes(1);
+    expect(acknowledge).toHaveBeenCalledWith([readable]);
   });
 
   it('책갈피가 이야기거리로 간다', async () => {

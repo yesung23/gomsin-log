@@ -45,12 +45,11 @@ struct OnDeviceSummaryLine {
 }
 
 enum OnDeviceSummaryUnavailableReason: String {
-    /// The framework exists in this build, but this device is below iOS 26.
-    case osTooOld = "os_too_old"
-    /// Compiled against an SDK without FoundationModels. A packaging fact.
-    case frameworkMissing = "framework_missing"
-    /// Apple Intelligence is not enabled, not eligible, or still downloading.
-    case modelUnavailable = "model_unavailable"
+    /// The native Foundation Models path does not exist in this build/OS.
+    case platformUnsupported = "platform_unsupported"
+    case deviceNotEligible = "device_not_eligible"
+    case appleIntelligenceDisabled = "apple_intelligence_disabled"
+    case modelNotReady = "model_not_ready"
     case localeUnsupported = "locale_unsupported"
 }
 
@@ -95,20 +94,19 @@ enum OnDeviceSummary {
     - 입력 문장에 없는 사실을 만들지 않는다. 추측·해석·조언·위로를 쓰지 않는다.
     - 감정, 기분, 건강, 통증, 생리주기, 신체 상태, 관계 상태를 추론하거나 평가하지 않는다.
     - 무엇이 더 중요한지 판단하지 않는다. 강조하거나 순서를 바꾸지 않는다.
-    - 입력 text가 40 UTF-16 단위 이하면 text 전체를 그대로 반환한다.
-    - 입력 text가 40 단위를 넘으면 8~38 UTF-16 단위의 발췌를 고른다.
+    - 입력 text는 모두 40 UTF-16 단위를 넘는 긴 문장이다.
+    - 각 text에서 8~38 UTF-16 단위의 발췌를 고른다.
     - 단어, 이모지, 결합문자의 중간에서 발췌를 시작하거나 끝내지 않는다.
     - 말줄임표는 추가하지 않는다. 화면 코드가 생략한 방향을 확인해 붙인다.
-    - 발췌할 것이 없으면 입력 text를 그대로 반환한다.
     """
 
     /// Whether the model can run here. `nil` means it can.
     static func availability(localeIdentifier: String) -> OnDeviceSummaryUnavailableReason? {
         #if canImport(FoundationModels)
-        guard #available(iOS 26.0, *) else { return .osTooOld }
+        guard #available(iOS 26.0, *) else { return .platformUnsupported }
         return systemModelAvailability(localeIdentifier: localeIdentifier)
         #else
-        return .frameworkMissing
+        return .platformUnsupported
         #endif
     }
 
@@ -116,16 +114,21 @@ enum OnDeviceSummary {
         localeIdentifier: String,
         items: [OnDeviceSummaryLine]
     ) async throws -> [OnDeviceSummaryLine] {
-        guard !items.isEmpty, items.count <= maxLines else {
+        guard !items.isEmpty,
+              items.count <= maxLines,
+              items.allSatisfy({
+                  $0.text.utf16.count > maxExcerptCharacters
+                      && $0.text.utf16.count <= maxSourceCharacters
+              }) else {
             throw OnDeviceSummaryError.badRequest
         }
         #if canImport(FoundationModels)
         guard #available(iOS 26.0, *) else {
-            throw OnDeviceSummaryError.unavailable(.osTooOld)
+            throw OnDeviceSummaryError.unavailable(.platformUnsupported)
         }
         return try await refineWithSystemModel(localeIdentifier: localeIdentifier, items: items)
         #else
-        throw OnDeviceSummaryError.unavailable(.frameworkMissing)
+        throw OnDeviceSummaryError.unavailable(.platformUnsupported)
         #endif
     }
 
@@ -134,7 +137,7 @@ enum OnDeviceSummary {
         let listed = items.map { "\($0.index). \($0.text)" }.joined(separator: "\n")
         return """
          다음 목록에서 각 text의 정확한 원문 연속 부분 문자열을 발췌하라. 원문을 다시 쓰거나 추론하거나 문맥을 덧붙이지 마라.
-         40 단위 이하 text는 전체를 그대로 반환하고, 긴 text는 단어·이모지·결합문자를 쪼개지 않은 8~38 단위만 고르라.
+         각 긴 text에서 단어·이모지·결합문자를 쪼개지 않은 8~38 단위만 고르라.
          항목 수와 순서를 그대로 유지하고 index를 그대로 복사하라. 말줄임표는 출력하지 마라.
 
         \(listed)
@@ -171,7 +174,23 @@ extension OnDeviceSummary {
         localeIdentifier: String
     ) -> OnDeviceSummaryUnavailableReason? {
         let model = SystemLanguageModel.default
-        guard model.isAvailable else { return .modelUnavailable }
+        switch model.availability {
+        case .available:
+            break
+        case .unavailable(let reason):
+            switch reason {
+            case .deviceNotEligible:
+                return .deviceNotEligible
+            case .appleIntelligenceNotEnabled:
+                return .appleIntelligenceDisabled
+            case .modelNotReady:
+                return .modelNotReady
+            @unknown default:
+                return .platformUnsupported
+            }
+        @unknown default:
+            return .platformUnsupported
+        }
         guard model.supportsLocale(Locale(identifier: localeIdentifier)) else {
             return .localeUnsupported
         }

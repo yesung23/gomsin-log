@@ -3,6 +3,10 @@ import type {
   OnDeviceSummaryFailure,
   OnDeviceSummaryItem,
 } from '@/lib/dailySummary/contract';
+import {
+  MAX_DAILY_SUMMARY_EXCERPT_CHARS,
+  MAX_DAILY_SUMMARY_MODEL_CANDIDATES,
+} from '@/lib/dailySummary/contract';
 
 /**
  * iOS 온디바이스 요약 플러그인으로 가는 유일한 통로.
@@ -18,7 +22,7 @@ import type {
  *
  * 없는 것이 아니라 **만들지 않는다.** Foundation Models는 Apple 플랫폼 API이고, Android에서
  * 같은 보장(온디바이스, 서버 전송 없음)을 주는 대체 구현은 별개의 결정이다. 그래서
- * `getPlatform() === 'ios'`가 아니면 `not_ios`로 끝내고 규칙 결과를 쓴다. 조용한 downgrade는
+ * `getPlatform() === 'ios'`가 아니면 `platform_unsupported`로 끝내고 규칙 결과를 쓴다. 조용한 downgrade는
  * "어느 경로가 실제로 돌았는가"를 답할 수 없게 만든다.
  *
  * ## 로그
@@ -55,17 +59,25 @@ export type OnDeviceRefineOutcome =
   | { ok: true; items: unknown }
   | { ok: false; reason: OnDeviceSummaryFailure };
 
+export type OnDevicePreflightOutcome =
+  | { ok: true }
+  | { ok: false; reason: OnDeviceSummaryFailure };
+
 const AVAILABILITY_FAILURES = new Set<OnDeviceSummaryFailure>([
-  'os_too_old',
-  'framework_missing',
-  'model_unavailable',
+  'device_not_eligible',
+  'apple_intelligence_disabled',
+  'model_not_ready',
   'locale_unsupported',
 ]);
 
 function availabilityFailure(reason: unknown): OnDeviceSummaryFailure {
-  return typeof reason === 'string' && AVAILABILITY_FAILURES.has(reason as OnDeviceSummaryFailure)
-    ? reason as OnDeviceSummaryFailure
-    : 'unsupported';
+  if (typeof reason !== 'string') return 'platform_unsupported';
+  if (AVAILABILITY_FAILURES.has(reason as OnDeviceSummaryFailure)) {
+    return reason as OnDeviceSummaryFailure;
+  }
+  // 이전 네이티브 빌드가 잠깐 공존해도 콘텐츠를 노출하지 않고 보수적으로 접는다.
+  if (reason === 'model_unavailable') return 'model_not_ready';
+  return 'platform_unsupported';
 }
 
 export function isOnDeviceDailySummaryEnabled(): boolean {
@@ -114,12 +126,51 @@ function isPluginRegistered(): boolean {
 /** 호출 전에 확인할 수 있는 모든 게이트. `'ready'`가 아니면 규칙 결과를 쓴다. */
 export function onDeviceSummaryGate(): 'ready' | OnDeviceSummaryFailure {
   if (!isOnDeviceDailySummaryEnabled()) return 'disabled';
-  // 테스트가 주입한 플러그인은 플랫폼 판정을 건너뛴다. 실제 게이트는 위의 flag와 아래의
-  // 네이티브 판정이며, 이 우회는 `injectedForTests`가 설정된 동안에만 존재한다.
+  // 테스트 seam도 플랫폼 판정을 우회하지 않는다. 웹/Android에서 주입된 객체가 실제
+  // Foundation Models처럼 보이면 플랫폼 계약을 테스트가 조용히 무력화한다.
+  if (!isIosNative()) return 'platform_unsupported';
   if (injectedForTests) return 'ready';
-  if (!isIosNative()) return 'not_ios';
-  if (!isPluginRegistered()) return 'plugin_missing';
+  if (!isPluginRegistered()) return 'platform_unsupported';
   return 'ready';
+}
+
+/**
+ * CTA를 보이기 전에 하는 콘텐츠 없는 확인.
+ *
+ * 전달하는 값은 고정 로케일 하나뿐이다. 기록, index, 날짜, 식별자, 요청 id는 만들지도
+ * 않는다. 이 확인이 성공한 뒤에만 사용자가 생성 요청을 선택할 수 있다.
+ */
+export async function preflightOnDeviceSummary(
+  options: { timeoutMs?: number } = {},
+): Promise<OnDevicePreflightOutcome> {
+  const gate = onDeviceSummaryGate();
+  if (gate !== 'ready') return { ok: false, reason: gate };
+
+  const port = plugin();
+  if (!port) return { ok: false, reason: 'platform_unsupported' };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(
+        () => resolve('timeout'),
+        options.timeoutMs ?? ON_DEVICE_SUMMARY_TIMEOUT_MS,
+      );
+    });
+    const support = await Promise.race([
+      port.availability({ locale: ON_DEVICE_SUMMARY_LOCALE }),
+      timedOut,
+    ]);
+    if (support === 'timeout') return { ok: false, reason: 'timeout' };
+    if (support?.available !== true) {
+      return { ok: false, reason: availabilityFailure(support?.reason) };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'native_error' };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /** 콘텐츠를 담지 않는 불투명 상관관계 id. */
@@ -147,10 +198,14 @@ export async function refineOnDeviceSummary(
 ): Promise<OnDeviceRefineOutcome> {
   const gate = onDeviceSummaryGate();
   if (gate !== 'ready') return { ok: false, reason: gate };
-  if (items.length === 0) return { ok: false, reason: 'rejected' };
+  if (
+    items.length === 0
+    || items.length > MAX_DAILY_SUMMARY_MODEL_CANDIDATES
+    || items.some((item) => item.text.length <= MAX_DAILY_SUMMARY_EXCERPT_CHARS)
+  ) return { ok: false, reason: 'rejected' };
 
   const port = plugin();
-  if (!port) return { ok: false, reason: 'plugin_missing' };
+  if (!port) return { ok: false, reason: 'platform_unsupported' };
 
   const previous = currentRequestId;
   const requestId = newRequestId();

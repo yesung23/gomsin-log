@@ -13,6 +13,7 @@ import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
 import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
 import { getTalkAboutActorState, type TalkAboutActorState } from '@/lib/talkAboutList';
 import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
+import { withReadableContent } from '@/lib/recordAvailability';
 
 /**
  * 스토리로 들어가는 세 개의 문.
@@ -237,7 +238,9 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       확인에는 전용 계측 이벤트를 만들지 않는다. §19의 종류를 늘리는 것은 LV 판독 항목을
       늘리는 결정이고, 그 결정은 이 화면이 내릴 것이 아니다.
     */
-    if (!acknowledge(records)) {
+    // 화면에 실제로 투영해 읽을 수 있었던 기록만 영수증에 포함한다. 암호키가 없어
+    // contentUnavailable인 행은 닫는 카드에 개수만 보이며 OUTSTANDING으로 남아야 한다.
+    if (!acknowledge(withReadableContent(records))) {
       toast.error('확인을 저장하지 못했어요. 기록은 그대로 남아 있어요.');
       return;
     }
@@ -283,7 +286,17 @@ export function StoryRoute({ mode }: { mode: StoryMode }) {
       onJumpToRecord={jumpToRecord}
       onRefineCover={aiSummaryActionVisible ? requestAiSummary : undefined}
       coverRefinementStatus={aiSummaryStatus}
-      coverRefinementReason={mode === 'today' && aiSummaryReason !== 'disabled' ? aiSummaryReason : undefined}
+      coverRefinementReason={mode === 'today' && (
+        aiSummaryReason === 'device_not_eligible'
+        || aiSummaryReason === 'apple_intelligence_disabled'
+        || aiSummaryReason === 'model_not_ready'
+        || aiSummaryReason === 'locale_unsupported'
+        || aiSummaryReason === 'too_many_candidates'
+        || aiSummaryReason === 'timeout'
+        || aiSummaryReason === 'cancelled'
+        || aiSummaryReason === 'rejected'
+        || aiSummaryReason === 'native_error'
+      ) ? aiSummaryReason : undefined}
       onToggleBookmark={mode === 'archive' || mode === 'highlight' ? undefined : toggleBookmark}
       onAcknowledge={mode === 'today' ? confirm : undefined}
       bookmarkDisabledReason={isOffline

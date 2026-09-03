@@ -28,6 +28,9 @@
 /** Foundation Models 네이티브 호출 한 번에 전달하는 고정 배치 크기. */
 export const ON_DEVICE_SUMMARY_BATCH_SIZE = 5;
 
+/** 출시 검증 범위: 긴 문장 후보가 이 수를 넘으면 모델을 전혀 호출하지 않는다. */
+export const MAX_DAILY_SUMMARY_MODEL_CANDIDATES = ON_DEVICE_SUMMARY_BATCH_SIZE;
+
 /** 모델에 보낼 정규화된 원문 본문의 최대 UTF-16 단위. */
 export const MAX_DAILY_SUMMARY_SOURCE_CHARS = 120;
 
@@ -79,20 +82,17 @@ export interface DailySummaryBatch {
 
 /** 온디바이스 경로가 쓰이지 못한 이유. 콘텐츠 없는 안정 코드만. */
 export type OnDeviceSummaryFailure =
-  /** 운영 kill switch가 `false`/`0`/`off`로 명시되어 있다. */
+  /** 운영 kill switch가 정확한 문자열 `true`가 아니다. */
   | 'disabled'
-  /** 웹 또는 Android. 이 기능에는 Android 구현이 없다. */
-  | 'not_ios'
-  /** iOS 네이티브지만 플러그인이 등록되지 않았다. */
-  | 'plugin_missing'
-  /** OS·모델·로케일 중 하나가 지원되지 않는다. */
-  | 'unsupported'
-  | 'os_too_old'
-  | 'framework_missing'
-  | 'model_unavailable'
+  /** 웹·Android·낮은 OS·플러그인 없는 빌드처럼 Apple 경로 자체가 없다. */
+  | 'platform_unsupported'
+  /** Foundation Models가 돌 수 없는 이유를 콘텐츠 없는 preflight에서 구분한다. */
+  | 'device_not_eligible'
+  | 'apple_intelligence_disabled'
+  | 'model_not_ready'
   | 'locale_unsupported'
-  /** 하루 전체는 그대로 보여 주되, 과열·장시간 대기를 막아 모델 호출은 생략한다. */
-  | 'too_many_records'
+  /** 긴 문장 후보가 출시 검증 상한 5개를 넘었다. 기준선 전체는 그대로 쓴다. */
+  | 'too_many_candidates'
   | 'timeout'
   | 'cancelled'
   /** 응답이 왔지만 요청과 짝이 맞지 않는다. */

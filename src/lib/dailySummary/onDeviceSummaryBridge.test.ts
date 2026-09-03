@@ -178,11 +178,23 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(bridgeCode).not.toContain('FoundationModels');
   });
 
-  it('모델과 로케일 가용성을 둘 다 확인한다', () => {
+  it('SystemLanguageModel.availability의 세 원인과 로케일을 각각 구분한다', () => {
     expect(swiftEngine).toContain('SystemLanguageModel.default');
-    expect(swiftEngine).toMatch(/model\.isAvailable/);
+    expect(swiftEngine).toMatch(/switch model\.availability/);
+    expect(swiftEngine).toContain('case .deviceNotEligible');
+    expect(swiftEngine).toContain('case .appleIntelligenceNotEnabled');
+    expect(swiftEngine).toContain('case .modelNotReady');
+    expect(swiftEngine).toContain('device_not_eligible');
+    expect(swiftEngine).toContain('apple_intelligence_disabled');
+    expect(swiftEngine).toContain('model_not_ready');
+    expect(swiftEngine).not.toMatch(/model\.isAvailable/);
     expect(swiftEngine).toMatch(/model\.supportsLocale\(Locale\(identifier: localeIdentifier\)\)/);
     expect(swiftEngine).toContain('"ko_KR"');
+  });
+
+  it('native generation은 40 UTF-16 단위를 넘는 긴 문장 1~5개만 받는다', () => {
+    expect(swiftEngine).toContain('items.count <= maxLines');
+    expect(swiftEngine).toContain('$0.text.utf16.count > maxExcerptCharacters');
   });
 
   it('요청마다 새 세션을 만들고 도구를 주지 않는다', () => {

@@ -419,6 +419,67 @@ describe('부재와 목차', () => {
   });
 });
 
+describe('시간순 baseline과 선택형 기기 AI 상태', () => {
+  const cover: StoryCard = {
+    kind: 'cover',
+    rangeLabel: '오늘',
+    lines: Array.from({ length: 8 }, (_, index) => ({
+      recordId: `r${index}`,
+      text: `줄 ${index}`,
+      time: `0${index}:00`,
+      date: '2026-08-22',
+    })),
+  };
+
+  it('모델과 무관하게 전체 개수와 시간순 정리 상태를 사실대로 표시한다', () => {
+    view({ cards: [cover], initialIndex: 0 });
+    expect(screen.getByText('오늘 기록 8개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.queryByText(/AI/)).toBeNull();
+  });
+
+  it('running은 role=status로 1/1과 baseline이 계속 보인다는 사실을 알리고 모션에 의존하지 않는다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'running',
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI로 긴 문장 줄이는 중 · 1/1 · 기본 시간순 정리는 계속 보여요',
+    );
+    const action = screen.getByRole('button', { name: '긴 문장 줄이는 중' });
+    expect(action).toHaveAttribute('aria-busy', 'true');
+    expect(action.querySelector('svg')).toHaveClass('motion-safe:animate-spin', 'motion-reduce:hidden');
+  });
+
+  it('success를 role=status로 알린다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'applied',
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI로 긴 문장 줄이기 완료 · 원문 연결은 그대로예요',
+    );
+  });
+
+  it('fallback을 role=status로 알리고 baseline 유지와 같은 CTA 재시도를 제공한다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'fallback',
+      coverRefinementReason: 'timeout',
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI가 제시간에 끝나지 않았어요. 시간순 정리를 그대로 보여드려요.',
+    );
+    expect(screen.getByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeTruthy();
+  });
+});
+
 describe('접근성', () => {
   it('대화상자로 알리고 이름을 준다', () => {
     view();

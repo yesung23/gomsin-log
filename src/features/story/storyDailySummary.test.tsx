@@ -118,13 +118,33 @@ function open(path: string) {
 }
 
 async function requestAiSummary() {
-  fireEvent.click(screen.getByRole('button', { name: 'AI로 하루 정리' }));
+  fireEvent.click(await screen.findByRole('button', { name: '기기 AI로 긴 문장 줄이기' }));
   await Promise.resolve();
 }
 
 function safeRefinedText(text: string): string {
-  return text;
+  return text.length > 38 ? text.slice(0, 20) : text;
 }
+
+function longBody(prefix: string): string {
+  return `${prefix} 오늘 있었던 일을 빠뜨리지 않도록 차근차근 길게 적어 두었어 꼭`;
+}
+
+type WireItem = { index: number; text: string };
+
+const CURRENT_VERIFICATION_FAILURES: readonly [string, (items: WireItem[]) => unknown][] = [
+  ['not_an_array', () => ({})],
+  ['count_mismatch', (items) => [items[0]]],
+  ['malformed_item', (items) => [items[0], null]],
+  ['index_not_integer', (items) => [items[0], { ...items[1], index: 1.5 }]],
+  ['index_out_of_range', (items) => [items[0], { ...items[1], index: 2 }]],
+  ['duplicate_index', (items) => [items[0], { ...items[1], index: 0 }]],
+  ['reordered', (items) => [{ ...items[1], index: 1 }, { ...items[0], index: 0 }]],
+  ['text_not_a_string', (items) => [items[0], { index: 1, text: 123 }]],
+  ['empty_text', (items) => [items[0], { index: 1, text: '   ' }]],
+  ['text_too_long', (items) => [items[0], { index: 1, text: '가'.repeat(41) }]],
+  ['semantic_mismatch', (items) => [items[0], { index: 1, text: '원문에 없는 관계 해석' }]],
+];
 
 function stubPlugin(over: Partial<OnDeviceSummaryPlugin> = {}): OnDeviceSummaryPlugin {
   return {
@@ -139,8 +159,8 @@ function stubPlugin(over: Partial<OnDeviceSummaryPlugin> = {}): OnDeviceSummaryP
 }
 
 const twoToday = () => [
-  record({ id: 'a', log: '오늘 시험 끝났어' }),
-  record({ id: 'b', time: '13:00', log: '점심 먹었어' }),
+  record({ id: 'a', log: longBody('오늘 시험 끝났어') }),
+  record({ id: 'b', time: '13:00', log: longBody('점심 먹었어') }),
 ];
 
 beforeEach(() => {
@@ -168,8 +188,13 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
   });
 
-  it('규칙 문장을 즉시 그리고 AI 버튼을 누르기 전에는 플러그인을 부르지 않는다', async () => {
-    const plugin = stubPlugin();
+  it('본문 없는 availability preflight가 끝난 뒤에만 CTA를 열고 클릭 전 generation은 0회다', async () => {
+    let resolvePreflight: ((value: { available: boolean; reason: string }) => void) | undefined;
+    const plugin = stubPlugin({
+      availability: vi.fn()
+        .mockImplementationOnce(() => new Promise((resolve) => { resolvePreflight = resolve; }))
+        .mockResolvedValue({ available: true, reason: 'ready' }),
+    });
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = twoToday();
     records = surface;
@@ -177,12 +202,21 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'AI로 하루 정리' })).toBeTruthy();
-    await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
+    await waitFor(() => expect(plugin.availability).toHaveBeenCalledTimes(1));
+    expect(plugin.availability).toHaveBeenCalledWith({ locale: 'ko_KR' });
+    const preflightWire = JSON.stringify(vi.mocked(plugin.availability).mock.calls[0][0]);
+    for (const forbidden of [surface[0].log, surface[1].log, 'a', 'b', PARTNER, TODAY]) {
+      expect(preflightWire).not.toContain(forbidden);
+    }
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+
+    resolvePreflight?.({ available: true, reason: 'ready' });
+    expect(await screen.findByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeTruthy();
     expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
-  it('AI 버튼을 누르면 즉시 온디바이스 요약을 시작한다', async () => {
+  it('CTA를 누르면 긴 문장 한 배치만 온디바이스에서 시작한다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = twoToday();
@@ -191,7 +225,44 @@ describe('기능을 명시적으로 켜도 스토리를 여는 것만으로 모�
     open('/story/partner');
     await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
+  });
+});
+
+describe('모든 기기의 즉시 baseline', () => {
+  it.each([
+    ['flag OFF iOS', 'false', true, 'ios'],
+    ['web', 'true', false, 'web'],
+    ['Android', 'true', true, 'android'],
+  ] as const)('%s에서도 50개를 시간순으로 모두 유지하고 AI 표기나 native call을 만들지 않는다', async (
+    _case,
+    flag,
+    native,
+    platformName,
+  ) => {
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', flag);
+    platform.native = native;
+    platform.name = platformName;
+    platform.pluginAvailable = true;
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = Array.from({ length: 50 }, (_, index) => record({
+      id: `r${index}`,
+      time: `08:${String(index).padStart(2, '0')}`,
+      log: longBody(`기록 ${index}`),
+    }));
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.getByText('오늘 기록 50개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.getByText(/기록 0 /)).toBeTruthy();
+    expect(screen.queryByText(/기록 5 /)).toBeNull();
+    expect(screen.getByRole('button', { name: '45개 더 보기' })).toBeTruthy();
+    expect(screen.queryByText(/AI/)).toBeNull();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 });
 
@@ -211,10 +282,10 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     await requestAiSummary();
 
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled();
     // 줄이 늘거나 줄지 않는다.
     expect(screen.queryByRole('button', { name: /사진을 남겼어요\./ })).toBeNull();
   });
@@ -233,8 +304,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(sent).not.toContain(PARTNER);
     expect(sent).not.toContain(TODAY);
     expect(JSON.parse(sent)).toEqual([
-      { index: 0, text: '오늘 시험 끝났어' },
-      { index: 1, text: '점심 먹었어' },
+      { index: 0, text: longBody('오늘 시험 끝났어') },
+      { index: 1, text: longBody('점심 먹었어') },
     ]);
   });
 
@@ -246,12 +317,12 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
 
     // 검증된 발췌를 눌러도 `recordId`로 정확한 원본 카드가 열린다.
     await userEvent.click(screen.getByRole('button', { name: /점심 먹었어/ }));
     await waitFor(() => expect(screen.getByTestId('story-location').textContent).toBe('?at=b'));
-    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+    expect(screen.getByText(longBody('점심 먹었어'))).toBeTruthy();
 
     // 규칙 문장을 눌렀을 때와 같은 대상이다.
     __setOnDeviceSummaryPluginForTests(null);
@@ -260,8 +331,22 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
   it('공유된 원문 본문에 health/location 사실은 포함하되 ID·시각·메타데이터는 보내지 않는다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
-    const sharedBody = '생리통이 있어 서울역 근처 약국에 들렀어';
-    surface = [record({ id: 'health-location-record', log: sharedBody, time: '14:30' })];
+    const sharedBody = '생리통이 있어 서울역 근처 약국에 들렀고 집에 와서 따뜻한 물을 마시며 쉬었어';
+    surface = [record({
+      id: 'health-location-record',
+      log: sharedBody,
+      time: '14:30',
+      attachments: [{
+        type: 'photo',
+        name: 'IMG_0001.JPG',
+        url: 'https://private.example/signed-photo',
+        latitude: 37.5547,
+        longitude: 126.9706,
+        exifTakenAt: '2026-08-22T14:29:00.000Z',
+      } as never],
+      cycleStartDate: '2026-08-20',
+      healthRecordId: 'health-row-secret',
+    } as Partial<DailyRecord>)];
     surface.push(record({ id: 'second-record', time: '16:00', log: '저녁에 통화할게' }));
     records = surface;
 
@@ -270,27 +355,55 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
     const sent = JSON.stringify(vi.mocked(plugin.refineLines).mock.calls[0][0].items);
     expect(sent).toContain(sharedBody);
-    for (const forbidden of ['health-location-record', 'second-record', PARTNER, TODAY, '14:30', '16:00', 'http', 'filename']) {
+    for (const forbidden of [
+      'health-location-record', 'second-record', PARTNER, TODAY, '14:30', '16:00',
+      '37.5547', '126.9706', 'IMG_0001.JPG', 'signed-photo', 'cycleStartDate',
+      'health-row-secret', 'latitude', 'longitude', 'exifTakenAt', 'http',
+    ]) {
       expect(sent).not.toContain(forbidden);
     }
   });
 
-  it('21개 이상인 하루는 버튼을 먼저 숨기고 모든 deterministic 항목을 유지한다', async () => {
+  it('긴 문장 후보가 6개면 generation은 0회이고 baseline 6줄과 원본 이동을 모두 보존한다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
-    surface = Array.from({ length: 21 }, (_, i) => record({ id: `r${i}`, time: `${String(i).padStart(2, '0')}:00`, log: `기록 ${i}` }));
+    surface = Array.from({ length: 6 }, (_, i) => record({
+      id: `r${i}`,
+      time: `0${i}:00`,
+      log: longBody(`긴 기록 ${i}`),
+    }));
     records = surface;
 
     open('/story/partner');
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull());
-    expect(screen.getByRole('status')).toHaveTextContent('기록이 많은 날은 모든 항목을 원문 중심으로 보여드려요');
+    expect(screen.getByText('오늘 기록 6개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
     expect(plugin.availability).not.toHaveBeenCalled();
     expect(plugin.refineLines).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /기록 0/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: '1개 더 보기' }));
+    await userEvent.click(screen.getByText(/긴 기록 5 /));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=r5'));
+    expect(screen.getByText(longBody('긴 기록 5'))).toBeTruthy();
   });
 
-  it('본문 없는 첨부 기록이 섞이면 합성 문장을 모델에 보내지 않고 원문 목록만 유지한다', async () => {
+  it('모든 본문이 40 UTF-16 단위 이하면 CTA와 native call이 없다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = [
+      record({ id: 'short-a', log: '짧은 첫 기록' }),
+      record({ id: 'short-b', time: '13:00', log: '짧은 둘째 기록' }),
+    ];
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.getByText('오늘 기록 2개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+  });
+
+  it('첨부-only 항목은 사실 문구로 남고 CTA와 native call이 없다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = [
@@ -306,38 +419,49 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner');
 
-    expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
     expect(screen.getByRole('button', { name: /사진을 남겼어요/ })).toBeTruthy();
     expect(plugin.availability).not.toHaveBeenCalled();
     expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
-  it('각 native batch가 독립적인 4초 예산을 받아 8개를 모두 처리한다', async () => {
-    vi.useFakeTimers();
+  it('혼합 목록에서는 긴 문장 1~5개만 한 배치로 보내고 exact local recordId를 유지한다', async () => {
     const plugin = stubPlugin({
-      refineLines: vi.fn((options) => new Promise((resolve) => {
-        setTimeout(() => resolve({
-          requestId: options.requestId,
-          items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-        }), 3500);
+      refineLines: vi.fn(async (options) => ({
+        requestId: options.requestId,
+        items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
       })),
     });
     __setOnDeviceSummaryPluginForTests(plugin);
-    surface = Array.from({ length: 8 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }));
+    const longA = longBody('첫 번째 긴 기록');
+    const longB = longBody('두 번째 긴 기록');
+    surface = [
+      record({ id: 'short-a', time: '08:00', log: '짧은 기록' }),
+      record({ id: 'long-a', time: '09:00', log: longA }),
+      record({
+        id: 'photo-only',
+        time: '10:00',
+        log: '',
+        attachments: [{ type: 'photo', name: 'private.jpg', url: 'https://private.example/photo.jpg' }],
+      }),
+      record({ id: 'long-b', time: '11:00', log: longB }),
+      record({ id: 'short-b', time: '12:00', log: '또 짧은 기록' }),
+    ];
     records = surface;
 
     open('/story/partner');
     await requestAiSummary();
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(3500); });
-    expect(plugin.refineLines).toHaveBeenCalledTimes(2);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3500);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled();
-    expect(screen.queryByRole('button', { name: /AI 다시 시도/ })).toBeNull();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(plugin.refineLines).mock.calls[0][0].items).toEqual([
+      { index: 0, text: longA },
+      { index: 1, text: longB },
+    ]);
+    expect(screen.getByText('짧은 기록')).toBeTruthy();
+    expect(screen.getByText('사진을 남겼어요')).toBeTruthy();
+    expect(screen.getByText('또 짧은 기록')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: /두 번째 긴 기록/ }));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=long-b'));
+    expect(screen.getByText(longB)).toBeTruthy();
   });
 
   it('120자를 넘긴 원문은 모델이 앞부분을 그대로 돌려도 suffix ellipsis를 강제한다', async () => {
@@ -359,7 +483,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
     expect(screen.getByText(`${'가 '.repeat(19)}가…`)).toBeTruthy();
   });
 
@@ -377,7 +501,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     __setOnDeviceSummaryPluginForTests(stubPlugin());
     open('/story/partner');
     await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
     await userEvent.click(screen.getByRole('button', { name: /점심 먹었어/ }));
     await waitFor(() => expect(screen.getByTestId('story-location').textContent).toBe(rulesTarget));
     expect(rulesTarget).toBe('?at=b');
@@ -390,12 +514,11 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner?at=b');
-    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+    expect(screen.getByText(longBody('점심 먹었어'))).toBeTruthy();
     await Promise.resolve();
     expect(plugin.refineLines).not.toHaveBeenCalled();
     // 딥링크는 표지 버튼을 거치지 않으므로 모델을 실행하지 않고 원문을 그대로 연다.
-    expect(screen.getByText('점심 먹었어')).toBeTruthy();
-    expect(screen.queryByText('점심 먹었어.')).toBeNull();
+    expect(screen.getByText(longBody('점심 먹었어'))).toBeTruthy();
   });
 
   it('사라진 원본은 여전히 대체되지 않는다', async () => {
@@ -422,30 +545,34 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
 
-  it('검증에 실패한 응답은 화면에 닿지 않는다', async () => {
-    // 개수·index는 맞지만 한 줄에 원문에 없는 감정을 지어낸 응답.
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => ({
-        requestId: options.requestId,
-        items: [
-          { index: 0, text: safeRefinedText(options.items[0].text) },
-          { index: 1, text: '점심을 먹고 외로워 보여' },
-        ],
-      })),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-    surface = twoToday();
-    records = surface;
+  it.each(CURRENT_VERIFICATION_FAILURES)(
+    '현재 검증 실패 %s 하나라도 생기면 후보 전체를 버리고 baseline만 유지한다',
+    async (_rejection, invalidItems) => {
+      const plugin = stubPlugin({
+        refineLines: vi.fn(async (options) => ({
+          requestId: options.requestId,
+          items: invalidItems(options.items.map((item) => ({
+            index: item.index,
+            text: safeRefinedText(item.text),
+          }))),
+        })),
+      });
+      __setOnDeviceSummaryPluginForTests(plugin);
+      surface = twoToday();
+      records = surface;
 
-    open('/story/partner');
-    await requestAiSummary();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
-    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-    expect(screen.queryByText('점심을 먹고 외로워 보여')).toBeNull();
-    expect(screen.queryByText('오늘 시험 끝났어.')).toBeNull();
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('AI 결과를 안전하게 확인하지 못했어요'));
-    expect(screen.queryByRole('button', { name: 'AI 다시 시도' })).toBeNull();
-  });
+      open('/story/partner');
+      await requestAiSummary();
+      await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
+      expect(screen.queryByText('원문에 없는 관계 해석')).toBeNull();
+      expect(screen.queryByText(`${safeRefinedText(surface[0].log)}…`)).toBeNull();
+      await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+        '기기 AI 결과를 안전하게 확인하지 못했어요. 시간순 정리를 그대로 보여드려요.',
+      ));
+    },
+  );
 
   it('네이티브가 실패해도 화면은 규칙 결과다', async () => {
     const plugin = stubPlugin({
@@ -459,160 +586,13 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await requestAiSummary();
     await waitFor(() => expect(plugin.refineLines).toHaveBeenCalled());
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('기기 AI가 응답하지 않았어요'));
-    expect(screen.getByRole('button', { name: 'AI 다시 시도' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI가 응답하지 않았어요. 시간순 정리를 그대로 보여드려요.',
+    ));
+    expect(screen.getByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeTruthy();
   });
 
-  it('5/6/8개 기록 처리: 5개는 1회 호출, 6개는 2회(5+1), 8개는 2회(5+3) 순차 배치 처리', async () => {
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => ({
-        requestId: options.requestId,
-        items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-      })),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-
-    const records8 = Array.from({ length: 8 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
-    surface = records8;
-    records = surface;
-
-    const view = open('/story/partner');
-    await requestAiSummary();
-    // 8개는 2개 배치 (5 + 3)
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
-
-    const calls = vi.mocked(plugin.refineLines).mock.calls;
-    // 첫 번째 배치: 5개 항목, index 0..4
-    expect(calls[0][0].items).toHaveLength(5);
-    expect(calls[0][0].items.map((it) => it.index)).toEqual([0, 1, 2, 3, 4]);
-    // 두 번째 배치: 3개 항목, index 0..2 (records 6~8인 r5, r6, r7에 해당)
-    expect(calls[1][0].items).toHaveLength(3);
-    expect(calls[1][0].items.map((it) => it.index)).toEqual([0, 1, 2]);
-
-    // 펼친 후 확인
-    const moreBtn = await screen.findByRole('button', { name: '3개 더 보기' });
-    await userEvent.click(moreBtn);
-    // 8개 모두 검증되어 원래 순서로 반영됨
-    expect(screen.getAllByRole('button', { name: /원문 \d$/ })).toHaveLength(8);
-    view.unmount();
-  });
-
-  it('배치 2가 실패하면 모든 줄이 결정론적 규칙 결과로 유지된다', async () => {
-    let callCount = 0;
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => {
-        callCount++;
-        if (callCount === 1) {
-          // 배치 1은 성공
-          return {
-            requestId: options.requestId,
-            items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-          };
-        }
-        // 배치 2는 실패
-        throw new Error('E_ON_DEVICE_SUMMARY');
-      }),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-
-    const records8 = Array.from({ length: 8 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
-    surface = records8;
-    records = surface;
-
-    open('/story/partner');
-    await requestAiSummary();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
-
-    // 배치 2 실패로 인해 첫 번째 배치의 내용도 섞이지 않고 전체가 규칙 원문으로 유지됨
-    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    expect(screen.getByRole('button', { name: /원문 1/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
-  });
-
-  it('나중 배치 한 줄만 원문 출처 검증에 실패해도 앞 배치까지 모두 fallback한다', async () => {
-    let callCount = 0;
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => {
-        callCount += 1;
-        return {
-          requestId: options.requestId,
-          items: options.items.map((item, index) => ({
-            index: item.index,
-            text: callCount === 2 && index === 0
-              ? '원문에 없는 관계 해석'
-              : safeRefinedText(item.text),
-          })),
-        };
-      }),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-    surface = Array.from({ length: 8 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
-    records = surface;
-
-    open('/story/partner');
-    await requestAiSummary();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
-
-    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
-    expect(screen.queryByText('원문에 없는 관계 해석')).toBeNull();
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('AI 결과를 안전하게 확인하지 못했어요'));
-  });
-
-  it('두 번째 배치도 독립적인 4초가 지나야 timeout되고 전체 fallback한다', async () => {
-    vi.useFakeTimers();
-    let callCount = 0;
-    const plugin = stubPlugin({
-      refineLines: vi.fn((options) => {
-        callCount += 1;
-        if (callCount === 1) {
-          return new Promise((resolve) => {
-            setTimeout(() => resolve({
-              requestId: options.requestId,
-              items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-            }), 3000);
-          });
-        }
-        return new Promise(() => undefined);
-      }),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-    surface = Array.from({ length: 8 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
-    records = surface;
-
-    const view = open('/story/partner');
-    await requestAiSummary();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3000);
-    });
-    expect(plugin.refineLines).toHaveBeenCalledTimes(2);
-
-    // 첫 배치가 3초를 썼어도 두 번째 배치는 독립적인 4초 예산을 받는다.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(3999);
-    });
-    expect(plugin.cancel).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '기기에서 정리 중' })).toBeDisabled();
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-    expect(plugin.cancel).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '원문 발췌 완료' })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('AI 다듬기가 제시간에 끝나지 않았어요');
-    expect(screen.getByRole('button', { name: 'AI 다시 시도' })).toBeTruthy();
-    view.unmount();
-  });
-
-  it('화면을 떠나면 진행 중인 배치를 취소하고 다음 배치를 시작하지 않는다', async () => {
+  it('화면을 떠나면 진행 중인 단일 배치를 취소한다', async () => {
     let resolveFirst: ((value: { requestId: string; items: { index: number; text: string }[] }) => void) | undefined;
     const plugin = stubPlugin({
       refineLines: vi.fn((options) => new Promise((resolve) => {
@@ -621,9 +601,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     });
     __setOnDeviceSummaryPluginForTests(plugin);
 
-    surface = Array.from({ length: 8 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
+    surface = twoToday();
     records = surface;
 
     const view = open('/story/partner');
@@ -642,63 +620,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(plugin.refineLines).toHaveBeenCalledTimes(1);
   });
 
-  it('기존 5개 refinement 뒤 6번째가 추가되면 새 배치 완료 전부터 이전 결과를 숨긴다', async () => {
-    let resolveUpdatedFirstBatch:
-      | ((value: { requestId: string; items: { index: number; text: string }[] }) => void)
-      | undefined;
-    let callCount = 0;
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => {
-        callCount += 1;
-        if (callCount === 1) {
-          return {
-            requestId: options.requestId,
-            items: options.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-          };
-        }
-        return new Promise((resolve) => {
-          resolveUpdatedFirstBatch = resolve;
-        });
-      }),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-
-    surface = Array.from({ length: 5 }, (_, i) =>
-      record({ id: `r${i}`, time: `0${i}:00`, log: `원문 ${i}` }),
-    );
-    records = surface;
-    const view = open('/story/partner');
-    await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: '원문 발췌 완료' })).toBeDisabled());
-
-    surface = [
-      ...surface,
-      record({ id: 'r5', time: '05:00', log: '새 원문 5' }),
-    ];
-    records = surface;
-    view.rerender(
-      <MemoryRouter initialEntries={['/story/partner']}>
-        <LocationProbe />
-        <Routes>
-          <Route path="/story/partner" element={<StoryRoute mode="today" />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-
-    // effect가 새 요청을 시작하기 전 렌더부터 stale map의 payloadKey가 달라 즉시 숨겨진다.
-    expect(screen.getByRole('button', { name: /원문 0/ })).toBeTruthy();
-    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
-    expect(screen.getByRole('button', { name: '기기에서 정리 중' })).toBeDisabled();
-
-    const updatedOptions = vi.mocked(plugin.refineLines).mock.calls[1][0];
-    resolveUpdatedFirstBatch?.({
-      requestId: updatedOptions.requestId,
-      items: updatedOptions.items.map((item) => ({ index: item.index, text: safeRefinedText(item.text) })),
-    });
-    view.unmount();
-  });
-
-  it('나중 배치에 Segmenter 부재로 인한 정규화 실패 시 네이티브 플러그인을 아예 호출하지 않는다', async () => {
+  it('Segmenter 없이 긴 Unicode 후보를 안전하게 자를 수 없으면 preflight와 generation을 모두 생략한다', async () => {
     const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
     Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
 
@@ -707,19 +629,18 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     try {
       const longLog = `${'a'.repeat(118)}👨‍👩‍👧‍👦b`;
-      const records8 = [
-        ...Array.from({ length: 5 }, (_, i) => record({ id: `r${i}`, time: `0${i}:00`, log: `짧은 원문 ${i}` })),
-        record({ id: 'r5', time: '05:00', log: longLog }),
-        record({ id: 'r6', time: '06:00', log: '짧은 원문 6' }),
+      const recordsWithUnsafeCandidate = [
+        record({ id: 'short', time: '08:00', log: '짧은 원문' }),
+        record({ id: 'long', time: '09:00', log: longLog }),
       ];
-      surface = records8;
+      surface = recordsWithUnsafeCandidate;
       records = surface;
 
       open('/story/partner');
-      // 배치 검증이 사전에 실패하여 실행 버튼도 내지 않고 플러그인을 단 한 번도 호출하지 않음
-      expect(screen.queryByRole('button', { name: 'AI로 하루 정리' })).toBeNull();
+      expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+      expect(plugin.availability).not.toHaveBeenCalled();
       expect(plugin.refineLines).not.toHaveBeenCalled();
-      expect(screen.getByRole('button', { name: /짧은 원문 0/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /짧은 원문/ })).toBeTruthy();
     } finally {
       if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
     }
@@ -731,29 +652,12 @@ describe('실패 이유와 재시도 정책', () => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
   });
 
-  it('기기 모델이 아직 준비되지 않았으면 규칙 문장을 보존하고 재시도할 수 있다', async () => {
-    const plugin = stubPlugin({
-      availability: vi.fn(async () => ({ available: false, reason: 'model_unavailable' })),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-    surface = twoToday();
-    records = surface;
-
-    open('/story/partner');
-    await requestAiSummary();
-
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('기기 AI가 아직 준비되지 않았어요'));
-    expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'AI 다시 시도' }));
-    await waitFor(() => expect(plugin.availability).toHaveBeenCalledTimes(2));
-  });
-
   it.each([
-    ['locale_unsupported', '한국어 AI 다듬기를 지원하지 않아요'],
-    ['os_too_old', '이 iOS 버전에서는 AI 다듬기를 지원하지 않아요'],
-    ['framework_missing', '이 앱 빌드에서는 AI 다듬기를 지원하지 않아요'],
-    ['record-specific-detail', '이 기기에서는 AI 다듬기를 사용할 수 없어요'],
-  ])('영구 미지원 사유는 상태만 표시하고 재시도 버튼을 두지 않는다: %s', async (reason, message) => {
+    ['device_not_eligible', '이 기기에서는 긴 문장 줄이기를 지원하지 않아요'],
+    ['apple_intelligence_disabled', '기기 설정에서 Apple Intelligence를 켜 주세요'],
+    ['model_not_ready', '기기 AI를 준비하는 중이에요'],
+    ['locale_unsupported', '이 기기의 한국어 처리는 아직 지원하지 않아요'],
+  ])('content-free preflight가 상세 가용성 사유를 구분한다: %s', async (reason, message) => {
     const plugin = stubPlugin({
       availability: vi.fn(async () => ({ available: false, reason })),
     });
@@ -762,11 +666,11 @@ describe('실패 이유와 재시도 정책', () => {
     records = surface;
 
     open('/story/partner');
-    await requestAiSummary();
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(message));
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'AI 다시 시도' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
   it('기능이 명시적으로 꺼져 있으면 내부 운영 상태를 노출하지 않는다', () => {
@@ -793,6 +697,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     __setOnDeviceSummaryPluginForTests(plugin);
     open(path);
     await Promise.resolve();
+    await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
     await waitFor(() => expect(plugin.refineLines).not.toHaveBeenCalled());
     return plugin;
   }
@@ -820,8 +725,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     records = surface;
     await expectNoCall('/story/partner');
     expect(screen.getByRole('dialog', { name: '놓친 하루' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('오늘 기록만 AI로 다듬을 수 있어요');
+    expect(screen.queryByText(/AI/)).toBeNull();
   });
 
   it('순간이 하나뿐 -- 표지가 없다', async () => {
@@ -836,8 +740,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     surface = twoToday();
     records = surface;
     await expectNoCall('/story/partner');
-    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('연결된 상대의 오늘만 AI로 다듬을 수 있어요');
+    expect(screen.queryByText(/AI/)).toBeNull();
   });
 
   it('현재 상대 신원이 아직 확인되지 않았다', async () => {
@@ -845,8 +748,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     surface = twoToday();
     records = surface;
     await expectNoCall('/story/partner');
-    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('상대 정보를 확인한 뒤 AI로 다듬을 수 있어요');
+    expect(screen.queryByText(/AI/)).toBeNull();
   });
 
   it('표지는 있지만 적격한 상대 기록이 하나뿐이다', async () => {
@@ -856,8 +758,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     ];
     records = surface;
     await expectNoCall('/story/partner');
-    expect(screen.queryByRole('button', { name: /AI/ })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('공유 기록이 두 개 이상일 때 AI로 다듬을 수 있어요');
+    expect(screen.queryByText(/AI/)).toBeNull();
   });
 
   it('비공개·읽을 수 없는 기록만 남으면', async () => {
@@ -880,8 +781,7 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     __setOnDeviceSummaryPluginForTests(null);
     open('/story/partner');
     expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'AI로 다듬기' })).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('이 기기에서는 AI 다듬기를 사용할 수 없어요');
+    expect(screen.queryByText(/AI/)).toBeNull();
     await waitFor(() => expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy());
   });
 });

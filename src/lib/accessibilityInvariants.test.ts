@@ -117,7 +117,10 @@ describe('a route change is announced and moves focus', () => {
     const shell = read('src/components/MobileShell.tsx');
     expect(shell).toContain('aria-label="하단 내비게이션"');
     expect(shell).toContain('matchPrefixes');
-    expect(shell).toContain('aria-selected={active}');
+    expect(shell).toContain("aria-current={active ? 'page' : undefined}");
+    expect(shell).not.toContain('role="tablist"');
+    expect(shell).not.toContain('role="tab"');
+    expect(shell).not.toContain('aria-selected={active}');
   });
 
   /*

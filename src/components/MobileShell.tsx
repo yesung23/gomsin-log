@@ -231,7 +231,6 @@ export function MobileShell({ children, hideNav = false, surface = 'paper' }: Mo
             background: 'var(--paper)',
             borderTop: 'var(--stroke) solid var(--ink-faint)',
           }}
-          role="tablist"
           aria-label="하단 내비게이션"
         >
           <ul className="grid grid-cols-5 px-1 pb-[max(env(safe-area-inset-bottom,0px),8px)] items-stretch">
@@ -247,8 +246,7 @@ export function MobileShell({ children, hideNav = false, surface = 'paper' }: Mo
                 <li key={t.to} className="flex justify-center">
                   <Link
                     to={t.to}
-                    role="tab"
-                    aria-selected={active}
+                    aria-current={active ? 'page' : undefined}
                     aria-label={t.label}
                     className={cn(
                       /*

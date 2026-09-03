@@ -7,7 +7,7 @@ import {
   useLocation,
   useNavigate,
 } from 'react-router-dom';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 /**
@@ -182,7 +182,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
 
     expect(screen.getAllByRole('status')).toHaveLength(1);
 
-    await user.click(screen.getByRole('tab', { name: '찾기' }));
+    await user.click(screen.getByRole('link', { name: '찾기' }));
 
     await waitFor(() => {
       expect(screen.getByRole('status')).toHaveTextContent('찾기 화면입니다');
@@ -209,7 +209,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
       expect(homeMain).not.toBeNull();
       const homeFocus = vi.spyOn(homeMain!, 'focus');
 
-      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+      fireEvent.click(screen.getByRole('link', { name: '찾기' }));
 
       const searchMain = screen.getByRole('heading', { name: '찾기' }).closest('main');
       expect(searchMain).not.toBeNull();
@@ -309,7 +309,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
       });
       observer.observe(liveRegion, { childList: true, characterData: true, subtree: true });
 
-      fireEvent.click(screen.getByRole('tab', { name: '일정' }));
+      fireEvent.click(screen.getByRole('link', { name: '일정' }));
       await act(async () => {
         await vi.runAllTimersAsync();
       });
@@ -356,7 +356,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
       expect(oldMain).not.toBeNull();
       const oldFocus = vi.spyOn(oldMain!, 'focus');
 
-      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+      fireEvent.click(screen.getByRole('link', { name: '찾기' }));
       await act(async () => {
         await vi.runAllTimersAsync();
       });
@@ -395,7 +395,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     try {
       renderSeparateShellRoutes();
 
-      fireEvent.click(screen.getByRole('tab', { name: '찾기' }));
+      fireEvent.click(screen.getByRole('link', { name: '찾기' }));
       const searchMain = screen.getByRole('heading', { name: '찾기' }).closest('main');
       expect(searchMain).not.toBeNull();
       const searchFocus = vi.spyOn(searchMain!, 'focus');
@@ -511,7 +511,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     renderShell('/home');
 
-    await user.click(screen.getByRole('tab', { name: '찾기' }));
+    await user.click(screen.getByRole('link', { name: '찾기' }));
 
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('찾기 화면입니다');
@@ -522,15 +522,15 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     renderShell('/home');
 
-    const diaryTab = screen.getByRole('tab', { name: '일기장' });
-    expect(diaryTab).toHaveAttribute('aria-selected', 'false');
+    const diaryTab = screen.getByRole('link', { name: '일기장' });
+    expect(diaryTab).not.toHaveAttribute('aria-current');
     expect(screen.getByTestId('current-path').textContent).toBe('/home');
 
     await user.click(diaryTab);
 
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent).toBe('/diary');
-      expect(diaryTab).toHaveAttribute('aria-selected', 'true');
+      expect(diaryTab).toHaveAttribute('aria-current', 'page');
       expect(screen.getByRole('status').textContent).toBe('일기장 화면입니다');
     });
   });
@@ -539,7 +539,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     const { container } = renderShell('/home');
 
-    const tab = screen.getByRole('tab', { name: '일정' });
+    const tab = screen.getByRole('link', { name: '일정' });
     await user.click(tab);
 
     const main = container.querySelector('#main-content');
@@ -571,7 +571,8 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
       `aria-label` 로 나갔다는 뜻이 아니다.
     */
     renderShell('/home');
-    const tabs = screen.getAllByRole('tab');
+    const navigation = screen.getByRole('navigation', { name: '하단 내비게이션' });
+    const tabs = within(navigation).getAllByRole('link');
     expect(tabs).toHaveLength(5);
     expect(tabs.map((tab) => tab.getAttribute('aria-label')))
       .toEqual(['홈', '찾기', '일기장', '일정', '우리']);
@@ -580,8 +581,8 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
   it('PRESERVATION: the tab bar still lights the section it is in', () => {
     renderShell('/trips/abc');
     // `/trips/:id` is inside 일정, and the highlight must survive a detail screen.
-    expect(screen.getByRole('tab', { name: '일정' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: '홈' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByRole('link', { name: '일정' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: '홈' })).not.toHaveAttribute('aria-current');
   });
 
   it('PRESERVATION: children still render inside main', () => {
@@ -613,6 +614,6 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
 
     expect(main).toHaveClass('garden-shell-surface');
     expect(frame).toHaveClass('garden-shell-surface');
-    expect(screen.queryByRole('tablist', { name: '하단 내비게이션' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '하단 내비게이션' })).not.toBeInTheDocument();
   });
 });

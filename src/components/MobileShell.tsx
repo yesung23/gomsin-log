@@ -1,6 +1,5 @@
 import { Link, useLocation } from 'react-router-dom';
-import { Home, Search, BookHeart, CalendarDays } from 'lucide-react';
-import { InkCircle, PenFace } from '@/components/paper';
+import { Home, Search, BookHeart, CalendarDays, UsersRound } from 'lucide-react';
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import { RouteMainRegistration } from '@/components/RouteAccessibilityManager';
@@ -9,25 +8,12 @@ import { OfflineBanner } from '@/components/OfflineBanner';
 import { SharedSyncBanner } from '@/components/SharedSyncBanner';
 
 /**
- * 하단 탭바 — 다섯 목적지를 처음부터 읽을 수 있는 고정 내비게이션.
+ * 하단 내비게이션 — 다섯 목적지로 이동하는 고정 링크 모음.
  *
- *     곰신로그    홈    찾기    일기장      일정     우리
+ *     곰신로그    홈    찾기    일기장    일정    우리
  *
- * 아이콘의 위치는 반복 사용을 돕지만, BookHeart와 커플 얼굴만 보고 `일기장`과 `우리`를
- * 처음부터 맞히게 해서는 안 된다. 그래서 아이콘 아래에 짧은 이름을 항상 남긴다.
- *
- * 릴스 자리에 일정이 오는 것은 성격이 맞아서다. 다른 넷은 전부 과거와 현재인데 -- 기록·
- * 탐색·작성·축적 -- 일정만 미래다. 인스타에서도 그 칸은 "다른 종류의 것"을 보는 자리다.
- *
- * 가운데 `+` 는 테두리가 있는 사각형이다. 인스타의 만들기 버튼도 그렇고, 무엇보다 이
- * 앱에서 **기록 진입점은 제거할 수 없는 계약**(§7.1)이라 눈에 띄어야 한다.
- *
- * ## 한 번 다른 다섯을 시도했고 되돌렸다
- *
- * `홈 · 나 · 일기장 · 일정 · 우리` 로 바꾼 적이 있다. 각 칸의 내용은 여전히 앱 안에
- * 있지만 -- `나` 는 `우리` 의 통계와 `/service` 로, `일기장` 은 `우리` 의 격자와
- * `기억 만들기` 로 -- **자리를 바꾼 대가가 너무 컸다.** 인스타를 쓰는 사람이 손으로
- * 아는 다섯 자리를 바꾸면 문법을 빌려온 이유 자체가 사라진다.
+ * 화면에는 아이콘만 보이지만 각 링크의 한국어 이름은 `aria-label`로 남긴다. 현재
+ * 목적지는 `aria-current`와 아이콘 아래의 짧은 선으로 함께 표시한다.
  *
  * `matchPrefixes` 는 섹션 안에서 움직이는 동안 탭이 꺼지지 않게 한다. 꺼지면 앱이
  * "당신은 아무 데도 없다"고 말한다. 어느 경로도 빠지지 않는다는 것은
@@ -71,13 +57,10 @@ const TABS = [
     matchPrefixes: ['/schedule', '/trips'],
   },
   {
-    /*
-      인스타의 프로필 탭은 자기 아바타다. 여기서는 커플 아바타이고, `나` 와 `일기장` 이
-      가졌던 것 -- 복무·주기·컨디션과 월별 지면 -- 이 이 안에 있다.
-    */
+    /* `나`가 아니라 둘의 프로필과 축적을 보는 관계 목적지다. */
     to: '/us',
     label: '우리',
-    icon: null,
+    icon: UsersRound,
     matchPrefixes: ['/us', '/me', '/service', '/my', '/settings'],
   },
 ] as const;
@@ -258,36 +241,25 @@ export function MobileShell({ children, hideNav = false, surface = 'paper' }: Mo
                         포인터가 내려가는 순간 걸리므로 바가 먼저 답하고 경로는 올 때
                         온다.
                       */
-                      'press-response flex min-h-[52px] w-full flex-col items-center justify-center gap-0.5 py-1.5',
+                      'press-response relative flex min-h-[52px] w-full flex-col items-center justify-center py-1.5',
                     )}
                   >
-                    {Icon ? (
-                      <Icon
-                        size={23}
-                        className="pen-icon"
-                        color={active ? 'var(--ink)' : 'var(--ink-soft)'}
-                        /*
-                          인스타는 선택된 홈 아이콘을 채운다. 채움이 있는 아이콘에서만
-                          의미가 있으므로 홈에만 준다 -- 달력이나 사각형을 채우면 뭉개진다.
-                        */
-                        fill={active && t.label === '홈' ? 'var(--ink)' : 'none'}
+                    <Icon
+                      size={23}
+                      strokeWidth={active ? 2.25 : 1.75}
+                      className="pen-icon"
+                      color={active ? 'var(--ink)' : 'var(--ink-soft)'}
+                      fill="none"
+                      aria-hidden="true"
+                    />
+                    {active && (
+                      <span
+                        data-active-indicator="true"
                         aria-hidden="true"
+                        className="absolute bottom-1.5 left-1/2 -translate-x-1/2 rounded-full"
+                        style={{ width: 17, height: 2, background: 'var(--ink)' }}
                       />
-                    ) : (
-                      /* 인스타의 프로필 탭은 자기 아바타다. 여기서는 커플 아바타. */
-                      <InkCircle size={26} ring={active ? 'seen' : 'none'}>
-                        <PenFace size={18} />
-                      </InkCircle>
                     )}
-                    <span
-                      className={cn(
-                        'text-caption leading-none',
-                        active ? 'font-semibold' : 'font-medium',
-                      )}
-                      style={{ color: active ? 'var(--ink)' : 'var(--ink-soft)' }}
-                    >
-                      {t.label}
-                    </span>
                   </Link>
                 </li>
               );

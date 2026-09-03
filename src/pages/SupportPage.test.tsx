@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { SupportPage } from '@/pages/SupportPage';
@@ -168,18 +168,19 @@ describe('SupportPage Component', () => {
     expect(termsLink.className).toMatch(/min-w-\[44px\]/);
   });
 
-  it('does not render bottom navigation or tabs on public /support', () => {
+  it('does not render bottom navigation or false tab semantics on public /support', () => {
     render(
       <MemoryRouter>
         <SupportPage contactEmail="help@example.com" />
       </MemoryRouter>,
     );
 
+    expect(screen.queryByRole('navigation', { name: '하단 내비게이션' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: '홈' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
   });
 
-  it('renders bottom navigation with five tabs by default when hideNav is omitted', () => {
+  it('renders bottom navigation with five destination links and no tab roles by default', () => {
     const originalMatchMedia = window.matchMedia;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
@@ -201,8 +202,13 @@ describe('SupportPage Component', () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByRole('tablist', { name: '하단 내비게이션' })).toBeInTheDocument();
-    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    const navigation = screen.getByRole('navigation', { name: '하단 내비게이션' });
+    const links = within(navigation).getAllByRole('link');
+    expect(links).toHaveLength(5);
+    expect(links.map((link) => link.getAttribute('aria-label')))
+      .toEqual(['홈', '찾기', '일기장', '일정', '우리']);
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
     } finally {
       window.matchMedia = originalMatchMedia;
     }
@@ -229,8 +235,9 @@ describe('SupportPage App Router Integration', () => {
 
     expect(await screen.findByRole('heading', { name: '고객지원' })).toBeInTheDocument();
     expect(screen.queryByTestId('onboarding-landing')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '하단 내비게이션' })).not.toBeInTheDocument();
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: '홈' })).not.toBeInTheDocument();
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
   });
 
   it('allows authenticated users to reach /support directly', async () => {

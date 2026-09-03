@@ -14,8 +14,8 @@ import userEvent from '@testing-library/user-event';
  * The behavioural half of `accessibilityInvariants.test.ts`.
  *
  * That suite pins the attributes in source. This one drives the real component:
- * clicks a tab, and asserts that the live region actually says the new screen's
- * name and that focus actually lands in `<main>` instead of staying on the tab in
+ * clicks a destination link, and asserts that the live region actually says the new screen's
+ * name and that focus actually lands in `<main>` instead of staying on the link in
  * the bar at the bottom.
  *
  * Before the fix a tab change announced nothing at all, and focus stayed on the
@@ -507,7 +507,7 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     expect(screen.getByRole('status').textContent).toBe('');
   });
 
-  it('announces the new screen after a tab change', async () => {
+  it('announces the new screen after a primary-destination change', async () => {
     const user = userEvent.setup();
     renderShell('/home');
 
@@ -518,19 +518,20 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     });
   });
 
-  it('가운데 일기장 탭을 클릭하면 /diary 경로로 이동하고 탭이 활성화된다', async () => {
+  it('일기장 링크를 클릭하면 /diary로 이동하고 현재 목적지로 표시된다', async () => {
     const user = userEvent.setup();
     renderShell('/home');
 
-    const diaryTab = screen.getByRole('link', { name: '일기장' });
-    expect(diaryTab).not.toHaveAttribute('aria-current');
+    const diaryLink = screen.getByRole('link', { name: '일기장' });
+    expect(diaryLink).not.toHaveAttribute('aria-current');
     expect(screen.getByTestId('current-path').textContent).toBe('/home');
 
-    await user.click(diaryTab);
+    await user.click(diaryLink);
 
     await waitFor(() => {
       expect(screen.getByTestId('current-path').textContent).toBe('/diary');
-      expect(diaryTab).toHaveAttribute('aria-current', 'page');
+      expect(diaryLink).toHaveAttribute('aria-current', 'page');
+      expect(diaryLink.querySelector('[data-active-indicator]')).toHaveAttribute('aria-hidden', 'true');
       expect(screen.getByRole('status').textContent).toBe('일기장 화면입니다');
     });
   });
@@ -539,14 +540,14 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
     const user = userEvent.setup();
     const { container } = renderShell('/home');
 
-    const tab = screen.getByRole('link', { name: '일정' });
-    await user.click(tab);
+    const destinationLink = screen.getByRole('link', { name: '일정' });
+    await user.click(destinationLink);
 
     const main = container.querySelector('#main-content');
     await waitFor(() => {
       expect(document.activeElement).toBe(main);
     });
-    expect(document.activeElement).not.toBe(tab);
+    expect(document.activeElement).not.toBe(destinationLink);
   });
 
   it('offers the skip link as the first focusable element, pointing at main', async () => {
@@ -578,11 +579,18 @@ describe('MobileShell announces the screen and moves focus on navigation', () =>
       .toEqual(['홈', '찾기', '일기장', '일정', '우리']);
   });
 
-  it('PRESERVATION: the tab bar still lights the section it is in', () => {
-    renderShell('/trips/abc');
-    // `/trips/:id` is inside 일정, and the highlight must survive a detail screen.
-    expect(screen.getByRole('link', { name: '일정' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: '홈' })).not.toHaveAttribute('aria-current');
+  it.each([
+    ['/call', '홈'],
+    ['/record/abc', '찾기'],
+    ['/shop', '일기장'],
+    ['/trips/abc', '일정'],
+    ['/settings', '우리'],
+  ])('PRESERVATION: %s keeps the %s section current', (path, label) => {
+    renderShell(path);
+
+    const activeLink = screen.getByRole('link', { name: label });
+    expect(activeLink).toHaveAttribute('aria-current', 'page');
+    expect(activeLink.querySelector('[data-active-indicator]')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('PRESERVATION: children still render inside main', () => {

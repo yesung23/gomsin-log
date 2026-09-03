@@ -71,6 +71,20 @@ beforeEach(() => {
 });
 
 describe('day-page diary', () => {
+  it('keeps the landing screen self-explanatory and gives an empty diary one clear action', async () => {
+    currentState = stateWith([]);
+    const user = userEvent.setup();
+
+    renderDiary();
+
+    expect(screen.queryByText(/한 달을 열고 날짜를 골라/)).not.toBeInTheDocument();
+    expect(screen.getByText('아직 엮을 것이 없어요.')).toBeInTheDocument();
+    expect(screen.queryByText(/오늘 있었던 일을 하나 남기면/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '첫 기록 남기기' }));
+    expect(navigate).toHaveBeenCalledWith('/compose');
+  });
+
   it('shows one recent readable moment before opening a month', () => {
     renderDiary();
 

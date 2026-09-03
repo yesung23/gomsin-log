@@ -20,9 +20,12 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *    the record set did not change, locks couple rows first, transfers shared
  *    plan ownership, removes private/blocking rows, and deletes records in one
  *    database transaction.
- * 3. Remove the couple row only when this account is its sole member. A current
+ * 4. Call the service-role-only close_account_relationship_generations RPC.
+ *    It terminally closes every relationship generation, revokes pairing and
+ *    delivery authority, disconnects both members, and invalidates invitations.
+ * 5. Remove the couple row only when this account is its sole member. A current
  *    or former partner membership preserves the shared relationship scope.
- * 4. Delete the Auth user only after database preparation succeeds.
+ * 6. Delete the Auth user only after every database step succeeds.
  *
  * Storage, Postgres, and Auth cannot share one transaction. Every phase is
  * retry-safe, but a failed later phase may follow a completed media cleanup.
@@ -352,6 +355,33 @@ export async function handleDeleteAccountRequest(
       throw new Error('Account deletion database preparation did not confirm success');
     }
     databasePreparationCompleted = true;
+
+    // Relationship identity is a one-use generation. This service-only step
+    // runs after ownership transfer/deletion has committed and before either
+    // sole-couple cleanup or Auth deletion. Its per-user advisory lock is shared
+    // with relationship creation/redemption, while the durable deletion request
+    // makes later attempts fail closed after the lock is released.
+    //
+    // `databasePreparationCompleted` is intentionally already true: if this
+    // call fails, relational user data has been removed by the preceding RPC,
+    // so the response must preserve the existing `dataRemoved: true` recovery
+    // meaning and Auth deletion must not run.
+    const {
+      data: relationshipClosure,
+      error: relationshipClosureError,
+    } = await admin.rpc('close_account_relationship_generations', {
+      p_user_id: userId,
+    });
+    if (relationshipClosureError) throw relationshipClosureError;
+    if (
+      !relationshipClosure
+      || typeof relationshipClosure !== 'object'
+      || relationshipClosure.ok !== true
+      || !Number.isInteger(relationshipClosure.closed_count)
+      || relationshipClosure.closed_count < 0
+    ) {
+      throw new Error('Account deletion relationship closure did not confirm success');
+    }
 
     // `couples` has no auth.users foreign key, so Auth deletion alone cannot
     // remove a sole-member relationship row (including anniversary metadata).

@@ -26,6 +26,8 @@ type AdminOptions = {
   deleteUserError?: unknown;
   e2eePrepareError?: unknown;
   prepareError?: unknown;
+  closeRelationshipsError?: unknown;
+  closeRelationshipsData?: unknown;
   cleanupCouplesError?: unknown;
 };
 
@@ -78,6 +80,17 @@ function makeAdmin(options: AdminOptions = {}) {
         return options.prepareError
           ? { data: null, error: options.prepareError }
           : { data: { ok: true }, error: null };
+      }
+      if (name === 'close_account_relationship_generations') {
+        if (options.closeRelationshipsError) {
+          return { data: null, error: options.closeRelationshipsError };
+        }
+        return {
+          data: Object.hasOwn(options, 'closeRelationshipsData')
+            ? options.closeRelationshipsData
+            : { ok: true, closed_count: 1 },
+          error: null,
+        };
       }
       if (name === 'cleanup_account_solo_couples') {
         return options.cleanupCouplesError
@@ -175,6 +188,50 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(relationalAt).toBeLessThan(authAt);
   });
 
+  it('closes every relationship generation after relational preparation and before cleanup or Auth deletion', async () => {
+    const admin = makeAdmin();
+    await post(admin);
+    const preparationAt = admin.calls.indexOf('rpc:prepare_account_deletion');
+    const closeAt = admin.calls.indexOf('rpc:close_account_relationship_generations');
+    const cleanupAt = admin.calls.indexOf('rpc:cleanup_account_solo_couples');
+    const authAt = admin.calls.indexOf('auth.admin.deleteUser');
+
+    expect(closeAt).toBeGreaterThan(preparationAt);
+    expect(closeAt).toBeLessThan(cleanupAt);
+    expect(cleanupAt).toBeLessThan(authAt);
+  });
+
+  it('fails closed after data preparation when relationship closure errors', async () => {
+    const admin = makeAdmin({
+      closeRelationshipsError: { message: 'relationship close failed' },
+    });
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true, warnings: [] });
+    expect(admin.calls).toContain('rpc:close_account_relationship_generations');
+    expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('fails closed when relationship closure does not return an explicit valid confirmation', async () => {
+    for (const closeRelationshipsData of [
+      null,
+      {},
+      { ok: false, closed_count: 1 },
+      { ok: true, closed_count: -1 },
+      { ok: true, closed_count: 1.5 },
+    ]) {
+      const admin = makeAdmin({ closeRelationshipsData });
+      const response = await post(admin);
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ dataRemoved: true });
+      expect(admin.calls).not.toContain('rpc:cleanup_account_solo_couples');
+      expect(admin.calls).not.toContain('auth.admin.deleteUser');
+    }
+  });
+
   it('leaves the flag SET when Auth deletion fails, and reports dataRemoved: true', async () => {
     const admin = makeAdmin({ deleteUserError: { message: 'auth deletion failed' } });
     const response = await post(admin);
@@ -215,6 +272,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'rpc:begin_account_deletion',
       'rpc:e2ee_prepare_account_deletion',
       'rpc:prepare_account_deletion',
+      'rpc:close_account_relationship_generations',
       'rpc:cleanup_account_solo_couples',
       'auth.admin.deleteUser',
     ]);

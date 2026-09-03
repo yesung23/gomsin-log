@@ -305,6 +305,16 @@ test('care actions create distinct one-shot reactions without adding a garden sc
   await expect(page.getByTestId('garden-live-region')).toContainText('둘째 친구가 반갑게 손을 흔들어요');
   expect(await sage.locator('.garden-limb-arm-right').evaluate((node) => getComputedStyle(node).animationName))
     .toBe('garden-care-wave-arm');
+
+  const firstWaveArt = await page.getByTestId('garden-companion-art-sage').elementHandle();
+  expect(firstWaveArt).not.toBeNull();
+  await sage.click();
+  await page.getByRole('button', { name: '둘째 친구에게 인사하기' }).click();
+  await expect.poll(async () => firstWaveArt?.evaluate((node) => node.isConnected))
+    .toBe(false);
+  await expect(sage).toHaveAttribute('data-care-reaction', 'wave');
+  expect(await sage.locator('.garden-limb-arm-right').evaluate((node) => getComputedStyle(node).animationName))
+    .toBe('garden-care-wave-arm');
   await expect(sage).toHaveAttribute('data-care-reaction', 'none', { timeout: 3_000 });
 
   await page.getByRole('button', { name: '꾸미기와 함께 놀기' }).click();

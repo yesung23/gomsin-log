@@ -730,6 +730,25 @@ describe('OnboardingPage step 3 - couple space', () => {
   });
 
   describe('Step 4-6 wizard flow, accessible inputs, and skip options', () => {
+    it('uses concise role choices from the same illustration language instead of emoji instructions', async () => {
+      storeState.onboardingStep = 1;
+      render(<OnboardingPage />);
+
+      await waitFor(() => expect(screen.getByText('곰신로그를 어떻게 사용할까요?')).toBeInTheDocument());
+      expect(screen.queryByText('역할에 따라 맞춤 기능이 제공돼요.')).not.toBeInTheDocument();
+
+      const gomsin = screen.getByRole('button', { name: /나는 곰신이에요/ });
+      const soldier = screen.getByRole('button', { name: /나는 군화예요/ });
+      expect(screen.getByText('내 하루를 남겨요')).toBeInTheDocument();
+      expect(screen.getByText('상대의 오늘을 이어 봐요')).toBeInTheDocument();
+      expect(gomsin.querySelector('svg')).not.toBeNull();
+      expect(soldier.querySelector('svg')).not.toBeNull();
+      expect(document.body).not.toHaveTextContent('🌸');
+      expect(document.body).not.toHaveTextContent('🪖');
+
+      storeState.onboardingStep = 3;
+    });
+
     it('supports anniversary skip toggle and label association on step 4', async () => {
       createCoupleInvitation.mockResolvedValue({ coupleId: 'couple-1', code: '123456' });
       await mountStep3();

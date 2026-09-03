@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { PenFace } from '@/components/paper/InkCircle';
 import { Button } from '@/components/ui/Button';
 import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
 import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
@@ -961,39 +962,22 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   <CoupleAvatar size={84} />
                 </div>
                 <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
-                <div className="space-y-1">
-                  <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
-                    함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.
-                  </p>
-                  <p className="text-muted-foreground text-body font-medium leading-relaxed break-keep">
-                    답장이 늦어도, 서로의 하루는 놓치지 않도록.
-                  </p>
-                </div>
+                <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
+                  답장이 늦어도, 서로의 하루를 이어 둘만의 기억으로 남겨요.
+                </p>
 
                 {/*
                   What signing in actually commits you to.
 
                   A first-run visitor could not tell from this screen that the app
                   needs a PARTNER -- they signed in, met a role picker, and only
-                  discovered at step 3 that the thing is unusable alone. Three lines
-                  is enough to set that expectation before the decision, and it is a
-                  real sequence, so it is numbered.
+                  discovered at step 3 that the thing is unusable alone. One quiet
+                  sentence sets that expectation without turning sign-in into a
+                  tutorial.
                 */}
-                <ol className="pt-2 mx-auto w-fit text-left space-y-1.5">
-                  {['역할과 닉네임을 고르고', '상대를 초대하면', '둘만의 공간이 열려요'].map(
-                    (line, index) => (
-                      <li key={line} className="flex items-center gap-2 text-caption text-muted-foreground">
-                        <span
-                          aria-hidden="true"
-                          className="w-5 h-5 shrink-0 rounded-full bg-muted text-foreground font-bold flex items-center justify-center tabular-nums"
-                        >
-                          {index + 1}
-                        </span>
-                        {line}
-                      </li>
-                    ),
-                  )}
-                </ol>
+                <p className="pt-1 text-caption text-muted-foreground">
+                  가입 후 상대를 초대해 함께 사용해요.
+                </p>
               </div>
 
               <div className="space-y-3">
@@ -1059,7 +1043,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   action, rather than only to people who can see it greyed out.
                 */}
                 {!legalGatePassed && (
-                  <p id="legal-gate-reason" className="text-caption text-muted-foreground text-center break-keep">
+                  <p id="legal-gate-reason" className="sr-only">
                     위 두 항목에 동의하면 로그인할 수 있어요.
                   </p>
                 )}
@@ -1139,37 +1123,40 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
               <div className="space-y-6">
                 <div>
                   <h2 className="text-title">곰신로그를 어떻게 사용할까요?</h2>
-                  <p className="text-body text-muted-foreground mt-1">역할에 따라 맞춤 기능이 제공돼요.</p>
                 </div>
 
                 <div className="space-y-3">
                   <button
                     onClick={() => setRole('gomsin')}
-                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
                       role === 'gomsin'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-display">🌸</span>
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                      <PenFace size={42} tone="b" />
+                    </span>
                     <div className="flex-1">
                       <div className="text-heading text-foreground">나는 곰신이에요</div>
-                      <div className="text-caption text-muted-foreground mt-1">하루의 순간을 편하게 남길게요</div>
+                      <div className="text-caption text-muted-foreground mt-1">내 하루를 남겨요</div>
                     </div>
                   </button>
 
                   <button
                     onClick={() => setRole('soldier')}
-                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
                       role === 'soldier'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-display">🪖</span>
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                      <PenFace size={42} tone="a" />
+                    </span>
                     <div className="flex-1">
                       <div className="text-heading text-foreground">나는 군화예요</div>
-                      <div className="text-caption text-muted-foreground mt-1">연인의 오늘을 놓치지 않고 볼게요</div>
+                      <div className="text-caption text-muted-foreground mt-1">상대의 오늘을 이어 봐요</div>
                     </div>
                   </button>
                 </div>
@@ -1670,17 +1657,12 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           {step === 7 && (
             <div className="flex-1 flex flex-col justify-between py-8 text-center">
               <div className="pt-12 space-y-4">
-                <div className="w-20 h-20 bg-coral/15 rounded-full flex items-center justify-center mx-auto text-display">
-                  {role === 'gomsin' ? '🌸' : '🪖'}
+                <div className="flex justify-center">
+                  <CoupleAvatar size={72} />
                 </div>
                 <h2 className="text-title text-foreground">
                   우리 둘만의 곰신로그가 준비됐어요.
                 </h2>
-                <p className="text-body text-muted-foreground">
-                  {role === 'gomsin'
-                    ? '오늘부터 편하게 하루의 순간을 남겨보세요.'
-                    : '곰신이 남긴 오늘 하루를 놓치지 않고 따라잡아볼까요?'}
-                </p>
               </div>
 
               <Button variant="primary" size="lg" full

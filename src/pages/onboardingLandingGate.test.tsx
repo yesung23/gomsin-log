@@ -85,7 +85,7 @@ describe('the sign-in buttons do not claim they will work before they will', () 
   it('marks them unavailable, and says why, while consent is missing', async () => {
     renderLanding();
     expect(await google()).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText('위 두 항목에 동의하면 로그인할 수 있어요.')).toBeInTheDocument();
+    expect(screen.getByText('위 두 항목에 동의하면 로그인할 수 있어요.')).toHaveClass('sr-only');
   });
 
   it('does not start a sign-in when consent is missing', async () => {
@@ -149,15 +149,17 @@ describe('email sign-in is gone', () => {
 describe('it says what the app is before asking for an account', () => {
   it('names the problem rather than the category', () => {
     renderLanding();
-    expect(screen.getByText('함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.')).toBeInTheDocument();
-    expect(screen.getByText('답장이 늦어도, 서로의 하루는 놓치지 않도록.')).toBeInTheDocument();
+    expect(screen.getByText('답장이 늦어도, 서로의 하루를 이어 둘만의 기억으로 남겨요.')).toBeInTheDocument();
+    expect(screen.queryByText('함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.')).not.toBeInTheDocument();
+    expect(screen.queryByText('답장이 늦어도, 서로의 하루는 놓치지 않도록.')).not.toBeInTheDocument();
   });
 
   it('sets the expectation that a partner is needed, before signing in', () => {
     // Someone could previously sign in, pick a role and name themselves before
     // discovering at step 3 that the app is unusable alone.
     renderLanding();
-    expect(screen.getByText('상대를 초대하면')).toBeInTheDocument();
+    expect(screen.getByText('가입 후 상대를 초대해 함께 사용해요.')).toBeInTheDocument();
+    expect(screen.queryByText('상대를 초대하면')).not.toBeInTheDocument();
   });
 });
 

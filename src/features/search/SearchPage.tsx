@@ -22,6 +22,7 @@ import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent, Branch, MilitaryStatus } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 
 /**
  * 찾기 — `우리`의 색인.
@@ -228,15 +229,19 @@ function InlineServiceInfo({
   const currentTier = expState.tier;
 
   return (
-    <section className="ink-box relative space-y-3.5 overflow-hidden p-4" data-testid="soldier-service-info">
+    <section
+      aria-labelledby="service-summary-heading"
+      className="ink-box relative space-y-3.5 overflow-hidden p-4"
+      data-testid="soldier-service-info"
+    >
       {/* Level-up / Promo Accessible Feedback */}
       {feedback ? (
         <div
           role="status"
           aria-live="polite"
           className={cn(
-            'flex items-center gap-1.5 rounded-lg border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong motion-safe:transition-all motion-safe:duration-300',
-            feedback.isBent && 'ring-2 ring-coral/20 motion-safe:animate-pulse',
+            'flex items-center gap-1.5 rounded-control border border-coral-strong/30 bg-coral/15 px-3 py-1.5 text-caption font-bold text-coral-strong',
+            feedback.isBent && 'ring-2 ring-coral/20',
           )}
           data-testid="service-feedback"
           data-tier-effect={feedback.isBent ? 'bent' : 'none'}
@@ -257,7 +262,13 @@ function InlineServiceInfo({
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h2 className="text-label font-bold" style={{ color: 'var(--ink)' }}>{title}</h2>
+              <h2
+                id="service-summary-heading"
+                className="text-heading break-keep [overflow-wrap:anywhere]"
+                style={{ color: 'var(--ink)' }}
+              >
+                {title}
+              </h2>
             </div>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
@@ -272,7 +283,7 @@ function InlineServiceInfo({
             </div>
           </div>
         </div>
-        <div className="text-right">
+        <div className="shrink-0 text-right">
           <span className="text-heading font-bold text-card-foreground tabular-nums">
             {expState.isDischarged
               ? '전역'
@@ -310,7 +321,7 @@ function InlineServiceInfo({
             style={{ width: `${expState.totalPercent}%`, background: 'var(--ink-accent)' }}
           />
         </div>
-        <div className="flex justify-between gap-3 text-caption text-muted-foreground">
+        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
           <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
           <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
         </div>
@@ -411,7 +422,7 @@ function InlineServiceInfo({
         {/* The full tier map stays secondary; the live current level remains visible above. */}
         <div id="service-tier-rail">
           {showAllTiers ? (
-            <div className="relative pt-2 pb-1" data-testid="service-tier-rail" aria-label="복무 레벨 성장 단계">
+            <div className="relative pt-2 pb-1" data-testid="service-tier-rail">
               {/* Background track */}
               <div className="absolute top-[26px] left-[7.14%] right-[7.14%] h-0.5 -translate-y-1/2 bg-border" />
               {/* Active progress rail */}
@@ -424,13 +435,14 @@ function InlineServiceInfo({
                 }}
               />
 
-              <div className="relative grid grid-cols-7 gap-0.5">
+              <ol aria-label="복무 레벨 성장 단계" className="relative grid list-none grid-cols-7 gap-0.5">
                 {expState.tierStops.map((stage: ServiceTierStop, idx: number) => {
                   return (
-                    <div
+                    <li
                       key={stage.key}
                       data-testid={`service-tier-step-${idx + 1}`}
                       data-tier-key={stage.key}
+                      aria-current={stage.isCurrent ? 'step' : undefined}
                       className={cn(
                         'flex flex-col items-center justify-center px-0.5 text-center motion-safe:transition-all',
                         stage.isCurrent && 'scale-105',
@@ -456,7 +468,7 @@ function InlineServiceInfo({
 
                       <span
                         className={cn(
-                          'text-caption leading-tight truncate w-full',
+                          'w-full text-caption leading-tight break-keep',
                           stage.isCurrent ? 'font-bold text-coral-strong' : stage.isPast ? 'font-semibold text-card-foreground' : 'text-muted-foreground',
                         )}
                       >
@@ -465,17 +477,17 @@ function InlineServiceInfo({
                       <span className="text-caption text-muted-foreground tabular-nums">
                         {stage.minPercent}%
                       </span>
-                    </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ol>
             </div>
           ) : null}
         </div>
       </div>
 
       {contact?.enabled ? (
-        <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
           평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
         </p>
@@ -520,7 +532,8 @@ function SoldierSearchSurface({
           type="button"
           onClick={onOpenService}
           aria-label="내 복무 현황 열기"
-          className="press-response w-full rounded-control border border-border bg-card p-4 text-left"
+          className="press-response ink-box min-h-11 w-full p-4 text-left"
+          style={{ background: 'var(--paper)' }}
         >
           <div className="flex items-center gap-2">
             <Shield size={16} className="text-muted-foreground" aria-hidden="true" />
@@ -537,7 +550,8 @@ function SoldierSearchSurface({
           type="button"
           onClick={onOpenService}
           aria-label="복무 정보 입력하기"
-          className="press-response w-full rounded-control border border-border bg-card p-4 text-left"
+          className="press-response ink-box min-h-11 w-full p-4 text-left"
+          style={{ background: 'var(--paper)' }}
         >
           <div className="flex items-center gap-2">
             <Shield size={16} className="text-muted-foreground" aria-hidden="true" />
@@ -552,25 +566,30 @@ function SoldierSearchSurface({
       )}
 
       {nextLeave ? (
-        <div className="rounded-control border border-border bg-card p-4" data-testid="soldier-next-leave">
-          <div className="flex items-center gap-2">
-            <Calendar size={16} className="text-muted-foreground" aria-hidden="true" />
-            <span className="text-label font-bold text-card-foreground">
-              {nextLeave.eventType === 'vacation' ? '다음 휴가' : '다음 면회'}
-            </span>
-            <span className="ml-auto text-label font-bold text-coral-strong tabular-nums">
-              {nextLeave.startDate === today ? 'D-Day' : `D-${daysBetweenLocal(today, nextLeave.startDate)}`}
-            </span>
+        <section aria-labelledby="next-leave-heading" className="pt-1" data-testid="soldier-next-leave">
+          <div className="ink-rule" aria-hidden="true" />
+          <div className="flex min-h-11 items-start gap-3 py-3">
+            <Calendar size={16} className="mt-1 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0 flex-1 space-y-1">
+              <div className="flex items-baseline justify-between gap-3">
+                <h2 id="next-leave-heading" className="text-label font-bold text-card-foreground">
+                  {nextLeave.eventType === 'vacation' ? '다음 휴가' : '다음 면회'}
+                </h2>
+                <span className="shrink-0 text-label font-bold text-coral-strong tabular-nums">
+                  {nextLeave.startDate === today ? 'D-Day' : `D-${daysBetweenLocal(today, nextLeave.startDate)}`}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <span className="min-w-0 text-label font-semibold text-card-foreground break-keep [overflow-wrap:anywhere]">
+                  {nextLeave.title || (nextLeave.eventType === 'vacation' ? '휴가' : '면회')}
+                </span>
+                <span className="shrink-0 text-caption text-muted-foreground">
+                  {formatLocalDate(nextLeave.startDate)}
+                </span>
+              </div>
+            </div>
           </div>
-          <div className="mt-2 flex items-center justify-between">
-            <span className="text-label font-semibold text-card-foreground truncate">
-              {nextLeave.title || (nextLeave.eventType === 'vacation' ? '휴가' : '면회')}
-            </span>
-            <span className="text-caption text-muted-foreground shrink-0 ml-2">
-              {formatLocalDate(nextLeave.startDate)}
-            </span>
-          </div>
-        </div>
+        </section>
       ) : null}
     </div>
   );
@@ -687,15 +706,27 @@ function SearchPageBody() {
 
   return (
     <div className="min-h-full pb-24">
+      <AppBar
+        title="찾기"
+        actions={(
+          <AppBarAction
+            aria-label="기록 남기기"
+            onClick={() => navigate('/compose')}
+            className="h-11 w-11"
+          >
+            <SquarePen size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+          </AppBarAction>
+        )}
+      />
       <div className="px-4 pt-3 pb-2">
         <form
           role="search"
           aria-label="기록 찾기"
           onSubmit={(event) => event.preventDefault()}
-          className="flex items-center gap-2"
+          className="flex items-center"
         >
           <div
-            className="ink-chip flex flex-1 items-center gap-2 px-3"
+            className="ink-chip flex min-w-0 flex-1 items-center gap-2 px-3 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--ring)]"
             data-testid="record-search-field"
             style={{ background: 'var(--paper)' }}
           >
@@ -709,8 +740,9 @@ function SearchPageBody() {
               aria-describedby="record-search-help"
               aria-controls="record-search-results"
               enterKeyHint="search"
-              type="search"
-              className="hand-text min-h-11 w-full flex-1 bg-transparent text-body outline-none placeholder:text-[var(--ink-soft)] placeholder:opacity-100"
+              type="text"
+              role="searchbox"
+              className="min-h-11 min-w-0 w-full flex-1 bg-transparent text-body outline-none placeholder:text-[var(--ink-soft)] placeholder:opacity-100"
               style={{ color: 'var(--ink)' }}
             />
             {query ? (
@@ -728,18 +760,9 @@ function SearchPageBody() {
             ) : null}
           </div>
 
-          {/* §7.1. 조건 없이 그린다 -- 이 버튼이 사라지는 상태는 존재하지 않는다. */}
-          <button
-            type="button"
-            aria-label="기록 남기기"
-            onClick={() => navigate('/compose')}
-            className="press-response ink-chip flex h-11 w-11 items-center justify-center"
-          >
-            <SquarePen size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-          </button>
         </form>
 
-        <p id="record-search-help" className="pt-1.5 text-caption" style={{ color: 'var(--ink-soft)' }}>
+        <p id="record-search-help" className="pt-1.5 text-caption leading-relaxed break-keep" style={{ color: 'var(--ink-soft)' }}>
           {/* 왜 기기 안인지 말한다. 제약처럼 보이는 것이 실은 이 구조가 준 것이다. */}
           이 기기 안에서만 찾아요 · 8/14 처럼 날짜로도 찾을 수 있어요
         </p>
@@ -805,7 +828,7 @@ function Results({
         </p>
       )}
 
-      <ul className="px-4">
+      <ul aria-label="검색 결과" className="px-4">
         {result.matches.map((match) => {
           const { before, hit, after } = excerptAround(match);
           const [, month, day] = match.record.date.split('-');
@@ -814,7 +837,7 @@ function Results({
               <button
                 type="button"
                 onClick={() => onOpen(match.record)}
-                className="press-response-row flex min-h-11 w-full flex-col items-start gap-1 py-3 text-left"
+                className="press-response-row flex min-h-11 min-w-0 w-full flex-col items-start gap-1 py-3 text-left"
               >
                 <span className="text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
                   {Number(month)}월 {Number(day)}일 {match.record.time}
@@ -823,7 +846,7 @@ function Results({
                   발췌는 원문 그대로다. 앱이 문장을 만들지 않고(§6.2), 찾던 말만 다른 색으로
                   표시해 사용자가 맞는 것을 찾았는지 바로 알게 한다.
                 */}
-                <span className="hand-text text-body" style={{ color: 'var(--ink)' }}>
+                <span className="hand-text w-full text-body break-keep [overflow-wrap:anywhere]" style={{ color: 'var(--ink)' }}>
                   {result.kind === 'date' ? match.snippet : (
                     <>
                       {before}

@@ -429,6 +429,17 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
 });
 
 describe('검색 입력 및 네비게이션', () => {
+  it('페이지 제목과 기록 진입점을 같은 상단 landmark에서 제공한다', () => {
+    renderSearch();
+
+    const pageHeading = screen.getByRole('heading', { name: '찾기', level: 1 });
+    const pageHeader = pageHeading.closest('header');
+    const composeButton = screen.getByRole('button', { name: '기록 남기기' });
+
+    expect(pageHeader).not.toBeNull();
+    expect(pageHeader).toContainElement(composeButton);
+  });
+
   it('상단 검색창과 기록 남기기 버튼이 상시 존재한다', () => {
     renderSearch();
 
@@ -448,6 +459,16 @@ describe('검색 입력 및 네비게이션', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/compose');
   });
 
+  it('검색창은 앱의 이름 있는 지우기 버튼만 사용한다', () => {
+    renderSearch();
+
+    const input = screen.getByRole('searchbox', { name: '쓴 말이나 날짜로 찾기' });
+    expect(input).toHaveAttribute('type', 'text');
+
+    fireEvent.change(input, { target: { value: '면회' } });
+    expect(screen.getAllByRole('button', { name: '검색어 지우기' })).toHaveLength(1);
+  });
+
   it('검색어를 입력하면 검색 결과가 표시되고 주 콘텐츠(복무/주기)는 가려진다', () => {
     const records = [
       createRecord({ id: 'rec-1', log: '오늘 면회 와줘서 너무 고마웠어' }),
@@ -462,6 +483,22 @@ describe('검색 입력 및 네비게이션', () => {
     expect(screen.getByRole('status')).toHaveTextContent('1개 찾았어요');
     expect(screen.getByText('면회')).toBeInTheDocument();
     expect(screen.queryByTestId('soldier-search-surface')).not.toBeInTheDocument();
+  });
+
+  it('검색 결과 목록을 접근 가능한 이름으로 구분한다', () => {
+    const longLog = `면회 ${'아주긴기록문장'.repeat(24)}`;
+    currentState = stateWith({
+      role: 'soldier',
+      records: [createRecord({ id: 'long-record', log: longLog })],
+    });
+    renderSearch();
+
+    fireEvent.change(screen.getByPlaceholderText('쓴 말이나 날짜로 찾기'), {
+      target: { value: '면회' },
+    });
+
+    const results = screen.getByRole('list', { name: '검색 결과' });
+    expect(results).toHaveTextContent('면회');
   });
 
   it('검색 결과 항목을 클릭하면 정확한 ?record= id 로 이동한다', () => {
@@ -516,6 +553,19 @@ describe('검색 입력 및 네비게이션', () => {
 
     expect(screen.getByTestId('soldier-search-surface')).toBeInTheDocument();
     expect(input).toHaveFocus();
+  });
+});
+
+describe('검색 화면의 비색상 상태 의미', () => {
+  it('펼친 복무 단계에서 현재 단계를 aria-current로 한 번만 알린다', () => {
+    currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
+    renderSearch();
+
+    fireEvent.click(screen.getByRole('button', { name: '전체 단계' }));
+
+    const currentSteps = document.querySelectorAll('[aria-current="step"]');
+    expect(currentSteps).toHaveLength(1);
+    expect(currentSteps[0]).toHaveTextContent(computeServiceExp(SERVING_MILITARY)!.tier.label);
   });
 });
 

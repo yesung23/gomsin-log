@@ -41,6 +41,7 @@ import { createTask, deleteTask, fetchTasks, updateTask, validateTaskTitle } fro
 import { supabase } from '@/lib/supabase';
 import { useDialogFocus } from '@/lib/useDialogFocus';
 import type { CoupleEvent, CoupleTask, EventType } from '@/types';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 
 const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent' | 'info' | 'success' | 'warning' }> = {
   anniversary: { label: '기념일', tone: 'accent' },
@@ -845,24 +846,30 @@ export function SchedulePage() {
 
   return (
     <MobileShell>
+      <AppBar
+        title="우리의 계획"
+        actions={!picking ? (
+          <AppBarAction
+            aria-label="일정 추가"
+            onClick={() => {
+              if (!hasCoupleSpace) return;
+              setPicking(true);
+              setPickedDays([]);
+            }}
+            disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
+            className="disabled:opacity-40"
+          >
+            <Plus size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+          </AppBarAction>
+        ) : undefined}
+      />
       {/*
         일정이 공책 위로 옮겨졌다 (2026-08-22, §5).
 
         달력 문법은 이 앱에서 여기만 소유한다 -- 요일을 맞추고 미래를 담는다. 표면만
         바뀌었고 셀 계산·이벤트·실시간 구독은 그대로다.
       */}
-      <div className="notebook min-h-full pb-28 px-4 pt-5 space-y-5">
-        {/*
-          제목줄을 걷어냈다 (2026-08-23).
-
-          `우리의 계획` 이라는 앱바와 그 아래 `2026년 8월` 이 따로 있었다. 프리뷰는 달
-          이름이 곧 헤더이고 그 줄 오른쪽에 `‹ › +` 가 있다 -- 인스타의 화면들이 그렇듯
-          제목이 곧 지금 보고 있는 것이다. 화면 이름을 한 번 더 적는 줄은 종이를 먹는다.
-
-          `+` 는 채운 알약이 아니라 펜 획이다. 종이 위에서 채운 알약은 그 화면에서 유일하게
-          앱처럼 보이는 물건이 된다.
-        */}
-
+      <div className="min-h-full space-y-6 px-4 pb-28 pt-3">
         <PlanSectionNav active="schedule" />
 
         {!authenticatedUser ? (
@@ -896,7 +903,7 @@ export function SchedulePage() {
             {!activeCouple && (
               <Card>
                 <div className="flex items-start gap-3">
-                  <Users size={18} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <Users size={18} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <div className="min-w-0">
                     <p className="text-label font-semibold text-foreground break-keep">
                       {profile.couple.status === 'pending' ? '파트너 연결을 기다리고 있어요' : '연결된 우리 공간이 없어요'}
@@ -913,16 +920,16 @@ export function SchedulePage() {
 
             {/* Anniversary D-Day - compact row, not a large card */}
             {anniversaryDate && daysTogether !== null && (
-              <div className="flex items-center justify-between px-1 py-2">
-                <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1 py-1">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-2">
                   <Heart size={14} className="fill-coral text-coral" aria-hidden="true" />
                   <span className="text-label font-semibold text-foreground">함께한 지</span>
-                  <span className="text-display text-foreground tabular-nums">
+                  <span className="text-title text-foreground tabular-nums">
                     {daysTogether > 0 ? `+${daysTogether}일` : dDayLabel(anniversaryDate, today)}
                   </span>
                 </div>
                 {nextMilestone && (
-                  <span className="text-caption text-muted-foreground">
+                  <span className="shrink-0 text-caption text-muted-foreground">
                     {nextMilestone.label} D-{nextMilestone.daysRemaining}
                   </span>
                 )}
@@ -930,9 +937,9 @@ export function SchedulePage() {
             )}
 
             {/* Calendar grid */}
-            <section aria-label="달력">
+            <section aria-labelledby="schedule-calendar-heading">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-heading" style={{ color: 'var(--ink)' }}>{currYear}년 {currMonth + 1}월</h2>
+                <h2 id="schedule-calendar-heading" className="text-heading" style={{ color: 'var(--ink)' }}>{currYear}년 {currMonth + 1}월</h2>
                 <div className="flex items-center gap-1">
                   {picking ? (
                     <button
@@ -950,7 +957,7 @@ export function SchedulePage() {
                     aria-label="이전 달"
                     className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronLeft size={18} className="pen-icon" color="var(--ink)" />
+                    <ChevronLeft size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -958,23 +965,8 @@ export function SchedulePage() {
                     aria-label="다음 달"
                     className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronRight size={18} className="pen-icon" color="var(--ink)" />
+                    <ChevronRight size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
                   </button>
-                  {!picking ? (
-                    <button
-                      type="button"
-                      aria-label="일정 추가"
-                      onClick={() => {
-                        if (!hasCoupleSpace) return;
-                        setPicking(true);
-                        setPickedDays([]);
-                      }}
-                      disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-                      className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control disabled:opacity-40"
-                    >
-                      <Plus size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-                    </button>
-                  ) : null}
                 </div>
               </div>
               <div className="-mx-3 grid grid-cols-7 gap-0 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
@@ -1030,6 +1022,7 @@ export function SchedulePage() {
                       aria-label={picking
                         ? `${date}${inPick ? ', 선택됨' : ''}`
                         : `${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
+                      aria-current={isToday ? 'date' : undefined}
                       aria-pressed={isSelected}
                       /*
                         달력 칸도 손으로 그린 것이다 (2026-08-23).
@@ -1083,7 +1076,7 @@ export function SchedulePage() {
               */}
               {picking ? (
                 <div className="mt-3 flex items-center gap-3">
-                  <p className="text-label flex-1" style={{ color: 'var(--ink)' }}>{pickedLabel}</p>
+                  <p className="min-w-0 flex-1 text-label break-keep [overflow-wrap:anywhere]" style={{ color: 'var(--ink)' }}>{pickedLabel}</p>
                   <Button
                     variant="primary"
                     size="sm"
@@ -1094,22 +1087,23 @@ export function SchedulePage() {
                   </Button>
                 </div>
               ) : (
-                <p className="mt-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
+                <p className="mt-2 text-caption leading-relaxed break-keep" style={{ color: 'var(--ink-soft)' }}>
                   일정 추가를 누른 뒤 날짜를 누르거나 끌어 골라요. 떨어진 날도 하나씩 더할 수 있어요
                 </p>
               )}
             </section>
 
             {/* Selected date events and tasks */}
-            <section>
+            <section aria-labelledby="selected-date-heading">
               <SectionHeader
+                titleId="selected-date-heading"
                 title={`${selectedDate.slice(5)} 일정`}
                 action={
                   <button
                     type="button"
                     onClick={openCreateModal}
                     disabled={!hasCoupleSpace || isOffline}
-                    className="press-response text-caption font-semibold disabled:opacity-40 min-h-11 flex items-center" style={{ color: 'var(--ink)' }}
+                    className="press-response flex min-h-11 items-center text-caption font-semibold break-keep disabled:opacity-40" style={{ color: 'var(--ink)' }}
                   >
                     이 날짜에 추가
                   </button>
@@ -1173,7 +1167,7 @@ export function SchedulePage() {
                     onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }}
                     placeholder="우리 할 일 빠르게 추가"
                     aria-label="할 일 제목"
-                    className="ink-chip w-full bg-transparent px-3 py-2 text-body outline-none min-h-11"
+                    className="ink-chip min-h-11 w-full bg-transparent px-3 py-2 text-body"
                   />
                   <div className="flex items-center gap-2">
                     <input
@@ -1233,7 +1227,7 @@ export function SchedulePage() {
 
               {/* Tasks list */}
               {selectedTasks.length > 0 && (
-                <RowGroup className="mb-3">
+                <RowGroup aria-label="선택한 날짜의 할 일" className="mb-3">
                   {selectedTasks.map((task) => {
                     const pending = pendingTaskIds.has(task.id);
                     return (
@@ -1247,7 +1241,7 @@ export function SchedulePage() {
                             aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`}
                             className="press-response disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2" style={{ color: 'var(--ink)' }}
                           >
-                            {task.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                            {task.completed ? <CheckCircle2 size={18} aria-hidden="true" /> : <Circle size={18} aria-hidden="true" />}
                           </button>
                         }
                         trailing={
@@ -1259,13 +1253,13 @@ export function SchedulePage() {
                               aria-label={`${task.title} 할 일 삭제`}
                               className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={14} aria-hidden="true" />
                             </button>
                           ) : undefined
                         }
                         density="tight"
                       >
-                        <p className={`text-label font-semibold break-keep ${task.completed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{task.title}</p>
+                        <p className={`text-label font-semibold break-keep [overflow-wrap:anywhere] ${task.completed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{task.title}</p>
                         <p className="text-caption text-muted-foreground tabular-nums">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p>
                       </ListRow>
                     );
@@ -1275,7 +1269,7 @@ export function SchedulePage() {
 
               {/* Events for selected date */}
               {selectedEvents.length > 0 && (
-                <RowGroup>
+                <RowGroup aria-label="선택한 날짜의 일정">
                   {selectedEvents.map((event) => {
                     const badge = EVENT_BADGES[event.eventType];
                     const isAuthor = event.createdBy === authenticatedUser?.id;
@@ -1297,7 +1291,7 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 수정`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
-                                <Pencil size={14} />
+                                <Pencil size={14} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -1306,21 +1300,21 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 삭제`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={14} aria-hidden="true" />
                               </button>
                             </div>
                           ) : undefined
                         }
                       >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-label font-semibold text-foreground break-keep">{event.title}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="min-w-0 text-label font-semibold text-foreground break-keep [overflow-wrap:anywhere]">{event.title}</span>
                           <Badge tone={badge.tone}>{badge.label}</Badge>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                           {event.isPrivate ? (
-                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Lock size={10} />나만 보기</span>
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Lock size={10} aria-hidden="true" />나만 보기</span>
                           ) : (
-                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Users size={10} />둘이 보기</span>
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Users size={10} aria-hidden="true" />둘이 보기</span>
                           )}
                           {event.talkAbout && <span className="text-caption font-medium text-coral-strong">꼭 얘기</span>}
                         </div>
@@ -1343,10 +1337,10 @@ export function SchedulePage() {
             </section>
 
             {/* Upcoming events */}
-            <section>
-              <SectionHeader title="다가오는 일정" />
+            <section aria-labelledby="upcoming-events-heading">
+              <SectionHeader titleId="upcoming-events-heading" title="다가오는 일정" />
               {upcoming.length > 0 ? (
-                <RowGroup>
+                <RowGroup aria-label="다가오는 일정 목록">
                   {upcoming.map((event) => {
                     const badge = EVENT_BADGES[event.eventType];
                     const isAuthor = event.createdBy === authenticatedUser?.id;
@@ -1355,7 +1349,7 @@ export function SchedulePage() {
                       <ListRow
                         key={event.id}
                         leading={
-                          <span className="text-caption text-muted-foreground tabular-nums w-11 text-right">
+                          <span className="w-11 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
                             {isOngoing ? '진행 중' : dDayLabel(event.startDate, today)}
                           </span>
                         }
@@ -1369,7 +1363,7 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 수정`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
-                                <Pencil size={14} />
+                                <Pencil size={14} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -1378,17 +1372,17 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 삭제`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={14} aria-hidden="true" />
                               </button>
                             </div>
                           ) : undefined
                         }
                       >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-label font-semibold text-foreground break-keep">{event.title}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="min-w-0 text-label font-semibold text-foreground break-keep [overflow-wrap:anywhere]">{event.title}</span>
                           <Badge tone={badge.tone}>{badge.label}</Badge>
                         </div>
-                        <p className="text-caption text-muted-foreground mt-0.5">
+                        <p className="mt-0.5 text-caption text-muted-foreground [overflow-wrap:anywhere]">
                           {event.startDate}{event.endDate ? ` ~ ${event.endDate}` : ''}
                           {event.isPrivate && ' · 나만 보기'}
                           {event.talkAbout && ' · 꼭 얘기'}

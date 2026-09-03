@@ -139,6 +139,40 @@ describe('SchedulePage loading lifecycle', () => {
     expect(reloadCalls).toHaveBeenCalledTimes(1);
   });
 
+  it('페이지 제목과 일정 추가를 같은 상단 landmark에서 제공한다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    const pageHeading = screen.getByRole('heading', { name: '우리의 계획', level: 1 });
+    const pageHeader = pageHeading.closest('header');
+    const createButton = await screen.findByRole('button', { name: '일정 추가' });
+
+    expect(pageHeader).not.toBeNull();
+    expect(pageHeader).toContainElement(createButton);
+  });
+
+  it('선택한 날짜와 다가오는 일정 영역을 제목으로 탐색할 수 있다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await screen.findByRole('button', { name: '일정 추가' });
+
+    expect(screen.getByRole('region', { name: /\d{2}-\d{2} 일정/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '다가오는 일정' })).toBeInTheDocument();
+  });
+
+  it('오늘 날짜를 색과 별개인 달력 의미로 알린다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await screen.findByRole('button', { name: '일정 추가' });
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    expect(screen.getByRole('button', { name: new RegExp(`^${today},`) }))
+      .toHaveAttribute('aria-current', 'date');
+  });
+
   it('keeps keyboard focus inside the event dialog and restores its opener', async () => {
     setOnLine(true);
     renderSchedulePage();

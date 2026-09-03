@@ -103,6 +103,8 @@ const EXEMPTIONS: Record<string, Record<string, string>> = {
     // Read-only
     fetchMyCoupleState: 'Read-only: reads couple lifecycle state, no mutation',
     fetchAuthProviderAvailability: 'Read-only: reads public Auth provider settings',
+    fetchAuthProviderAvailabilityFrom:
+      'Read-only testable boundary: reads public Auth provider settings without account data',
     isConfigured: 'Read-only: returns boolean configuration check',
     // `loadState` / `saveState` were listed here for `SupabaseLogRepository`, a
     // dead exported placeholder that was never instantiated. It has been deleted, so the entries are gone

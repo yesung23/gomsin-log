@@ -1,0 +1,14 @@
+{
+  "name": "@gomsinlog/capacitor-storekit",
+  "version": "0.1.0",
+  "description": "iOS-only StoreKit 2 bridge for verified transactions and App Store display metadata.",
+  "private": true,
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "capacitor": {
+    "ios": { "src": "ios" }
+  },
+  "peerDependencies": { "@capacitor/core": "^7.0.0" },
+  "files": ["dist/", "ios/", "GomsinlogCapacitorStorekit.podspec"]
+}

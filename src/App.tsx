@@ -16,6 +16,7 @@ import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
+import { AppleIapSessionBridge } from '@/components/AppleIapSessionBridge';
 import { RouteAccessibilityManager } from '@/components/RouteAccessibilityManager';
 import { MilitaryOnlyRoute } from '@/components/MilitaryOnlyRoute';
 import { AppLoadingState } from '@/components/ui/AppLoadingState';
@@ -374,6 +375,7 @@ function AppContent() {
             MobileShell, so shell-level accessibility tests and isolated routes
             remain usable without a StoreProvider. */}
         <NotificationReentryBridge />
+        <AppleIapSessionBridge />
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           {/* Legal documents must be reachable before sign-in too (store listing requirement). */}

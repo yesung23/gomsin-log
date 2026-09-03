@@ -49,6 +49,7 @@ import { ProfileCaptionEditor } from '@/components/ProfileCaptionEditor';
 import { isValidUsername, normalizeUsername } from '@/lib/profileCaption';
 import type { GenderIdentity, ProfileDateType } from '@/types';
 import { resolveRelationshipContext } from '@/lib/relationshipContext';
+import { restoreApplePurchases } from '@/lib/iap/runtime';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
@@ -155,6 +156,7 @@ export function SettingsPage() {
     status: 'TEMPORARILY_UNAVAILABLE',
   });
   const [isProtectionBusy, setIsProtectionBusy] = useState(false);
+  const [isRestoringPurchases, setIsRestoringPurchases] = useState(false);
   const [setupResult, setSetupResult] = useState<BootstrapResult | null>(null);
   const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
   const [recoveryArtifactInput, setRecoveryArtifactInput] = useState('');
@@ -1023,6 +1025,23 @@ export function SettingsPage() {
             >
               <span className="text-label font-semibold text-foreground">PWA 홈 화면 설치 방법</span>
             </PressableRow>
+
+            {Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios' ? (
+              <PressableRow
+                onClick={() => {
+                  if (!settingsIdentityKey || isRestoringPurchases) return;
+                  setIsRestoringPurchases(true);
+                  void restoreApplePurchases(settingsIdentityKey)
+                    .then(() => toast.success('App Store 구매 내역을 확인했어요.'))
+                    .catch(() => toast.error('구매 내역을 복원하지 못했어요. 잠시 후 다시 시도해 주세요.'))
+                    .finally(() => setIsRestoringPurchases(false));
+                }}
+                leading={<RefreshCw size={18} className="text-coral" aria-hidden="true" />}
+                trailing={<span className="text-caption text-muted-foreground">{isRestoringPurchases ? '확인 중…' : 'App Store'}</span>}
+              >
+                <span className="text-label font-semibold text-foreground">구매 복원</span>
+              </PressableRow>
+            ) : null}
           </RowGroup>
         </section>
 

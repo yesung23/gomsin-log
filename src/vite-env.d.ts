@@ -1,6 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  /** New Apple IAP sales only. Exact string `'true'` enables; unset is OFF. */
+  readonly VITE_APPLE_IAP_SALE_ENABLED?: string;
   readonly VITE_SUPABASE_URL?: string;
   readonly VITE_SUPABASE_PUBLISHABLE_KEY?: string;
   readonly VITE_LEGAL_OPERATOR_NAME?: string;

@@ -34,6 +34,8 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>GomsinlogAppleIAPSaleEnabled</key>
+	<string>$(GOMSINLOG_APPLE_IAP_NATIVE_SALE_ENABLED)</string>
 
 	<!--
 		OAuth return path. `authRedirectUrl()` in src/lib/platform.ts builds

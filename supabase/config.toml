@@ -12,3 +12,12 @@ verify_jwt = true
 
 [functions.verify-recovery]
 verify_jwt = true
+
+[functions.apple-iap-sync]
+verify_jwt = true
+
+[functions.apple-iap-notifications]
+verify_jwt = false
+
+[functions.apple-iap-reconcile]
+verify_jwt = false

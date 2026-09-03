@@ -520,6 +520,18 @@ export async function handleDeleteAccountRequest(
     soloCouplesDeleted = cleanedCouples.deleted_count as number;
     currentPhase = 'solo_cleanup_complete';
 
+    // Billing identity is account-owned, not couple-owned. Remove the live
+    // user/token link and close unused rights before Auth deletion, while the
+    // private ledger keeps only pseudonymous refund/delivery evidence.
+    const { data: iapPreparation, error: iapPreparationError } = await admin.rpc(
+      'iap_prepare_account_deletion',
+      { p_user_id: userId },
+    );
+    if (iapPreparationError) throw iapPreparationError;
+    if (!iapPreparation || typeof iapPreparation !== 'object') {
+      throw new Error('IAP deletion preparation did not confirm success');
+    }
+
     // The last irreversible step, and the only one whose failure leaves a live
     // account with its data already removed, so it gets a few attempts.
     let deleteUserError: unknown = null;

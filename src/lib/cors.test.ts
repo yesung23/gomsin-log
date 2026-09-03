@@ -66,7 +66,9 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
                 ? { ok: true, phase: 'relationships_closed', closed_count: 1 }
                 : name === 'cleanup_account_solo_couples_v2'
                   ? { ok: true, phase: 'solo_cleanup_complete', deleted_count: 0 }
-                  : null,
+                  : name === 'iap_prepare_account_deletion'
+                    ? { binding_tombstoned: true, entitlements_removed: 0, credits_closed: 0 }
+                    : null,
         error: null,
       };
     }),
@@ -315,6 +317,7 @@ describe('C2 - the delete-account function applies the table end to end', () => 
       'rpc:prepare_account_deletion_v2',
       'rpc:close_account_relationship_generations_v2',
       'rpc:cleanup_account_solo_couples_v2',
+      'rpc:iap_prepare_account_deletion',
       'auth.admin.deleteUser',
     ]);
   });

@@ -36,6 +36,7 @@ type AdminOptions = {
   closeRelationshipsData?: unknown;
   cleanupCouplesError?: unknown;
   cleanupCouplesData?: unknown;
+  iapPrepareError?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
@@ -166,6 +167,11 @@ function makeAdmin(options: AdminOptions = {}) {
                 : 1,
             error: null,
           };
+      }
+      if (name === 'iap_prepare_account_deletion') {
+        return options.iapPrepareError
+          ? { data: null, error: options.iapPrepareError }
+          : { data: { binding_tombstoned: true, entitlements_removed: 1, credits_closed: 0 }, error: null };
       }
       return { data: null, error: null };
     }),
@@ -438,6 +444,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'rpc:prepare_account_deletion_v2',
       'rpc:close_account_relationship_generations_v2',
       'rpc:cleanup_account_solo_couples_v2',
+      'rpc:iap_prepare_account_deletion',
       'auth.admin.deleteUser',
     ]);
   });
@@ -494,6 +501,15 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(admin.calls).toContain('rpc:cleanup_account_solo_couples_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
     expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+  });
+
+  it('does not delete Auth when IAP tombstoning cannot be confirmed', async () => {
+    const admin = makeAdmin({ iapPrepareError: { message: 'iap cleanup failed' } });
+    const response = await post(admin);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
   it('uses app_metadata and never user_metadata', async () => {

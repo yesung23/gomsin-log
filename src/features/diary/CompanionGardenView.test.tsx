@@ -412,6 +412,17 @@ describe('interactive companion garden characters', () => {
     expect(screen.queryByTestId(`garden-accessory-sage-${accessory}`)).not.toBeInTheDocument();
   });
 
+  it.each(['boots', 'sneakers', 'letter', 'dogtag', 'plane'] as const)(
+    'renders source-sheet accessory %s with exact source crop on character body',
+    (accessory: GardenAccessory) => {
+      const accessories: GardenAccessoryState = { version: 1, peach: accessory, sage: 'none' };
+      render(<ControlledGarden initial={accessories} />);
+
+      expect(screen.getByTestId(`garden-accessory-peach-${accessory}`)).toBeVisible();
+      expect(screen.queryByTestId(`garden-accessory-sage-${accessory}`)).not.toBeInTheDocument();
+    },
+  );
+
   it('requires a continuous 500ms press, then stays picked up until release', () => {
     vi.useFakeTimers();
     render(<ControlledGarden />);

@@ -1,5 +1,15 @@
 export type GardenCompanionId = 'peach' | 'sage';
-export type GardenAccessory = 'none' | 'cap' | 'bow' | 'scarf' | 'flower';
+export type GardenAccessory =
+  | 'none'
+  | 'cap'
+  | 'bow'
+  | 'scarf'
+  | 'flower'
+  | 'boots'
+  | 'sneakers'
+  | 'letter'
+  | 'dogtag'
+  | 'plane';
 
 export interface GardenAccessoryState {
   version: 1;
@@ -13,6 +23,11 @@ export const GARDEN_ACCESSORY_OPTIONS: readonly { id: GardenAccessory; label: st
   { id: 'bow', label: '리본' },
   { id: 'scarf', label: '목도리' },
   { id: 'flower', label: '꽃' },
+  { id: 'boots', label: '군화' },
+  { id: 'sneakers', label: '운동화' },
+  { id: 'letter', label: '하트 편지' },
+  { id: 'dogtag', label: '군번줄' },
+  { id: 'plane', label: '종이비행기' },
 ] as const;
 
 export const DEFAULT_GARDEN_ACCESSORIES: GardenAccessoryState = {

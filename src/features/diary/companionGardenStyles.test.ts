@@ -50,5 +50,12 @@ describe('companion garden motion CSS', () => {
     expect(reduced).toContain('animation: none');
     expect(reduced).toContain('transition: none');
     expect(reduced).not.toMatch(/\.garden-companion-position\s*\{[^}]*transition:\s*none/s);
+    expect(reduced).toContain('.accessory-roulette-spinning');
+  });
+
+  it('defines an accessory-roulette-spin keyframe and spinning class', () => {
+    expect(css).toContain('@keyframes accessory-roulette-spin');
+    expect(css).toContain('.accessory-roulette-spinning');
+    expect(css).toMatch(/\.accessory-roulette-spinning\s*\{[^}]*animation:\s*accessory-roulette-spin/s);
   });
 });

@@ -13,6 +13,17 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe('companion garden local accessories', () => {
+  it('supports newly added source-sheet accessory IDs while keeping legacy IDs valid', () => {
+    saveGardenAccessory('alice', 'peach', 'boots');
+    saveGardenAccessory('alice', 'sage', 'letter');
+
+    expect(loadGardenAccessories('alice')).toEqual({
+      version: 1,
+      peach: 'boots',
+      sage: 'letter',
+    });
+  });
+
   it('starts with no accessories and persists independent choices for the two companions', () => {
     expect(loadGardenAccessories('alice')).toEqual(DEFAULT_GARDEN_ACCESSORIES);
 

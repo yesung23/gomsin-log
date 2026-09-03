@@ -19,6 +19,7 @@ import {
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
 import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
+import { isSourceAccessory, SOURCE_ACCESSORY_CROPS } from './gardenAccessoryCrops';
 import type { CompanionGardenState } from './companionGarden';
 import {
   CompanionGardenActionSheet,
@@ -91,6 +92,17 @@ const CHARACTER_POSE_CROPS: Record<GardenCompanionId, Record<'idle', string>> = 
   sage: {
     idle: '156 514 138 155',
   },
+};
+
+const SOURCE_ACCESSORY_PLACEMENTS: Record<
+  keyof typeof SOURCE_ACCESSORY_CROPS,
+  { x: number; y: number; width: number; height: number }
+> = {
+  boots: { x: 38, y: 44, width: 22, height: 34 },
+  sneakers: { x: 36, y: 44, width: 22, height: 36 },
+  letter: { x: 34, y: 40, width: 30, height: 21 },
+  dogtag: { x: 26, y: 38, width: 18, height: 32 },
+  plane: { x: 34, y: 34, width: 26, height: 30 },
 };
 
 type PressSession = {
@@ -190,6 +202,29 @@ function GardenAccessoryGlyph({
 }) {
   if (accessory === 'none') return null;
   const testId = `garden-accessory-${companion}-${accessory}`;
+  if (isSourceAccessory(accessory)) {
+    const crop = SOURCE_ACCESSORY_CROPS[accessory];
+    const placement = SOURCE_ACCESSORY_PLACEMENTS[accessory];
+    return (
+      <svg
+        data-testid={testId}
+        viewBox={crop.viewBox}
+        x={placement.x}
+        y={placement.y}
+        width={placement.width}
+        height={placement.height}
+        style={{ overflow: 'visible' }}
+      >
+        <image
+          href={paperPairAsset}
+          width="1254"
+          height="1254"
+          pointerEvents="none"
+          style={{ imageRendering: 'auto' }}
+        />
+      </svg>
+    );
+  }
   if (accessory === 'cap') {
     return (
       <g data-testid={testId}>

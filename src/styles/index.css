@@ -1225,11 +1225,26 @@ input[type='range']::-webkit-slider-thumb {
 @media (prefers-reduced-motion: reduce) {
   .garden-companion-walking .garden-companion-body,
   .garden-companion-walking .garden-limb,
-  .garden-companion-lifted .garden-limb {
+  .garden-companion-lifted .garden-limb,
+  .accessory-roulette-spinning {
     animation: none !important;
   }
 
   .garden-companion-pressed {
     transition: none !important;
   }
+}
+
+/* Accessory draw roulette spin animation */
+@keyframes accessory-roulette-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(1080deg);
+  }
+}
+
+.accessory-roulette-spinning {
+  animation: accessory-roulette-spin 1.2s cubic-bezier(0.2, 0.8, 0.3, 1) forwards;
 }

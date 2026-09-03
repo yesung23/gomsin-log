@@ -83,6 +83,20 @@ describe('companion shop account-local collection', () => {
     expect(result.lastFreeDrawDate).toBe('2026-09-01');
   });
 
+  it('collects source-sheet accessories and normalizes both source and legacy items in stable order', () => {
+    saveCompanionShopState('u1', {
+      version: 1,
+      ownedAccessories: ['cap', 'boots'],
+      ownedPapers: ['plain', 'ruled'],
+      lastFreeDrawDate: null,
+    });
+
+    const result = collectCompanionAccessory('u1', 'letter');
+
+    expect(result.ownedAccessories).toEqual(['cap', 'boots', 'letter']);
+    expect(loadCompanionShopState('u1').ownedAccessories).toEqual(['cap', 'boots', 'letter']);
+  });
+
   it('is idempotent when the selected accessory is already owned', () => {
     saveCompanionShopState('u1', {
       version: 1,

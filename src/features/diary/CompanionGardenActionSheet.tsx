@@ -10,6 +10,8 @@ import {
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
 import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
+import { GardenAccessoryArt } from './GardenAccessoryArt';
+import { isSourceAccessory } from './gardenAccessoryCrops';
 
 export type GardenMoveDirection = 'up' | 'down' | 'left' | 'right';
 
@@ -207,6 +209,9 @@ export function CompanionGardenActionSheet({
                     aria-label={`${label} 친구 ${option.label}`}
                     className="sr-only"
                   />
+                  {isSourceAccessory(option.id) ? (
+                    <GardenAccessoryArt accessory={option.id} className="mr-1.5 h-4 w-4" />
+                  ) : null}
                   <span aria-hidden="true">{option.label}</span>
                 </label>
               ))}

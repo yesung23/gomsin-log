@@ -298,6 +298,10 @@
   --card: oklch(1 0 0);
   --card-foreground: var(--navy);
   --garden-surface: #ffffff;
+  --garden-ink: #2a2723;
+  --garden-ink-soft: #746e64;
+  --garden-character-paper: #f4edda;
+  --garden-character-outline: #555149;
   --muted: oklch(0.96 0.009 18);
   --muted-foreground: oklch(0.55 0.03 260);
   /* Hairlines carry the same hue: a neutral grey rule on a warm page reads dirty. */
@@ -1067,6 +1071,23 @@ input[type='range']::-webkit-slider-thumb {
   background-color: var(--garden-surface);
 }
 
+.garden-header {
+  background-image: none;
+  color: var(--garden-ink);
+}
+
+.garden-header .pen-icon {
+  color: var(--garden-ink);
+}
+
+.garden-ink {
+  color: var(--garden-ink);
+}
+
+.garden-ink-muted {
+  color: var(--garden-ink-soft);
+}
+
 .garden-character-frame {
   position: absolute;
   inset: 0;
@@ -1087,7 +1108,9 @@ input[type='range']::-webkit-slider-thumb {
 .garden-limb {
   position: absolute;
   border-radius: 9999px;
-  background-color: var(--ink);
+  background-color: var(--garden-character-paper);
+  border: 1px solid var(--garden-character-outline);
+  box-sizing: border-box;
   pointer-events: none;
   transform-origin: center top;
 }

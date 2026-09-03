@@ -830,15 +830,18 @@ export function CompanionGardenView({
   }, [announce, cancelInteraction, suppressNextClick]);
 
   const lostPointerCapturePickup = useCallback((id: GardenCompanionId, event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (ignoredPointersRef.current.get(event.pointerId) === id) {
+      ignoredPointersRef.current.delete(event.pointerId);
+      return;
+    }
     const session = pressSessions.current[id];
-    if (session && session.pointerId === event.pointerId) {
-      const label = id === 'peach' ? '첫째' : '둘째';
-      if (session.activated) {
-        suppressNextClick(id);
-        announce(`${label} 친구를 내려놓았어요.`);
-      } else {
-        announce(`${label} 친구 들어 올리기가 취소되었어요.`);
-      }
+    if (!session || session.pointerId !== event.pointerId) return;
+    const label = id === 'peach' ? '첫째' : '둘째';
+    if (session.activated) {
+      suppressNextClick(id);
+      announce(`${label} 친구를 내려놓았어요.`);
+    } else {
+      announce(`${label} 친구 들어 올리기가 취소되었어요.`);
     }
     cancelInteraction(id, event);
   }, [announce, cancelInteraction, suppressNextClick]);
@@ -916,18 +919,18 @@ export function CompanionGardenView({
       : '함께한 날을 설정하면 정원이 자라기 시작해요.';
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col', state.isAvailable ? 'garden-surface bg-white text-foreground' : 'bg-background')}>
+    <div className={cn('flex h-full min-h-0 flex-col', state.isAvailable ? 'garden-surface' : 'bg-background')}>
       <AppBar
         title={<span className="sr-only">정원</span>}
         onBack={onBack}
         backLabel="이전 화면으로"
-        className={state.isAvailable ? 'garden-surface bg-white shadow-none [&_.ink-rule]:hidden' : undefined}
+        className={state.isAvailable ? 'garden-header garden-surface shadow-none [&_.ink-rule]:hidden' : undefined}
         actions={state.isAvailable ? (
           <button
             type="button"
             onClick={(event) => openActionSheet('peach', event.currentTarget)}
             aria-label="꾸미기와 함께 놀기"
-            className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-foreground"
+            className="garden-ink press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control"
           >
             <Palette size={20} aria-hidden="true" />
           </button>
@@ -935,15 +938,15 @@ export function CompanionGardenView({
       />
 
       {state.isAvailable ? (
-        <section className="garden-surface flex min-h-0 flex-1 flex-col bg-white" aria-label="정원 현황">
+        <section className="garden-surface flex min-h-0 flex-1 flex-col" aria-label="정원 현황">
           <div className="garden-landscape-summary px-4 pb-3 pt-4">
-            <p className="text-caption font-medium text-muted-foreground">함께한 {state.togetherDays}일</p>
+            <p className="garden-ink-muted text-caption font-medium">함께한 {state.togetherDays}일</p>
           </div>
 
           <div
             ref={sceneRef}
             data-testid="garden-scene"
-            className="garden-landscape-scene garden-surface relative min-h-0 flex-1 overflow-hidden bg-white"
+            className="garden-landscape-scene garden-surface relative min-h-0 flex-1 overflow-hidden"
           >
             <GardenCompanion
               id="peach"

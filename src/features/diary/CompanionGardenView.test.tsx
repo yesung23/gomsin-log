@@ -294,7 +294,7 @@ describe('interactive companion garden characters', () => {
     expect(screen.queryByText('정원은 점수나 미션 없이 함께한 시간만 따라 자라요.')).not.toBeInTheDocument();
     const scene = screen.getByTestId('garden-scene');
     expect(scene).toHaveClass('garden-surface');
-    expect(scene).toHaveClass('bg-white');
+    expect(scene).not.toHaveClass('bg-white');
     expect(scene).not.toHaveClass('bg-card');
     expect(scene).not.toHaveClass('border-y');
     expect(screen.getByTestId('garden-scene')).not.toHaveAttribute('style');
@@ -449,6 +449,33 @@ describe('interactive companion garden characters', () => {
     fireEvent.pointerUp(sage, { pointerId: 42, pointerType: 'touch', clientX: 280, clientY: 450 });
     expect(peach).toHaveAttribute('data-lifted', 'true');
     fireEvent.pointerUp(peach, { pointerId: 41, pointerType: 'touch', clientX: 90, clientY: 450 });
+    expect(peach).toHaveAttribute('data-lifted', 'false');
+  });
+
+  it('does not cancel a primary hold when an ignored pointer loses capture on the same companion', () => {
+    vi.useFakeTimers();
+    render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+
+    fireEvent.pointerDown(peach, {
+      pointerId: 71,
+      pointerType: 'touch',
+      button: 0,
+      clientX: 90,
+      clientY: 450,
+    });
+    fireEvent.pointerDown(peach, {
+      pointerId: 72,
+      pointerType: 'touch',
+      button: 0,
+      clientX: 92,
+      clientY: 452,
+    });
+    fireEvent.lostPointerCapture(peach, { pointerId: 72, pointerType: 'touch' });
+    act(() => vi.advanceTimersByTime(500));
+
+    expect(peach).toHaveAttribute('data-lifted', 'true');
+    fireEvent.pointerUp(peach, { pointerId: 71, pointerType: 'touch', clientX: 90, clientY: 450 });
     expect(peach).toHaveAttribute('data-lifted', 'false');
   });
 

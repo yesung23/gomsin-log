@@ -7,7 +7,12 @@ describe('companion garden motion CSS', () => {
 
   it('defines a semantic white surface token and class in light and dark themes', () => {
     expect(css).toContain('--garden-surface: #ffffff;');
+    expect(css).toContain('--garden-ink:');
+    expect(css).toContain('--garden-ink-soft:');
+    expect(css).toContain('--garden-character-paper:');
     expect(css).toContain('.garden-surface');
+    expect(css).toMatch(/\.garden-header \.pen-icon\s*\{[^}]*color:\s*var\(--garden-ink\)/s);
+    expect(css).toMatch(/\.garden-ink-muted\s*\{[^}]*color:\s*var\(--garden-ink-soft\)/s);
   });
 
   it('has independent limb keyframes and body step-bob without whole-body shaking', () => {
@@ -30,7 +35,8 @@ describe('companion garden motion CSS', () => {
     expect(css).not.toContain('.garden-character-frame--lift');
     expect(css).not.toContain('@keyframes garden-body-shake');
     expect(css).not.toMatch(/.garden-companion-(?:control|lifted|body)[^{]*{[^}]*animation:[^}]*shake/i);
-    expect(css).not.toMatch(/.garden-companion-lifteds*{[^}]*animation:/i);
+    expect(css).not.toMatch(/\.garden-companion-lifted\s*\{[^}]*animation:/i);
+    expect(css).toMatch(/\.garden-limb\s*\{[^}]*background-color:\s*var\(--garden-character-paper\)[^}]*border:/s);
   });
 
   it('turns autonomous visual motion off for reduced-motion users', () => {

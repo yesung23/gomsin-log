@@ -3,6 +3,8 @@ import type { ServerErrorKind } from '@/lib/serverErrors';
 export type { ServerErrorKind };
 
 export type Role = 'gomsin' | 'soldier';
+export type RelationshipContext = 'military' | 'general';
+export type GenderIdentity = 'woman' | 'man';
 
 export type Branch = 
   | 'army'            // 육군 (18개월)

@@ -7,6 +7,7 @@ import { fetchTripsResultFromDB } from '@/lib/trips';
 import { fetchTalkAboutMarksResultFromDB } from '@/lib/talkAbout';
 import { fetchCoupleHighlightsResultFromDB } from '@/lib/highlights';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+import { fetchPartnerMembershipResult } from '@/lib/coupleTimeline';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_UNAVAILABLE;
@@ -25,6 +26,8 @@ export type AuthSyncStage =
   | 'unexpected'
   | 'timeout';
 
+type FullStateSyncStage = AuthSyncStage | 'partner-membership';
+
 /**
  * Same fetch, but carrying WHY it failed.
  *
@@ -35,7 +38,7 @@ export type AuthSyncStage =
  */
 export type FullStateResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage; code?: string };
+  | { ok: false; reason: ServerErrorKind; stage: FullStateSyncStage; code?: string };
 
 const PROFILE_COLUMNS = 'id, display_name, role, avatar_path, military_info, onboarding_completed_at';
 const PROFILE_IDENTITY_COLUMNS = `${PROFILE_COLUMNS}, username, profile_caption, profile_date_type`;
@@ -148,7 +151,7 @@ async function fetchProfileRow(userId: string) {
  * The stage is safe to keep as diagnostic metadata. Raw server messages and
  * response objects are deliberately not written to the developer console.
  */
-function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
+function syncFailure(stage: FullStateSyncStage, error: unknown): FullStateResult {
   const reason = classifyServerError(error).kind;
   const record = error && typeof error === 'object'
     ? error as { code?: unknown; message?: unknown }
@@ -285,10 +288,10 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
       if (partnerError) return syncFailure('partner', partnerError);
       
-      const hasPartner = !!(partnerData && partnerData.length > 0);
+      const hasPartnerPresentation = !!(partnerData && partnerData.length > 0);
       let partnerName = '';
       let partnerUsername: string | undefined;
-      if (hasPartner) {
+      if (hasPartnerPresentation) {
         partnerName = partnerData[0].display_name || '';
         if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
           partnerUsername = partnerData[0].username;
@@ -297,7 +300,7 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
 
       let partnerMilitary: PartnerServiceInfo | undefined;
       const currentRole = memberData.role || profileData.role;
-      if (hasPartner && currentRole === 'gomsin') {
+      if (hasPartnerPresentation && currentRole === 'gomsin') {
         const serviceResult = await supabase.rpc('get_partner_service_info');
         if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
           return syncFailure('partner', serviceResult.error);
@@ -305,15 +308,26 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
         partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
       }
 
+      // Presentation RPCs are not identity authority. Verify the exact active,
+      // non-self member last so connected state and partner identity enter one
+      // FullStateResult snapshot or do not enter state at all.
+      const partnerMembership = await fetchPartnerMembershipResult(memberData.couple_id, userId);
+      if (!partnerMembership.ok) {
+        return syncFailure('partner-membership', partnerMembership.error);
+      }
+      const verifiedPartner = partnerMembership.partner;
+
       couple = {
         coupleId: memberData.couple_id,
-        partnerName,
-        ...(partnerUsername ? { partnerUsername } : {}),
-        ...(partnerMilitary ? { partnerMilitary } : {}),
+        partnerName: verifiedPartner ? partnerName : '',
+        ...(verifiedPartner ? { partnerUserId: verifiedPartner.userId } : {}),
+        ...(verifiedPartner?.joinedAt ? { partnerJoinedAt: verifiedPartner.joinedAt } : {}),
+        ...(verifiedPartner && partnerUsername ? { partnerUsername } : {}),
+        ...(verifiedPartner && partnerMilitary ? { partnerMilitary } : {}),
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
-        connected: hasPartner,
-        status: hasPartner ? 'active' : 'pending',
+        connected: !!verifiedPartner,
+        status: verifiedPartner ? 'active' : 'pending',
       };
     }
 

@@ -271,6 +271,7 @@ function Probe({
       <span data-testid="username">{state.profile.username ?? 'none'}</span>
       <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
       <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
+      <span data-testid="partnerId">{state.profile.couple.partnerUserId ?? 'none'}</span>
       <span data-testid="partnerMilitary">{state.profile.couple.partnerMilitary ? 'present' : 'none'}</span>
       <span data-testid="anniversary">{state.profile.couple.anniversaryDate ?? 'none'}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
@@ -905,7 +906,7 @@ describe('StoreProvider auth lifecycle', () => {
       profile: {
         myName: '춘향', role: 'gomsin',
         couple: {
-          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          coupleId: 'couple-1', partnerName: '몽룡', partnerUserId: 'partner-1', coupleCode: '',
           connected: true, status: 'active',
         },
         military: {} as never, contact: {} as never,
@@ -931,7 +932,7 @@ describe('StoreProvider auth lifecycle', () => {
         profile: {
           myName: '새 이름', role: 'gomsin',
           couple: {
-            coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+            coupleId: 'couple-1', partnerName: '몽룡', partnerUserId: 'partner-1', coupleCode: '',
             connected: true, status: 'active',
           },
           military: {} as never, contact: {} as never,
@@ -947,6 +948,147 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
     expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-old');
     expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('ready');
+  });
+
+  it('keeps the last verified profile until an identity-bearing profile refresh completes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const refresh = deferred<{ ok: true; state: Partial<AppState> }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '현재 이름', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '현재 상대', partnerUserId: 'partner-1',
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockImplementationOnce(() => refresh.promise);
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchFullStateResultFromDB).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByTestId('name')).toHaveTextContent('현재 이름');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+
+    await act(async () => refresh.resolve({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [{
+          id: 'mark-unverified', recordId: 'record-unverified', coupleId: 'couple-1',
+          actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+        }],
+        profile: {
+          myName: '불완전한 새 이름', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-1', partnerName: '신원 없는 상대', coupleCode: '',
+            connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    }));
+
+    expect(screen.getByTestId('name')).toHaveTextContent('현재 이름');
+    expect(screen.getByTestId('partner')).toHaveTextContent('현재 상대');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('unavailable');
+  });
+
+  it('drops a delayed account A profile refresh after account B becomes active', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const delayedAccountA = deferred<{ ok: true; state: Partial<AppState> }>();
+    let accountAReads = 0;
+    fetchFullStateResultFromDB.mockImplementation((requestedUserId: string) => {
+      if (requestedUserId === 'user-a') {
+        accountAReads += 1;
+        if (accountAReads > 1) return delayedAccountA.promise;
+        return Promise.resolve({
+          ok: true as const,
+          state: serverState({
+            talkAboutMarks: [],
+            profile: {
+              myName: 'Account A', role: 'gomsin',
+              couple: {
+                coupleId: 'couple-a', partnerName: 'A partner', partnerUserId: 'partner-a',
+                coupleCode: '', connected: true, status: 'active',
+              },
+              military: {} as never, contact: {} as never,
+            } as never,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true as const,
+        state: serverState({
+          talkAboutMarks: [],
+          profile: {
+            myName: 'Account B', role: 'gomsin',
+            couple: {
+              coupleId: 'couple-b', partnerName: 'B partner', partnerUserId: 'partner-b',
+              coupleCode: '', connected: true, status: 'active',
+            },
+            military: {} as never, contact: {} as never,
+          } as never,
+        }),
+      });
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-a'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-a')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(accountAReads).toBe(2));
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b'));
+
+    await act(async () => delayedAccountA.resolve({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [],
+        profile: {
+          myName: 'Stale Account A', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-a', partnerName: 'Stale A partner', partnerUserId: 'partner-a',
+            coupleCode: '', connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    }));
+
+    expect(screen.getByTestId('user')).toHaveTextContent('user-b');
+    expect(screen.getByTestId('name')).toHaveTextContent('Account B');
+    expect(screen.getByTestId('couple')).toHaveTextContent('couple-b');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b');
   });
 
   it('does not let an older profile full-read overwrite a newer talk-only response', async () => {

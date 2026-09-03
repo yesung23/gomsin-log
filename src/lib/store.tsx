@@ -1394,7 +1394,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (hydration.ok) return null;
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
-            setAuthSyncStage(hydration.ok ? null : hydration.stage);
+            setAuthSyncStage(
+              hydration.ok
+                ? null
+                : hydration.stage === 'partner-membership'
+                  ? 'membership'
+                  : hydration.stage,
+            );
             /*
               The backend's own code goes to the console, not to state.
 
@@ -1924,6 +1930,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           const profile = result.state.profile;
+          if (
+            profile.couple.connected
+            && profile.couple.status === 'active'
+            && (!profile.couple.coupleId || !profile.couple.partnerUserId)
+          ) {
+            // A connected profile is incomplete until exact current partner
+            // membership is part of the same snapshot. Keep the last verified
+            // profile rather than publishing presentation without authority.
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
           const talkAboutMarks = result.state.talkAboutMarks;
           setTalkAboutSyncStatus('ready');
           updateStateImmediately((current) =>

@@ -79,12 +79,29 @@ function setupProfileMock(data: unknown, error: unknown = null) {
   return { select, eq, maybeSingle };
 }
 
-function setupMemberMock(data: unknown, error: unknown = null) {
+function setupMemberMock(
+  data: unknown,
+  error: unknown = null,
+  partnerLookup?: () => Promise<{ data: unknown; error: unknown }>,
+) {
   const maybeSingle = vi.fn().mockResolvedValue({ data, error });
-  const eqStatus = vi.fn().mockReturnValue({ maybeSingle });
-  const eqUserId = vi.fn().mockReturnValue({ eq: eqStatus });
-  const select = vi.fn().mockReturnValue({ eq: eqUserId });
-  return { select, eqUserId, eqStatus, maybeSingle };
+  const defaultPartnerRows = data
+    && typeof data === 'object'
+    && typeof (data as { couple_id?: unknown }).couple_id === 'string'
+    ? [{ user_id: 'partner-001', joined_at: '2026-08-20T12:00:00Z' }]
+    : [];
+  const query = {
+    eq: vi.fn(),
+    neq: vi.fn(),
+    limit: vi.fn(() => partnerLookup
+      ? partnerLookup()
+      : Promise.resolve({ data: defaultPartnerRows, error: null })),
+    maybeSingle,
+  };
+  query.eq.mockReturnValue(query);
+  query.neq.mockReturnValue(query);
+  const select = vi.fn().mockReturnValue(query);
+  return { select, eq: query.eq, neq: query.neq, limit: query.limit, maybeSingle };
 }
 
 function setupCoupleMock(data: unknown, error: unknown = null) {
@@ -252,7 +269,11 @@ describe('fetchFullStateFromDB', () => {
   it('returns a pending couple when no partner exists', async () => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);
-    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
     const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
     const contactChain = setupContactMock();
 
@@ -271,6 +292,7 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.profile!.couple.connected).toBe(false);
     expect(result.profile!.couple.status).toBe('pending');
+    expect(result.profile!.couple.partnerUserId).toBeUndefined();
   });
 
   it('maps profile identity fields when the new schema is available', async () => {
@@ -352,6 +374,8 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.profile!.couple.connected).toBe(true);
     expect(result.profile!.couple.status).toBe('active');
+    expect(result.profile!.couple.partnerUserId).toBe('partner-001');
+    expect(result.profile!.couple.partnerJoinedAt).toBe('2026-08-20T12:00:00Z');
     expect(result.profile!.couple.partnerUsername).toBe('partner_id');
     expect(result.profile!.couple.partnerMilitary).toEqual({
       branch: 'army',
@@ -362,6 +386,130 @@ describe('fetchFullStateFromDB', () => {
     });
     expect('memo' in (result.profile!.couple.partnerMilitary ?? {})).toBe(false);
     expect(mockRpc).toHaveBeenNthCalledWith(2, 'get_partner_service_info');
+    expect(memberChain.limit.mock.invocationCallOrder[0]).toBeGreaterThan(
+      mockRpc.mock.invocationCallOrder[1],
+    );
+  });
+
+  it('keeps exact membership identity when the presentation profile has no row', async () => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc.mockResolvedValue({ data: [], error: null });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple).toMatchObject({
+      coupleId,
+      connected: true,
+      status: 'active',
+      partnerName: '',
+      partnerUserId: 'partner-001',
+      partnerJoinedAt: '2026-08-20T12:00:00Z',
+    });
+  });
+
+  it('discards stale presentation when final membership authority has zero rows', async () => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ display_name: 'Former Partner', username: 'former_partner' }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          branch: 'army',
+          military_status: 'serving',
+          discharge_date_source: 'manual',
+        }],
+        error: null,
+      });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple).toMatchObject({
+      coupleId,
+      connected: false,
+      status: 'pending',
+      partnerName: '',
+    });
+    expect(result.profile!.couple.partnerUserId).toBeUndefined();
+    expect(result.profile!.couple.partnerJoinedAt).toBeUndefined();
+    expect(result.profile!.couple.partnerUsername).toBeUndefined();
+    expect(result.profile!.couple.partnerMilitary).toBeUndefined();
+  });
+
+  it.each([
+    {
+      label: 'query error',
+      lookup: async () => ({
+        data: null,
+        error: { code: '42501', message: 'permission denied' },
+      }),
+    },
+    {
+      label: 'throw',
+      lookup: async () => { throw new TypeError('Failed to fetch'); },
+    },
+    {
+      label: 'malformed row',
+      lookup: async () => ({ data: [{ user_id: '', joined_at: null }], error: null }),
+    },
+    {
+      label: 'multiple rows',
+      lookup: async () => ({
+        data: [
+          { user_id: 'partner-001', joined_at: null },
+          { user_id: 'partner-002', joined_at: null },
+        ],
+        error: null,
+      }),
+    },
+  ])('reports $label as retryable partner-membership failure', async ({ lookup }) => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      lookup,
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc.mockResolvedValue({ data: [{ display_name: 'Partner' }], error: null });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result).toMatchObject({ ok: false, stage: 'partner-membership' });
+    expect(mockFetchRecordsResultFromDB).not.toHaveBeenCalled();
   });
 
   it('falls back to the existing partner profile RPC before migration 060 is applied', async () => {
@@ -526,7 +674,11 @@ describe('fetchFullStateFromDB', () => {
   it('fetches records and trips for a pending couple', async () => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);
-    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
     const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
     const contactChain = setupContactMock();
 

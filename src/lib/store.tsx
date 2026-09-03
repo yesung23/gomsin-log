@@ -4135,9 +4135,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, setupComplete: complete }));
   };
 
-  const setOnboardingStep = (step: number) => {
-    updateStateImmediately((prev) => ({ ...prev, onboardingStep: step }));
-  };
+  const setOnboardingStep = useCallback((step: number) => {
+    updateStateImmediately((prev) => (
+      prev.onboardingStep === step
+        ? prev
+        : { ...prev, onboardingStep: step }
+    ));
+  }, [updateStateImmediately]);
 
   const setHighlightedRecordId = (id?: string) => {
     updateStateImmediately((prev) => ({ ...prev, highlightedRecordId: id }));

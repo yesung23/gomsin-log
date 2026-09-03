@@ -380,6 +380,28 @@ function Probe({
   );
 }
 
+function OnboardingStepProbe({
+  onRender,
+}: {
+  onRender: (setter: (step: number) => void) => void;
+}) {
+  const { state, isReady, setOnboardingStep } = useStore();
+  onRender(setOnboardingStep);
+
+  return (
+    <div>
+      <span data-testid="onboarding-ready">{isReady ? 'ready' : 'loading'}</span>
+      <span data-testid="onboarding-step">{state.onboardingStep}</span>
+      <button onClick={() => setOnboardingStep(state.onboardingStep)}>
+        write-same-onboarding-step
+      </button>
+      <button onClick={() => setOnboardingStep(state.onboardingStep + 1)}>
+        advance-onboarding-step
+      </button>
+    </div>
+  );
+}
+
 function emitAuth(event: string, userId: string | null) {
   const session = userId
     ? { user: { id: userId, email: `${userId}@example.com`, app_metadata: { provider: 'google' } } }
@@ -444,6 +466,37 @@ describe('StoreProvider auth lifecycle', () => {
     deleteEventFromDB.mockReset().mockResolvedValue(true);
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('keeps the onboarding step writer stable and treats the same step as a no-op', async () => {
+    const setters: Array<(step: number) => void> = [];
+    let renderCount = 0;
+
+    render(
+      <StoreProvider>
+        <OnboardingStepProbe onRender={(setter) => {
+          renderCount += 1;
+          setters.push(setter);
+        }} />
+      </StoreProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const settledRenderCount = renderCount;
+    const settledSetter = setters.at(-1);
+    screen.getByRole('button', { name: 'write-same-onboarding-step' }).click();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(renderCount).toBe(settledRenderCount);
+    expect(setters.at(-1)).toBe(settledSetter);
+
+    screen.getByRole('button', { name: 'advance-onboarding-step' }).click();
+    await waitFor(() => expect(screen.getByTestId('onboarding-step')).toHaveTextContent('1'));
+    expect(setters.at(-1)).toBe(settledSetter);
   });
 
   afterEach(() => {

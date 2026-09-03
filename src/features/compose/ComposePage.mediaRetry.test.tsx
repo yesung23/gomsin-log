@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import type { AppState } from '@/types';
@@ -29,6 +29,7 @@ const updateRecordMedia = vi.fn(
 const queueRecordForLater = vi.fn(async () => ({ queued: true }));
 const recordProductEvent = vi.fn(async () => undefined);
 const resetEmotionReview = vi.fn();
+const toastWarning = vi.fn();
 
 const state = {
   authenticatedUser: { id: 'user-1', email: 'a@b.c', provider: 'google' },
@@ -87,7 +88,7 @@ vi.mock('@/lib/useEmotionCandidates', () => ({
 vi.mock('sonner', () => ({
   toast: {
     success: vi.fn(),
-    warning: vi.fn(),
+    warning: toastWarning,
     error: vi.fn(),
   },
 }));
@@ -100,6 +101,7 @@ function renderComposer() {
       <Routes>
         <Route path="/compose" element={<ComposePage />} />
         <Route path="/home" element={<p>home reached</p>} />
+        <Route path="/record" element={<p>records reached</p>} />
         <Route path="/saved" element={<p>saved records reached</p>} />
       </Routes>
     </MemoryRouter>,
@@ -144,6 +146,7 @@ describe('ComposePage exact-row photo retry', () => {
     queueRecordForLater.mockClear();
     recordProductEvent.mockClear();
     resetEmotionReview.mockClear();
+    toastWarning.mockClear();
   });
 
   it('reattaches a failed photo to record-1 without creating or counting another record', async () => {
@@ -262,7 +265,82 @@ describe('ComposePage exact-row photo retry', () => {
     expect(updateRecordMedia).not.toHaveBeenCalled();
   });
 
-  it('offers the saved-record list instead of retrying when partial success has no recordId', async () => {
+  it('keeps removal and ordinary compose disabled until an in-flight media retry settles', async () => {
+    const failedPhoto = new File(['failed'], 'failed.jpg', { type: 'image/jpeg' });
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['failed.jpg'],
+      recordId: 'record-1',
+    });
+    let settleRetry: ((result: MediaResult) => void) | undefined;
+    updateRecordMedia.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        settleRetry = resolve;
+      }),
+    );
+
+    const user = await reachRetryMode([failedPhoto]);
+    const remove = screen.getByRole('button', { name: '선택한 사진 1 빼기' });
+    expect(remove).not.toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: '사진 다시 올리기' }));
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledTimes(1));
+
+    expect(remove).toBeDisabled();
+    await user.click(remove);
+    expect(screen.getByRole('status')).toHaveTextContent('같은 기록');
+
+    const text = screen.getByRole('textbox', { name: '오늘 남길 글' });
+    expect(text).toHaveAttribute('readonly');
+    await user.type(text, '늦은 성공이 지우면 안 되는 새 글');
+    expect(text).toHaveValue('');
+    expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      settleRetry?.({ ok: true, failedFiles: [] });
+    });
+    expect(await screen.findByText('home reached')).toBeInTheDocument();
+  });
+
+  it('keeps only the first photo when one selection batch contains duplicate basenames', async () => {
+    const first = new File(['first'], 'same-name.jpg', { type: 'image/jpeg' });
+    const duplicate = new File(['duplicate'], 'same-name.jpg', { type: 'image/jpeg' });
+    const user = userEvent.setup();
+    renderComposer();
+
+    await user.upload(photoInput(), [first, duplicate]);
+
+    expect(screen.getAllByRole('img', { name: /선택한 사진/ })).toHaveLength(1);
+    expect(toastWarning).toHaveBeenCalledWith(
+      'same-name.jpg: 같은 이름의 사진은 한 번만 선택할 수 있어요.',
+    );
+
+    await user.click(screen.getByRole('button', { name: '남기기' }));
+    await screen.findByText('home reached');
+    expect(addRecordWithMedia.mock.calls[0]?.[1]).toEqual([first]);
+  });
+
+  it('rejects a duplicate basename against existing selection while accepting a new valid photo', async () => {
+    const existing = new File(['existing'], 'same-name.jpg', { type: 'image/jpeg' });
+    const duplicate = new File(['duplicate'], 'same-name.jpg', { type: 'image/jpeg' });
+    const unique = new File(['unique'], 'unique.png', { type: 'image/png' });
+    const user = userEvent.setup();
+    renderComposer();
+
+    await user.upload(photoInput(), existing);
+    await user.upload(photoInput(), [duplicate, unique]);
+
+    expect(screen.getAllByRole('img', { name: /선택한 사진/ })).toHaveLength(2);
+    expect(toastWarning).toHaveBeenCalledWith(
+      'same-name.jpg: 같은 이름의 사진은 한 번만 선택할 수 있어요.',
+    );
+
+    await user.click(screen.getByRole('button', { name: '남기기' }));
+    await screen.findByText('home reached');
+    expect(addRecordWithMedia.mock.calls[0]?.[1]).toEqual([existing, unique]);
+  });
+
+  it('offers the records screen instead of retrying when partial success has no recordId', async () => {
     const failedPhoto = new File(['failed'], 'failed.jpg', { type: 'image/jpeg' });
     addRecordWithMedia.mockResolvedValueOnce({
       ok: true,
@@ -275,7 +353,8 @@ describe('ComposePage exact-row photo retry', () => {
 
     await user.click(screen.getByRole('button', { name: '저장된 기록 보기' }));
 
-    expect(await screen.findByText('saved records reached')).toBeInTheDocument();
+    expect(await screen.findByText('records reached')).toBeInTheDocument();
+    expect(screen.queryByText('saved records reached')).not.toBeInTheDocument();
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     expect(updateRecordMedia).not.toHaveBeenCalled();
     expect(queueRecordForLater).not.toHaveBeenCalled();

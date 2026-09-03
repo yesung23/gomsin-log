@@ -419,7 +419,7 @@ export function ComposePage() {
           type="button"
           onClick={() => {
             if (needsSavedRecordRecovery) {
-              navigate('/saved');
+              navigate('/record');
               return;
             }
             void save();
@@ -493,8 +493,9 @@ export function ComposePage() {
                 <button
                   type="button"
                   aria-label={`선택한 사진 ${index + 1} 빼기`}
+                  disabled={saving}
                   onClick={() => removePhoto(index)}
-                  className="press-response absolute right-1 top-1 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/65 text-white"
+                  className="press-response absolute right-1 top-1 flex min-h-11 min-w-11 items-center justify-center rounded-full bg-black/65 text-white disabled:opacity-40"
                 >
                   <X size={18} aria-hidden="true" />
                 </button>
@@ -512,12 +513,18 @@ export function ComposePage() {
           className="hidden"
           onChange={(event) => {
             const accepted: File[] = [];
+            const selectedNames = new Set(files.map((file) => file.name));
             Array.from(event.target.files ?? []).forEach((file) => {
               const classified = classifyMediaFile(file);
               if ('error' in classified) {
                 toast.error(`${file.name}: ${classified.error}`);
                 return;
               }
+              if (selectedNames.has(file.name)) {
+                toast.warning(`${file.name}: 같은 이름의 사진은 한 번만 선택할 수 있어요.`);
+                return;
+              }
+              selectedNames.add(file.name);
               accepted.push(file);
             });
             if (accepted.length > 0) setFiles((current) => [...current, ...accepted]);

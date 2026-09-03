@@ -41,6 +41,14 @@ function view(props: Partial<Parameters<typeof StoryViewer>[0]> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe('스토리는 저절로 넘어가지 않는다', () => {
+  it('전체 화면 진행 표시와 이동 버튼을 iPhone 안전영역 안에 둔다', () => {
+    view();
+    const viewer = screen.getByTestId('story-viewer');
+
+    expect(viewer).toHaveClass('pt-[env(safe-area-inset-top,0px)]');
+    expect(viewer).toHaveClass('pb-[env(safe-area-inset-bottom,0px)]');
+  });
+
   it('시간이 지나도 같은 카드에 머문다', () => {
     /*
       인스타의 스토리는 6초마다 넘어간다. 여기에 타이머가 없는 것이 이 화면의 가장 중요한

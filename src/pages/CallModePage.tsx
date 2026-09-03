@@ -279,7 +279,7 @@ export function CallModePage() {
   };
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col">
+    <div className="min-h-dvh bg-background flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
       {/*
         No MobileShell, so no tab bar. This screen is used one-handed while a
         phone is against an ear, and a row of navigation targets along the bottom

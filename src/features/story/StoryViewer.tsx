@@ -208,7 +208,7 @@ export function StoryViewer({
       aria-modal="true"
       aria-label={title}
       data-testid="story-viewer"
-      className="fixed inset-0 z-50 flex flex-col bg-background outline-none"
+      className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] outline-none"
     >
       <p className="sr-only" aria-live="polite">{announcement}</p>
 

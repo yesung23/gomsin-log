@@ -155,6 +155,15 @@ beforeEach(() => {
 });
 
 describe('what 통화 모드 must never do', () => {
+  it('keeps the full-screen controls inside the iPhone safe areas', () => {
+    const { records, marks } = three();
+    const { container } = renderPage(records, marks);
+    const frame = container.firstElementChild;
+
+    expect(frame).toHaveClass('pt-[env(safe-area-inset-top,0px)]');
+    expect(frame).toHaveClass('pb-[env(safe-area-inset-bottom,0px)]');
+  });
+
   it('never offers to place a call', () => {
     // §8: the call is the user's to make on whatever they already use. A dialler
     // here would also be the one control on screen that leaves the app entirely.

@@ -3748,6 +3748,113 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · Realtime lifecycle·schema-cache 전체 suite 회귀 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A Release Candidate reliability/privacy
+- Workstream: migration 072 client adoption and cumulative migration contracts
+- Step: full-suite 두 실패 root-cause 조사, 최소 수정, fresh full verification
+- Previous Gate: 온디바이스 하루 exact-source 발췌 local/simulator/review PASS에서 full-suite 두 실패 발견
+- This Gate: local full Vitest·fresh PostgreSQL·lint·typecheck·build와 independent review PASS; Production rollout HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 수익·저장·AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/operations/rollback-runbook.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, HEAD `75a3676`, exact status/diff, migration 072와 `store.tsx` subscription call path
+- Latest relevant Work Log checked: 2026-09-03 Realtime private-metadata gate와 온디바이스 exact-source gate 바로 위
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary systematic investigation + independent Sol Architect + independent Reviewer
+- Model: GPT-5.6 Sol primary; Sol Architect; configured independent Reviewer
+- Role: primary root-cause/TDD/integration owner, Architect는 Realtime/migration authority 검토, Reviewer는 exact two-file delta 독립 검증
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `75a367624422d2526dc5124fa050fb93862de807`
+- Old HEAD: `75a367624422d2526dc5124fa050fb93862de807`
+- New HEAD / Reviewed HEAD: `717635bba3414d67f168b62b484c36bcc0526288`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/coupleLifecycleTransitions.test.tsx`
+- function/component/migration: remote membership revocation regression test
+- what changed/reviewed: 첫 mock channel 결과를 고정하지 않고 실제 authoritative `couple-sync:couple-1` channel index를 찾아 `couple_members` callback과 최종 `disconnected` purge를 검증한다.
+- why: migration 072 호환 전환이 legacy records channel을 먼저 생성한 뒤 생긴 test-harness order regression을 고치되 제품 기대값은 완화하지 않기 위해
+- file: `supabase/migrations/072_close_private_capable_realtime_metadata.sql`
+- function/component/migration: PostgREST schema-cache convergence
+- what changed/reviewed: migration transaction `COMMIT` 뒤 정적 `NOTIFY pgrst, 'reload schema'`를 추가했다.
+- why: 마지막 function-definition migration이 자신의 schema catalog refresh를 보장하게 하기 위해
+- file: `control-tower/reports/codex/2026-09-03_1319_realtime-regression-suite-closure_codex.md`
+- function/component/migration: Control Tower/debug report
+- what changed/reviewed: 증상·root cause·수정·전체 검증·Production HOLD를 기록
+- why: test-only 결함과 실제 migration 누락을 구분하고 remote 미확인을 남기기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 072의 trigger·RLS·REVOKE·publication 의미는 변경하지 않고 cache reload만 추가; remote 미적용
+- product semantics: current membership revocation은 기존 own-row signal → quarantine → authoritative RPC → purge 경로 유지
+- Production: Supabase query/migration, Vercel, push, merge, TestFlight, App Store 모두 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, `.gstack/`, `.unlazy/`는 stage하지 않음
+
+#### VERIFICATION
+- command: 구현 전 `npm run test -- --run src/lib/coupleLifecycleTransitions.test.tsx src/lib/migrationSecurityContracts.test.ts`
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 2 files / 2 deterministic failures
+- what it actually proves: channel-order assumption과 latest-function reload omission을 각각 재현
+- command: `npm run test -- --run src/lib/coupleLifecycleTransitions.test.tsx src/lib/migrationSecurityContracts.test.ts src/lib/migration072.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 125 tests
+- what it actually proves: 기존 revocation outcome, cumulative schema-cache contract, 072 text contract가 함께 복구됨
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 68 applied migrations / 668 assertions
+- what it actually proves: throwaway fresh DB에서 001→072 apply와 RLS·privilege·private/shared invalidation·account-cleanup actor behavior
+- command: `npm run test -- --run`
+- PASS / FAIL / UNVERIFIED: PASS — 296 files / 4,221 tests
+- what it actually proves: repository 전체 Vitest에 알려진 회귀가 없음
+- command: `npm run lint`; `npm run typecheck`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 전체 ESLint·TypeScript·whitespace integrity
+- command: placeholder public env로 `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules
+- what it actually proves: production-mode bundle 생성 가능; 실제 Production backend는 증명하지 않음
+- command: independent Sol Architect + independent Reviewer exact-delta review
+- PASS / FAIL / UNVERIFIED: LOCAL PASS — exact delta actionable CRITICAL/HIGH/MEDIUM 0; Reviewer CRITICAL/HIGH/MEDIUM/LOW 0
+- what it actually proves: test expectation 유지, membership call path, NOTIFY 위치, privacy semantics 불변에 대한 독립 검토
+
+#### REVIEW IMPACT
+- DELTA: migration 072에 cache-convergence statement만 추가하고 lifecycle test harness 결속만 수정했다. 1636592의 trigger/RLS/publication/runtime semantics는 유지된다.
+- whether an earlier review is stale: NO for implementation semantics; exact two-file delta는 fresh independent reviews로 폐쇄
+
+#### BLOCKERS
+- code: 이 gate에서 알려진 blocker 없음
+- environment: actual Supabase WebSocket, reconnect/background, remote PostgREST reload 처리 미검증
+- external/manual: remote migration ledger/catalog와 compatible-client adoption/minimum-version gate 미확인
+
+#### STOPPED AT
+- exact completed boundary: commit `717635b` local full-suite/fresh-DB/build/review PASS
+
+#### REMAINING
+- migration 072 적용 전 remote read-only preflight, compatible-client adoption, backup/rollback readiness
+- staging 두 계정으로 own-membership revoke·foreground recovery·private CRUD 0-event·shared invalidation 실제 WebSocket 검증
+- canonical roadmap/current implementation 대조 후 다음 local RC blocker 폐쇄
+
+#### NEXT ACTION
+- next owner: Codex Control Tower + photo-lifecycle Architect, bounded Worker/Verifier/Reviewer
+- tool/model: Sol privacy/data architecture, scoped TDD implementation, independent security review
+- 기준 SHA: `717635bba3414d67f168b62b484c36bcc0526288`
+- exact next task: V5-E1 `EXIF-free screen master + thumbnail + 최소 lifecycle metadata + 멱등 cleanup`의 구버전 호환·RLS·orphan 안전 계약을 먼저 확정하고 현재 `ComposePage → addRecordWithMedia → Storage → attachment patch` 경로에 별도 commit으로 구현
+
+#### DO NOT ADVANCE UNTIL
+- migration 072를 compatible-client adoption보다 먼저 remote에 적용하지 않음
+- 실제 Supabase WebSocket과 remote catalog evidence 없이 Production PASS를 주장하지 않음
+- 이후 Realtime/migration 072 변경 시 exact review freshness를 다시 확보
+- 사진 server ledger에 filename·GPS·EXIF·본문 같은 사용자 콘텐츠를 추가하거나 기존 Storage RLS를 약화하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

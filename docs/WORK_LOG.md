@@ -3522,6 +3522,113 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+### 2026-09-03 · 비공개 가능 기록·할 일 Realtime 메타데이터 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A Release Candidate privacy/reliability
+- Workstream: records/tasks Realtime authorization and reconciliation
+- Step: private-capable source publication 제거, content-free invalidation 전환, race-safe authoritative re-read
+- Previous Gate: Garden pair-safe motion·접근성 local PASS
+- This Gate: migration 072 fresh-chain·actor proof와 client dual-read compatibility local PASS; Production rollout HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 연결·보존 무료와 개인정보 비프리미엄 원칙 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/skills/release-validation.md`
+- Current-state checked: branch/HEAD/status, current record/task call paths, migration 001→072 local chain, `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-03 Garden gate와 cycle consent/revocation privacy entries
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + two independent Sol architecture/security review passes
+- Model: GPT-5.6 Sol primary; fresh Sol architect reviewers
+- Role: primary TDD·integration·verification owner; reviewers는 exact local delta의 authorization/race/rollback 독립 감사
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `5b0a7b7073d87384ad2906c828ece66e70c60101`
+- Old HEAD: `5b0a7b7073d87384ad2906c828ece66e70c60101`
+- New/Reviewed HEAD: `1636592f3504f5d260fcc71317c9bbeaf407299a`
+
+#### CHANGED / REVIEWED
+- file: `supabase/migrations/072_close_private_capable_realtime_metadata.sql`, `src/lib/migration072.test.ts`
+- function/component/migration: private-filtered trigger, source publication boundary, content-free `collaboration_invalidations`
+- what changed/reviewed: `daily_records`와 `couple_tasks`를 Realtime publication에서 제거하고 shared CRUD·shared↔private 전환에만 couple/slice invalidation을 갱신한다. trigger 함수 직접 실행권한을 회수하고, parent couple가 이미 삭제된 cascade에서는 child invalidation을 재생성하지 않는다.
+- why: Postgres Changes DELETE가 row filter로 비공개 행의 존재·삭제 시점을 숨기지 못하는 metadata leak과 account-deletion FK 회귀를 함께 막기 위해
+- file: `src/lib/store.tsx`, `src/lib/store.test.tsx`
+- function/component/migration: record compatibility subscription, authoritative invalidation/refetch, sequence and mutation reconciliation
+- what changed/reviewed: direct source channel을 migration 전 호환용으로 격리하고 authoritative invalidation channel·foreground·online·bounded failure polling으로 RLS-visible snapshot을 다시 읽는다. stale/failed reads가 새 상태를 덮지 못하고 create/update/delete와 racing refetch가 중복·부활·rollback을 만들지 않게 한다.
+- why: migration 전후 앱 버전을 단계적으로 지원하면서 private/shared 권한 변화와 네트워크 race를 fail-closed로 복구하기 위해
+- file: `src/pages/SchedulePage.tsx`, `src/pages/ScheduleTasksState.test.tsx`
+- function/component/migration: tasks dual-read transition, refresh result/sequence, post-response authority check and transport-failure fallback
+- what changed/reviewed: 성공한 mutation 뒤 authoritative re-read를 우선하고, 그 read까지 transport-fail이면 committed snapshot sequence를 기준으로 create merge·delete removal·안전한 update를 적용하면서 명시적 retry 상태를 유지한다. forbidden은 오래된 데이터를 복원하지 않는다.
+- why: 느린 mutation response와 더 최신인 다른 기기 snapshot이 교차할 때 성공 상태 유실이나 최신 상태 overwrite를 막기 위해
+- file: `scripts/phase0/storage-authz-harness.mjs`, `supabase/migrations/README.md`
+- function/component/migration: migration 072 executable actor/cascade proof and rollout contract
+- what changed/reviewed: 실제 PostgreSQL fresh chain에서 publication, function privilege, private/shared transition, old/new couple scope, RLS actors, sole-couple account cleanup cascade를 실행하고 client-adoption/WebSocket rollout gate를 문서화했다.
+- why: SQL 파일 존재가 보안 동작이나 Production 적용 증거로 오인되지 않게 하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; E2EE key/envelope/protocol 미수정
+- DB/migration semantics: 072 파일은 로컬에 추가했지만 remote에는 적용하지 않음
+- product semantics: 기록·할 일 본문/공유 의미/원본 연결/읽음 의미 변경 없음
+- Production: push·merge·deploy·Supabase catalog query/migration·TestFlight·App Store 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, 온디바이스 요약 slice, `.gstack/`, `.unlazy/`를 이 커밋에서 제외
+
+#### VERIFICATION
+- command: 구현 전 failing PostgreSQL account-cleanup cascade와 record/task refetch-first·delayed-mutation tests
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL 후 수정
+- what it actually proves: reviewer가 찾은 FK 재생성, duplicate create, stale mutation overwrite 및 double-read failure를 재현한 뒤 닫음
+- command: `npm test -- --run src/lib/store.test.tsx src/pages/ScheduleTasksState.test.tsx src/lib/migration072.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 89 tests
+- what it actually proves: records/tasks subscription 분리, 순서·중복·mutation race, forbidden/transport failure와 migration text contract
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — active 001→072 fresh chain, 68 applied migrations, 668 assertions
+- what it actually proves: throwaway PostgreSQL 17에서 publication·trigger·privilege·RLS actor·account deletion cascade의 실제 local DB 동작
+- command: exact target ESLint; `npm run typecheck`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 정적 규칙, 전체 TypeScript, staged whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; Schedule 33.65 kB / gzip 9.85 kB
+- what it actually proves: production-mode bundle 생성 가능; remote Supabase 또는 실제 WebSocket은 증명하지 않음
+- command: first independent Sol review, RED fixes, second fresh Sol final review
+- PASS / FAIL / UNVERIFIED: initial HOLD 3건 + follow-up MEDIUM 1건을 수정한 뒤 LOCAL PASS — actionable CRITICAL/HIGH/MEDIUM 0
+- what it actually proves: exact local authorization/race/cascade delta의 독립 검토; Production rollout 안전성은 별도 gate
+
+#### REVIEW IMPACT
+- FULL: Realtime source/publication과 records/tasks reconciliation 의미가 바뀌어 이전 검토를 승계하지 않고 두 차례 fresh review를 수행했다.
+- whether an earlier review is stale: final local snapshot에 대해서는 NO; 이후 이 8개 파일 변경 또는 migration 재작성 시 재검토 필요
+
+#### BLOCKERS
+- code: 이 local gate에서 알려진 blocker 없음
+- environment: 실제 Supabase WebSocket, background/foreground, reconnect, slow/partial network의 staging 2-account 검증 미완료
+- external/manual: remote migration 068→072 적용 상태·publication/RLS/function catalog와 compatible-client adoption/minimum-version gate가 UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: commit `1636592` local PASS; migration 072는 저장소에만 존재하고 remote에는 미적용
+
+#### REMAINING
+- remote migration ledger와 068→072 dependency를 read-only 확인한 뒤 적용 전 backup/rollback readiness 판정
+- compatible client adoption/minimum-version gate를 먼저 충족
+- staging 두 계정으로 private CRUD event 0건, shared CRUD/privacy transitions, reconnect/foreground/channel failure를 실제 WebSocket에서 검증
+
+#### NEXT ACTION
+- next owner: Codex primary + on-device AI security architect/reviewer
+- tool/model: GPT-5.6 Sol implementation audit and simulator build
+- 기준 SHA: `1636592f3504f5d260fcc71317c9bbeaf407299a`
+- exact next task: 하루 모든 eligible record의 exact-source 온디바이스 요약 contract와 native Foundation Models adapter를 local/simulator gate까지 폐쇄
+
+#### DO NOT ADVANCE UNTIL
+- migration 072를 compatible-client adoption보다 먼저 Production에 적용하지 않음
+- action-time remote authority, backup/rollback, staging 2-actor WebSocket 증거 없이 APPLIED/secure/release-ready라고 주장하지 않음
+- rollback 목적으로 private-capable source table을 publication에 다시 넣지 않음; forward invalidation/HTTP repair 사용
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
 ## 2026-09-03 — Cycle consent atomic revocation and write gate
 
 PLAN POSITION

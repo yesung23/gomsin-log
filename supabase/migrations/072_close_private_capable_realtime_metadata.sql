@@ -134,3 +134,8 @@ END;
 $$;
 
 COMMIT;
+
+-- Refresh PostgREST's cached function catalog only after the transaction is
+-- durable. The trigger function is not client-executable, but keeping every
+-- function-signature migration self-refreshing prevents stale catalog state.
+NOTIFY pgrst, 'reload schema';

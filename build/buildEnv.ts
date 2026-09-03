@@ -13,6 +13,7 @@
 
 export const CSP_HTTP_MARKER = '__SUPABASE_HTTP_SRC__';
 export const CSP_CONNECT_MARKER = '__SUPABASE_CONNECT_SRC__';
+const APPLE_LOGIN_RELEASE_HOLD_CODE = 'APPLE_LOGIN_RELEASE_HOLD';
 
 export type BuildEnvironment = {
   VITE_SUPABASE_URL?: string;
@@ -20,6 +21,9 @@ export type BuildEnvironment = {
   VITE_SUPABASE_ANON_KEY?: string;
   VITE_LEGAL_OPERATOR_NAME?: string;
   VITE_PRIVACY_CONTACT_EMAIL?: string;
+  VITE_APPLE_LOGIN_ENABLED?: string;
+  /** Vite mode for build-only safety gates; ordinary local validation may omit it. */
+  buildMode?: string;
   /** Vercel sets this to `production` only for the public production target. */
   deploymentTarget?: string;
   /** Explicit release signal (e.g. GOMSINLOG_RELEASE=true or build:release command). */
@@ -45,6 +49,14 @@ function fail(message: string): never {
  */
 export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildEnvironment {
   const isProductionTarget = env.deploymentTarget === 'production' || env.isRelease === true;
+  const isAppleReleaseTarget = env.buildMode === 'production' || isProductionTarget;
+  if (isAppleReleaseTarget && env.VITE_APPLE_LOGIN_ENABLED === 'true') {
+    fail(
+      `${APPLE_LOGIN_RELEASE_HOLD_CODE}: VITE_APPLE_LOGIN_ENABLED=true is blocked in production/release builds. `
+      + 'Remove this fuse only in a separately reviewed activation commit after same-email silent-merge '
+      + 'prevention, the Apple token custody/revocation ledger, and native AuthenticationServices are verified.',
+    );
+  }
   if (isProductionTarget) {
     const operatorName = (env.VITE_LEGAL_OPERATOR_NAME || '').trim();
     const privacyEmail = (env.VITE_PRIVACY_CONTACT_EMAIL || '').trim();

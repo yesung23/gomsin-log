@@ -38,15 +38,15 @@ function validateBuildEnvironmentPlugin(
     name: 'validate-build-environment',
     apply: 'build',
     config(_config, { mode }) {
-      if (mode !== 'production') return;
-      // Vite loads `.env*` after resolving the config, so values from a local
-      // `.env` are not present in `process.env` here. Read them explicitly while
-      // still giving CI/Vercel environment variables precedence.
-      const fileEnv = loadEnv(mode, process.cwd(), 'VITE_');
       const isExplicitRelease =
         process.env.GOMSINLOG_RELEASE === 'true'
         || process.env.GOMSINLOG_RELEASE === '1'
         || process.env.npm_lifecycle_event === 'build:release';
+      if (mode !== 'production' && !isExplicitRelease) return;
+      // Vite loads `.env*` after resolving the config, so values from a local
+      // `.env` are not present in `process.env` here. Read them explicitly while
+      // still giving CI/Vercel environment variables precedence.
+      const fileEnv = loadEnv(mode, process.cwd(), 'VITE_');
       const validated = validateBuildEnvironment({
         VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL,
         VITE_SUPABASE_PUBLISHABLE_KEY:
@@ -57,6 +57,9 @@ function validateBuildEnvironmentPlugin(
           process.env.VITE_LEGAL_OPERATOR_NAME || fileEnv.VITE_LEGAL_OPERATOR_NAME,
         VITE_PRIVACY_CONTACT_EMAIL:
           process.env.VITE_PRIVACY_CONTACT_EMAIL || fileEnv.VITE_PRIVACY_CONTACT_EMAIL,
+        VITE_APPLE_LOGIN_ENABLED:
+          process.env.VITE_APPLE_LOGIN_ENABLED ?? fileEnv.VITE_APPLE_LOGIN_ENABLED,
+        buildMode: mode,
         deploymentTarget: process.env.VERCEL_ENV,
         isRelease: isExplicitRelease,
       });

@@ -192,6 +192,67 @@ describe('C3 - a misconfigured production build cannot produce an artifact', () 
   });
 });
 
+describe('V5-B - incomplete Apple login stays off in release artifacts', () => {
+  const VALID_RELEASE = {
+    ...VALID,
+    VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_release_test_token',
+    VITE_LEGAL_OPERATOR_NAME: '테스트 운영자',
+    VITE_PRIVACY_CONTACT_EMAIL: 'privacy@gomsinlog.app',
+  };
+
+  it('allows exact true in an ordinary non-release build for local testing', () => {
+    expect(() => validateBuildEnvironment({
+      ...VALID,
+      VITE_APPLE_LOGIN_ENABLED: 'true',
+      buildMode: 'development',
+    })).not.toThrow();
+  });
+
+  it.each([
+    ['Vite production mode', { buildMode: 'production' }],
+    ['the explicit release signal', { isRelease: true }],
+    ['the public production deployment target', { deploymentTarget: 'production' }],
+  ])('blocks exact true for %s', (_label, releaseSignal) => {
+    expect(() => validateBuildEnvironment({
+      ...VALID_RELEASE,
+      ...releaseSignal,
+      VITE_APPLE_LOGIN_ENABLED: 'true',
+    })).toThrow(/APPLE_LOGIN_RELEASE_HOLD/);
+  });
+
+  it.each([undefined, '', 'false', 'TRUE', '1', ' true ', 'true\n'])(
+    'keeps release builds valid when the Apple flag is not exact true: %j',
+    (flag) => {
+      expect(() => validateBuildEnvironment({
+        ...VALID_RELEASE,
+        isRelease: true,
+        VITE_APPLE_LOGIN_ENABLED: flag,
+      })).not.toThrow();
+    },
+  );
+
+  it('reports a static activation-review hold without echoing build secrets', () => {
+    const secretSentinel = 'sb_publishable_DO_NOT_ECHO_secret_sentinel';
+    let thrown: Error | null = null;
+    try {
+      validateBuildEnvironment({
+        ...VALID_RELEASE,
+        VITE_SUPABASE_PUBLISHABLE_KEY: secretSentinel,
+        isRelease: true,
+        VITE_APPLE_LOGIN_ENABLED: 'true',
+      });
+    } catch (error) {
+      thrown = error as Error;
+    }
+
+    expect(thrown).toBeInstanceOf(BuildEnvironmentError);
+    expect(thrown!.message).toMatch(/APPLE_LOGIN_RELEASE_HOLD/);
+    expect(thrown!.message).toMatch(/separately reviewed activation commit/i);
+    expect(thrown!.message).not.toContain(secretSentinel);
+    expect(thrown!.message).not.toContain('DO_NOT_ECHO');
+  });
+});
+
 describe('C3 - a valid build emits a complete, marker-free CSP', () => {
   const headersPath = resolve(process.cwd(), 'public', '_headers');
   const headers = readFileSync(headersPath, 'utf8');

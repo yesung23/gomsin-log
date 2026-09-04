@@ -12474,3 +12474,119 @@ PRODUCTION
 - NOT APPLIED / UNVERIFIED: no remote state was queried or changed by this gate
 
 ---
+
+## 2026-09-05 — RC Task 3 Apple IAP refund/consumption state-machine hardening
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence (`V5-C` payment foundation toward `V5-G` verification)
+- Workstream: Apple IAP database/Edge correctness and rollout safety
+- Step: Task 3 — consumption/refund evidence race gates and expand/deploy/contract closure
+- Previous Gate: required starting commit `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- This Gate: local implementation commit `b30c2303b3e5536b7fe980b1590e071fd56f8253`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; checked because Task 3 hardens a future paid path, but it does not change product/pricing/paid-boundary strategy
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-brief.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-architecture.md`
+- Current-state checked: exact worktree/branch/starting HEAD/status, repository code/tests, `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-04 RC reliability/IAP predecessor entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 Codex
+- Role: sole Task 3 implementation owner and local verifier
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- Old HEAD: `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- New HEAD / Reviewed HEAD: implementation `b30c2303b3e5536b7fe980b1590e071fd56f8253`; fresh independent exact-HEAD review pending
+
+### CHANGED / REVIEWED
+- file: `supabase/migrations/079_apple_iap_refund_consumption.sql`, `supabase/migrations/081_retire_apple_iap_v1_entrypoints.sql`, `scripts/phase0/apple-iap-ledger-harness.mjs`
+- function/component/migration: V2 transaction/credit/evidence/consent/review/consumption state, account lock order, V1 quarantine, sale hold, V1 external contract retirement
+- what changed/reviewed: added exact lots/allocations, trusted-ingress deadlines, immutable send authorization, exact late completion, bounded tokenless/deleted-account review facts, actor authorization, mixed-version and forward-recovery assertions; 081 only revokes two V1 service signatures after canary
+- why: prevent pooled-credit misattribution, deletion/consent/send races, blind unknown-result resend and unsafe rollout while keeping sales OFF
+- file: `supabase/functions/_shared/appleIapContract.ts`, `appleIapVerifier.ts`, `appleIapServerApi.ts` and covering tests
+- function/component/migration: verified Apple claim boundary, product-type rejection, Apple Server API timeout/Retry-After handling
+- what changed/reviewed: bounded quantity/revocation/reason claims, rejected Non-Renewing Subscription, interpreted numeric Retry-After as epoch milliseconds, pinned real request cancellation and credentials/environment checks
+- why: Edge and DB must accept the same reviewed contract and use Apple timing safely
+- file: `supabase/functions/apple-iap-sync/**`, `apple-iap-notifications/**`, `apple-iap-reconcile/**`, `apple-iap-consumption/**`, `supabase/config.toml`, `package.json`, `deno.lock`, `.gitignore`
+- function/component/migration: authenticated sync/consent, required nested notification, per-target reconcile, secret-gated consumption/alerts/review, frozen dependency entrypoints
+- what changed/reviewed: wired V2 RPCs, aggregate-only reconcile, claim/authorize/send/complete flow, bounded operations responses and frozen root Deno lock
+- why: turn the SQL contract into real fail-closed local Edge paths without activating scheduler or sales
+- file: `src/lib/iap/adapters.ts`, `src/lib/iap/runtime.ts`, `src/lib/iap/adapters.test.ts`
+- function/component/migration: exact reviewed notice consent adapter/runtime boundary
+- what changed/reviewed: added version/hash state and affirmative/withdrawal calls without inventing legal values or accepting caller account identity
+- why: provide a real application boundary while keeping UI/legal activation external
+- file: `docs/operations/apple-iap-rollout-runbook.md`, `docs/operations/rollback-runbook.md`, `supabase/migrations/README.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-report.md`
+- function/component/migration: rollout, recovery, evidence boundary and complete Task 3 report
+- what changed/reviewed: documented 079 expand → V2 deploy/canary with scheduler OFF → 081 contract, forward-only recovery, exact tests and unverified external gates
+- why: repository files/local tests must not be misrepresented as remote, App Store or Production evidence
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, ciphertext or E2EE change
+- DB/migration semantics: no remote migration; unrelated migration 080 untouched and unstaged; no sale-activation migration
+- product semantics: sale remains OFF; no Garden/Book Studio/UI/design/pricing/paid-boundary change and no fabricated legal/retention/fulfillment claim
+- Production: no push, merge, deploy, Supabase/Vercel, secret, cron, App Store Connect, Sandbox/TestFlight, device or customer-data action
+
+### VERIFICATION
+- command: strict focused TDD cycles listed in `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-report.md`
+- PASS / FAIL / UNVERIFIED: PASS after observed REDs; final added deleted token-bound evidence test failed after 377 assertions, then passed after the minimal SQL change
+- what it actually proves: each reported bug had a runtime/actor behavior failure before its production change; existing green tests were not substituted for RED
+- command: `npm run check:iap`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: all four IAP Deno entrypoints resolve/typecheck using committed `deno.lock` in frozen mode
+- command: `npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — 59 passed, 0 failed
+- what it actually proves: local shared/Edge handler and real entrypoint behavior; it does not call Apple or deployed Edge
+- command: `npm run test:iap:ledger`
+- PASS / FAIL / UNVERIFIED: PASS — 435 PostgreSQL actor assertions
+- what it actually proves: ephemeral local PostgreSQL migration/role/state/race/rollout behavior including expected denial probes; it does not prove remote migration state
+- command: `npx vitest run src/lib/iap/adapters.test.ts src/lib/iap/runtime.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 2 files, 7 tests
+- what it actually proves: local app adapter/runtime consent contract
+- command: `npm run typecheck`; scoped app ESLint; 20-file Deno format check; harness `node --check`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current local TypeScript graph, scoped formatting/lint/syntax and patch whitespace; the TypeScript run includes separately owned dirty worktree files
+- command: implementation `git diff --cached --stat`; `git diff --cached --check`; explicit forbidden-path match
+- PASS / FAIL / UNVERIFIED: PASS — 33 exact Task 3 files, no whitespace error, no forbidden path staged
+- what it actually proves: commit `b30c2303b3e5536b7fe980b1590e071fd56f8253` did not absorb the pre-existing build/offline, migration-080 or Control Tower work
+- command: remote Supabase/Edge, Production, Apple Server/App Store/Sandbox/TestFlight, physical device
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: no local result is generalized to external state
+
+### REVIEW IMPACT
+- FULL: authorization/RLS-private DB schema, migrations, transaction/credit/refund state and external-send state machine changed
+- whether an earlier review is stale: YES; a fresh independent exact-HEAD critical security/release review is required before rollout
+
+### BLOCKERS
+- code: none found in the scoped local Task 3 acceptance suite
+- environment: full web suite/build and physical-device behavior were not run; the worktree contains separately owned forbidden build/offline changes
+- external/manual: approved legal notice/version/hash/retention, live fulfillment caller, remote catalog/backup/rehearsal, deployed V2 canary, scheduler secret/single-flight/alerts, Apple credentials/products/Sandbox/TestFlight/device and Production state remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: Task 3 implementation commit, complete report/ledger, local frozen Deno + Edge + PostgreSQL actor + app/type/lint/format verification; sales and scheduler remain OFF
+
+### REMAINING
+- fresh independent exact-HEAD critical review and every external/manual gate listed in the Task 3 report
+- no live Book Studio fulfillment caller was connected because Book Studio was explicitly forbidden
+
+### NEXT ACTION
+- next owner: independent critical security reviewer, then release integrator only if review is clear
+- tool/model: strongest available read-only security/database reviewer; deployment owner after approval
+- 기준 SHA: `b30c2303b3e5536b7fe980b1590e071fd56f8253` plus the accompanying report-only commit
+- exact next task: review the committed DB/Edge diff at exact HEAD, then rehearse 079 expand → deployed V2 canary with scheduler OFF → 081 contract in an authorized non-Production environment
+
+### DO NOT ADVANCE UNTIL
+- fresh exact-HEAD review has no blocking finding
+- approved legal/retention and real fulfillment evidence paths exist
+- remote backup/preflight/rehearsal and deployed canary are recorded
+- scheduler and sales stay OFF until their separate activation gates are explicitly approved
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---

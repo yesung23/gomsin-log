@@ -492,6 +492,11 @@ export async function installMockBackend(
       test to assert on delivery bookkeeping instead of on what the person sees.
     */
     if (path === '/rest/v1/rpc/clear_my_unseen') return json(route, null);
+    // Store bootstrap checks the authenticated user's server-side deletion
+    // fence before hydrating any ordinary product data. Healthy scenarios have
+    // no pending deletion, so model the real scalar RPC response explicitly;
+    // leaving it unrouted turns every unrelated UI flow into a recovery error.
+    if (path === '/rest/v1/rpc/is_my_account_deletion_pending') return json(route, false);
     // Push is disabled by default in the active product. A connected account may
     // still carry a token registered by an older build, so the client revokes it
     // once while the authenticated session is valid. The browser fixture accepts

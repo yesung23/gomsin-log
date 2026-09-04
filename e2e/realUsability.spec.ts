@@ -332,7 +332,7 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await bootedInto(page, '/trips/trip-ocr');
-  await expect(page.getByRole('button', { name: '사진에서 초안 만들기' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: '사진에서 불러오기' })).toBeVisible({ timeout: 20_000 });
 
   await page.getByLabel('지도 캡처 선택').setInputFiles({
     name: 'map-capture.png',

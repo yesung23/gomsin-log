@@ -13,9 +13,18 @@ const SAFE_ERROR_CODES = new Set([
   'E_STORAGE_PATH_INVALID',
   'E_STORAGE_DEPTH_EXCEEDED',
   'E_STORAGE_DELETE_FAILED',
+  'E_STORAGE_OBJECT_RESOLVE_FAILED',
 ]);
 
 export type RecordMediaCleanupJob = {
+  recordId: string;
+  coupleId: string;
+  leaseId: string;
+};
+
+export type RecordMediaObjectCleanupJob = {
+  mediaObjectId: string;
+  storageObjectId: string;
   recordId: string;
   coupleId: string;
   leaseId: string;
@@ -44,6 +53,18 @@ export type RecordMediaCleanupDeps = {
     leaseId: string,
     errorCode: string,
   ) => Promise<'pending' | 'blocked' | null>;
+  object?: {
+    claim: (
+      leaseId: string,
+      leaseSeconds: number,
+    ) => Promise<RecordMediaObjectCleanupJob | null>;
+    resolvePath: (job: RecordMediaObjectCleanupJob) => Promise<string | null>;
+    settle: (job: RecordMediaObjectCleanupJob) => Promise<boolean>;
+    fail: (
+      job: RecordMediaObjectCleanupJob,
+      errorCode: string,
+    ) => Promise<'pending' | 'blocked' | null>;
+  };
 };
 
 type ScanResult = {
@@ -247,6 +268,96 @@ async function settleDeferred(
   return { outcome: 'deferred', deletedObjects };
 }
 
+function isRecordMediaObjectCleanupJob(
+  value: RecordMediaObjectCleanupJob,
+  leaseId: string,
+): boolean {
+  return isUuid(value.mediaObjectId)
+    && isUuid(value.storageObjectId)
+    && isUuid(value.recordId)
+    && isUuid(value.coupleId)
+    && isUuid(value.leaseId)
+    && value.leaseId === leaseId;
+}
+
+function isExactObjectPath(path: unknown, job: RecordMediaObjectCleanupJob): path is string {
+  if (typeof path !== 'string') return false;
+  const parts = path.split('/');
+  return parts.length === 3
+    && parts[0] === job.coupleId
+    && parts[1] === job.recordId
+    && isSafeSegment(parts[2]);
+}
+
+async function settleObjectComplete(
+  deps: RecordMediaCleanupDeps,
+  job: RecordMediaObjectCleanupJob,
+  deletedObjects: number,
+): Promise<RecordMediaCleanupResult> {
+  if (!deps.object) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+  const completed = await replayBooleanSettlement(() => deps.object!.settle(job));
+  if (!completed) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+  return { outcome: 'completed', deletedObjects };
+}
+
+async function settleObjectFailure(
+  deps: RecordMediaCleanupDeps,
+  job: RecordMediaObjectCleanupJob,
+  errorCode: string,
+): Promise<RecordMediaCleanupResult> {
+  if (!deps.object) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+  let state: 'pending' | 'blocked' | null;
+  try {
+    state = await deps.object.fail(job, errorCode);
+  } catch {
+    try {
+      state = await deps.object.fail(job, errorCode);
+    } catch {
+      throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+    }
+  }
+  if (state === 'pending') return { outcome: 'retry_scheduled', deletedObjects: 0 };
+  if (state === 'blocked') return { outcome: 'blocked', deletedObjects: 0 };
+  throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+}
+
+async function runObjectCleanup(
+  deps: RecordMediaCleanupDeps,
+  leaseId: string,
+): Promise<RecordMediaCleanupResult> {
+  if (!deps.object) return { outcome: 'idle', deletedObjects: 0 };
+
+  let job: RecordMediaObjectCleanupJob | null;
+  try {
+    job = await deps.object.claim(leaseId, RECORD_MEDIA_CLEANUP_LEASE_SECONDS);
+  } catch {
+    throw new Error('E_CLEANUP_CLAIM_FAILED');
+  }
+  if (job === null) return { outcome: 'idle', deletedObjects: 0 };
+  if (!isRecordMediaObjectCleanupJob(job, leaseId)) {
+    throw new Error('E_CLEANUP_JOB_INVALID');
+  }
+
+  let path: string | null;
+  try {
+    path = await deps.object.resolvePath(job);
+  } catch {
+    return settleObjectFailure(deps, job, 'E_STORAGE_OBJECT_RESOLVE_FAILED');
+  }
+  if (path === null) return settleObjectComplete(deps, job, 0);
+  if (!isExactObjectPath(path, job)) {
+    return settleObjectFailure(deps, job, 'E_STORAGE_PATH_INVALID');
+  }
+
+  try {
+    await removePaths(deps, [path]);
+  } catch (error) {
+    if (!(error instanceof CleanupStorageError)) throw error;
+    return settleObjectFailure(deps, job, storageErrorCode(error));
+  }
+  return settleObjectComplete(deps, job, 1);
+}
+
 export async function runRecordMediaCleanup(
   deps: RecordMediaCleanupDeps,
 ): Promise<RecordMediaCleanupResult> {
@@ -259,7 +370,7 @@ export async function runRecordMediaCleanup(
   } catch {
     throw new Error('E_CLEANUP_CLAIM_FAILED');
   }
-  if (job === null) return { outcome: 'idle', deletedObjects: 0 };
+  if (job === null) return runObjectCleanup(deps, leaseId);
   if (
     !isUuid(job.recordId) || !isUuid(job.coupleId) || !isUuid(job.leaseId) ||
     job.leaseId !== leaseId

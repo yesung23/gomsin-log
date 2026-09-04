@@ -78,6 +78,13 @@ const deleteRecordFromDB = vi.fn(async () => {
 const removeRecordMedia = vi.fn(async () => {
   callOrder.push('removeRecordMedia');
 });
+const beginRecordMediaMutation = vi.fn(async (request: { baseContentRevision: number }) => ({
+  ok: true as const,
+  state: 'pending' as const,
+  targetContentRevision: request.baseContentRevision + 1,
+}));
+const getRecordMediaMutationStatus = vi.fn(async () => ({ ok: true as const, state: 'pending' as const }));
+const abandonRecordMediaMutation = vi.fn(async () => ({ ok: true as const, state: 'abandoned' as const }));
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
 
@@ -88,6 +95,9 @@ vi.mock('@/lib/records', () => ({
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: vi.fn(async (file: File) => ({ attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } })),
   removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
+  beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(...(args as [])),
+  getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
+  abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/')
@@ -97,6 +107,7 @@ vi.mock('@/lib/records', () => ({
     if (typeof path !== 'string') return false;
     return path.startsWith(`${coupleId}/${recordId}/`);
   },
+  isValidMediaObjectId: () => true,
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -234,6 +245,15 @@ describe('deleteRecord with database-owned media cleanup', () => {
     deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return { ok: true as const }; });
     saveRecordToDB.mockReset();
     saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return { ok: true as const }; });
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
     localStorage.clear();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
   });

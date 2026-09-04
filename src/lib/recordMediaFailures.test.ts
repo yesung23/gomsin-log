@@ -201,6 +201,27 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     });
   });
 
+  it('returns the exact candidate attachment when a stable upload response is ambiguous', async () => {
+    mockUpload.mockResolvedValue({ error: new TypeError('Failed to fetch') });
+
+    const result = await uploadRecordMedia(
+      pngFile(),
+      COUPLE_ID,
+      RECORD_ID,
+      undefined,
+      STABLE_OBJECT_ID,
+    );
+
+    expect(result).toMatchObject({
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: 'photo.jpg',
+        path: `${COUPLE_ID}/${RECORD_ID}/${STABLE_OBJECT_ID}.jpg`,
+      },
+    });
+  });
+
   it('rejects a malformed stable object id before touching Storage', async () => {
     const result = await uploadRecordMedia(
       pngFile(),

@@ -93,6 +93,68 @@ Deno.test('record media cleanup: an empty claim is idle and never touches Storag
   assert.deepEqual(fixture.failed, []);
 });
 
+Deno.test('record media cleanup: after no prefix job it deletes one exact object and settles by object id', async () => {
+  const fixture = createFixture();
+  fixture.value.claim = async () => null;
+  const objectPath = `${ROOT}/legacy-photo.jpg`;
+  const calls: string[] = [];
+  const objectAware = fixture.value as RecordMediaCleanupDeps & {
+    object?: {
+      claim: (leaseId: string, leaseSeconds: number) => Promise<{
+        mediaObjectId: string;
+        storageObjectId: string;
+        recordId: string;
+        coupleId: string;
+        leaseId: string;
+      } | null>;
+      resolvePath: (job: { storageObjectId: string }) => Promise<string | null>;
+      settle: (job: { storageObjectId: string }) => Promise<boolean>;
+      fail: (
+        job: { storageObjectId: string },
+        errorCode: string,
+      ) => Promise<'pending' | 'blocked' | null>;
+    };
+  };
+  objectAware.object = {
+    claim: async (leaseId, leaseSeconds) => {
+      calls.push(`claim:${leaseId}:${leaseSeconds}`);
+      return {
+        mediaObjectId: '40000000-0000-4000-8000-000000000001',
+        storageObjectId: '50000000-0000-4000-8000-000000000001',
+        recordId: RECORD_ID,
+        coupleId: COUPLE_ID,
+        leaseId: LEASE_ID,
+      };
+    },
+    resolvePath: async (job) => {
+      calls.push(`resolve:${job.storageObjectId}`);
+      return objectPath;
+    },
+    settle: async (job) => {
+      calls.push(`settle:${job.storageObjectId}`);
+      return true;
+    },
+    fail: async (_job, errorCode) => {
+      calls.push(`fail:${errorCode}`);
+      return 'pending';
+    },
+  };
+  fixture.value.remove = async (paths) => {
+    calls.push(`remove:${paths.join('|')}`);
+  };
+
+  assert.deepEqual(await runRecordMediaCleanup(objectAware), {
+    outcome: 'completed',
+    deletedObjects: 1,
+  });
+  assert.deepEqual(calls, [
+    `claim:${LEASE_ID}:120`,
+    'resolve:50000000-0000-4000-8000-000000000001',
+    `remove:${objectPath}`,
+    'settle:50000000-0000-4000-8000-000000000001',
+  ]);
+});
+
 Deno.test('record media cleanup: recursively drains only the exact UUID prefix and completes after a fresh empty scan', async () => {
   const paths = [
     `${ROOT}/root.jpg`,

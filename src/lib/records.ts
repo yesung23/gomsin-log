@@ -61,7 +61,7 @@ export function encryptionRefusalReason(): ServerErrorKind {
  */
 export type RecordWriteIntent =
   | { kind: 'create' }
-  | { kind: 'update'; expectedRevision: number };
+  | { kind: 'update'; expectedRevision: number; mediaOperationId?: string };
 
 /** The five protected fields, as the sealed document carries them. */
 function documentForRecord(record: DailyRecord, coupleId: string) {
@@ -347,6 +347,13 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
     contentRevision: Number.isSafeInteger(contentRevision) && contentRevision >= 1
       ? contentRevision
       : 1,
+    mediaContractVersion: row.media_contract_version === 1 ? 1 : 0,
+    mediaManifestRevision: Number.isSafeInteger(Number(row.media_manifest_revision))
+      ? Number(row.media_manifest_revision)
+      : 0,
+    ...(typeof row.last_media_operation_id === 'string'
+      ? { lastMediaOperationId: row.last_media_operation_id }
+      : {}),
   };
 
   const cipherFormat = typeof row.cipher_format === 'number' ? row.cipher_format : RECORD_CIPHER_PLAINTEXT;
@@ -422,6 +429,119 @@ function unconfiguredReason(): ServerErrorKind {
     : 'server';
 }
 
+export type RecordMediaMutationState =
+  | 'pending'
+  | 'committed'
+  | 'abandoned'
+  | 'unavailable';
+
+export type RecordMediaMutationRequest = {
+  operationId: string;
+  recordId: string;
+  userId: string;
+  coupleId: string;
+  baseContentRevision: number;
+  existingPaths: string[];
+  newMediaIds: string[];
+};
+
+export type RecordMediaMutationIdentity = Pick<
+  RecordMediaMutationRequest,
+  'operationId' | 'recordId' | 'userId' | 'coupleId'
+> & Partial<Pick<RecordMediaMutationRequest, 'baseContentRevision' | 'existingPaths' | 'newMediaIds'>>;
+
+export type RecordMediaMutationResult =
+  | {
+      ok: true;
+      state: RecordMediaMutationState;
+      targetContentRevision?: number;
+    }
+  | { ok: false; reason: ServerErrorKind };
+
+function readMediaMutationResult(data: unknown): RecordMediaMutationResult | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const candidate = data as Record<string, unknown>;
+  if (!['pending', 'committed', 'abandoned', 'unavailable'].includes(String(candidate.state))) {
+    return null;
+  }
+  const target = Number(candidate.target_content_revision);
+  return {
+    ok: true,
+    state: candidate.state as RecordMediaMutationState,
+    ...(Number.isSafeInteger(target) && target >= 1 ? { targetContentRevision: target } : {}),
+  };
+}
+
+function validMutationIdentity(request: RecordMediaMutationIdentity): boolean {
+  return Boolean(request.operationId && request.recordId && request.userId && request.coupleId);
+}
+
+export async function beginRecordMediaMutation(
+  request: RecordMediaMutationRequest,
+): Promise<RecordMediaMutationResult> {
+  if (
+    !isSupabaseConfigured
+    || !supabase
+    || !validMutationIdentity(request)
+    || !Number.isSafeInteger(request.baseContentRevision)
+    || request.baseContentRevision < 1
+  ) return { ok: false, reason: unconfiguredReason() };
+
+  const { data, error } = await supabase.rpc('begin_record_media_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+    p_base_content_revision: request.baseContentRevision,
+    p_target_content_revision: request.baseContentRevision + 1,
+    p_existing_paths: [...request.existingPaths],
+    p_new_media_ids: [...request.newMediaIds],
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to begin record media mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
+export async function getRecordMediaMutationStatus(
+  request: RecordMediaMutationIdentity,
+): Promise<RecordMediaMutationResult> {
+  if (!isSupabaseConfigured || !supabase || !validMutationIdentity(request)) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const { data, error } = await supabase.rpc('record_media_mutation_status', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to read record media mutation status.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
+export async function abandonRecordMediaMutation(
+  request: RecordMediaMutationIdentity,
+): Promise<RecordMediaMutationResult> {
+  if (!isSupabaseConfigured || !supabase || !validMutationIdentity(request)) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const { data, error } = await supabase.rpc('abandon_record_media_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to abandon record media mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
 export async function saveRecordToDB(
   record: DailyRecord,
   coupleId: string,
@@ -454,6 +574,9 @@ export async function saveRecordToDB(
     talk_about: !record.isPrivate && record.talkAbout === true,
     emotion_updated_at: record.emotionUpdatedAt || null,
     updated_at: new Date().toISOString(),
+    ...(intent.kind === 'update' && intent.mediaOperationId
+      ? { last_media_operation_id: intent.mediaOperationId }
+      : {}),
   };
 
   const environment = recordCryptoEnvironment;
@@ -534,7 +657,12 @@ export async function saveRecordToDB(
       console.error('[gomsinlog] Failed to save record.');
       return { ok: false, reason: classifyServerError(error).kind };
     }
-    return { ok: true, contentRevision: record.contentRevision ?? 1 };
+    return {
+      ok: true,
+      contentRevision: intent.kind === 'update'
+        ? intent.expectedRevision + 1
+        : record.contentRevision ?? 1,
+    };
   }
 
   const { data, error } = await request
@@ -707,6 +835,26 @@ function isAlreadyUploadedStableObject(error: unknown): boolean {
     || message.includes('duplicate');
 }
 
+const UNCERTAIN_MEDIA_UPLOAD_REASONS: ReadonlySet<ServerErrorKind> = new Set([
+  'offline',
+  'unreachable',
+  'server',
+  'unknown',
+]);
+
+type RecordMediaUploadResult =
+  | { attachment: Attachment }
+  | {
+      error: string;
+      reason: ServerErrorKind;
+      /**
+       * Exact deterministic object identity for a stable-id upload whose
+       * response was ambiguous. The caller may submit this candidate to the
+       * record CAS; the database accepts it only if Storage actually committed.
+       */
+      uncertainAttachment?: Attachment;
+    };
+
 /**
  * Upload one attachment for an already-persisted record.
  *
@@ -720,7 +868,7 @@ export async function uploadRecordMedia(
   recordId: string,
   displayName?: string,
   stableObjectId?: string,
-): Promise<{ attachment: Attachment } | { error: string; reason: ServerErrorKind }> {
+): Promise<RecordMediaUploadResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.', reason: 'server' };
   }
@@ -753,6 +901,14 @@ export async function uploadRecordMedia(
   }
 
   const path = buildMediaPath(coupleId, recordId, uploadExtension, stableObjectId);
+  const attachment: Attachment = {
+    type: classified.type,
+    // The source basename can contain a person's name, location or date. The
+    // photo sanitizer has already replaced it with a neutral filename, so use
+    // that value unless the user deliberately supplied a display label.
+    name: displayName?.trim() || uploadFile.name || `${classified.type}.${uploadExtension}`,
+    path,
+  };
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, uploadFile, {
     contentType: uploadFile.type,
     upsert: false,
@@ -767,19 +923,13 @@ export async function uploadRecordMedia(
     return {
       error: `파일을 올리지 못했어요. ${classifiedError.message}`,
       reason: classifiedError.kind,
+      ...(stableObjectId && UNCERTAIN_MEDIA_UPLOAD_REASONS.has(classifiedError.kind)
+        ? { uncertainAttachment: attachment }
+        : {}),
     };
   }
 
-  return {
-    attachment: {
-      type: classified.type,
-      // The source basename can contain a person's name, location or date. The
-      // photo sanitizer has already replaced it with a neutral filename, so use
-      // that value unless the user deliberately supplied a display label.
-      name: displayName?.trim() || uploadFile.name || `${classified.type}.${uploadExtension}`,
-      path,
-    },
-  };
+  return { attachment };
 }
 
 /**
@@ -826,13 +976,6 @@ export async function downloadRecordPhotoForReuse(
     return { error: '기존 사진을 이 기기에서 안전하게 처리하지 못했어요.' };
   }
   return { file };
-}
-
-/** Remove uploaded objects. Throws on error so callers can decide how to handle failure. */
-export async function removeRecordMedia(paths: string[]): Promise<void> {
-  if (!isSupabaseConfigured || !supabase || paths.length === 0) return;
-  const { error } = await supabase.storage.from(MEDIA_BUCKET).remove(paths);
-  if (error) throw new Error(`Failed to clean up media objects: ${error.message}`);
 }
 
 /**

@@ -111,13 +111,34 @@ vi.mock('@/lib/sync', () => ({
 }));
 
 /** The single observable. Only a delivery attempt reaches it. */
-const saveRecordToDB = vi.fn(async () => ({ ok: true as const, contentRevision: 1 }));
+const saveRecordToDB = vi.fn(async (
+  _record: DailyRecord,
+  _coupleId?: string,
+  _userId?: string,
+  intent?: { kind?: string; expectedRevision?: number },
+) => ({
+  ok: true as const,
+  contentRevision: intent?.kind === 'update' ? (intent.expectedRevision ?? 0) + 1 : 1,
+}));
 const uploadRecordMedia = vi.fn(async (file: File, _coupleId?: string, _recordId?: string, _displayName?: string, objectId?: string) => ({
   attachment: {
     type: 'photo' as const,
     name: file.name,
     path: `${_coupleId}/${_recordId}/${objectId ?? file.name}.png`,
   },
+}));
+const beginRecordMediaMutation = vi.fn(async (request: { baseContentRevision: number }) => ({
+  ok: true as const,
+  state: 'pending' as const,
+  targetContentRevision: request.baseContentRevision + 1,
+}));
+const getRecordMediaMutationStatus = vi.fn(async () => ({
+  ok: true as const,
+  state: 'pending' as const,
+}));
+const abandonRecordMediaMutation = vi.fn(async () => ({
+  ok: true as const,
+  state: 'abandoned' as const,
 }));
 
 vi.mock('@/lib/records', () => ({
@@ -128,7 +149,11 @@ vi.mock('@/lib/records', () => ({
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(
     ...(args as [File, string?, string?, string?, string?]),
   ),
-  removeRecordMedia: vi.fn(async () => {}),
+  beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(
+    ...(args as [{ baseContentRevision: number }]),
+  ),
+  getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
+  abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/') ? { ext: 'png', type: 'photo' } : { error: 'unsupported' },
@@ -298,7 +323,15 @@ describe('offline outbox flush', () => {
     authCallbacks.length = 0;
     queue = [];
     saveRecordToDB.mockReset();
-    saveRecordToDB.mockImplementation(async () => ({ ok: true as const, contentRevision: 1 }));
+    saveRecordToDB.mockImplementation(async (
+      _record: DailyRecord,
+      _coupleId?: string,
+      _userId?: string,
+      intent?: { kind?: string; expectedRevision?: number },
+    ) => ({
+      ok: true as const,
+      contentRevision: intent?.kind === 'update' ? (intent.expectedRevision ?? 0) + 1 : 1,
+    }));
     uploadRecordMedia.mockReset();
     uploadRecordMedia.mockImplementation(async (
       file: File,
@@ -313,6 +346,15 @@ describe('offline outbox flush', () => {
         path: `${coupleId}/${recordId}/${objectId ?? file.name}.png`,
       },
     }));
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true as const,
+      state: 'pending' as const,
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
     fetchMyCoupleState.mockReset();
     fetchMyCoupleState.mockResolvedValue({ ok: false, reason: 'server' });
     localStorage.clear();
@@ -397,6 +439,40 @@ describe('offline outbox flush', () => {
       .toEqual(['first.png', 'second.png']);
     expect(savedVersions.at(-1)?.attachments?.map((attachment) => attachment.path))
       .toEqual(plannedObjectIds.map((objectId) => `couple-1/queued-rec-1/${objectId}.png`));
+
+    unmount();
+  });
+
+  it('commits one stable outbox object when Storage succeeded but its response was lost', async () => {
+    const objectId = '11111111-1111-4111-8111-111111111111';
+    const file = new File(['private'], 'private.png', { type: 'image/png' });
+    queue = [queuedEntry({
+      files: [file],
+      mediaPlan: {
+        version: 1,
+        slots: [{ objectId, fileIndex: 0, byteLength: file.size, mimeType: file.type }],
+      },
+    })];
+    uploadRecordMedia.mockResolvedValueOnce({
+      error: '서버에 요청이 닿지 않았어요. 잠시 후 다시 시도해 주세요.',
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: 'photo.jpg',
+        path: `couple-1/queued-rec-1/${objectId}.jpg`,
+      },
+    } as never);
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => expect(queue).toHaveLength(0));
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia.mock.calls[0]?.[4]).toBe(objectId);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+    expect((saveRecordToDB.mock.calls[1]?.[0] as DailyRecord).attachments?.[0]?.path)
+      .toBe(`couple-1/queued-rec-1/${objectId}.jpg`);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
 
     unmount();
   });

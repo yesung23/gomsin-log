@@ -60,7 +60,9 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
         activeAttemptId = args?.p_attempt_id;
       }
       return {
-        data: name === 'begin_account_deletion_v2'
+        data: name === 'record_media_cleanup_contract_version'
+          ? 2
+          : name === 'begin_account_deletion_v2'
           ? { ok: true, attempt_id: args?.p_attempt_id, phase: 'media_cleanup' }
           : name === 'inspect_account_deletion_fence_v2'
             ? {
@@ -327,6 +329,7 @@ describe('C2 - the delete-account function applies the table end to end', () => 
     // `deleteAccountFunction.test.ts`.
     expect(admin.calls.filter((call) => call !== 'auth.admin.updateUserById')).toEqual([
       'auth.getUser',
+      'rpc:record_media_cleanup_contract_version',
       'from:daily_records.select',
       'rpc:begin_account_deletion_v2',
       'auth.getUser',

@@ -135,6 +135,9 @@ function makeAdmin(options: AdminOptions = {}) {
     rpc: vi.fn(async (name: string, args?: Record<string, unknown>) => {
       calls.push(`rpc:${name}`);
       rpcCalls.push({ name, args });
+      if (name === 'record_media_cleanup_contract_version') {
+        return { data: 2, error: null };
+      }
       if (name === 'begin_account_deletion_v2') {
         if (options.beginError) return { data: null, error: options.beginError };
         const data = Object.hasOwn(options, 'beginData')
@@ -449,7 +452,11 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: false, warnings: [] });
     // The account is fully intact: not one destructive or preparatory step ran.
-    expect(admin.calls).toEqual(['auth.getUser', 'auth.admin.updateUserById']);
+    expect(admin.calls).toEqual([
+      'auth.getUser',
+      'rpc:record_media_cleanup_contract_version',
+      'auth.admin.updateUserById',
+    ]);
     expect(admin.calls).not.toContain('from:daily_records.select');
     expect(admin.calls).not.toContain('rpc:begin_account_deletion_v2');
     expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
@@ -1002,6 +1009,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
     await post(admin);
     expect(admin.calls).toEqual([
       'auth.getUser',
+      'rpc:record_media_cleanup_contract_version',
       'auth.admin.updateUserById',
       'from:daily_records.select',
       'rpc:begin_account_deletion_v2',

@@ -27,6 +27,7 @@
     "test:p5": "node scripts/e2ee/p5-harness.mjs",
     "test:phase0": "node scripts/phase0/storage-authz-harness.mjs",
     "test:record-media-cleanup": "node scripts/phase0/record-media-cleanup-harness.mjs",
+    "test:record-media-chain": "node scripts/phase0/record-media-real-chain-harness.mjs",
     "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "verify:native": "vitest run --config vitest.config.ts --configLoader runner src/lib/nativeConfig.test.ts src/lib/iosPrivacyManifest.test.ts src/lib/appAssets.test.ts src/lib/nativePermissions.test.ts",
     "assets:generate": "node scripts/assets/generate-app-assets.mjs",

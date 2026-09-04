@@ -236,9 +236,21 @@ const uploadRecordMedia = vi.fn(async (
     },
   };
 });
-const removeRecordMedia = vi.fn(async () => {
-  callOrder.push('removeMedia');
-});
+const beginRecordMediaMutation = vi.fn(async (
+  request: { baseContentRevision: number },
+) => ({
+  ok: true as const,
+  state: 'pending' as const,
+  targetContentRevision: request.baseContentRevision + 1,
+}));
+const getRecordMediaMutationStatus = vi.fn(async () => ({
+  ok: true as const,
+  state: 'pending' as const,
+}));
+const abandonRecordMediaMutation = vi.fn(async () => ({
+  ok: true as const,
+  state: 'abandoned' as const,
+}));
 
 const fetchRecordsFromDB = vi.fn(async () => []);
 
@@ -254,7 +266,9 @@ vi.mock('@/lib/records', () => ({
   uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(
     ...(args as [File, string?, string?, string?, string?]),
   ),
-  removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
+  beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(...(args as [])),
+  getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
+  abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/')
@@ -552,6 +566,15 @@ describe('StoreProvider auth lifecycle', () => {
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     deleteRecordFromDB.mockReset().mockResolvedValue({ ok: true });
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
@@ -2580,8 +2603,15 @@ describe('StoreProvider auth lifecycle', () => {
     expect(callOrder).toContain('upload:first.png');
     expect(callOrder).toContain('upload:second.png');
     expect(callOrder.indexOf('saveRecord')).toBeLessThan(callOrder.indexOf('upload:first.png'));
-    // A second save patches the row with the attachment metadata.
-    expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(2);
+    // Normal partial-success mode commits one bounded media revision per file.
+    expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(3);
+    expect(beginRecordMediaMutation.mock.calls.slice(-2).map(([request]) => ({
+      base: (request as { baseContentRevision: number }).baseContentRevision,
+      uploads: (request as { newMediaIds: string[] }).newMediaIds.length,
+    }))).toEqual([
+      { base: 1, uploads: 1 },
+      { base: 2, uploads: 1 },
+    ]);
     expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
   });
 
@@ -2623,12 +2653,55 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('privacy')).toHaveTextContent('public');
   });
 
-  it('keeps uploaded media when the attachment patch response is lost and read-back confirms commit', async () => {
+  it('returns truthful partial success when media begin fails after the staged profile row exists', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockResolvedValue({ ok: true, contentRevision: 1 });
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'server' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'unavailable' });
+    uploadRecordMedia.mockClear();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'post.png', { type: 'image/png' })]} allOrNothingMedia />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({
+      ok: true,
+      failedFiles: ['post.png'],
+      reason: 'server',
+      recordId: expect.any(String),
+    });
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+    expect(screen.getByTestId('privacy')).toHaveTextContent('private');
+  });
+
+  it('keeps uploaded media when the attachment patch response is lost and operation status confirms commit', async () => {
     callOrder.length = 0;
-    removeRecordMedia.mockClear();
     saveRecordToDB.mockReset()
       .mockResolvedValueOnce({ ok: true, contentRevision: 1 })
       .mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchFullStateFromDB.mockResolvedValue(
       serverState({
         profile: {
@@ -2640,13 +2713,6 @@ describe('StoreProvider auth lifecycle', () => {
         } as never,
       }),
     );
-    fetchRecordsResultFromDB.mockImplementation(async () => {
-      const intended = saveRecordToDB.mock.calls[1]?.[0] as DailyRecord | undefined;
-      return {
-        ok: true,
-        records: intended ? [{ ...intended, userId: 'user-a', contentRevision: 2 }] : [],
-      };
-    });
 
     render(
       <StoreProvider>
@@ -2661,7 +2727,8 @@ describe('StoreProvider auth lifecycle', () => {
 
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual([]);
-    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
     expect(screen.getByTestId('attachments')).toHaveTextContent('post.png');
   });
 
@@ -2880,6 +2947,182 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
   });
 
+  it('preserves successful normal-composer files without reviving an abandoned failed id', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+      callOrder.push('saveRecord');
+      const intent = args[3] as { kind: 'create' | 'update'; expectedRevision?: number };
+      return {
+        ok: true as const,
+        contentRevision: intent.kind === 'create' ? 1 : (intent.expectedRevision ?? 1) + 1,
+      };
+    });
+    uploadRecordMedia.mockReset().mockImplementation(async (
+      file: File,
+      coupleId?: string,
+      recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => {
+      callOrder.push(`upload:${file.name}`);
+      return file.name === 'broken.png'
+        ? { error: '파일을 올리지 못했어요.', reason: 'server' as const }
+        : {
+            attachment: {
+              type: 'photo' as const,
+              name: file.name,
+              path: `${coupleId}/${recordId}/${objectId}.png`,
+            },
+          };
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'good.png', { type: 'image/png' }),
+          new File(['b'], 'broken.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['broken.png'] });
+    expect(screen.getByTestId('attachments')).toHaveTextContent('good.png');
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { baseContentRevision: number }).baseContentRevision
+    ))).toEqual([1, 2]);
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { newMediaIds: string[] }).newMediaIds.length
+    ))).toEqual([1, 1]);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports only the unfinished normal-composer files after a later begin is refused', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+      const intent = args[3] as { kind: 'create' | 'update'; expectedRevision?: number };
+      return {
+        ok: true as const,
+        contentRevision: intent.kind === 'create' ? 1 : (intent.expectedRevision ?? 1) + 1,
+      };
+    });
+    beginRecordMediaMutation
+      .mockImplementationOnce(async (request: { baseContentRevision: number }) => ({
+        ok: true as const,
+        state: 'pending' as const,
+        targetContentRevision: request.baseContentRevision + 1,
+      }))
+      .mockResolvedValueOnce({ ok: false, reason: 'forbidden' });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'committed.png', { type: 'image/png' }),
+          new File(['b'], 'unfinished.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({
+      ok: true,
+      failedFiles: ['unfinished.png'],
+      reason: 'forbidden',
+    });
+    expect(uploadRecordMedia.mock.calls.map(([file]) => (file as File).name))
+      .toEqual(['committed.png']);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('attachments')).toHaveTextContent('committed.png');
+    expect(screen.getByTestId('attachments')).not.toHaveTextContent('unfinished.png');
+  });
+
+  it('continues normal-composer sequencing after response-loss status confirms a file commit', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    saveRecordToDB.mockReset()
+      .mockResolvedValueOnce({ ok: true, contentRevision: 1 })
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' })
+      .mockResolvedValueOnce({ ok: true, contentRevision: 3 });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
+    uploadRecordMedia.mockReset().mockImplementation(async (
+      file: File,
+      coupleId?: string,
+      recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => ({
+      attachment: {
+        type: 'photo' as const,
+        name: file.name,
+        path: `${coupleId}/${recordId}/${objectId}.png`,
+      },
+    }));
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'first.png', { type: 'image/png' }),
+          new File(['b'], 'second.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(screen.getByTestId('attachments')).toHaveTextContent('first.png');
+    expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { baseContentRevision: number }).baseContentRevision
+    ))).toEqual([1, 2]);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
   it('post mode rolls back successful media when any file fails and returns the same row id', async () => {
     callOrder.length = 0;
     lastMediaResult = null;
@@ -2930,9 +3173,8 @@ describe('StoreProvider auth lifecycle', () => {
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual(['good.png', 'broken.png']);
     expect(lastMediaResult?.recordId).toBeTruthy();
-    expect(removeRecordMedia).toHaveBeenCalledWith([
-      expect.stringContaining('/good.png'),
-    ]);
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
     expect((saveRecordToDB.mock.calls[0]?.[0] as DailyRecord).isPrivate).toBe(true);

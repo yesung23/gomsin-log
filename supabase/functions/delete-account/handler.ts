@@ -6,7 +6,9 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *
  * 0. Resolve CORS against an explicit allowlist and refuse any origin that is
  *    not on it, before any authentication or admin-client work.
- * 0b. Verify the bearer token, then write the admin-only Auth flag
+ * 0b. Verify the bearer token, then probe migration 084's exact media cleanup
+ *    contract before any flag or destructive phase.
+ * 0c. Write the admin-only Auth flag
  *    `app_metadata.account_deletion_pending = true`. This is the PRIMARY
  *    authority for deletion recovery and it gates everything below: if the
  *    write fails, nothing is deleted.
@@ -20,8 +22,9 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *    plan ownership, removes private/blocking rows, deletes records, and
  *    enqueues their media-cleanup tombstones in one database transaction.
  * 4. Call the service-role-only close_account_relationship_generations RPC.
- *    Migration 083 refuses this step until every owned cleanup tombstone is
- *    complete, so Auth remains intact while asynchronous Storage work remains.
+ *    Migrations 083/084 refuse this step until every owned prefix and object
+ *    cleanup job is complete, so Auth remains intact while asynchronous
+ *    Storage work remains.
  *    It terminally closes every relationship generation, revokes pairing and
  *    delivery authority, disconnects both members, and invalidates invitations.
  * 5. Remove the couple row only when this account is its sole member. A current
@@ -240,6 +243,35 @@ export async function handleDeleteAccountRequest(
   }
 
   const userId = user.id;
+
+  // This Edge artifact is unsafe against a database that only has the
+  // full-prefix cleanup contract from migration 083: record preparation could
+  // delete rows while per-object work is still unknown to the account barrier.
+  // Probe the exact contract before writing even the recoverable Auth flag or
+  // reading a record. A missing, stale, malformed, or unreachable contract is
+  // therefore a clean no-op from the user's point of view.
+  let mediaCleanupContractReady = false;
+  try {
+    const { data, error } = await admin.rpc(
+      'record_media_cleanup_contract_version',
+    );
+    mediaCleanupContractReady = !error && data === 2;
+  } catch {
+    mediaCleanupContractReady = false;
+  }
+  if (!mediaCleanupContractReady) {
+    console.error('[delete-account] Required media cleanup contract is unavailable');
+    return jsonResponse(
+      {
+        error: 'Account deletion is temporarily unavailable.',
+        dataRemoved: false,
+        warnings: [],
+      },
+      503,
+      cors.headers,
+    );
+  }
+
   // One invocation, one unguessable fence. A retry receives a new token and
   // atomically supersedes the previous invocation without losing its phase.
   const attemptId = crypto.randomUUID();

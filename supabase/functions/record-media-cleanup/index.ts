@@ -8,6 +8,7 @@ import {
 import {
   RECORD_MEDIA_CLEANUP_LEASE_SECONDS,
   type RecordMediaCleanupJob,
+  type RecordMediaObjectCleanupJob,
   runRecordMediaCleanup,
 } from '../_shared/recordMediaCleanup.ts';
 import { handleRecordMediaCleanupRequest } from './handler.ts';
@@ -17,7 +18,11 @@ type CleanupRpcName =
   | 'claim_record_media_cleanup_job'
   | 'complete_record_media_cleanup_job'
   | 'defer_record_media_cleanup_job'
-  | 'fail_record_media_cleanup_job';
+  | 'fail_record_media_cleanup_job'
+  | 'claim_record_media_object_cleanup_job'
+  | 'resolve_record_media_object_cleanup_path'
+  | 'settle_record_media_object_cleanup_job'
+  | 'fail_record_media_object_cleanup_job';
 
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -122,6 +127,68 @@ Deno.serve(async (request) => {
         });
         if (error) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
         return data === 'pending' || data === 'blocked' ? data : null;
+      },
+      object: {
+        claim: async (leaseId, leaseSeconds) => {
+          const { data, error } = await callCleanupRpc(
+            'claim_record_media_object_cleanup_job',
+            { p_lease_id: leaseId, p_lease_seconds: leaseSeconds },
+          );
+          if (error || !Array.isArray(data) || data.length > 1) {
+            throw new Error('E_CLEANUP_CLAIM_FAILED');
+          }
+          if (data.length === 0) return null;
+          const row = data[0] as Record<string, unknown>;
+          return {
+            mediaObjectId: String(row.media_object_id),
+            storageObjectId: String(row.storage_object_id),
+            recordId: String(row.record_id),
+            coupleId: String(row.couple_id),
+            leaseId: String(row.lease_id),
+          } satisfies RecordMediaObjectCleanupJob;
+        },
+        resolvePath: async (job) => {
+          const { data, error } = await callCleanupRpc(
+            'resolve_record_media_object_cleanup_path',
+            {
+              p_media_object_id: job.mediaObjectId,
+              p_storage_object_id: job.storageObjectId,
+              p_lease_id: job.leaseId,
+            },
+          );
+          if (error || !Array.isArray(data) || data.length > 1) {
+            throw new Error('E_STORAGE_OBJECT_RESOLVE_FAILED');
+          }
+          if (data.length === 0) return null;
+          const path = (data[0] as Record<string, unknown>).storage_path;
+          if (typeof path !== 'string') throw new Error('E_STORAGE_OBJECT_RESOLVE_FAILED');
+          return path;
+        },
+        settle: async (job) => {
+          const { data, error } = await callCleanupRpc(
+            'settle_record_media_object_cleanup_job',
+            {
+              p_media_object_id: job.mediaObjectId,
+              p_storage_object_id: job.storageObjectId,
+              p_lease_id: job.leaseId,
+            },
+          );
+          if (error) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+          return data === true;
+        },
+        fail: async (job, errorCode) => {
+          const { data, error } = await callCleanupRpc(
+            'fail_record_media_object_cleanup_job',
+            {
+              p_media_object_id: job.mediaObjectId,
+              p_storage_object_id: job.storageObjectId,
+              p_lease_id: job.leaseId,
+              p_error_code: errorCode,
+            },
+          );
+          if (error) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
+          return data === 'pending' || data === 'blocked' ? data : null;
+        },
       },
     }),
   });

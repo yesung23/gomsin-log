@@ -2,6 +2,9 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   classifyMediaFile,
   buildMediaPath,
+  beginRecordMediaMutation,
+  getRecordMediaMutationStatus,
+  abandonRecordMediaMutation,
   MAX_BYTES,
   MEDIA_ACCEPT,
   MEDIA_POLICY_REFUSAL,
@@ -392,6 +395,91 @@ describe('deleteRecordFromDB', () => {
   });
 });
 
+describe('record media mutation RPCs', () => {
+  const request = {
+    operationId: '40000000-0000-4000-8000-000000000001',
+    recordId: '20000000-0000-4000-8000-000000000001',
+    userId: '10000000-0000-4000-8000-000000000001',
+    coupleId: '30000000-0000-4000-8000-000000000001',
+    baseContentRevision: 7,
+    existingPaths: ['30000000-0000-4000-8000-000000000001/20000000-0000-4000-8000-000000000001/old.jpg'],
+    newMediaIds: ['50000000-0000-4000-8000-000000000001'],
+  };
+
+  it('begins the exact base-to-target manifest before upload', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        operation_id: request.operationId,
+        state: 'pending',
+        base_content_revision: 7,
+        target_content_revision: 8,
+        desired_object_count: 2,
+      },
+      error: null,
+    });
+
+    await expect(beginRecordMediaMutation(request)).resolves.toEqual({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 8,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('begin_record_media_mutation', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+      p_base_content_revision: 7,
+      p_target_content_revision: 8,
+      p_existing_paths: request.existingPaths,
+      p_new_media_ids: request.newMediaIds,
+    });
+  });
+
+  it('uses status to distinguish a committed lost response from pending work', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        operation_id: request.operationId,
+        state: 'committed',
+        base_content_revision: 7,
+        target_content_revision: 8,
+        desired_object_count: 2,
+      },
+      error: null,
+    });
+
+    await expect(getRecordMediaMutationStatus(request)).resolves.toEqual({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 8,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('record_media_mutation_status', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+    });
+  });
+
+  it('abandons by opaque operation identity and never calls Storage DELETE', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { operation_id: request.operationId, state: 'abandoned' },
+      error: null,
+    });
+
+    await expect(abandonRecordMediaMutation(request)).resolves.toEqual({
+      ok: true,
+      state: 'abandoned',
+    });
+    expect(mockRpc).toHaveBeenCalledWith('abandon_record_media_mutation', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+    });
+    expect(mockSupabase.storage.from).not.toHaveBeenCalled();
+  });
+});
+
 describe('saveRecordToDB', () => {
   const record = {
     id: 'rec-001',
@@ -432,6 +520,26 @@ describe('saveRecordToDB', () => {
     const insert = mockUpsert(null);
     await saveRecordToDB({ ...record, isProfilePost: false }, 'couple-001', 'user-001');
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: false }));
+  });
+
+  it('advances a successful legacy plaintext update to expectedRevision plus one', async () => {
+    const eqCouple = vi.fn().mockResolvedValue({ error: null });
+    const eqUser = vi.fn().mockReturnValue({ eq: eqCouple });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUser });
+    const update = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ update });
+
+    const result = await saveRecordToDB(
+      { ...record, contentRevision: 7 },
+      'couple-001',
+      'user-001',
+      { kind: 'update', expectedRevision: 7, mediaOperationId: 'operation-1' },
+    );
+
+    expect(result).toEqual({ ok: true, contentRevision: 8 });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      last_media_operation_id: 'operation-1',
+    }));
   });
 
   it('reports forbidden for an RLS rejection, never a connection failure', async () => {

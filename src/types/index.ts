@@ -150,6 +150,12 @@ export interface DailyRecord {
    * greater than 1.
    */
   contentRevision?: number;
+  /** Opaque media-ledger contract stamped atomically with contentRevision. */
+  mediaContractVersion?: 0 | 1;
+  /** Content revision whose opaque media manifest most recently committed. */
+  mediaManifestRevision?: number;
+  /** Idempotence token for response-loss reconciliation; never a Storage path. */
+  lastMediaOperationId?: string;
   /**
    * Why this record's content could not be shown.
    *

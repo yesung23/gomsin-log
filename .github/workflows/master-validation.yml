@@ -295,6 +295,12 @@ jobs:
       - name: Fresh migration chain, RLS and authorization contracts
         run: npm run test:phase0
 
+      - name: Record media real-chain compatibility through migration 084
+        run: npm run test:record-media-chain
+
+      - name: Record media actor and concurrency contracts
+        run: npm run test:record-media-cleanup
+
       - name: E2EE pairing and partner-visibility contracts
         run: npm run test:p5
 

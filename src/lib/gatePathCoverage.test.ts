@@ -33,6 +33,9 @@ const SERVER_TRANSPORT_PATTERNS: Record<TransportKind, RegExp> = {
  * forces a security review instead of inheriting the old exemption silently.
  */
 const EXEMPT_TRANSPORT_ALLOWLIST: Record<string, Record<string, string[]>> = {
+  'records.ts': {
+    getRecordMediaMutationStatus: ['rpc:record_media_mutation_status'],
+  },
   'trips.ts': {
     fetchTripsResultFromDB: ['rpc:get_my_active_couple_id'],
   },
@@ -216,7 +219,8 @@ const STORE_GATED: Record<string, { functions: string[]; reason: string }> = {
       'saveRecordToDB',
       'deleteRecordFromDB',
       'uploadRecordMedia',
-      'removeRecordMedia',
+      'beginRecordMediaMutation',
+      'abandonRecordMediaMutation',
     ],
     reason:
       'Gated at the store.tsx call site: addRecordWithMedia / updateRecord / '
@@ -253,6 +257,7 @@ const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
   'records.ts': {
     fetchRecordsResultFromDB: 'Read-only: fetches records without mutation',
     fetchRecordsFromDB: 'Read-only: wrapper around fetchRecordsResultFromDB',
+    getRecordMediaMutationStatus: 'Read-only: reconciles one opaque operation identity',
     resolveAttachmentUrls: 'Read-only: signs existing paths, creates nothing',
     downloadRecordPhotoForReuse:
       'Read-only: downloads one RLS-authorized canonical photo; the store owns any later write',
@@ -850,7 +855,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/events.ts': 3,
       'src/lib/highlights.ts': 1,
       'src/lib/productEvents.ts': 1,
-      'src/lib/records.ts': 6,
+      'src/lib/records.ts': 5,
       'src/lib/sensitiveConsent.ts': 1,
       'src/lib/store.tsx': 2,
       'src/lib/supabase.ts': 1,
@@ -865,7 +870,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/highlights.ts': 1,
       'src/lib/partnerUsername.ts': 1,
       'src/lib/pushTokens.ts': 3,
-      'src/lib/records.ts': 1,
+      'src/lib/records.ts': 4,
       'src/lib/relationshipSnapshot.ts': 1,
       'src/lib/sensitiveConsent.ts': 2,
       'src/lib/store.tsx': 3,

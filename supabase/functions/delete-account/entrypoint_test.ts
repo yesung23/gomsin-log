@@ -291,6 +291,66 @@ Deno.test({
   },
 });
 
+Deno.test('account deletion probes media cleanup contract v2 before any flag or destructive phase', async () => {
+  const userId = '10000000-0000-4000-8000-000000000001';
+  let flagWrites = 0;
+  let tableReads = 0;
+  let authDeletes = 0;
+  const rpcCalls: string[] = [];
+  const admin = {
+    auth: {
+      getUser: async () => ({
+        data: { user: { id: userId, app_metadata: { provider: 'email' } } },
+        error: null,
+      }),
+      admin: {
+        updateUserById: async () => {
+          flagWrites += 1;
+          return { error: null };
+        },
+        deleteUser: async () => {
+          authDeletes += 1;
+          return { error: null };
+        },
+      },
+    },
+    from: () => {
+      tableReads += 1;
+      throw new Error('no table read may precede the cleanup contract probe');
+    },
+    rpc: async (name: string) => {
+      rpcCalls.push(name);
+      return { data: null, error: { status: 404, code: 'PGRST202' } };
+    },
+  };
+
+  const response = await handleDeleteAccountRequest(
+    new Request('https://edge.example/delete-account', {
+      method: 'POST',
+      headers: { Origin: ALLOWED, Authorization: 'Bearer valid-test-token' },
+    }),
+    {
+      env: (key) => ({
+        ALLOWED_ORIGINS: ALLOWED,
+        SUPABASE_URL: 'https://project.example',
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
+      } as Record<string, string>)[key],
+      createAdmin: () => admin,
+    },
+  );
+
+  assertEquals(response.status, 503, 'missing contract must fail closed');
+  assertEquals(await response.json(), {
+    error: 'Account deletion is temporarily unavailable.',
+    dataRemoved: false,
+    warnings: [],
+  }, 'contract failure response');
+  assertEquals(rpcCalls, ['record_media_cleanup_contract_version'], 'only the probe may run');
+  assertEquals(flagWrites, 0, 'the Auth pending flag must remain untouched');
+  assertEquals(tableReads, 0, 'record enumeration must not run');
+  assertEquals(authDeletes, 0, 'Auth deletion must not run');
+});
+
 Deno.test('account deletion relies on the database cleanup barrier and never deletes Storage directly', async () => {
   const userId = '10000000-0000-4000-8000-000000000001';
   const recordId = '20000000-0000-4000-8000-000000000001';
@@ -340,6 +400,9 @@ Deno.test('account deletion relies on the database cleanup barrier and never del
     },
     rpc: async (name: string, args: Record<string, unknown>) => {
       rpcCalls.push(name);
+      if (name === 'record_media_cleanup_contract_version') {
+        return { data: 2, error: null };
+      }
       if (name === 'begin_account_deletion_v2') {
         attemptId = String(args.p_attempt_id);
         return {
@@ -399,6 +462,7 @@ Deno.test('account deletion relies on the database cleanup barrier and never del
   assertEquals(selectedColumns, 'id', 'media routing metadata must not be loaded by account deletion');
   assertEquals(authDeleteCalls, 0, 'Auth deletion must not run while cleanup is pending');
   assertEquals(rpcCalls, [
+    'record_media_cleanup_contract_version',
     'begin_account_deletion_v2',
     'inspect_account_deletion_fence_v2',
     'e2ee_prepare_account_deletion_v2',

@@ -108,6 +108,12 @@ Deno.test({
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (path.endsWith('/rest/v1/rpc/claim_record_media_object_cleanup_job')) {
+        return new Response('[]', {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({ message: 'unexpected endpoint' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
@@ -129,16 +135,23 @@ Deno.test({
       });
       assertEquals(response.status, 200, 'idle claim must succeed');
       assertEquals(await response.json(), { outcome: 'idle', deletedObjects: 0 }, 'idle body');
-      assertEquals(stub.seen.length, 1, 'exactly one backend request');
+      assertEquals(stub.seen.length, 2, 'prefix and object queues are each claimed once');
       assert(
         stub.seen[0].path.endsWith('/rest/v1/rpc/claim_record_media_cleanup_job'),
-        'the backend call must be the claim RPC',
+        'the first backend call must preserve the prefix-first claim',
+      );
+      assert(
+        stub.seen[1].path.endsWith('/rest/v1/rpc/claim_record_media_object_cleanup_job'),
+        'the second backend call may claim one exact object only after an empty prefix queue',
       );
       assertEquals(stub.seen[0].apikey, VALID_ADMIN_KEY, 'opaque key must be sent as apikey');
       assertEquals(stub.seen[0].authorization, null, 'opaque admin key must not be sent as bearer');
       const body = JSON.parse(stub.seen[0].body ?? '{}');
       assert(typeof body.p_lease_id === 'string', 'claim must send a generated lease UUID');
       assertEquals(body.p_lease_seconds, 120, 'claim must use the bounded lease duration');
+      const objectBody = JSON.parse(stub.seen[1].body ?? '{}');
+      assertEquals(objectBody.p_lease_id, body.p_lease_id, 'both queues use the same invocation lease');
+      assertEquals(objectBody.p_lease_seconds, 120, 'object claim uses the bounded lease duration');
     } finally {
       await entrypoint.stop();
       await stub.stop();

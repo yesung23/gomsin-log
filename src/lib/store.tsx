@@ -120,7 +120,9 @@ import {
   deleteRecordFromDB,
   fetchRecordsResultFromDB,
   uploadRecordMedia,
-  removeRecordMedia,
+  beginRecordMediaMutation,
+  getRecordMediaMutationStatus,
+  abandonRecordMediaMutation,
   resolveAttachmentUrls,
   isCanonicalRecordMediaPath,
   isValidMediaObjectId,
@@ -168,6 +170,16 @@ type QueuedRecordInput = Omit<QueuedRecord, 'attempts' | 'queuedAt' | 'sealedRec
   queuedAt?: string;
 };
 type BarrieredEnqueueResult = 'queued' | 'deletion_pending' | 'stale' | 'failed';
+type MediaRevisionUpload = { file: File; objectId: string };
+type MediaRevisionCommitResult =
+  | { ok: true; record: DailyRecord; operationId: string }
+  | {
+      ok: false;
+      phase: 'begin' | 'upload' | 'commit' | 'stale';
+      reason: RecordMutationReason;
+      error: string;
+      failedFiles: string[];
+    };
 
 function persistedMediaKey(attachment: Attachment): string {
   return `${attachment.type}\u0000${attachment.name}\u0000${attachment.path ?? ''}`;
@@ -3194,6 +3206,200 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Commit exactly one record-media revision.
+   *
+   * The operation is durable before Storage is touched. An authoritative upload
+   * or row failure abandons it, which turns every reservation into either a
+   * tombstone or cleanup work. An ambiguous row response is resolved only by the
+   * operation id; if status is unavailable the pending operation is left for its
+   * bounded expiry rather than risking cleanup of a committed object.
+   */
+  const commitRecordMediaRevision = async (
+    workspace: ActiveWorkspace,
+    baseRecord: DailyRecord,
+    desiredRecordBeforeUploads: DailyRecord,
+    uploads: MediaRevisionUpload[],
+  ): Promise<MediaRevisionCommitResult> => {
+    const baseRevision = baseRecord.contentRevision ?? 1;
+    const operationId = crypto.randomUUID();
+    const identity = {
+      operationId,
+      recordId: baseRecord.id,
+      userId: workspace.userId,
+      coupleId: workspace.coupleId,
+    };
+    // A duplicated attachment remains duplicated in encrypted content for
+    // rollout compatibility, but the lifecycle manifest names object identities,
+    // not display occurrences. SQL intentionally rejects duplicate paths.
+    const existingPaths = Array.from(new Set(
+      (desiredRecordBeforeUploads.attachments || [])
+        .map((attachment) => attachment.path)
+        .filter((path): path is string => (
+          isCanonicalRecordMediaPath(path, workspace.coupleId, baseRecord.id)
+        )),
+    ));
+    let begun = await beginRecordMediaMutation({
+      ...identity,
+      baseContentRevision: baseRevision,
+      existingPaths,
+      newMediaIds: uploads.map((upload) => upload.objectId),
+    });
+    if (!begun.ok && RECORD_UPDATE_READ_BACK_REASONS.has(begun.reason)) {
+      const recovered = await getRecordMediaMutationStatus(identity);
+      if (recovered.ok && recovered.state === 'pending') begun = recovered;
+    }
+    if (!begun.ok || begun.state !== 'pending') {
+      const reason = begun.ok ? 'server' : begun.reason;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return {
+        ok: false,
+        phase: 'begin',
+        reason,
+        error: recordFailureMessage(reason),
+        failedFiles: uploads.map(({ file }) => file.name),
+      };
+    }
+
+    const abandonPending = async (): Promise<void> => {
+      try {
+        await abandonRecordMediaMutation(identity);
+      } catch {
+        // The reservation remains durable and the service worker expires it.
+      }
+    };
+    if (!isCurrentLinkedCouple(workspace)) {
+      await abandonPending();
+      return {
+        ok: false,
+        phase: 'stale',
+        reason: 'stale',
+        error: recordFailureMessage('stale'),
+        failedFiles: uploads.map(({ file }) => file.name),
+      };
+    }
+
+    const uploaded: Attachment[] = [];
+    for (const { file, objectId } of uploads) {
+      const result = await uploadRecordMedia(
+        file,
+        workspace.coupleId,
+        baseRecord.id,
+        undefined,
+        objectId,
+      );
+      if (!isCurrentLinkedCouple(workspace)) {
+        await abandonPending();
+        return {
+          ok: false,
+          phase: 'stale',
+          reason: 'stale',
+          error: recordFailureMessage('stale'),
+          failedFiles: uploads.map(({ file: candidate }) => candidate.name),
+        };
+      }
+      if ('error' in result) {
+        if (
+          result.uncertainAttachment
+          && RECORD_UPDATE_READ_BACK_REASONS.has(result.reason)
+        ) {
+          // Storage may have committed even though its response was lost. Keep
+          // the exact reserved identity and let the row trigger prove whether
+          // that object exists; never tombstone a potentially successful
+          // stable-id upload before the authoritative CAS has run.
+          uploaded.push(result.uncertainAttachment);
+          continue;
+        }
+        await abandonPending();
+        return {
+          ok: false,
+          phase: 'upload',
+          reason: result.reason ?? 'unknown',
+          error: result.error,
+          failedFiles: uploads.map(({ file: candidate }) => candidate.name),
+        };
+      }
+      uploaded.push(result.attachment);
+    }
+
+    const desiredRecord: DailyRecord = {
+      ...desiredRecordBeforeUploads,
+      attachments: [...(desiredRecordBeforeUploads.attachments || []), ...uploaded],
+    };
+    const committed = (targetContentRevision: number): MediaRevisionCommitResult => ({
+      ok: true,
+      operationId,
+      record: {
+        ...desiredRecord,
+        contentRevision: targetContentRevision,
+        mediaContractVersion: 1,
+        mediaManifestRevision: targetContentRevision,
+        lastMediaOperationId: operationId,
+      },
+    });
+    const reconcileFailure = async (
+      reason: RecordMutationReason,
+    ): Promise<MediaRevisionCommitResult> => {
+      if (RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        const status = await getRecordMediaMutationStatus(identity);
+        if (status.ok && status.state === 'committed') {
+          return committed(status.targetContentRevision ?? baseRevision + 1);
+        }
+        if (status.ok && status.state === 'pending') await abandonPending();
+      } else {
+        await abandonPending();
+      }
+      return {
+        ok: false,
+        phase: 'commit',
+        reason,
+        error: recordFailureMessage(reason),
+        failedFiles: uploads.map(({ file }) => file.name),
+      };
+    };
+
+    try {
+      const saved = await saveRecordToDB(
+        desiredRecord,
+        workspace.coupleId,
+        workspace.userId,
+        {
+          kind: 'update',
+          expectedRevision: baseRevision,
+          mediaOperationId: operationId,
+        },
+      );
+      if (!isCurrentLinkedCouple(workspace)) {
+        return {
+          ok: false,
+          phase: 'stale',
+          reason: 'stale',
+          error: recordFailureMessage('stale'),
+          failedFiles: uploads.map(({ file }) => file.name),
+        };
+      }
+      if (!saved.ok) {
+        if (saved.reason === 'auth_expired') void handleAuthExpired();
+        return reconcileFailure(recordSaveFailureReason(saved));
+      }
+      return committed(saved.contentRevision ?? baseRevision + 1);
+    } catch (error) {
+      if (!isCurrentLinkedCouple(workspace)) {
+        return {
+          ok: false,
+          phase: 'stale',
+          reason: 'stale',
+          error: recordFailureMessage('stale'),
+          failedFiles: uploads.map(({ file }) => file.name),
+        };
+      }
+      console.error('[gomsinlog] Failed to commit record media revision.');
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return reconcileFailure(reason);
+    }
+  };
+
+  /**
    * Create a record and attach media files to it.
    *
    * Two phases are required by the storage RLS policy (migration 007): the
@@ -3398,156 +3604,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...newRecord,
       contentRevision: authoritativeRevision,
     };
-    const attachments: Attachment[] = [...(savedRecord.attachments || [])];
-    const uploadedPaths: string[] = [];
+    const mediaObjectIds = options?.mediaObjectIds ?? files.map(() => crypto.randomUUID());
+    const uploads = files.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
     let mediaFailureReason: RecordMutationReason | undefined;
     let mediaFailureMessage: string | undefined;
+    let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
+    let terminalFailedFiles: string[] = [];
+    let finalRecord = savedRecord;
 
-    /**
-     * Abandon the upload loop, reclaiming what it already uploaded.
-     *
-     * Inside the loop the attachment patch has definitively NOT run yet, so no row
-     * references these objects and deleting them cannot break anything. Bailing out
-     * without this left them in Storage forever: the client only learns an object's
-     * path from local state, and the Storage DELETE policy needs an owned
-     * `daily_records` row in the ACTIVE couple, so once the workspace moved on
-     * nothing client-side could ever reach them again.
-     *
-     * Best-effort by necessity -- if the couple genuinely changed, that same policy
-     * will refuse this delete too, and only `delete-account` or an operator can
-     * reclaim them. It still recovers the common case, where "stale" is a local
-     * generation bump rather than a real membership change.
-     */
-    const abandonUploads = async (): Promise<typeof staleResult> => {
-      if (uploadedPaths.length > 0) {
-        try {
-          await removeRecordMedia(uploadedPaths);
-        } catch {
-          /* best-effort cleanup */
-        }
-      }
-      return staleResult;
+    const rememberUploadFailure = (result: Extract<MediaRevisionCommitResult, { ok: false }>) => {
+      failedFiles.push(...result.failedFiles);
+      mediaFailureReason ??= result.reason;
+      mediaFailureMessage ??= result.error;
+      console.error('[gomsinlog] Attachment upload failed.');
     };
 
-    for (const [fileIndex, file] of files.entries()) {
-      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
-      const result = await uploadRecordMedia(
-        file,
-        workspace.coupleId,
-        recordId,
-        undefined,
-        options?.mediaObjectIds?.[fileIndex],
+    if (files.length > 0 && options?.allOrNothingMedia) {
+      const batch = await commitRecordMediaRevision(
+        workspace,
+        savedRecord,
+        {
+          ...savedRecord,
+          // The private staging row and absent profile marker become public only
+          // in the same CAS update that activates the complete media set.
+          isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
+          ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
+        },
+        uploads,
       );
-      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
-      if ('error' in result) {
-        failedFiles.push(file.name);
-        mediaFailureReason ??= result.reason;
-        mediaFailureMessage ??= result.error;
-        console.error('[gomsinlog] Attachment upload failed.');
-        continue;
+      if (batch.ok) finalRecord = batch.record;
+      else if (batch.phase === 'upload') rememberUploadFailure(batch);
+      else {
+        terminalFailure = batch;
+        terminalFailedFiles = files.map((file) => file.name);
       }
-      attachments.push(result.attachment);
-      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
-    }
-
-    /*
-     * A profile post promises that the first selected photo stays the cover.
-     * Committing only the successful subset would make a later retry append the
-     * missing photos at the end and silently change that order. For this caller,
-     * roll every uploaded object back and keep the text-only row as the retry
-     * target. The normal composer keeps its existing D-05 partial-success mode.
-     */
-    if (options?.allOrNothingMedia && failedFiles.length > 0) {
-      if (uploadedPaths.length > 0) {
-        try {
-          await removeRecordMedia(uploadedPaths);
-        } catch {
-          /* best-effort; the row never references these objects */
-        }
-      }
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      recordsRefreshSequenceRef.current += 1;
-      updateStateImmediately((current) =>
-        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-          ? { ...current, records: mergeCreatedRecordSnapshot(current.records, savedRecord) }
-          : current,
-      );
-      return {
-        ok: true,
-        failedFiles: files.map((file) => file.name),
-        error: mediaFailureMessage,
-        reason: mediaFailureReason ?? 'unknown',
-        recordId,
-      };
-    }
-
-    let finalRecord: DailyRecord = {
-      ...savedRecord,
-      attachments,
-      // Publish a staged post only in the same row update that commits all media.
-      isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
-      ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
-    };
-    if (attachments.length > 0) {
-      const reconcileAttachmentPatch = async (reason: RecordMutationReason): Promise<boolean> => {
-        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return false;
-        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
-        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
-        const persisted = remote.records.find((candidate) =>
-          candidate.id === recordId && candidate.userId === workspace.userId);
-        if (!persisted || !hasSamePersistedMedia(persisted, finalRecord)) return false;
-        finalRecord = persisted;
-        return true;
-      };
-      try {
-        const patched = await saveRecordToDB(
+    } else {
+      // Normal composer partial success is bounded by the 32-object manifest.
+      // Every file has its own operation and consumes exactly one new revision;
+      // a failed reservation is abandoned and can never be revived by a later id.
+      for (const [index, upload] of uploads.entries()) {
+        const addition = await commitRecordMediaRevision(
+          workspace,
           finalRecord,
-          workspace.coupleId,
-          workspace.userId,
-          {
-            kind: 'update',
-            expectedRevision: finalRecord.contentRevision ?? 1,
-          },
+          finalRecord,
+          [upload],
         );
-        // Deliberately NOT reclaiming uploads here: the patch has already been
-        // issued, so whether the row now references these objects is unknown.
-        // Deleting them could strip a successfully patched record's attachments,
-        // which is worse than leaving objects an operator can sweep.
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        if (!patched.ok) {
-          const reason = recordSaveFailureReason(patched);
-          if (!await reconcileAttachmentPatch(reason)) {
-            // The UPDATE may have committed even when its response was lost. Once
-            // issued, deleting uploads can break a live row; leave uncertain bytes
-            // for a later orphan sweep instead of risking user-visible data loss.
-            if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-              try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-            }
-            failedFiles.push(...files.map((file) => file.name));
-            mediaFailureReason ??= reason;
-            mediaFailureMessage ??= recordFailureMessage(reason);
-            finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
-          }
+        if (addition.ok) {
+          finalRecord = addition.record;
+        } else if (addition.phase === 'upload') {
+          rememberUploadFailure(addition);
         } else {
-          finalRecord = { ...finalRecord, contentRevision: patched.contentRevision };
-        }
-      } catch (error) {
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        console.error('[gomsinlog] Failed to attach media to record.');
-        const reason = classifyServerError(error).kind;
-        if (!await reconcileAttachmentPatch(reason)) {
-          if (!isCurrentLinkedCouple(workspace)) return staleResult;
-          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-            try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-          }
-          failedFiles.push(...files.map((file) => file.name));
-          mediaFailureReason ??= reason;
-          mediaFailureMessage ??= recordFailureMessage(reason);
-          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          terminalFailure = addition;
+          terminalFailedFiles = [
+            ...addition.failedFiles,
+            ...uploads.slice(index + 1).map(({ file }) => file.name),
+          ];
+          break;
         }
       }
     }
+
+    if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
     if (finalRecord.attachments?.length) {
       finalRecord = {
@@ -3565,13 +3683,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-        ? { ...current, records: mergeCreatedRecordSnapshot(current.records, recordToCommit) }
-        : current,
+          ? { ...current, records: mergeCreatedRecordSnapshot(current.records, recordToCommit) }
+          : current,
     );
+    if (terminalFailure) {
+      // The INSERT is already authoritative. Report a media-only partial result
+      // so profile retry attaches to this exact row instead of creating a
+      // duplicate. A staged all-or-nothing post remains private here.
+      return {
+        ok: true,
+        failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        error: terminalFailure.error,
+        reason: terminalFailure.reason,
+        recordId,
+      };
+    }
     return isCurrentLinkedCouple(workspace)
       ? {
           ok: true,
-          failedFiles: Array.from(new Set(failedFiles)),
+          failedFiles: Array.from(new Set(
+            options?.allOrNothingMedia && failedFiles.length > 0
+              ? files.map((file) => file.name)
+              : failedFiles,
+          )),
           ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
           ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
           recordId,
@@ -4170,7 +4304,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       internal?.deletionLease,
       () => recordFailure('deletion_pending'),
       async () => {
-    let authoritativeRevision = existing.contentRevision ?? 1;
+    const baseRevision = existing.contentRevision ?? 1;
+    const mediaOperationId = crypto.randomUUID();
+    const mediaIdentity = {
+      operationId: mediaOperationId,
+      recordId: id,
+      userId: workspace.userId,
+      coupleId: workspace.coupleId,
+    };
+    const manifestPaths = Array.from(new Set(
+      (updated.attachments || [])
+        .map((attachment) => attachment.path)
+        .filter((path): path is string =>
+          isCanonicalRecordMediaPath(path, workspace.coupleId, id)),
+    ));
+    let begun = await beginRecordMediaMutation({
+      ...mediaIdentity,
+      baseContentRevision: baseRevision,
+      existingPaths: manifestPaths,
+      newMediaIds: [],
+    });
+    if (!begun.ok && RECORD_UPDATE_READ_BACK_REASONS.has(begun.reason)) {
+      const recovered = await getRecordMediaMutationStatus(mediaIdentity);
+      if (recovered.ok && recovered.state === 'pending') begun = recovered;
+    }
+    if (!begun.ok || begun.state !== 'pending') {
+      const reason = begun.ok ? 'server' : begun.reason;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return recordFailure(reason);
+    }
+    const abandonPending = async () => {
+      await abandonRecordMediaMutation(mediaIdentity);
+    };
+    if (!isCurrentLinkedCouple(workspace)) {
+      await abandonPending();
+      return recordFailure('stale');
+    }
+
+    let authoritativeRevision = baseRevision;
     let reconciledRecord: DailyRecord | null = null;
     const reconcileRecordUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
       if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) return null;
@@ -4194,31 +4365,59 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updated,
         workspace.coupleId,
         workspace.userId,
-        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+        {
+          kind: 'update',
+          expectedRevision: baseRevision,
+          mediaOperationId,
+        },
       );
-      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      if (!isCurrentLinkedCouple(workspace)) {
+        const status = await getRecordMediaMutationStatus(mediaIdentity);
+        if (status.ok && status.state === 'pending') await abandonPending();
+        return recordFailure('stale');
+      }
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
         const reason = recordSaveFailureReason(saved);
-        reconciledRecord = await reconcileRecordUpdate(reason);
-        if (!reconciledRecord) return recordFailure(reason);
-        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+        const status = RECORD_UPDATE_READ_BACK_REASONS.has(reason)
+          ? await getRecordMediaMutationStatus(mediaIdentity)
+          : null;
+        if (status?.ok && status.state === 'committed') {
+          reconciledRecord = await reconcileRecordUpdate(reason);
+          authoritativeRevision = reconciledRecord?.contentRevision
+            ?? status.targetContentRevision
+            ?? baseRevision + 1;
+        } else {
+          if (status?.ok && status.state === 'pending') await abandonPending();
+          else if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) await abandonPending();
+          return recordFailure(reason);
+        }
       } else {
-        authoritativeRevision = saved.contentRevision;
+        authoritativeRevision = saved.contentRevision ?? baseRevision + 1;
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       console.error('[gomsinlog] Failed to update record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      reconciledRecord = await reconcileRecordUpdate(reason);
-      if (!reconciledRecord) return recordFailure(reason);
-      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      const status = await getRecordMediaMutationStatus(mediaIdentity);
+      if (status.ok && status.state === 'committed') {
+        reconciledRecord = await reconcileRecordUpdate(reason);
+        authoritativeRevision = reconciledRecord?.contentRevision
+          ?? status.targetContentRevision
+          ?? baseRevision + 1;
+      } else {
+        if (status.ok && status.state === 'pending') await abandonPending();
+        return recordFailure(reason);
+      }
     }
 
     let recordToCommit: DailyRecord = {
       ...(reconciledRecord ?? updated),
       contentRevision: authoritativeRevision,
+      mediaContractVersion: 1,
+      mediaManifestRevision: authoritativeRevision,
+      lastMediaOperationId: mediaOperationId,
     };
     const attachmentsToResolve = reconciledRecord
       ? reconciledRecord.attachments
@@ -4303,16 +4502,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /**
    * Add and/or remove media on an existing record.
    *
-   * Ordering is forced by storage RLS and by the no-orphans rule, and is the same
-   * shape `addRecordWithMedia` uses:
+   * Ordering is forced by Storage RLS and the durable lifecycle contract, and is
+   * the same shape `addRecordWithMedia` uses:
    *
-   *   gate -> verify ownership -> upload new objects -> patch the row -> commit the
-   *   guarded local snapshot -> delete only objects no longer referenced by it.
+   *   gate -> verify ownership -> begin exact manifest -> upload reserved objects
+   *   -> CAS patch (activate/retire) -> commit the guarded local snapshot.
    *
-   * If the patch fails, the freshly uploaded objects are deleted again and the row
-   * is left exactly as it was: no orphaned storage, no phantom success. Deleting
-   * the removed objects last is deliberate -- doing it first would destroy files
-   * that are still referenced by the row if the patch then failed.
+   * A failed pre-commit operation is abandoned into durable cleanup. Physical
+   * deletion is service-worker-only; the browser never reports that it completed.
    */
   const updateRecordMedia = async (
     id: string,
@@ -4410,176 +4607,130 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const kept = (existing.attachments || []).filter(
       (attachment) => !attachment.path || !removePaths.includes(attachment.path),
     );
-    const uploadedPaths: string[] = [];
+    const mediaObjectIds = changes.mediaObjectIds ?? addFiles.map(() => crypto.randomUUID());
+    const uploads = addFiles.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
-    const added: Attachment[] = [];
     let mediaFailureReason: RecordMutationReason | undefined;
     let mediaFailureMessage: string | undefined;
+    let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
+    let terminalFailedFiles: string[] = [];
+    let workingRecord = existing;
+    let committedAnyRevision = false;
 
-    for (const [fileIndex, file] of addFiles.entries()) {
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      const result = await uploadRecordMedia(
-        file,
-        workspace.coupleId,
-        id,
-        undefined,
-        changes.mediaObjectIds?.[fileIndex],
-      );
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      if ('error' in result) {
-        failedFiles.push(file.name);
-        mediaFailureReason ??= result.reason;
-        mediaFailureMessage ??= result.error;
-        console.error('[gomsinlog] Attachment upload failed.');
-        continue;
-      }
-      added.push(result.attachment);
-      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
-    }
-    const rollbackUploads = async () => {
-      if (uploadedPaths.length === 0) return;
-      try {
-        await removeRecordMedia(uploadedPaths);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to roll back uploaded media.');
-      }
+    const adoptCommit = (result: Extract<MediaRevisionCommitResult, { ok: true }>) => {
+      workingRecord = result.record;
+      committedAnyRevision = true;
+    };
+    const rememberUploadFailure = (result: Extract<MediaRevisionCommitResult, { ok: false }>) => {
+      failedFiles.push(...result.failedFiles);
+      mediaFailureReason ??= result.reason;
+      mediaFailureMessage ??= result.error;
+      console.error('[gomsinlog] Attachment upload failed.');
     };
 
-    if (changes.allOrNothing && failedFiles.length > 0) {
-      await rollbackUploads();
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      return {
-        ok: true,
-        failedFiles: allFileNames,
-        error: mediaFailureMessage,
-        reason: mediaFailureReason ?? 'unknown',
-      };
-    }
-
-    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
-
-    const reconcileMediaUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
-      if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return null;
-      const remote = await fetchRecordsResultFromDB(workspace.coupleId);
-      if (!isCurrentLinkedCouple(workspace) || !remote.ok) return null;
-      const persisted = remote.records.find((candidate) =>
-        candidate.id === id && candidate.userId === workspace.userId);
-      return persisted && hasSamePersistedMedia(persisted, patchedRecord) ? persisted : null;
-    };
-
-    let authoritativeRevision = existing.contentRevision ?? 1;
-    let reconciledRecord: DailyRecord | null = null;
-    try {
-      const patched = await saveRecordToDB(
-        patchedRecord,
-        workspace.coupleId,
-        workspace.userId,
-        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+    if (changes.allOrNothing) {
+      const batch = await commitRecordMediaRevision(
+        workspace,
+        existing,
+        { ...existing, attachments: kept },
+        uploads,
       );
-      if (!patched.ok) {
-        if (patched.reason === 'auth_expired') void handleAuthExpired();
-        const reason = recordSaveFailureReason(patched);
-        reconciledRecord = await reconcileMediaUpdate(reason);
-        if (!reconciledRecord) {
-          // Do not delete uploaded objects after an issued UPDATE: a lost response
-          // is not proof that the row still lacks them.
-          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-            await rollbackUploads();
-          }
-          return {
-            ok: false,
-            failedFiles: allFileNames,
-            error: recordFailureMessage(reason),
-            reason,
-          };
-        }
-        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      if (batch.ok) {
+        adoptCommit(batch);
+      } else if (batch.phase === 'upload') {
+        // The row was never updated. Abandon owns cleanup of every reservation,
+        // including uploads that succeeded earlier in this batch.
+        rememberUploadFailure(batch);
       } else {
-        authoritativeRevision = patched.contentRevision;
+        terminalFailure = batch;
+        terminalFailedFiles = allFileNames;
       }
-    } catch (error) {
-      console.error('[gomsinlog] Failed to patch record media.');
-      const reason = classifyServerError(error).kind;
-      if (reason === 'auth_expired') void handleAuthExpired();
-      reconciledRecord = await reconcileMediaUpdate(reason);
-      if (!reconciledRecord) {
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-          await rollbackUploads();
+    } else {
+      // Removal is one logical revision. Each later file gets a fresh operation
+      // and the revision produced by the preceding success. A failed file is
+      // abandoned and never appears as an existing path in another operation.
+      if (removePaths.length > 0) {
+        const removal = await commitRecordMediaRevision(
+          workspace,
+          workingRecord,
+          { ...workingRecord, attachments: kept },
+          [],
+        );
+        if (removal.ok) adoptCommit(removal);
+        else {
+          terminalFailure = removal;
+          terminalFailedFiles = allFileNames;
         }
-        return {
-          ok: false,
-          failedFiles: allFileNames,
-          error: recordFailureMessage(reason),
-          reason,
-        };
       }
-      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+
+      if (!terminalFailure) {
+        for (const [index, upload] of uploads.entries()) {
+          const addition = await commitRecordMediaRevision(
+            workspace,
+            workingRecord,
+            workingRecord,
+            [upload],
+          );
+          if (addition.ok) {
+            adoptCommit(addition);
+          } else if (addition.phase === 'upload') {
+            rememberUploadFailure(addition);
+          } else {
+            terminalFailure = addition;
+            terminalFailedFiles = [
+              ...addition.failedFiles,
+              ...uploads.slice(index + 1).map(({ file }) => file.name),
+            ];
+            break;
+          }
+        }
+      }
     }
 
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
-    let committed: DailyRecord = {
-      ...(reconciledRecord ?? patchedRecord),
-      contentRevision: authoritativeRevision,
-    };
-    if (committed.attachments?.length) {
-      committed = {
-        ...committed,
-        attachments: await resolveAttachmentUrls(committed.attachments, workspace.coupleId, id),
-      };
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-    }
-
-    // Commit the snapshot guard before any destructive Storage cleanup. A delayed
-    // media response may finish after a newer revision has reattached one of the
-    // requested paths; in that case the guard keeps the newer state and cleanup
-    // must be skipped rather than deleting an object that state still references.
-    recordsRefreshSequenceRef.current += 1;
-    const nextState = updateStateImmediately((current) =>
-      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-        ? {
-            ...current,
-            records: current.records.map((record) =>
-              record.id === id
-                ? shouldKeepCurrentRecordSnapshot(record, committed, existing, reconciledRecord !== null)
-                  ? record
-                  : committed
-                : record,
-            ),
-          }
-        : current,
-    );
-
-    const currentRecord = nextState.records.find((record) => record.id === id);
-    const committedLocally = currentRecord === committed;
-    const referencedPaths = new Set(
-      (currentRecord?.attachments || [])
-        .map((attachment) => attachment.path)
-        .filter((path): path is string => typeof path === 'string'),
-    );
-    const cleanupPaths = committedLocally
-      ? removePaths.filter((path) => !referencedPaths.has(path))
-      : [];
-
-    // A cleanup failure leaves unreferenced bytes behind, which is logged but
-    // must NOT fail the operation the user asked for. If the guard retained a
-    // newer snapshot, leaving all paths alone is the safe outcome.
-    if (cleanupPaths.length > 0) {
-      try {
-        await removeRecordMedia(cleanupPaths);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to clean up removed media objects.');
+    if (committedAnyRevision) {
+      let committed = workingRecord;
+      if (committed.attachments?.length) {
+        committed = {
+          ...committed,
+          attachments: await resolveAttachmentUrls(committed.attachments, workspace.coupleId, id),
+        };
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
       }
+      recordsRefreshSequenceRef.current += 1;
+      updateStateImmediately((current) =>
+        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
+          ? {
+              ...current,
+              records: current.records.map((record) =>
+                record.id === id
+                  ? shouldKeepCurrentRecordSnapshot(record, committed, existing, false)
+                    ? record
+                    : committed
+                  : record,
+              ),
+            }
+          : current,
+      );
     }
-    return isCurrentLinkedCouple(workspace)
-      ? {
-          ok: true,
-          failedFiles: Array.from(new Set(failedFiles)),
-          ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
-          ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
-        }
-      : staleResult;
+
+    if (terminalFailure) {
+      return {
+        ok: committedAnyRevision,
+        failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        error: terminalFailure.error,
+        reason: terminalFailure.reason,
+      };
+    }
+    return {
+      ok: true,
+      failedFiles: Array.from(new Set(
+        changes.allOrNothing && failedFiles.length > 0 ? allFileNames : failedFiles,
+      )),
+      ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
+      ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
+    };
       },
     );
   };

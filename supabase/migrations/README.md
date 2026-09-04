@@ -1145,3 +1145,41 @@ supabase functions deploy delete-account
   list/remove 의미와 scheduler 실행은 별도 staging canary 전까지 검증된 것으로 보지 않습니다.
 - **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
   Supabase에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.
+
+## 084 — 기록 미디어 객체 수명주기·revision CAS (2026-09-05)
+
+- `084_record_media_object_lifecycle.sql`은 기존 001–083을 수정하지 않는 forward-only
+  migration입니다. `daily_records`에 media contract/version stamp를 추가하고, 경로·파일명·
+  signed URL·봉투·표시 순서·사용자 콘텐츠 없이 UUID/count/state/timing만 저장하는 private
+  mutation/object ledger를 만듭니다. 세 ledger는 RLS를 켜고 모든 API role의 직접 table
+  privilege를 회수하며 user/couple/record foreign key를 두지 않아 tombstone이 보존됩니다.
+- browser는 record revision의 정확한 base→target operation을 먼저 예약하고 canonical
+  `{couple_uuid}/{record_uuid}/{media_uuid}.{safe_ext}` 객체를 올린 뒤 같은 operation ID로
+  record CAS를 수행합니다. v1이 된 record는 일반 텍스트 수정도 현재의 중복 제거된 media
+  manifest를 제출해야 하며 v0로 낮아질 수 없습니다. 제거된 객체는 DB transaction에서
+  즉시 `cleanup_pending`이 되어 새 read/signing이 차단되고 물리 삭제는 leased worker가
+  나중에 수행합니다. 이미 발급된 signed URL은 만료 전 강제 회수할 수 없습니다.
+- Storage INSERT와 begin/commit/abandon/expiry/record-delete는 동일 record advisory key를
+  사용합니다. 따라서 trigger를 이미 통과한 미커밋 upload를 정확히 drain하면서 다른
+  record/couple의 업로드를 전역 직렬화하지 않습니다. migration 마지막의 Storage SHARE
+  lock 1회는 083 trigger로 시작한 cutover 이전 transaction만 drain하며 steady-state RPC에는
+  존재하지 않습니다.
+- authenticated Storage DELETE는 계속 금지됩니다. service-role의 `couple-media` DELETE도
+  account capability로 우회할 수 없고, 살아 있는 exact full-prefix lease 또는 immutable
+  Storage object ID의 exact object lease가 있어야 합니다. prefix가 retire된 뒤 재개되는
+  늦은 upload와 한번 tombstone이 된 stable media UUID 재사용은 거부됩니다.
+- 기존 `record-media-cleanup` worker는 prefix job이 없을 때 exact object job 하나를 claim해
+  경로를 일시적으로만 해석하고, Storage UUID가 실제로 사라졌는지 확인해 settle합니다.
+  응답 유실 replay, lease expiry/reclaim, bounded exponential retry와 8회 후 `blocked`를
+  지원합니다. 계정 종료는 prefix와 object job 모두 끝날 때까지 DB barrier에서 멈춥니다.
+- 로컬 검증은 `npm run test:record-media-chain`이 활성 migration 82개를 001..084 순서로
+  fresh PostgreSQL에 적용하고, `npm run test:record-media-cleanup`이 실제 actor/RLS/trigger와
+  양방향 upload race를 검증합니다. `master-validation.yml`은 두 명령을 기존
+  `npm run test:phase0` PostgreSQL job에서 직접 실행합니다. Hosted Supabase Storage HTTP,
+  PostgREST schema reload, 실제 scheduler는 hosted canary 전까지 `UNVERIFIED`입니다.
+- 안전한 rollout은 **호출하지 않는 새 worker 준비 → 083/084 적용 및 catalog/contract-v2
+  probe 확인 → 새 delete-account artifact 배포 → hosted prefix/object canary → scheduler 시작**
+  순서입니다. rollback은 scheduler/새 artifact를 멈추고 더 큰 번호의 forward fix를 내며,
+  authenticated 직접 DELETE나 v1 이전 writer를 복원하지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase, Vercel, App Store에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.

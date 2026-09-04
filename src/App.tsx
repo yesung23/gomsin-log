@@ -118,7 +118,7 @@ function AccountDeletionRecovery() {
     setBusy('retry');
     setMessage(null);
     const outcome = await retryAccountDeletion();
-    if (outcome.status !== 'deleted') {
+    if (outcome.status !== 'deleted' && outcome.status !== 'cancelled') {
       setMessage('아직 탈퇴를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
     setBusy(null);
@@ -137,10 +137,10 @@ function AccountDeletionRecovery() {
         role="alert"
         className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3"
       >
-        <h1 className="text-heading text-foreground">탈퇴가 완료되지 않았어요</h1>
+        <h1 className="text-heading text-foreground">탈퇴 처리를 확인하고 있어요</h1>
         <p className="text-body text-muted-foreground">
-          기록과 프로필 데이터는 이미 삭제되었지만 로그인 계정이 아직 남아 있어요.
-          탈퇴를 끝내려면 아래에서 다시 시도해 주세요.
+          안전하게 완료되기 전까지 계정 이용이 잠시 제한돼요.
+          아래에서 탈퇴를 다시 시도하거나 로그아웃할 수 있어요.
         </p>
         {message && (
           <p className="text-body text-destructive">{message}</p>

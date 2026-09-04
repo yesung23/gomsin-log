@@ -652,10 +652,10 @@ export async function disconnectCoupleFromDB(): Promise<boolean> {
 /**
  * Ask the server to delete this account.
  *
- * Returns a three-valued outcome rather than a boolean, because "the request
- * failed" and "your data is gone but your login is not" require completely
- * different handling. The error response BODY carries that distinction and used
- * to be discarded entirely.
+ * Returns a structured outcome rather than a boolean, because an intact
+ * failure, a server-confirmed safe cancellation, a recovery fence, and a
+ * partial deletion require different handling. The error response BODY carries
+ * that distinction and used to be discarded entirely.
  */
 export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
   if (!supabase) return { status: 'failed', dataRemoved: false, warnings: [] };
@@ -677,6 +677,8 @@ export async function deleteAccountFromDB(): Promise<AccountDeletionOutcome> {
           const outcome = classifyDeletionErrorBody(body);
           if (outcome.status === 'partially_deleted') {
             console.error('[gomsinlog] Account deletion ended in a partial state.');
+          } else if (outcome.status === 'recovery_required') {
+            console.error('[gomsinlog] Account deletion cancellation requires recovery.');
           }
           return outcome;
         } catch {

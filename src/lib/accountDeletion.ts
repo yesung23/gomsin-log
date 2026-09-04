@@ -7,12 +7,14 @@
  */
 
 /* ------------------------------------------------------------------ *
- * 1. Truthful three-valued outcome of a deletion attempt
+ * 1. Truthful outcome of a deletion attempt
  * ------------------------------------------------------------------ */
 
 export type AccountDeletionOutcome =
   | { status: 'deleted'; dataRemoved: true; warnings: string[] }
   | { status: 'partially_deleted'; dataRemoved: true; warnings: string[] }
+  | { status: 'cancelled'; dataRemoved: false; warnings: string[] }
+  | { status: 'recovery_required'; dataRemoved: false; warnings: string[] }
   | { status: 'failed'; dataRemoved: false; warnings: string[] };
 
 /**
@@ -49,8 +51,18 @@ export function classifyDeletionErrorBody(body: unknown): AccountDeletionOutcome
   const warnings = coerceWarnings(body);
   const dataRemoved = !!body && typeof body === 'object'
     && (body as { dataRemoved?: unknown }).dataRemoved === true;
-  return dataRemoved
-    ? { status: 'partially_deleted', dataRemoved: true, warnings }
+  if (dataRemoved) {
+    return { status: 'partially_deleted', dataRemoved: true, warnings };
+  }
+  const recoveryRequired = !!body && typeof body === 'object'
+    && (body as { recoveryRequired?: unknown }).recoveryRequired === true;
+  if (recoveryRequired) {
+    return { status: 'recovery_required', dataRemoved: false, warnings };
+  }
+  const deletionCancelled = !!body && typeof body === 'object'
+    && (body as { deletionCancelled?: unknown }).deletionCancelled === true;
+  return deletionCancelled
+    ? { status: 'cancelled', dataRemoved: false, warnings }
     : { status: 'failed', dataRemoved: false, warnings };
 }
 

@@ -579,8 +579,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   /** False once the couple channel reports a terminal transport failure. */
   const realtimeHealthyRef = useRef(true);
   /**
-   * Non-null while this account is in account-deletion recovery: its data has
-   * been removed but its login has not. `warnings` is kept IN MEMORY ONLY --
+   * Non-null while this account is in account-deletion recovery: either a
+   * destructive phase ran or the server could not prove every cancellation
+   * fence was cleared. `warnings` is kept IN MEMORY ONLY --
    * warning strings can name storage paths, and the durable marker is a boolean
    * carrying no deleted-account content of any kind.
    */
@@ -956,6 +957,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, [isCurrentIdentity, replaceStateImmediately, setTalkAboutSyncStatus]);
 
   /**
+   * Permanently remove one account's queued writes and attached Files.
+   *
+   * Ordinary sign-out deliberately keeps this queue for the same account's
+   * return. Deletion recovery is different: the account is fenced and may no
+   * longer be able to decrypt or deliver those entries, so retaining them would
+   * leave sensitive user content in IndexedDB after the rest of the local cache
+   * has been removed. The explicit user id keeps another account's queue intact.
+   */
+  const purgeOutboxForAccount = useCallback(async (userId: string): Promise<boolean> => {
+    const persistence = outboxRef.current;
+    if (!persistence) {
+      setOutboxCounts({ waiting: 0, blocked: 0 });
+      return true;
+    }
+    try {
+      await purgeOutboxAccount(persistence, userId);
+      if (sessionUserIdRef.current === userId) {
+        setOutboxCounts({ waiting: 0, blocked: 0 });
+      }
+      return true;
+    } catch {
+      console.error('[gomsinlog] Failed to purge the account outbox during deletion recovery.');
+      return false;
+    }
+  }, []);
+
+  /**
    * Resolve the tri-state deletion status for `userId`.
    *
    * The local marker is read FIRST and synchronously. A positive marker
@@ -1009,16 +1037,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Runs synchronously with respect to the caller's first request: the caller
    * returns on the gate's `pending` result and never reaches its request.
    *
-   * FORWARD CONSTRAINT: the "no queued mutation delivered" claim holds because
-   * there is no outbox in this codebase -- every mutation is issued directly by
-   * the store methods, and the only deferred work is two read-only timer-based
-   * schedulers, both cancelled in step 4. IF A PERSISTENT MUTATION QUEUE IS EVER
-   * ADDED, a drain-blocking gate must be added at its drain point too.
+   * The persistent mutation outbox is purged for this exact account before the
+   * caller can continue. Its drain path is independently guarded by the same
+   * authoritative deletion preflight.
    */
-  const abortForPendingDeletion = useCallback((identity: ActiveIdentity): void => {
+  const abortForPendingDeletion = useCallback(async (identity: ActiveIdentity): Promise<void> => {
     // (1) Make the verdict durable first, so it survives a reload without
     //     needing the round-trip again.
-    markRecoveryPending(identity.userId);
+    // Preserve any existing marker byte-for-byte. Every present value is
+    // already fail-closed, and a read path must never "repair" or normalise a
+    // malformed value into something it could later mistake for absence.
+    if (readRecoveryMarker(identity.userId) === 'absent') {
+      markRecoveryPending(identity.userId);
+    }
     // (2) Content goes, identity and session stay, device prefs untouched.
     purgeLocalContentRetainingIdentity(identity);
     // (3) Close the route gate on the next render.
@@ -1026,7 +1057,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     applyDeletionStatus({ kind: 'pending' });
     // (4) Nothing deferred may fire afterwards.
     cancelDeferredSyncRef.current?.();
-  }, [applyDeletionStatus, purgeLocalContentRetainingIdentity]);
+    // (5) No queued record text or File may outlive deletion recovery.
+    await purgeOutboxForAccount(identity.userId);
+  }, [applyDeletionStatus, purgeLocalContentRetainingIdentity, purgeOutboxForAccount]);
 
   /**
    * Pre-flight gate for every server synchronization and every server mutation.
@@ -1040,7 +1073,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!identity) return { kind: 'unknown' };
     const status = await verifyDeletionStatus(identity.userId);
     if (status.kind === 'pending' && isCurrentIdentity(identity)) {
-      abortForPendingDeletion(identity);
+      await abortForPendingDeletion(identity);
     }
     return status;
   }, [abortForPendingDeletion, captureActiveIdentity, isCurrentIdentity, verifyDeletionStatus]);
@@ -1322,15 +1355,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           // spent and no round-trip required. A positive marker outranks any
           // server answer, so this branch needs no `getUser()` call at all.
           if (readRecoveryMarker(sessionUser.id) === 'active') {
-            applyDeletionStatus({ kind: 'pending' });
-            setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
-            hydratedUserIdRef.current = null;
-            cachePurgedRef.current = true;
             replaceStateImmediately({
               ...DEFAULT_STATE,
               ...carryOverDevicePrefs(stateRef.current),
               authenticatedUser: authUser,
             });
+            await abortForPendingDeletion({ userId: sessionUser.id, generation: authGeneration });
             setIsAuthChecked(true);
             return;
           }
@@ -1352,14 +1382,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               || sessionUserIdRef.current !== sessionUser.id
             ) return;
             if (deletion.kind === 'pending') {
-              setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
-              hydratedUserIdRef.current = null;
-              cachePurgedRef.current = true;
               replaceStateImmediately({
                 ...DEFAULT_STATE,
                 ...carryOverDevicePrefs(stateRef.current),
                 authenticatedUser: authUser,
               });
+              await abortForPendingDeletion({ userId: sessionUser.id, generation: authGeneration });
               return;
             }
             setAccountDeletionRecovery(null);
@@ -1603,6 +1631,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [
     applyDeletionStatus,
+    abortForPendingDeletion,
     handleAuthExpired,
     isHydrated,
     refreshCoupleLifecycle,
@@ -4128,7 +4157,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // No purge, no recovery and NO MARKER: the account is fully intact.
     if (outcome.status === 'failed') return outcome;
 
-    if (outcome.status === 'partially_deleted') {
+    if (outcome.status === 'cancelled') {
+      const wasRecovering = readRecoveryMarker(identity.userId) === 'active'
+        || deletionStatusRef.current.kind === 'pending';
+      // This is a new server-confirmed cancellation authority: the fenced DB
+      // marker and Auth pending flag were both cleared, and no data was removed.
+      clearRecoveryMarker(identity.userId);
+      setAccountDeletionRecovery(null);
+      if (wasRecovering) {
+        // Recovery may have intentionally discarded all local account content.
+        // End this local session so the next sign-in goes through the one full,
+        // crypto-aware hydration path instead of rendering an empty substitute.
+        if (purgeLocalAccountData(identity)) {
+          try {
+            await authRepository.signOut();
+          } catch {
+            console.error('[gomsinlog] Sign-out after deletion cancellation failed; local data was cleared.');
+          }
+        }
+      } else {
+        applyDeletionStatus({ kind: 'clear' });
+      }
+      return outcome;
+    }
+
+    if (
+      outcome.status === 'partially_deleted'
+      || outcome.status === 'recovery_required'
+    ) {
       // Marker FIRST, so a reload cannot escape recovery, then contain the
       // exposure while keeping the session so the deletion can be finished.
       markRecoveryPending(identity.userId);
@@ -4137,6 +4193,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAccountDeletionRecovery({ warnings: outcome.warnings });
       applyDeletionStatus({ kind: 'pending' });
       cancelDeferredSyncRef.current?.();
+      await purgeOutboxForAccount(identity.userId);
       return outcome;
     }
 
@@ -4147,13 +4204,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // The queue is deliberately kept across sign-out, so deletion is the one place
     // it must be removed: this account will never sign in again, and leaving its
     // unsent records on the device would outlive the account they belong to.
-    if (outboxRef.current) {
-      try {
-        await purgeOutboxAccount(outboxRef.current, identity.userId);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to purge the outbox after deletion.');
-      }
-    }
+    await purgeOutboxForAccount(identity.userId);
     setAccountDeletionRecovery(null);
     applyDeletionStatus({ kind: 'clear' });
     try {
@@ -4169,8 +4220,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * Retry from the recovery screen. Re-invokes the Edge Function, which
    * re-writes the same `true` pending flag idempotently.
    *
-   * A `partially_deleted` or `failed` retry stays in recovery, LEAVES THE MARKER
-   * IN PLACE and re-fetches nothing.
+   * A `partially_deleted`, `recovery_required` or ordinary failed retry stays in
+   * recovery. A server-confirmed cancellation is the only non-deletion result
+   * permitted to clear the marker, and it ends the local session so the next
+   * sign-in goes through full hydration.
    */
   const retryAccountDeletion = async (): Promise<AccountDeletionOutcome> =>
     deleteAccount();

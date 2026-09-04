@@ -1491,6 +1491,20 @@ export function SettingsPage() {
                         );
                         return;
                       }
+                      if (result.status === 'recovery_required') {
+                        toast.error(
+                          '탈퇴 처리를 안전하게 확인하지 못했습니다. 안내 화면에서 다시 시도해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'cancelled') {
+                        toast.error(
+                          '공유 기록을 안전하게 보존하기 위해 탈퇴를 중단했습니다. 기록은 삭제되지 않았습니다.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
                       if (result.status === 'failed') {
                         toast.error('계정을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');
                         return;

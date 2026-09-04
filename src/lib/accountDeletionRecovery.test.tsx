@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState } from '@/types';
+import type { QueuedRecord } from '@/lib/outbox';
 import { App } from '@/App';
 import { DEVICE_PREF_CARRY_OVER_KEYS, StoreProvider } from '@/lib/store';
 import { useStore } from '@/lib/useStore';
@@ -34,6 +35,12 @@ const h = vi.hoisted(() => {
   const fetchFullStateFromDB = vi.fn();
   const saveRecordToDB = vi.fn(async () => { callLog.push('saveRecordToDB'); return true; });
   const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
+  const outboxEntries = new Map<string, QueuedRecord>();
+  const outboxPersistence = {
+    all: vi.fn(async () => Array.from(outboxEntries.values())),
+    put: vi.fn(async (entry: QueuedRecord) => { outboxEntries.set(entry.id, entry); }),
+    remove: vi.fn(async (id: string) => { outboxEntries.delete(id); }),
+  };
 
   const mockSupabase = {
     auth: {
@@ -84,6 +91,7 @@ const h = vi.hoisted(() => {
   return {
     authCallbacks, callLog, getUser, authRepositorySignOut, deleteAccountFromDB,
     fetchFullStateFromDB, saveRecordToDB, mockSupabase, FULL_STATE_UNAVAILABLE,
+    outboxEntries, outboxPersistence,
   };
 });
 
@@ -96,6 +104,10 @@ const deleteAccountFromDB = h.deleteAccountFromDB as unknown as {
 const fetchFullStateFromDB = h.fetchFullStateFromDB;
 const saveRecordToDB = h.saveRecordToDB;
 const FULL_STATE_UNAVAILABLE = h.FULL_STATE_UNAVAILABLE;
+
+vi.mock('@/lib/outboxStorage', () => ({
+  createIndexedDbOutbox: () => h.outboxPersistence,
+}));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: h.mockSupabase,
@@ -259,6 +271,16 @@ const PARTIAL: AccountDeletionOutcome = {
   dataRemoved: true,
   warnings: ['media_not_fully_removed:couple-1/rec-1/a.jpg'],
 };
+const RECOVERY_REQUIRED: AccountDeletionOutcome = {
+  status: 'recovery_required',
+  dataRemoved: false,
+  warnings: [],
+};
+const CANCELLED: AccountDeletionOutcome = {
+  status: 'cancelled',
+  dataRemoved: false,
+  warnings: [],
+};
 const DELETED: AccountDeletionOutcome = { status: 'deleted', dataRemoved: true, warnings: [] };
 const FAILED: AccountDeletionOutcome = { status: 'failed', dataRemoved: false, warnings: [] };
 
@@ -272,6 +294,7 @@ describe('Deletion-Recovery Suite', () => {
     authCallbacks.length = 0;
     callLog.length = 0;
     localStorage.clear();
+    h.outboxEntries.clear();
     getUser.mockReset().mockResolvedValue(NOT_PENDING);
     deleteAccountFromDB.mockReset().mockResolvedValue(FAILED);
     fetchFullStateFromDB.mockReset().mockResolvedValue(serverState());
@@ -335,6 +358,57 @@ describe('Deletion-Recovery Suite', () => {
     expect(screen.getByTestId('recovery')).toHaveTextContent('active');
     expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
     expect(screen.queryByText('HOME-PAGE-RENDERED')).toBeNull();
+  });
+
+  it('purges only the deleting account\'s queued files on partial deletion', async () => {
+    h.outboxEntries.set('queued-a', {
+      id: 'queued-a', userId: 'user-a', coupleId: 'couple-1', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-a'], 'private-a.jpg', { type: 'image/jpeg' })],
+    });
+    h.outboxEntries.set('queued-b', {
+      id: 'queued-b', userId: 'user-b', coupleId: 'couple-2', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-b'], 'private-b.jpg', { type: 'image/jpeg' })],
+    });
+    deleteAccountFromDB.mockResolvedValue(PARTIAL);
+    renderApp();
+    await signIn();
+
+    await act(async () => { screen.getByText('delete-account').click(); });
+
+    expect(h.outboxEntries.has('queued-a')).toBe(false);
+    expect(h.outboxEntries.has('queued-b')).toBe(true);
+  });
+
+  it('routes a non-destructive but incomplete cancellation into recovery and purges its outbox', async () => {
+    h.outboxEntries.set('queued-a', {
+      id: 'queued-a', userId: 'user-a', coupleId: 'couple-1', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-a'], 'private-a.jpg', { type: 'image/jpeg' })],
+    });
+    deleteAccountFromDB.mockResolvedValue(RECOVERY_REQUIRED);
+    renderApp();
+    await signIn();
+
+    await act(async () => { screen.getByText('delete-account').click(); });
+
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
+    expect(screen.getByTestId('recovery')).toHaveTextContent('active');
+    expect(h.outboxEntries.has('queued-a')).toBe(false);
+  });
+
+  it('leaves the account usable after a server-confirmed safe cancellation', async () => {
+    deleteAccountFromDB.mockResolvedValue(CANCELLED);
+    renderApp();
+    await signIn();
+
+    await act(async () => { screen.getByText('delete-account').click(); });
+
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBeNull();
+    expect(screen.getByTestId('recovery')).toHaveTextContent('none');
+    expect(screen.getByTestId('deletionStatus')).toHaveTextContent('clear');
+    expect(screen.getByTestId('user')).toHaveTextContent('user-a');
   });
 
   it('2 - logout preserves the marker and does not claim the account was deleted', async () => {
@@ -428,6 +502,26 @@ describe('Deletion-Recovery Suite', () => {
     expect(screen.queryByText('HOME-PAGE-RENDERED')).toBeNull();
   });
 
+  it('purges only the pending account\'s queued files when another device supplies the server flag', async () => {
+    h.outboxEntries.set('queued-a', {
+      id: 'queued-a', userId: 'user-a', coupleId: 'couple-1', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-a'], 'private-a.jpg', { type: 'image/jpeg' })],
+    });
+    h.outboxEntries.set('queued-b', {
+      id: 'queued-b', userId: 'user-b', coupleId: 'couple-2', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-b'], 'private-b.jpg', { type: 'image/jpeg' })],
+    });
+    getUser.mockResolvedValue(PENDING);
+    renderApp();
+    await signIn();
+
+    await waitFor(() => expect(screen.getByTestId('recovery')).toHaveTextContent('active'));
+    expect(h.outboxEntries.has('queued-a')).toBe(false);
+    expect(h.outboxEntries.has('queued-b')).toBe(true);
+  });
+
   it('8 - a successful retry deletes Auth BEFORE clearing the marker', async () => {
     deleteAccountFromDB.mockResolvedValue(PARTIAL);
     renderApp();
@@ -455,6 +549,22 @@ describe('Deletion-Recovery Suite', () => {
     });
   });
 
+  it('a safely cancelled retry clears recovery and ends the purged local session', async () => {
+    deleteAccountFromDB.mockResolvedValue(PARTIAL);
+    renderApp();
+    await signIn();
+    await act(async () => { screen.getByText('delete-account').click(); });
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
+
+    deleteAccountFromDB.mockResolvedValue(CANCELLED);
+    await act(async () => { screen.getByText('retry-deletion').click(); });
+
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBeNull();
+    expect(screen.getByTestId('recovery')).toHaveTextContent('none');
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(authRepositorySignOut).toHaveBeenCalled();
+  });
+
   it('9 - every authenticated route renders the recovery screen throughout', async () => {
     deleteAccountFromDB.mockResolvedValue(PARTIAL);
     for (const route of AUTHENTICATED_ROUTES) {
@@ -465,25 +575,25 @@ describe('Deletion-Recovery Suite', () => {
       await act(async () => { screen.getByText('delete-account').click(); });
 
       // before retry
-      expect(await screen.findByText('탈퇴가 완료되지 않았어요'), route).toBeInTheDocument();
+      expect(await screen.findByText('탈퇴 처리를 확인하고 있어요'), route).toBeInTheDocument();
       expect(screen.queryByText('HOME-PAGE-RENDERED'), route).toBeNull();
 
       // after a failed retry
       deleteAccountFromDB.mockResolvedValue(FAILED);
       await act(async () => { screen.getByText('retry-deletion').click(); });
-      expect(screen.getByText('탈퇴가 완료되지 않았어요'), route).toBeInTheDocument();
+      expect(screen.getByText('탈퇴 처리를 확인하고 있어요'), route).toBeInTheDocument();
 
       // after a reload / remount, driven from localStorage alone
       view.unmount();
       authCallbacks.length = 0;
       const remounted = renderApp(route);
       await signIn();
-      expect(await screen.findByText('탈퇴가 완료되지 않았어요'), route).toBeInTheDocument();
+      expect(await screen.findByText('탈퇴 처리를 확인하고 있어요'), route).toBeInTheDocument();
 
       // after logout and re-login as the same user
       await act(async () => { screen.getByText('sign-out').click(); });
       await act(async () => { emitAuth('SIGNED_IN', 'user-a'); });
-      expect(await screen.findByText('탈퇴가 완료되지 않았어요'), route).toBeInTheDocument();
+      expect(await screen.findByText('탈퇴 처리를 확인하고 있어요'), route).toBeInTheDocument();
       expect(screen.queryByText('HOME-PAGE-RENDERED'), route).toBeNull();
 
       deleteAccountFromDB.mockResolvedValue(PARTIAL);
@@ -587,7 +697,7 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
       await signIn();
 
       expect(screen.getByTestId('deletionStatus'), route).toHaveTextContent('pending');
-      expect(await screen.findByText('탈퇴가 완료되지 않았어요'), route).toBeInTheDocument();
+      expect(await screen.findByText('탈퇴 처리를 확인하고 있어요'), route).toBeInTheDocument();
       expect(screen.queryByText('HOME-PAGE-RENDERED'), route).toBeNull();
       // The route gate was already closed while no server answer existed, and
       // the marker required no round-trip to reach that verdict.
@@ -683,7 +793,7 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
     expect(screen.getByTestId('recovery')).toHaveTextContent('active');
     expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
     expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
-    expect(await screen.findByText('탈퇴가 완료되지 않았어요')).toBeInTheDocument();
+    expect(await screen.findByText('탈퇴 처리를 확인하고 있어요')).toBeInTheDocument();
 
     // No deferred timer later delivers a write.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });

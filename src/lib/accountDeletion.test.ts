@@ -40,6 +40,33 @@ describe('C1 - truthful three-valued deletion classification', () => {
       .toEqual({ status: 'failed', dataRemoved: false, warnings: [] });
   });
 
+  it('distinguishes a safely cancelled deletion from an ordinary failure', () => {
+    expect(classifyDeletionErrorBody({
+      error: 'shared encrypted history must be preserved',
+      dataRemoved: false,
+      deletionCancelled: true,
+      warnings: [],
+    })).toEqual({ status: 'cancelled', dataRemoved: false, warnings: [] });
+  });
+
+  it('enters recovery when the server cannot prove that its cancellation fence was cleared', () => {
+    expect(classifyDeletionErrorBody({
+      error: 'cancellation could not be completed',
+      dataRemoved: false,
+      recoveryRequired: true,
+      warnings: [],
+    })).toEqual({ status: 'recovery_required', dataRemoved: false, warnings: [] });
+  });
+
+  it('never lets a cancellation flag hide an explicit partial deletion', () => {
+    expect(classifyDeletionErrorBody({
+      dataRemoved: true,
+      deletionCancelled: true,
+      recoveryRequired: true,
+      warnings: [],
+    })).toEqual({ status: 'partially_deleted', dataRemoved: true, warnings: [] });
+  });
+
   it('classifies an UNREADABLE body as failed, never a fabricated partial deletion', () => {
     for (const body of [null, undefined, 'not json', 42, [], {}]) {
       expect(classifyDeletionErrorBody(body).status).toBe('failed');
@@ -68,7 +95,9 @@ describe('C1 - truthful three-valued deletion classification', () => {
     ];
     for (const body of bodies) {
       for (const outcome of [classifyDeletionErrorBody(body), classifyDeletionSuccess(body)]) {
-        expect(outcome.dataRemoved).toBe(outcome.status !== 'failed');
+        expect(outcome.dataRemoved).toBe(
+          outcome.status === 'deleted' || outcome.status === 'partially_deleted',
+        );
       }
     }
   });

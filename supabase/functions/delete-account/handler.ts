@@ -375,18 +375,43 @@ export async function handleDeleteAccountRequest(
         { p_user_id: userId, p_attempt_id: attemptId },
       );
       if (cancelError || cancelled !== true) {
-        destructiveDatabasePreparationMayHaveCommitted = true;
         const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
         console.error('[delete-account] Exact orphan refusal could not clear its fence', { kind });
       } else {
         deletionMarkerStarted = false;
+        // The database fence is gone and no irreversible phase ran. Restore the
+        // Auth metadata to its pre-request shape so the next login cannot be
+        // trapped behind a deletion that was explicitly cancelled. The Admin
+        // API replaces app_metadata wholesale, so preserve every unrelated key.
+        const restoredAppMetadata = { ...(user.app_metadata ?? {}) };
+        delete restoredAppMetadata[ACCOUNT_DELETION_PENDING_FIELD];
+        const { error: clearFlagError } = await admin.auth.admin.updateUserById(userId, {
+          app_metadata: restoredAppMetadata,
+        });
+        if (!clearFlagError) {
+          return jsonResponse(
+            {
+              error: 'Account deletion was refused to preserve shared encrypted history.',
+              dataRemoved: false,
+              deletionCancelled: true,
+              recoveryRequired: false,
+              warnings: [],
+            },
+            500,
+            cors.headers,
+          );
+        }
+        console.error(
+          '[delete-account] Exact orphan refusal was cancelled but its Auth flag could not be cleared',
+          { kind: safeDeleteErrorKind(clearFlagError) },
+        );
       }
       return jsonResponse(
         {
-          error: destructiveDatabasePreparationMayHaveCommitted
-            ? 'Account deletion could not be completed safely. Please try again.'
-            : 'Account deletion was refused to preserve shared encrypted history.',
-          dataRemoved: destructiveDatabasePreparationMayHaveCommitted,
+          error: 'Account deletion could not be cancelled completely. Please try again.',
+          dataRemoved: false,
+          deletionCancelled: false,
+          recoveryRequired: true,
           warnings: [],
         },
         500,

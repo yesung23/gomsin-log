@@ -23,6 +23,7 @@ const EXISTING_APP_METADATA = {
 
 type AdminOptions = {
   flagError?: unknown;
+  clearFlagError?: unknown;
   deleteUserError?: unknown;
   beginError?: unknown;
   beginData?: unknown;
@@ -65,8 +66,10 @@ function makeAdmin(options: AdminOptions = {}) {
         updateUserById: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
           calls.push('auth.admin.updateUserById');
           metadataWrites.push(payload.app_metadata);
-          return options.flagError
-            ? { data: null, error: options.flagError }
+          const isInitialFlagWrite = metadataWrites.length === 1;
+          const error = isInitialFlagWrite ? options.flagError : options.clearFlagError;
+          return error
+            ? { data: null, error }
             : { data: {}, error: null };
         }),
         deleteUser: vi.fn(async () => {
@@ -279,7 +282,11 @@ describe('delete-account - the server-authoritative pending flag', () => {
     });
     const response = await post(admin);
     expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({ dataRemoved: false });
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      deletionCancelled: true,
+      recoveryRequired: false,
+    });
     expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
@@ -288,6 +295,52 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const begin = admin.rpcCalls.find((call) => call.name === 'begin_account_deletion_v2');
     const cancel = admin.rpcCalls.find((call) => call.name === 'cancel_account_deletion_v2');
     expect(cancel?.args?.p_attempt_id).toBe(begin?.args?.p_attempt_id);
+  });
+
+  it('clears only the pending Auth flag after the exact refusal is safely cancelled', async () => {
+    const admin = makeAdmin({
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(admin.metadataWrites).toEqual([
+      { ...EXISTING_APP_METADATA, account_deletion_pending: true },
+      EXISTING_APP_METADATA,
+    ]);
+    const cancelAt = admin.calls.indexOf('rpc:cancel_account_deletion_v2');
+    const clearAt = admin.calls.lastIndexOf('auth.admin.updateUserById');
+    expect(cancelAt).toBeGreaterThanOrEqual(0);
+    expect(clearAt).toBeGreaterThan(cancelAt);
+  });
+
+  it('requires recovery without claiming data loss when clearing the Auth flag fails', async () => {
+    const admin = makeAdmin({
+      clearFlagError: { message: 'metadata clear timeout' },
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('storage.remove');
   });
 
   it('preserves every media object when E2EE refuses deletion before irreversible cleanup', async () => {
@@ -358,8 +411,13 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const response = await post(admin);
 
     expect(response.status).toBe(500);
-    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
     expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.metadataWrites).toHaveLength(1);
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 

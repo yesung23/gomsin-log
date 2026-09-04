@@ -225,9 +225,35 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
   it('취소를 requestId 단위로 다루고 single-flight를 유지한다', () => {
     expect(swiftEngine).toContain('actor OnDeviceSummaryEngine');
     expect(swiftEngine).toMatch(/func cancel\(requestId: String\)/);
-    expect(swiftEngine).toMatch(/guard let current = inFlight, current\.requestId == requestId/);
+    expect(swiftEngine).toMatch(/(?:guard|if) let current = inFlight, current\.requestId == requestId/);
     expect(swiftEngine).toMatch(/Task\.checkCancellation\(\)/);
     expect(swiftBridge).toMatch(/OnDeviceSummaryEngine\.shared\.cancel\(requestId: requestId\)/);
+  });
+
+  it('actor 등록 전 취소를 bounded exact requestId로 기억하고 시작 전에 소비한다', () => {
+    expect(swiftEngine).toContain('private static let maximumPendingCancellations = 32');
+    expect(swiftEngine).toContain('private var cancelledBeforeStart: [String] = []');
+    expect(swiftEngine).toContain('guard !cancelledBeforeStart.contains(requestId) else { return }');
+    expect(swiftEngine).toContain('cancelledBeforeStart.append(requestId)');
+    expect(swiftEngine).toContain('cancelledBeforeStart.removeFirst(');
+    expect(swiftEngine).toContain('cancelledBeforeStart.firstIndex(of: requestId)');
+    expect(swiftEngine).toContain('throw CancellationError()');
+
+    const refineStart = engineCode.indexOf('func refine(\n        requestId: String');
+    const preCancelCheck = engineCode.indexOf(
+      'if let cancelledIndex = cancelledBeforeStart.firstIndex(of: requestId)',
+      refineStart,
+    );
+    const competingFlightCancellation = engineCode.indexOf('if let current = inFlight {', refineStart);
+    const availabilityCheck = engineCode.indexOf('OnDeviceSummary.availability(', refineStart);
+    const taskCreation = engineCode.indexOf('let task = Task<[OnDeviceSummaryLine], Error>', refineStart);
+
+    expect(refineStart).toBeGreaterThanOrEqual(0);
+    expect(preCancelCheck).toBeGreaterThan(refineStart);
+    // A의 pending cancel은 A만 소비하고 즉시 끝나야 이미 실행 중인 B를 취소하지 않는다.
+    expect(preCancelCheck).toBeLessThan(competingFlightCancellation);
+    expect(preCancelCheck).toBeLessThan(availabilityCheck);
+    expect(preCancelCheck).toBeLessThan(taskCreation);
   });
 
   it('입력·출력을 로그하지 않는다', () => {

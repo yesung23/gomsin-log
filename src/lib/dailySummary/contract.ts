@@ -28,7 +28,7 @@
 /** Foundation Models 네이티브 호출 한 번에 전달하는 고정 배치 크기. */
 export const ON_DEVICE_SUMMARY_BATCH_SIZE = 5;
 
-/** 출시 검증 범위: 긴 문장 후보가 이 수를 넘으면 모델을 전혀 호출하지 않는다. */
+/** 네이티브 호출 한 번의 후보 상한. 하루 흐름은 5개씩 나누며, 별도로 20개에서 제한한다. */
 export const MAX_DAILY_SUMMARY_MODEL_CANDIDATES = ON_DEVICE_SUMMARY_BATCH_SIZE;
 
 /** 모델에 보낼 정규화된 원문 본문의 최대 UTF-16 단위. */

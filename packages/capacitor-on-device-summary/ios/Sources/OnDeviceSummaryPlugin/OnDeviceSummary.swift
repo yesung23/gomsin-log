@@ -267,16 +267,27 @@ extension OnDeviceSummary {
 /// moved on; so a new request cancels the previous one before starting.
 actor OnDeviceSummaryEngine {
     static let shared = OnDeviceSummaryEngine()
+    private static let maximumPendingCancellations = 32
 
     private var inFlight: (requestId: String, task: Task<[OnDeviceSummaryLine], Error>)?
+    private var cancelledBeforeStart: [String] = []
 
-    /// Cancel `requestId` if it is the one in flight. A stale id is a no-op, not
-    /// an error: the caller cancels on unmount without knowing whether the
-    /// request already finished.
+    /// Cancel `requestId` if it is in flight, or remember a bounded cancellation
+    /// if actor-side request registration has not happened yet.
     func cancel(requestId: String) {
-        guard let current = inFlight, current.requestId == requestId else { return }
-        current.task.cancel()
-        inFlight = nil
+        if let current = inFlight, current.requestId == requestId {
+            current.task.cancel()
+            inFlight = nil
+            return
+        }
+
+        guard !cancelledBeforeStart.contains(requestId) else { return }
+        cancelledBeforeStart.append(requestId)
+        if cancelledBeforeStart.count > Self.maximumPendingCancellations {
+            cancelledBeforeStart.removeFirst(
+                cancelledBeforeStart.count - Self.maximumPendingCancellations
+            )
+        }
     }
 
     func refine(
@@ -284,6 +295,11 @@ actor OnDeviceSummaryEngine {
         localeIdentifier: String,
         items: [OnDeviceSummaryLine]
     ) async throws -> [OnDeviceSummaryLine] {
+        if let cancelledIndex = cancelledBeforeStart.firstIndex(of: requestId) {
+            cancelledBeforeStart.remove(at: cancelledIndex)
+            throw CancellationError()
+        }
+
         if let current = inFlight {
             current.task.cancel()
             inFlight = nil

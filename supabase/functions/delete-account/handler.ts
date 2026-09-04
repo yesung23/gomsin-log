@@ -401,9 +401,10 @@ export async function handleDeleteAccountRequest(
             cors.headers,
           );
         }
+        const kind = safeDeleteErrorKind(clearFlagError);
         console.error(
           '[delete-account] Exact orphan refusal was cancelled but its Auth flag could not be cleared',
-          { kind: safeDeleteErrorKind(clearFlagError) },
+          { kind },
         );
       }
       return jsonResponse(

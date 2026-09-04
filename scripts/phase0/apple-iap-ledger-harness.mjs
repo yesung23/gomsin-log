@@ -348,7 +348,247 @@ try {
   }
   const billingAccountId = scalar(`SELECT billing_account_id::text FROM iap_private.apple_account_bindings WHERE user_id = ${q(A)}::uuid`, 'billing account binding');
   if (!/^[0-9a-f-]{36}$/.test(billingAccountId)) throw new Error('billing account binding did not receive an arbitrary UUID primary key');
+
+  // The ledger is an accounting evidence table, so every row family must be
+  // structurally unambiguous even for owner-level inserts. These probes use
+  // unique identities so a failure cannot be accidentally supplied by an
+  // unrelated uniqueness collision.
+  const ledgerProbeReservationA = '90000000-0000-4000-8000-000000000001';
+  const ledgerProbeReservationB = '90000000-0000-4000-8000-000000000002';
+  let ledgerProbeTransaction = 990000;
+  const ledgerInsert = ({
+    entryKind,
+    amount,
+    transactionId = null,
+    eventMillis = null,
+    reservationId = null,
+  }) => admin(`
+    INSERT INTO iap_private.export_credit_ledger (
+      billing_account_id, environment, transaction_id, event_signed_at,
+      reservation_id, entry_kind, amount
+    ) VALUES (
+      ${q(billingAccountId)}::uuid,
+      'Production',
+      ${transactionId === null ? 'NULL' : `${q(transactionId)}::text`},
+      ${eventMillis === null ? 'NULL' : `to_timestamp(${eventMillis} / 1000.0)`},
+      ${reservationId === null ? 'NULL' : `${q(reservationId)}::uuid`},
+      ${q(entryKind)},
+      ${amount}::bigint
+    )
+  `);
+  const nextLedgerTransaction = () => String(ledgerProbeTransaction++);
+  const malformedLedgerRows = [
+    ['purchase_grant rejects missing transaction and event', { entryKind: 'purchase_grant', amount: 1 }],
+    ['purchase_grant rejects missing event', { entryKind: 'purchase_grant', amount: 1, transactionId: nextLedgerTransaction() }],
+    ['purchase_grant rejects missing transaction', { entryKind: 'purchase_grant', amount: 1, eventMillis: 1000 }],
+    ['purchase_grant rejects reservation identity', { entryKind: 'purchase_grant', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 1000, reservationId: ledgerProbeReservationA }],
+    ['purchase_grant rejects zero amount', { entryKind: 'purchase_grant', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 1000 }],
+    ['purchase_grant rejects negative amount', { entryKind: 'purchase_grant', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 1000 }],
+
+    ['refund_reclaim rejects missing transaction and event', { entryKind: 'refund_reclaim', amount: -1 }],
+    ['refund_reclaim rejects missing event', { entryKind: 'refund_reclaim', amount: -1, transactionId: nextLedgerTransaction() }],
+    ['refund_reclaim rejects missing transaction', { entryKind: 'refund_reclaim', amount: -1, eventMillis: 2000 }],
+    ['refund_reclaim rejects reservation identity', { entryKind: 'refund_reclaim', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 2000, reservationId: ledgerProbeReservationA }],
+    ['refund_reclaim rejects zero amount', { entryKind: 'refund_reclaim', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 2000 }],
+    ['refund_reclaim rejects positive amount', { entryKind: 'refund_reclaim', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 2000 }],
+
+    ['refund_reversed_grant rejects missing transaction and event', { entryKind: 'refund_reversed_grant', amount: 1 }],
+    ['refund_reversed_grant rejects missing event', { entryKind: 'refund_reversed_grant', amount: 1, transactionId: nextLedgerTransaction() }],
+    ['refund_reversed_grant rejects missing transaction', { entryKind: 'refund_reversed_grant', amount: 1, eventMillis: 3000 }],
+    ['refund_reversed_grant rejects reservation identity', { entryKind: 'refund_reversed_grant', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 3000, reservationId: ledgerProbeReservationA }],
+    ['refund_reversed_grant rejects zero amount', { entryKind: 'refund_reversed_grant', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 3000 }],
+    ['refund_reversed_grant rejects negative amount', { entryKind: 'refund_reversed_grant', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 3000 }],
+
+    ['reserve rejects missing reservation', { entryKind: 'reserve', amount: -1 }],
+    ['reserve rejects transaction identity', { entryKind: 'reserve', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 4000, reservationId: ledgerProbeReservationA }],
+    ['reserve rejects zero amount', { entryKind: 'reserve', amount: 0, reservationId: ledgerProbeReservationA }],
+    ['reserve rejects positive amount', { entryKind: 'reserve', amount: 1, reservationId: ledgerProbeReservationA }],
+
+    ['commit rejects missing reservation', { entryKind: 'commit', amount: 0 }],
+    ['commit rejects transaction identity', { entryKind: 'commit', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 5000, reservationId: ledgerProbeReservationA }],
+    ['commit rejects positive amount', { entryKind: 'commit', amount: 1, reservationId: ledgerProbeReservationA }],
+    ['commit rejects negative amount', { entryKind: 'commit', amount: -1, reservationId: ledgerProbeReservationA }],
+
+    ['release rejects missing reservation', { entryKind: 'release', amount: 1 }],
+    ['release rejects transaction identity', { entryKind: 'release', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 6000, reservationId: ledgerProbeReservationA }],
+    ['release rejects zero amount', { entryKind: 'release', amount: 0, reservationId: ledgerProbeReservationA }],
+    ['release rejects negative amount', { entryKind: 'release', amount: -1, reservationId: ledgerProbeReservationA }],
+
+    ['account_deletion rejects missing reservation', { entryKind: 'account_deletion', amount: 1 }],
+    ['account_deletion rejects transaction identity', { entryKind: 'account_deletion', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 7000, reservationId: ledgerProbeReservationA }],
+    ['account_deletion rejects zero amount', { entryKind: 'account_deletion', amount: 0, reservationId: ledgerProbeReservationA }],
+    ['account_deletion rejects negative amount', { entryKind: 'account_deletion', amount: -1, reservationId: ledgerProbeReservationA }],
+
+    ['refund_forced_release rejects missing transaction and event', { entryKind: 'refund_forced_release', amount: 1, reservationId: ledgerProbeReservationA }],
+    ['refund_forced_release rejects missing event', { entryKind: 'refund_forced_release', amount: 1, transactionId: nextLedgerTransaction(), reservationId: ledgerProbeReservationA }],
+    ['refund_forced_release rejects missing transaction', { entryKind: 'refund_forced_release', amount: 1, eventMillis: 8000, reservationId: ledgerProbeReservationA }],
+    ['refund_forced_release rejects missing reservation', { entryKind: 'refund_forced_release', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 8000 }],
+    ['refund_forced_release rejects zero amount', { entryKind: 'refund_forced_release', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 8000, reservationId: ledgerProbeReservationA }],
+    ['refund_forced_release rejects negative amount', { entryKind: 'refund_forced_release', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 8000, reservationId: ledgerProbeReservationA }],
+
+    ['revoke_forced_release rejects missing transaction and event', { entryKind: 'revoke_forced_release', amount: 1, reservationId: ledgerProbeReservationA }],
+    ['revoke_forced_release rejects missing event', { entryKind: 'revoke_forced_release', amount: 1, transactionId: nextLedgerTransaction(), reservationId: ledgerProbeReservationA }],
+    ['revoke_forced_release rejects missing transaction', { entryKind: 'revoke_forced_release', amount: 1, eventMillis: 9000, reservationId: ledgerProbeReservationA }],
+    ['revoke_forced_release rejects missing reservation', { entryKind: 'revoke_forced_release', amount: 1, transactionId: nextLedgerTransaction(), eventMillis: 9000 }],
+    ['revoke_forced_release rejects zero amount', { entryKind: 'revoke_forced_release', amount: 0, transactionId: nextLedgerTransaction(), eventMillis: 9000, reservationId: ledgerProbeReservationA }],
+    ['revoke_forced_release rejects negative amount', { entryKind: 'revoke_forced_release', amount: -1, transactionId: nextLedgerTransaction(), eventMillis: 9000, reservationId: ledgerProbeReservationA }],
+  ];
+  for (const [label, row] of malformedLedgerRows) {
+    expectFail(ledgerInsert(row), label);
+  }
+
+  const normalUniquenessTransaction = nextLedgerTransaction();
+  expectOk(ledgerInsert({
+    entryKind: 'purchase_grant',
+    amount: 1,
+    transactionId: normalUniquenessTransaction,
+    eventMillis: 10000,
+  }), 'normal transaction-event uniqueness fixture');
+  expectFail(ledgerInsert({
+    entryKind: 'purchase_grant',
+    amount: 1,
+    transactionId: normalUniquenessTransaction,
+    eventMillis: 10000,
+  }), 'normal transaction-event exact duplicate');
+  expectFail(ledgerInsert({
+    entryKind: 'purchase_grant',
+    amount: 1,
+    transactionId: normalUniquenessTransaction,
+    eventMillis: 10000,
+    reservationId: ledgerProbeReservationA,
+  }), 'normal transaction-event duplicate with changed reservation');
+  expectOk(admin(`DELETE FROM iap_private.export_credit_ledger
+    WHERE environment = 'Production' AND transaction_id = ${q(normalUniquenessTransaction)}`), 'normal uniqueness probe cleanup');
+
+  const forcedUniquenessTransaction = nextLedgerTransaction();
+  expectOk(admin(`
+    INSERT INTO iap_private.export_credit_ledger (
+      billing_account_id, environment, transaction_id, event_signed_at,
+      reservation_id, entry_kind, amount
+    ) VALUES
+      (${q(billingAccountId)}::uuid, 'Production', ${q(forcedUniquenessTransaction)}, to_timestamp(11), ${q(ledgerProbeReservationA)}::uuid, 'refund_forced_release', 1),
+      (${q(billingAccountId)}::uuid, 'Production', ${q(forcedUniquenessTransaction)}, to_timestamp(11), ${q(ledgerProbeReservationB)}::uuid, 'refund_forced_release', 2)
+  `), 'distinct forced releases for one transaction event');
+  expectFail(ledgerInsert({
+    entryKind: 'refund_forced_release',
+    amount: 1,
+    transactionId: forcedUniquenessTransaction,
+    eventMillis: 11000,
+    reservationId: ledgerProbeReservationA,
+  }), 'duplicate forced release for the same reservation and kind');
+  expectOk(admin(`DELETE FROM iap_private.export_credit_ledger
+    WHERE environment = 'Production' AND transaction_id = ${q(forcedUniquenessTransaction)}`), 'forced uniqueness probe cleanup');
+
   expectOk(asActor('authenticated', A, `SELECT * FROM public.iap_get_state('Production')`), 'authenticated state RPC');
+
+  // Regression: a refund must reclaim a credit currently held by an open
+  // reservation. Otherwise a later ordinary release resurrects refunded value.
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2010', product: 'app.gomsinlog.book.export.credit.1', hash: sha('purchase-2010'), purchase: 1000, signed: 1000, event: 'purchase' }), 'reservation refund regression grant');
+  const refundHeldReservation = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 1, '20000000-0000-4000-8000-000000000010'::uuid) AS x`, 'reservation refund regression reserve'), 'reservation refund regression reserve');
+  const refund2010NotificationId = '00000000-0000-4000-8000-000000000010';
+  const refund2010NotificationHash = sha('notification-refund-2010');
+  const processRefund2010 = (notificationHash = refund2010NotificationHash) => asActor('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
+    ${q(refund2010NotificationId)}::uuid, 'Production', 'REFUND', NULL, '2010', '2010', 2000, ${q(notificationHash)},
+    '2010', '2010', 'app.gomsinlog.book.export.credit.1', 'Consumable', 'app.gomsinlog', ${q(tokenHash(otherAccountToken))}, 1000, 2000, NULL, 2000, 'refund', ${q(sha('refund-2010'))}) AS x`);
+  const refund2010 = jsonResult(expectOk(processRefund2010(), 'reservation refund notification reclaim'), 'reservation refund notification reclaim');
+  if (refund2010.transaction_applied !== true) throw new Error('reservation refund notification did not apply its transaction');
+  if (scalar(`SELECT status || '|' || amount::text FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(refundHeldReservation.reservation_id)}::uuid`, 'forced refund reservation state') !== 'released|1') {
+    throw new Error('refund did not whole-release the open reservation');
+  }
+  if (scalar(`SELECT entry_kind || '|' || amount::text || '|' || (transaction_id = '2010')::text || '|' || (event_signed_at = to_timestamp(2))::text FROM iap_private.export_credit_ledger WHERE reservation_id = ${q(refundHeldReservation.reservation_id)}::uuid AND entry_kind = 'refund_forced_release'`, 'forced refund ledger evidence') !== 'refund_forced_release|1|true|true') {
+    throw new Error('refund forced release is missing transaction/reservation/event evidence');
+  }
+  expectFail(asActor('authenticated', B, `SELECT * FROM public.iap_export_credit_commit(${q(refundHeldReservation.reservation_id)}::uuid)`), 'commit after forced refund release');
+  const ordinaryReleaseAfterRefund = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_release(${q(refundHeldReservation.reservation_id)}::uuid) AS x`, 'ordinary release after forced refund release'), 'ordinary release after forced refund release');
+  if (ordinaryReleaseAfterRefund.duplicate !== true || ordinaryReleaseAfterRefund.export_credits !== 0) {
+    throw new Error('ordinary release resurrected a credit after its transaction was refunded');
+  }
+
+  const refund2010Replay = jsonResult(expectOk(processRefund2010(), 'forced refund notification replay'), 'forced refund notification replay');
+  if (refund2010Replay.duplicate !== true) throw new Error('forced refund replay was not idempotent');
+  const stale2010 = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
+    '00000000-0000-4000-8000-000000000011', 'Production', 'REFUND', NULL, '2010', '2010', 1500, ${q(sha('notification-stale-2010'))}) AS x`, 'forced refund stale notification'), 'forced refund stale notification');
+  if (stale2010.stale !== true) throw new Error('forced refund stale event was not rejected as stale');
+  expectFail(processRefund2010(sha('notification-conflict-2010')), 'forced refund notification conflict');
+  if (scalar("SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE environment = 'Production' AND transaction_id = '2010' AND entry_kind IN ('refund_forced_release', 'refund_reclaim')", 'forced refund idempotent ledger count') !== '2') {
+    throw new Error('duplicate, stale, or conflicting refund changed the ledger');
+  }
+
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2010', product: 'app.gomsinlog.book.export.credit.1', hash: sha('reverse-2010'), purchase: 1000, signed: 3000, event: 'refund_reversed' }), 'forced refund reversal');
+  if (actorScalar('authenticated', B, `SELECT export_credits::text FROM public.iap_get_state('Production') LIMIT 1`, 'forced refund reversal balance') !== '1') {
+    throw new Error('refund reversal did not restore exactly the reclaimed amount');
+  }
+  if (scalar(`SELECT status FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(refundHeldReservation.reservation_id)}::uuid`, 'forced refund reversal reservation state') !== 'released') {
+    throw new Error('refund reversal reopened a forced-released reservation');
+  }
+  if (scalar("SELECT amount::text FROM iap_private.export_credit_ledger WHERE environment = 'Production' AND transaction_id = '2010' AND entry_kind = 'refund_reversed_grant'", 'forced refund reversal evidence') !== '1') {
+    throw new Error('refund reversal restored more or less than the amount reclaimed');
+  }
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2010', product: 'app.gomsinlog.book.export.credit.1', hash: sha('refund-again-2010'), purchase: 1000, signed: 4000, revoke: 4000, event: 'refund' }), 'later legitimate refund after reversal');
+  if (scalar("SELECT count(*)::text || '|' || count(DISTINCT event_signed_at)::text FROM iap_private.export_credit_ledger WHERE environment = 'Production' AND transaction_id = '2010' AND entry_kind = 'refund_reclaim'", 'repeated refund event-time uniqueness') !== '2|2') {
+    throw new Error('signed event time did not preserve the later legitimate refund');
+  }
+  if (actorScalar('authenticated', B, `SELECT export_credits::text FROM public.iap_get_state('Production') LIMIT 1`, 'later refund balance') !== '0') {
+    throw new Error('later legitimate refund did not reclaim its transaction credit');
+  }
+
+  // A refund with sufficient immediately available value must not disturb an
+  // unrelated reservation. A later deficit releases only whole reservations,
+  // newest first, and may overshoot without partially shrinking one.
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2011', product: 'export.3', hash: sha('purchase-2011'), purchase: 5000, signed: 5000, event: 'purchase' }), 'sufficient-balance grant one');
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2012', product: 'export.3', hash: sha('purchase-2012'), purchase: 5100, signed: 5100, event: 'purchase' }), 'sufficient-balance grant two');
+  const unrelatedReservation = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 1, '20000000-0000-4000-8000-000000000011'::uuid) AS x`, 'unrelated open reservation'), 'unrelated open reservation');
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2011', product: 'export.3', hash: sha('refund-2011'), purchase: 5000, signed: 6000, revoke: 6000, event: 'refund' }), 'sufficient-balance refund');
+  if (scalar(`SELECT status FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(unrelatedReservation.reservation_id)}::uuid`, 'unrelated reservation after sufficient refund') !== 'reserved') {
+    throw new Error('sufficient balance refund touched an unrelated reservation');
+  }
+
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2013', product: 'export.3', hash: sha('purchase-2013'), purchase: 6100, signed: 6100, event: 'purchase' }), 'oversized-reservation grant');
+  const olderRefundReservation = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 3, '20000000-0000-4000-8000-000000000012'::uuid) AS x`, 'older refund reservation'), 'older refund reservation');
+  const newestRefundReservation = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Production', 2, '20000000-0000-4000-8000-000000000015'::uuid) AS x`, 'newest refund reservation'), 'newest refund reservation');
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2013', product: 'export.3', hash: sha('refund-2013'), purchase: 6100, signed: 7000, revoke: 7000, event: 'refund' }), 'oversized-reservation refund');
+  if (scalar(`SELECT count(*)::text FROM iap_private.export_credit_reservations WHERE reservation_id IN (${q(olderRefundReservation.reservation_id)}::uuid, ${q(newestRefundReservation.reservation_id)}::uuid) AND status = 'released'`, 'multiple whole reservation releases') !== '2') {
+    throw new Error('refund did not whole-release each required reservation');
+  }
+  if (scalar("SELECT count(*)::text || '|' || sum(amount)::text FROM iap_private.export_credit_ledger WHERE environment = 'Production' AND transaction_id = '2013' AND entry_kind = 'refund_forced_release'", 'multiple forced-release evidence') !== '2|5') {
+    throw new Error('refund did not retain evidence for every whole reservation release');
+  }
+  if (scalar(`SELECT status FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(unrelatedReservation.reservation_id)}::uuid`, 'older reservation stop boundary') !== 'reserved') {
+    throw new Error('refund released reservations after enough units were available');
+  }
+
+  // Same-account rows in another environment and another user's rows must not
+  // be candidates for a Production refund/revoke release.
+  expectOk(callApply({ user: B, environment: 'Sandbox', token: otherAccountToken, tx: '2014', product: 'app.gomsinlog.book.export.credit.1', hash: sha('purchase-2014-sandbox'), purchase: 7100, signed: 7100, event: 'purchase' }), 'environment-isolation grant');
+  const sandboxReservation = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Sandbox', 1, '20000000-0000-4000-8000-000000000013'::uuid) AS x`, 'environment-isolation reservation'), 'environment-isolation reservation');
+  expectOk(callApply({ environment: 'Xcode', tx: '9010', product: 'app.gomsinlog.book.export.credit.1', hash: sha('purchase-9010'), purchase: 7100, signed: 7100, event: 'purchase' }), 'user-isolation grant');
+  const otherUserReservation = jsonResult(actorScalar('authenticated', A, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Xcode', 1, '20000000-0000-4000-8000-000000000014'::uuid) AS x`, 'user-isolation reservation'), 'user-isolation reservation');
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2012', product: 'export.3', hash: sha('revoke-2012'), purchase: 5100, signed: 8000, revoke: 8000, event: 'revoke' }), 'forced revoke release');
+  if (scalar(`SELECT entry_kind FROM iap_private.export_credit_ledger WHERE transaction_id = '2012' AND reservation_id = ${q(unrelatedReservation.reservation_id)}::uuid`, 'forced revoke evidence') !== 'revoke_forced_release') {
+    throw new Error('forced release did not distinguish revoke from refund');
+  }
+  if (scalar(`SELECT status FROM iap_private.export_credit_reservations WHERE reservation_id IN (${q(sandboxReservation.reservation_id)}::uuid, ${q(otherUserReservation.reservation_id)}::uuid) ORDER BY reservation_id LIMIT 1`, 'isolated reservation first state') !== 'reserved'
+      || scalar(`SELECT count(*)::text FROM iap_private.export_credit_reservations WHERE reservation_id IN (${q(sandboxReservation.reservation_id)}::uuid, ${q(otherUserReservation.reservation_id)}::uuid) AND status = 'reserved'`, 'isolated reservation count') !== '2') {
+    throw new Error('forced release crossed user or environment boundaries');
+  }
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2012', product: 'export.3', hash: sha('refund-after-revoke-2012'), purchase: 5100, signed: 9000, revoke: 9000, event: 'refund' }), 'refund after revoke without active reclaim');
+  expectOk(callApply({ user: B, token: otherAccountToken, tx: '2012', product: 'export.3', hash: sha('reverse-zero-refund-2012'), purchase: 5100, signed: 10000, event: 'refund_reversed' }), 'zero-reclaim refund reversal');
+  if (actorScalar('authenticated', B, `SELECT export_credits::text FROM public.iap_get_state('Production') LIMIT 1`, 'zero-reclaim refund reversal balance') !== '0') {
+    throw new Error('refund reversal restored value reclaimed by an earlier revoke');
+  }
+  expectOk(callApply({ environment: 'Xcode', tx: '9010', product: 'app.gomsinlog.book.export.credit.1', hash: sha('refund-9010'), purchase: 7100, signed: 8100, revoke: 8100, event: 'refund' }), 'account-deletion forced-release fixture');
+  if (scalar(`SELECT status FROM iap_private.export_credit_reservations WHERE reservation_id = ${q(otherUserReservation.reservation_id)}::uuid`, 'account-deletion forced-release fixture state') !== 'released') {
+    throw new Error('account-deletion fixture was not force-released by its refund');
+  }
+
+  expectOk(admin(`
+    DELETE FROM iap_private.export_credit_ledger
+    WHERE billing_account_id = (SELECT billing_account_id FROM iap_private.apple_account_bindings WHERE user_id = ${q(B)}::uuid);
+    DELETE FROM iap_private.export_credit_reservations
+    WHERE billing_account_id = (SELECT billing_account_id FROM iap_private.apple_account_bindings WHERE user_id = ${q(B)}::uuid);
+    DELETE FROM iap_private.apple_transactions
+    WHERE billing_account_id = (SELECT billing_account_id FROM iap_private.apple_account_bindings WHERE user_id = ${q(B)}::uuid);
+  `), 'reservation refund regression cleanup');
 
   expectOk(callApply({ tx: '1001', product: 'paper.paid', hash: sha('purchase-1001'), purchase: 1000, signed: 1000, event: 'purchase' }), 'non-consumable purchase');
   const notificationHash = sha('notification-refund-1001');
@@ -492,9 +732,10 @@ try {
     throw new Error('account deletion did not balance the released reservation in the audit ledger');
   }
   if (scalar(`SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE reservation_id = ${q(pendingReservation.reservation_id)}::uuid AND entry_kind = 'account_deletion'`, 'account deletion release evidence') !== '1') throw new Error('account deletion release was not recorded exactly once');
+  if (scalar(`SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE reservation_id = ${q(otherUserReservation.reservation_id)}::uuid AND entry_kind = 'account_deletion'`, 'forced release account deletion evidence') !== '0') throw new Error('account deletion double-released a refund-forced reservation');
   if (scalar(`SELECT (user_id IS NULL)::text || '|' || (app_account_token IS NULL)::text || '|' || length(app_account_token_hash)::text FROM iap_private.apple_account_bindings WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'raw token/user tombstone') !== 'true|true|64') throw new Error('account deletion prep did not tombstone the user/raw token while preserving the hash');
   expectOk(admin(`DELETE FROM auth.users WHERE id = ${q(A)}::uuid`), 'auth delete after billing tombstone');
-  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'retained ledger after auth delete') !== '8') throw new Error('auth user deletion removed billing-account transaction evidence');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'retained ledger after auth delete') !== String(beforeTransactions)) throw new Error('auth user deletion removed billing-account transaction evidence');
   const deletedNotification = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     '00000000-0000-4000-8000-000000000005', 'Production', 'REFUND', NULL, '2002', '2002', 7000, ${q(sha('deleted-notification'))},
     '2002', '2002', 'export.3', 'Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 7000, NULL, 7000, 'refund', ${q(sha('deleted-refund'))}) AS x`, 'post-deletion notification');

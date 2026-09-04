@@ -172,18 +172,70 @@ CREATE TABLE iap_private.export_credit_ledger (
   billing_account_id UUID NOT NULL REFERENCES iap_private.apple_account_bindings(billing_account_id),
   environment TEXT NOT NULL CHECK (environment IN ('Sandbox', 'Production', 'Xcode')),
   transaction_id TEXT CHECK (transaction_id IS NULL OR iap_private.is_uint64_text(transaction_id)),
+  event_signed_at TIMESTAMPTZ,
   reservation_id UUID,
   entry_kind TEXT NOT NULL CHECK (entry_kind IN (
     'purchase_grant', 'refund_reclaim', 'refund_reversed_grant',
+    'refund_forced_release', 'revoke_forced_release',
     'reserve', 'commit', 'release', 'account_deletion'
   )),
-  amount BIGINT NOT NULL CHECK (amount >= 0 OR entry_kind IN ('refund_reclaim', 'reserve')),
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  amount BIGINT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT export_credit_ledger_row_family_check CHECK (
+    (entry_kind = 'purchase_grant'
+      AND transaction_id IS NOT NULL
+      AND event_signed_at IS NOT NULL
+      AND reservation_id IS NULL
+      AND amount > 0)
+    OR (entry_kind = 'refund_reclaim'
+      AND transaction_id IS NOT NULL
+      AND event_signed_at IS NOT NULL
+      AND reservation_id IS NULL
+      AND amount < 0)
+    OR (entry_kind = 'refund_reversed_grant'
+      AND transaction_id IS NOT NULL
+      AND event_signed_at IS NOT NULL
+      AND reservation_id IS NULL
+      AND amount > 0)
+    OR (entry_kind = 'reserve'
+      AND transaction_id IS NULL
+      AND event_signed_at IS NULL
+      AND reservation_id IS NOT NULL
+      AND amount < 0)
+    OR (entry_kind = 'commit'
+      AND transaction_id IS NULL
+      AND event_signed_at IS NULL
+      AND reservation_id IS NOT NULL
+      AND amount = 0)
+    OR (entry_kind = 'release'
+      AND transaction_id IS NULL
+      AND event_signed_at IS NULL
+      AND reservation_id IS NOT NULL
+      AND amount > 0)
+    OR (entry_kind = 'account_deletion'
+      AND transaction_id IS NULL
+      AND event_signed_at IS NULL
+      AND reservation_id IS NOT NULL
+      AND amount > 0)
+    OR (entry_kind = 'refund_forced_release'
+      AND transaction_id IS NOT NULL
+      AND event_signed_at IS NOT NULL
+      AND reservation_id IS NOT NULL
+      AND amount > 0)
+    OR (entry_kind = 'revoke_forced_release'
+      AND transaction_id IS NOT NULL
+      AND event_signed_at IS NOT NULL
+      AND reservation_id IS NOT NULL
+      AND amount > 0)
+  )
 );
 
 CREATE UNIQUE INDEX iap_credit_transaction_event_once
-  ON iap_private.export_credit_ledger (environment, transaction_id, entry_kind)
-  WHERE transaction_id IS NOT NULL;
+  ON iap_private.export_credit_ledger (
+    environment, transaction_id, entry_kind, event_signed_at
+  )
+  WHERE transaction_id IS NOT NULL
+    AND reservation_id IS NULL;
 CREATE UNIQUE INDEX iap_credit_reservation_event_once
   ON iap_private.export_credit_ledger (reservation_id, entry_kind)
   WHERE reservation_id IS NOT NULL;
@@ -399,7 +451,7 @@ BEGIN
     RETURN;
   END IF;
 
-  v_balance := GREATEST(iap_private.credit_balance(v_billing_account_id, p_environment), 0);
+  v_balance := iap_private.credit_balance(v_billing_account_id, p_environment);
   v_reserved := iap_private.open_reserved_credits(v_billing_account_id, p_environment);
 
   RETURN QUERY
@@ -565,6 +617,10 @@ DECLARE
   v_stale BOOLEAN := FALSE;
   v_credit BIGINT := 0;
   v_reclaim BIGINT := 0;
+  v_available BIGINT := 0;
+  v_had_existing BOOLEAN := FALSE;
+  v_previous_status TEXT;
+  v_open_reservation iap_private.export_credit_reservations%ROWTYPE;
   v_original_owner UUID;
   v_notification iap_private.apple_notifications%ROWTYPE;
   v_verified_product_type TEXT;
@@ -662,8 +718,10 @@ BEGIN
   FROM iap_private.apple_transactions AS tx
   WHERE tx.environment = p_environment AND tx.transaction_id = p_transaction_id
   FOR UPDATE;
+  v_had_existing := FOUND;
 
-  IF FOUND THEN
+  IF v_had_existing THEN
+    v_previous_status := v_existing.status;
     IF v_existing.billing_account_id IS DISTINCT FROM v_binding.billing_account_id
        OR v_existing.original_transaction_id IS DISTINCT FROM p_original_transaction_id
        OR v_existing.product_id IS DISTINCT FROM p_product_id
@@ -704,7 +762,7 @@ BEGIN
   END IF;
 
   IF NOT v_stale AND NOT v_duplicate THEN
-    IF NOT FOUND THEN
+    IF NOT v_had_existing THEN
       IF v_effective_event_kind = 'refund_reversed' THEN
         RAISE EXCEPTION 'Cannot reverse an unknown consumable transaction';
       END IF;
@@ -724,8 +782,8 @@ BEGIN
 
       IF v_effective_event_kind = 'purchase' AND v_catalog.product_type = 'consumable' THEN
         INSERT INTO iap_private.export_credit_ledger (
-          billing_account_id, environment, transaction_id, entry_kind, amount
-        ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, 'purchase_grant', v_credit)
+          billing_account_id, environment, transaction_id, event_signed_at, entry_kind, amount
+        ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, v_signed_at, 'purchase_grant', v_credit)
         ON CONFLICT DO NOTHING;
       END IF;
     ELSE
@@ -743,27 +801,66 @@ BEGIN
     END IF;
 
     IF v_catalog.product_type = 'consumable' AND v_credit > 0 THEN
-      IF v_effective_event_kind IN ('refund', 'revoke') THEN
-        v_reclaim := LEAST(
-          v_credit,
-          GREATEST(iap_private.credit_balance(v_binding.billing_account_id, p_environment), 0)
-        );
+      IF v_had_existing
+         AND v_previous_status = 'active'
+         AND v_effective_event_kind IN ('refund', 'revoke') THEN
+        v_available := iap_private.credit_balance(v_binding.billing_account_id, p_environment);
+        IF v_available < 0 THEN
+          RAISE EXCEPTION 'IAP credit ledger has a negative balance';
+        END IF;
+
+        IF v_available < v_credit THEN
+          FOR v_open_reservation IN
+            SELECT r.*
+            FROM iap_private.export_credit_reservations AS r
+            WHERE r.billing_account_id = v_binding.billing_account_id
+              AND r.environment = p_environment
+              AND r.status = 'reserved'
+            ORDER BY r.created_at DESC, r.reservation_id DESC
+            FOR UPDATE
+          LOOP
+            UPDATE iap_private.export_credit_reservations AS r
+            SET status = 'released', updated_at = now()
+            WHERE r.reservation_id = v_open_reservation.reservation_id;
+
+            INSERT INTO iap_private.export_credit_ledger (
+              billing_account_id, environment, transaction_id, event_signed_at,
+              reservation_id, entry_kind, amount
+            ) VALUES (
+              v_binding.billing_account_id, p_environment, p_transaction_id, v_signed_at,
+              v_open_reservation.reservation_id,
+              CASE WHEN v_effective_event_kind = 'refund'
+                THEN 'refund_forced_release' ELSE 'revoke_forced_release' END,
+              v_open_reservation.amount
+            );
+            v_available := v_available + v_open_reservation.amount;
+            EXIT WHEN v_available >= v_credit;
+          END LOOP;
+        END IF;
+
+        v_reclaim := LEAST(v_credit, v_available);
         IF v_reclaim > 0 THEN
           INSERT INTO iap_private.export_credit_ledger (
-            billing_account_id, environment, transaction_id, entry_kind, amount
-          ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, 'refund_reclaim', -v_reclaim)
+            billing_account_id, environment, transaction_id, event_signed_at, entry_kind, amount
+          ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, v_signed_at, 'refund_reclaim', -v_reclaim)
           ON CONFLICT DO NOTHING;
         END IF;
-      ELSIF v_effective_event_kind = 'refund_reversed' THEN
-        SELECT COALESCE(-l.amount, 0) INTO v_reclaim
+      ELSIF v_had_existing
+            AND v_previous_status = 'refunded'
+            AND v_effective_event_kind = 'refund_reversed' THEN
+        SELECT -COALESCE(sum(l.amount), 0)::BIGINT INTO v_reclaim
         FROM iap_private.export_credit_ledger AS l
         WHERE l.environment = p_environment
           AND l.transaction_id = p_transaction_id
-          AND l.entry_kind = 'refund_reclaim';
+          AND l.entry_kind = 'refund_reclaim'
+          AND l.event_signed_at = v_existing.signed_at;
+        IF v_reclaim < 0 THEN
+          RAISE EXCEPTION 'Refund reversal exceeds the amount reclaimed';
+        END IF;
         IF v_reclaim > 0 THEN
           INSERT INTO iap_private.export_credit_ledger (
-            billing_account_id, environment, transaction_id, entry_kind, amount
-          ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, 'refund_reversed_grant', v_reclaim)
+            billing_account_id, environment, transaction_id, event_signed_at, entry_kind, amount
+          ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, v_signed_at, 'refund_reversed_grant', v_reclaim)
           ON CONFLICT DO NOTHING;
         END IF;
       END IF;
@@ -823,7 +920,7 @@ BEGIN
   END IF;
 
   RETURN QUERY SELECT NOT v_stale, v_duplicate, v_stale, p_environment,
-    p_transaction_id, v_active, GREATEST(iap_private.credit_balance(v_binding.billing_account_id, p_environment), 0);
+    p_transaction_id, v_active, iap_private.credit_balance(v_binding.billing_account_id, p_environment);
 END;
 $$;
 
@@ -1031,7 +1128,7 @@ BEGIN
   WHERE r.billing_account_id = v_billing_account_id AND r.environment = p_environment AND r.idempotency_key = p_idempotency_key;
   IF FOUND THEN
     RETURN QUERY SELECT v_reservation.reservation_id, v_reservation.status, TRUE,
-      GREATEST(iap_private.credit_balance(v_billing_account_id, p_environment), 0),
+      iap_private.credit_balance(v_billing_account_id, p_environment),
       iap_private.open_reserved_credits(v_billing_account_id, p_environment);
     RETURN;
   END IF;
@@ -1046,7 +1143,7 @@ BEGIN
     billing_account_id, environment, reservation_id, entry_kind, amount
   ) VALUES (v_billing_account_id, p_environment, v_reservation.reservation_id, 'reserve', -p_amount);
   RETURN QUERY SELECT v_reservation.reservation_id, 'reserved'::TEXT, FALSE,
-    GREATEST(iap_private.credit_balance(v_billing_account_id, p_environment), 0),
+    iap_private.credit_balance(v_billing_account_id, p_environment),
     iap_private.open_reserved_credits(v_billing_account_id, p_environment);
 END;
 $$;
@@ -1085,7 +1182,7 @@ BEGIN
   IF v_reservation.status = 'released' THEN RAISE EXCEPTION 'Released export reservation cannot be committed'; END IF;
   IF v_reservation.status = 'committed' THEN
     RETURN QUERY SELECT v_reservation.reservation_id, 'committed'::TEXT, TRUE,
-      GREATEST(iap_private.credit_balance(v_billing_account_id, v_reservation.environment), 0),
+      iap_private.credit_balance(v_billing_account_id, v_reservation.environment),
       iap_private.open_reserved_credits(v_billing_account_id, v_reservation.environment);
     RETURN;
   END IF;
@@ -1096,7 +1193,7 @@ BEGIN
   ) VALUES (v_billing_account_id, v_reservation.environment, v_reservation.reservation_id, 'commit', 0)
   ON CONFLICT DO NOTHING;
   RETURN QUERY SELECT v_reservation.reservation_id, 'committed'::TEXT, FALSE,
-    GREATEST(iap_private.credit_balance(v_billing_account_id, v_reservation.environment), 0),
+    iap_private.credit_balance(v_billing_account_id, v_reservation.environment),
     iap_private.open_reserved_credits(v_billing_account_id, v_reservation.environment);
 END;
 $$;
@@ -1135,7 +1232,7 @@ BEGIN
   IF v_reservation.status = 'committed' THEN RAISE EXCEPTION 'Committed export reservation cannot be released'; END IF;
   IF v_reservation.status = 'released' THEN
     RETURN QUERY SELECT v_reservation.reservation_id, 'released'::TEXT, TRUE,
-      GREATEST(iap_private.credit_balance(v_billing_account_id, v_reservation.environment), 0),
+      iap_private.credit_balance(v_billing_account_id, v_reservation.environment),
       iap_private.open_reserved_credits(v_billing_account_id, v_reservation.environment);
     RETURN;
   END IF;
@@ -1146,7 +1243,7 @@ BEGIN
   ) VALUES (v_billing_account_id, v_reservation.environment, v_reservation.reservation_id, 'release', v_reservation.amount)
   ON CONFLICT DO NOTHING;
   RETURN QUERY SELECT v_reservation.reservation_id, 'released'::TEXT, FALSE,
-    GREATEST(iap_private.credit_balance(v_billing_account_id, v_reservation.environment), 0),
+    iap_private.credit_balance(v_billing_account_id, v_reservation.environment),
     iap_private.open_reserved_credits(v_billing_account_id, v_reservation.environment);
 END;
 $$;

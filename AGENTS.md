@@ -579,3 +579,10 @@ Review는 특정 exact commit에 대한 판정이다. HEAD가 바뀌면 이전 r
 리뷰 대상 PR의 보안 의미를 바꾸지 않는 별도 docs-only branch는 그 PR의 HEAD에
 WORK_LOG-only commit을 추가하지 않는다. READ-ONLY Kiro Reviewer/Sol Architect는
 저장소를 수정하지 않으며, 다음 write-capable owner가 복사할 수 있는 결과만 남긴다.
+
+## 20. Context7 Documentation Lookup
+
+버전에 따라 달라질 수 있는 외부 라이브러리/API를 구현하거나 수정할 때는 사용 가능한
+경우 Context7 MCP의 `resolve-library-id`와 `query-docs`로 현재 문서를 먼저 확인한다.
+Context7 결과는 보조 근거이며, 보안·결제·데이터 변경은 반드시 공식 문서와 현재 코드,
+실행한 테스트로 다시 검증한다. Context7을 사용할 수 없으면 공식 문서를 직접 확인한다.

@@ -1092,7 +1092,9 @@ export function RecordPage() {
                 <li
                   id={`record-${r.id}`}
                   key={r.id}
-                  data-author-role={author.role ?? 'unknown'}
+                  data-author-role={relationshipContext === 'military'
+                    ? author.role ?? 'unknown'
+                    : undefined}
                   data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
                     'list-none relative border-b border-border/40 last:border-b-0 motion-safe:transition-all motion-safe:duration-500',

@@ -381,6 +381,8 @@ describe('the general-couple timeline uses neutral author language', () => {
     const theirs = cardOf(container, 'rec-theirs');
     expect(mine.querySelector('.sr-only')).toHaveTextContent('내가 남긴 기록');
     expect(theirs.querySelector('.sr-only')).toHaveTextContent('춘향의 기록');
+    expect(mine).not.toHaveAttribute('data-author-role');
+    expect(theirs).not.toHaveAttribute('data-author-role');
     expect(mine.querySelector('[aria-hidden="true"]')?.className)
       .not.toBe(theirs.querySelector('[aria-hidden="true"]')?.className);
   });

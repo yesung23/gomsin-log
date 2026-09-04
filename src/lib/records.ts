@@ -564,22 +564,19 @@ export async function deleteRecordFromDB(
     || !expectedCoupleId
   ) return { ok: false, reason: unconfiguredReason() };
 
-  const { data, error } = await supabase
-    .from('daily_records')
-    .delete()
-    .eq('id', recordId)
-    .eq('user_id', expectedUserId)
-    .eq('couple_id', expectedCoupleId)
-    .select('id')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('delete_my_record', {
+    p_record_id: recordId,
+    p_expected_user_id: expectedUserId,
+    p_expected_couple_id: expectedCoupleId,
+  });
 
   if (error) {
     console.error('[gomsinlog] Failed to delete record.');
     return { ok: false, reason: classifyServerError(error).kind };
   }
-  // No matching row came back. The filters pin id + owner + couple, so this is
-  // an ownership/visibility answer, not a transport failure.
-  if (data?.id !== recordId) return { ok: false, reason: 'not_found' };
+  // The SECURITY DEFINER RPC deliberately collapses missing, stale-couple and
+  // non-owner targets to the same false result so record existence is private.
+  if (data !== true) return { ok: false, reason: 'not_found' };
   return { ok: true };
 }
 

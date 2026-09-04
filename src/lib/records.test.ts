@@ -19,16 +19,18 @@ import {
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
 
-const { mockFrom, mockStorageDownload, mockSupabase } = vi.hoisted(() => {
+const { mockFrom, mockRpc, mockStorageDownload, mockSupabase } = vi.hoisted(() => {
   const mockFrom = vi.fn();
+  const mockRpc = vi.fn();
   const mockStorageDownload = vi.fn();
   const mockSupabase = {
     from: mockFrom,
+    rpc: mockRpc,
     storage: {
       from: vi.fn(() => ({ download: mockStorageDownload })),
     },
   };
-  return { mockFrom, mockStorageDownload, mockSupabase };
+  return { mockFrom, mockRpc, mockStorageDownload, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -345,53 +347,33 @@ describe('deleteRecordFromDB', () => {
   const userId = 'user-001';
   const coupleId = 'couple-001';
 
-  it('calls .from(daily_records).delete().eq(id).eq(user_id).eq(couple_id).select(id).maybeSingle()', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: recordId }, error: null });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
+  it('routes deletion through the atomic owner RPC instead of direct table DELETE', async () => {
+    mockRpc.mockResolvedValueOnce({ data: true, error: null });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
     expect(result).toEqual({ ok: true });
-    expect(mockFrom).toHaveBeenCalledWith('daily_records');
-    expect(eqId).toHaveBeenCalledWith('id', recordId);
-    expect(eqUserId).toHaveBeenCalledWith('user_id', userId);
-    expect(eqCoupleId).toHaveBeenCalledWith('couple_id', coupleId);
-    expect(select).toHaveBeenCalledWith('id');
-    expect(maybeSingle).toHaveBeenCalled();
+    expect(mockRpc).toHaveBeenCalledWith('delete_my_record', {
+      p_record_id: recordId,
+      p_expected_user_id: userId,
+      p_expected_couple_id: coupleId,
+    });
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it('reports not_found when no row is returned', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
+  it('maps the RPC non-disclosure false result to not_found', async () => {
+    mockRpc.mockResolvedValueOnce({ data: false, error: null });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
-    // The filters pin id + owner + couple, so an empty result is an ownership
-    // answer -- not a transport failure, and never a connection message.
     expect(result).toEqual({ ok: false, reason: 'not_found' });
   });
 
   it('classifies an RLS rejection as forbidden rather than a connection problem', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({
+    mockRpc.mockResolvedValueOnce({
       data: null,
       error: { code: '42501', message: 'permission denied for table daily_records' },
     });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
@@ -399,16 +381,10 @@ describe('deleteRecordFromDB', () => {
   });
 
   it('classifies an expired session as auth_expired', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({
+    mockRpc.mockResolvedValueOnce({
       data: null,
       error: { code: 'PGRST301', message: 'JWT expired' },
     });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 

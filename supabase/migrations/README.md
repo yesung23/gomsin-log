@@ -1119,3 +1119,29 @@ supabase functions deploy delete-account
 - **운영 적용 상태: NOT APPLIED / UNVERIFIED.** Production catalog fingerprint,
   V2 Edge deploy/canary, scheduler secret, Apple Sandbox/Production, 실제 결제·환불은
   확인하거나 변경하지 않았습니다.
+
+## 083 — 기록 삭제 원자화 및 복구 가능한 미디어 정리 (2026-09-05)
+
+- `083_record_media_cleanup_jobs.sql`은 기록 행을 먼저 삭제하고 Storage를 나중에 정리할
+  수 있도록, 본문·파일명·URL 없이 record/couple/owner UUID와 제한된 lease 상태만 가진
+  private tombstone을 추가합니다. 이 행에는 삭제 cascade를 일으킬 foreign key가 없습니다.
+- 모든 `daily_records` DELETE는 기존 account/couple lock 뒤 Storage relation의 SHARE lock을
+  잡고 같은 transaction에서 tombstone을 만듭니다. owner 앱은 exact owner/couple을 확인하는
+  `delete_my_record` RPC만 사용하며, partner·unrelated·former·anon·missing 대상은 같은
+  비공개 `false` 결과로 닫힙니다.
+- authenticated의 직접 `storage.objects` DELETE 권한과 과거 정책은 회수됩니다. 따라서
+  구버전의 Storage-first 삭제는 blob을 없애기 전에 실패하고, 새 leased service worker만
+  live job의 정확한 `couple_id/record_id` prefix를 삭제할 수 있습니다. `service_role`의
+  `BYPASSRLS`도 Storage trigger를 우회하지 않습니다.
+- worker는 한 번에 한 job을 `SKIP LOCKED` lease로 가져와 page/depth/object/batch/round를
+  제한하고, 새 exhaustive listing이 비어 있을 때만 완료합니다. 계정 삭제는 소유한 job이
+  pending/leased/blocked인 동안 relationship generation과 Auth 삭제로 진행하지 않습니다.
+- 안전한 적용 순서는 검증된 Edge artifact와 scheduler secret을 먼저 준비하되 호출하지 않고,
+  083을 적용한 뒤 schema reload를 확인하고 scheduler를 시작하는 것입니다. worker 장애 시
+  scheduler를 멈춰도 record tombstone과 blob이 보존되며, authenticated DELETE를 복원하지
+  않습니다. 수정은 더 큰 번호의 forward migration/artifact로 수행합니다.
+- 로컬 검증은 migration source contract, 실제 PostgreSQL actor/RLS/trigger/transaction/race
+  harness, 공유 worker/handler/실제 Deno entrypoint 테스트로 수행합니다. Hosted Storage의
+  list/remove 의미와 scheduler 실행은 별도 staging canary 전까지 검증된 것으로 보지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.

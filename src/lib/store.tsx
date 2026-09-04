@@ -4270,26 +4270,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       () => recordFailure('deletion_pending'),
       async () => {
 
-    // Storage cleanup: remove owned media objects BEFORE deleting the DB row.
-    // Fail closed: if cleanup fails, abort the delete rather than orphaning
-    // storage objects that can no longer be traced back to a record.
-    const attachmentPaths = (existing.attachments || [])
-      .map((a) => a.path)
-      .filter((p): p is string =>
-        isCanonicalRecordMediaPath(p, workspace.coupleId, id),
-      );
-
-    if (attachmentPaths.length > 0) {
-      try {
-        await removeRecordMedia(attachmentPaths);
-        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-      } catch (error) {
-        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-        console.error('[gomsinlog] Storage cleanup failed, aborting delete.');
-        return recordFailure(classifyServerError(error).kind);
-      }
-    }
-
     try {
       const deleted = await deleteRecordFromDB(
         id,

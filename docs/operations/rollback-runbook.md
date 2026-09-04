@@ -82,6 +82,24 @@ active membership, RLS, grant, schema cache를 각각 확인한다. 원인이 �
 복구 후 owner upload/read, active partner shared read, private/former/unrelated/anon deny를
 실제 객체 경로로 검증한다.
 
+### 기록 미디어 cleanup worker 장애
+
+1. 잘못된 prefix 삭제, 반복 실패, lease 이상이 의심되면 scheduler 호출과 해당 Edge
+   artifact를 먼저 중지한다. job 행이나 Storage 객체를 수동 삭제하지 않는다.
+2. `record_media_cleanup_jobs`의 상태별 건수와 lease 만료 여부만 확인한다. 파일명 목록,
+   signed URL, 토큰, 사용자 콘텐츠는 쿼리 결과·로그·보고서에 남기지 않는다.
+3. authenticated의 직접 Storage DELETE grant/policy를 복원하지 않는다. 구버전 앱이
+   blob 삭제 전에 실패하는 것이 데이터 보존을 위한 의도된 호환 동작이다.
+4. tombstone trigger, no-FK 보존, exact-prefix service trigger, account relationship-close
+   barrier는 유지한다. worker가 멈춘 동안 계정 삭제가 Auth 단계에서 대기하는 것은
+   안전한 실패이며, 이를 우회해 Auth 사용자를 직접 삭제하지 않는다.
+5. 원인을 수정한 이전과 호환되는 Edge artifact 또는 더 큰 번호의 forward migration을
+   staging에 적용하고, owner/partner/unrelated/anon, service-role lease, response-loss,
+   upload/delete race를 다시 확인한 뒤 scheduler를 재개한다.
+
+이미 적용된 083을 되감기 위해 과거 migration을 수정하거나 tombstone을 drop하지 않는다.
+앱 artifact를 되돌려야 한다면 `delete_my_record` RPC를 사용하는 버전만 허용한다.
+
 ### 비대칭 연결 해제 데이터가 발견된 경우
 
 먼저 대상 couple ID와 예상 영향 행 수만 read-only로 산출한다. 백업 후 검토된 단일

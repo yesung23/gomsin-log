@@ -214,7 +214,7 @@ function buildConnectedState(records: DailyRecord[] = []): Partial<AppState> {
   };
 }
 
-describe('deleteRecord with storage cleanup', () => {
+describe('deleteRecord with database-owned media cleanup', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
     createdChannels.length = 0;
@@ -264,7 +264,7 @@ describe('deleteRecord with storage cleanup', () => {
     return unmount;
   }
 
-  it('cleans up storage objects then deletes the DB row', async () => {
+  it('deletes through the atomic DB path without issuing a client Storage DELETE', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -285,13 +285,12 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // Storage cleanup happens BEFORE the DB delete
-    expect(callOrder).toEqual(['removeRecordMedia', 'deleteRecordFromDB']);
-    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/abc.jpg']);
+    expect(callOrder).toEqual(['deleteRecordFromDB']);
+    expect(removeRecordMedia).not.toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');
   });
 
-  it('aborts delete if storage cleanup fails', async () => {
+  it('cannot lose a record through a failing legacy Storage helper', async () => {
     removeRecordMedia.mockReset();
     removeRecordMedia.mockRejectedValue(new Error('Storage error'));
 
@@ -313,15 +312,14 @@ describe('deleteRecord with storage cleanup', () => {
     await act(async () => {
       screen.getByTestId('delete-rec1').click();
     });
-    await waitFor(() => expect(lastDeleteResult).toBe(false));
+    await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // DB delete should NOT have been called
-    expect(deleteRecordFromDB).not.toHaveBeenCalled();
-    // Record should still be present
-    expect(screen.getByTestId('records').textContent).toBe('rec-1');
+    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(deleteRecordFromDB).toHaveBeenCalled();
+    expect(screen.getByTestId('records').textContent).toBe('');
   });
 
-  it('skips non-canonical paths during storage cleanup', async () => {
+  it('does not trust or inspect attachment paths during record deletion', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -343,11 +341,11 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // Only the canonical path should be cleaned up
-    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/abc.jpg']);
+    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(deleteRecordFromDB).toHaveBeenCalled();
   });
 
-  it('succeeds when record has no attachments (no storage cleanup needed)', async () => {
+  it('uses the same atomic DB path when the record has no attachments', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -365,7 +363,6 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // No storage cleanup, just DB delete
     expect(removeRecordMedia).not.toHaveBeenCalled();
     expect(deleteRecordFromDB).toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');

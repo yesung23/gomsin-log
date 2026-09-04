@@ -290,3 +290,119 @@ Deno.test({
     }
   },
 });
+
+Deno.test('account deletion relies on the database cleanup barrier and never deletes Storage directly', async () => {
+  const userId = '10000000-0000-4000-8000-000000000001';
+  const recordId = '20000000-0000-4000-8000-000000000001';
+  let appMetadata: Record<string, unknown> = { provider: 'email', providers: ['email'] };
+  let attemptId = '';
+  let storageCalls = 0;
+  let authDeleteCalls = 0;
+  let selectedColumns = '';
+  const rpcCalls: string[] = [];
+
+  const admin = {
+    auth: {
+      getUser: async () => ({
+        data: { user: { id: userId, app_metadata: { ...appMetadata } } },
+        error: null,
+      }),
+      admin: {
+        updateUserById: async (_id: string, update: { app_metadata: Record<string, unknown> }) => {
+          appMetadata = { ...update.app_metadata };
+          return { error: null };
+        },
+        deleteUser: async () => {
+          authDeleteCalls += 1;
+          return { error: null };
+        },
+      },
+    },
+    from: (table: string) => {
+      assertEquals(table, 'daily_records', 'only the record preflight table is read');
+      return {
+        select: (columns: string) => {
+          selectedColumns = columns;
+          return {
+            eq: async () => ({ data: [{ id: recordId }], error: null }),
+          };
+        },
+      };
+    },
+    storage: {
+      from: () => {
+        storageCalls += 1;
+        return {
+          list: async () => ({ data: [], error: null }),
+          remove: async () => ({ data: [], error: null }),
+        };
+      },
+    },
+    rpc: async (name: string, args: Record<string, unknown>) => {
+      rpcCalls.push(name);
+      if (name === 'begin_account_deletion_v2') {
+        attemptId = String(args.p_attempt_id);
+        return {
+          data: { ok: true, attempt_id: attemptId, phase: 'media_cleanup' },
+          error: null,
+        };
+      }
+      if (name === 'inspect_account_deletion_fence_v2') {
+        return {
+          data: {
+            ok: true,
+            pending: true,
+            attempt_id: attemptId,
+            phase: 'media_cleanup',
+          },
+          error: null,
+        };
+      }
+      if (name === 'e2ee_prepare_account_deletion_v2') {
+        return { data: { ok: true, phase: 'e2ee_prepared' }, error: null };
+      }
+      if (name === 'prepare_account_deletion_v2') {
+        return { data: { ok: true, phase: 'relational_prepared' }, error: null };
+      }
+      if (name === 'close_account_relationship_generations_v2') {
+        return {
+          data: null,
+          error: { status: 500, message: 'record_media_cleanup_pending' },
+        };
+      }
+      throw new Error(`unexpected RPC ${name}`);
+    },
+  };
+
+  const response = await handleDeleteAccountRequest(
+    new Request('https://edge.example/delete-account', {
+      method: 'POST',
+      headers: {
+        Origin: ALLOWED,
+        Authorization: 'Bearer valid-test-token',
+      },
+    }),
+    {
+      env: (key) => ({
+        ALLOWED_ORIGINS: ALLOWED,
+        SUPABASE_URL: 'https://project.example',
+        SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
+      } as Record<string, string>)[key],
+      createAdmin: () => admin,
+    },
+  );
+
+  assertEquals(response.status, 500, 'the pending cleanup barrier must stop account deletion');
+  const body = await response.json();
+  assertEquals(body.dataRemoved, true, 'relational preparation already committed');
+  assertEquals(storageCalls, 0, 'account deletion must never list or remove record media directly');
+  assertEquals(selectedColumns, 'id', 'media routing metadata must not be loaded by account deletion');
+  assertEquals(authDeleteCalls, 0, 'Auth deletion must not run while cleanup is pending');
+  assertEquals(rpcCalls, [
+    'begin_account_deletion_v2',
+    'inspect_account_deletion_fence_v2',
+    'e2ee_prepare_account_deletion_v2',
+    'prepare_account_deletion_v2',
+    'close_account_relationship_generations_v2',
+  ], 'database preparation must enqueue jobs before the relationship-close barrier');
+});

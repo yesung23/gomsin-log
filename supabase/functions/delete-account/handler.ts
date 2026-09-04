@@ -10,45 +10,34 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *    `app_metadata.account_deletion_pending = true`. This is the PRIMARY
  *    authority for deletion recovery and it gates everything below: if the
  *    write fails, nothing is deleted.
- * 1. Enumerate the caller's daily records and completely remove their Storage
- *    objects. A listing/removal failure aborts before relational/auth changes.
+ * 1. Enumerate the caller's daily record IDs for the fenced database RPC.
  * 2. Call the service-role-only fenced E2EE preparation RPC, which
  *    removes this account's device/recovery/envelope material, preserves the
  *    couple-owned epochs and the surviving partner's envelopes, and REFUSES
  *    the whole deletion if continuing would strand that partner.
  * 3. Call the service-role-only prepare_account_deletion RPC. It verifies that
  *    the record set did not change, locks couple rows first, transfers shared
- *    plan ownership, removes private/blocking rows, and deletes records in one
- *    database transaction.
+ *    plan ownership, removes private/blocking rows, deletes records, and
+ *    enqueues their media-cleanup tombstones in one database transaction.
  * 4. Call the service-role-only close_account_relationship_generations RPC.
+ *    Migration 083 refuses this step until every owned cleanup tombstone is
+ *    complete, so Auth remains intact while asynchronous Storage work remains.
  *    It terminally closes every relationship generation, revokes pairing and
  *    delivery authority, disconnects both members, and invalidates invitations.
  * 5. Remove the couple row only when this account is its sole member. A current
  *    or former partner membership preserves the shared relationship scope.
  * 6. Delete the Auth user only after every database step succeeds.
  *
- * Storage, Postgres, and Auth cannot share one transaction. Every phase is
- * retry-safe, but a failed later phase may follow a completed media cleanup.
+ * Storage, Postgres, and Auth cannot share one transaction. The account
+ * handler therefore never deletes record media directly; the leased cleanup
+ * worker owns that service boundary after the database transaction commits.
  *
  * The request handling lives in this module rather than in `index.ts` purely so
  * that it can be exercised by the test suite: `index.ts` stays a thin Deno
- * entrypoint that injects `Deno.env` and the service-role client. The deletion
- * sequence itself is unchanged -- every step, every constant, same order.
+ * entrypoint that injects `Deno.env` and the service-role client. Tests pin the
+ * cross-service ordering and the no-direct-Storage boundary here.
  */
 
-const MEDIA_BUCKET = 'couple-media';
-const STORAGE_PAGE_SIZE = 100;
-/**
- * Bound on the remove-then-confirm cycle per record folder.
- *
- * Storage reports a successful removal for entries it did not actually delete,
- * so confirmation has to be a re-listing. Without a cap, anything Storage keeps
- * returning turns that into an endless loop that the platform eventually kills
- * mid-deletion.
- */
-const MAX_STORAGE_ROUNDS = 20;
-/** Guard against a pathological prefix chain while descending a record folder. */
-const MAX_STORAGE_DEPTH = 8;
 /** Attempts for the Auth deletion, which is the only step with no rollback. */
 const AUTH_DELETE_ATTEMPTS = 3;
 
@@ -72,10 +61,7 @@ function jsonResponse(
 }
 
 type Admin = any;
-type RecordMediaScope = { id: string; couple_id: string };
-
-type Bucket = any;
-type StorageEntry = { name: string; id: string | null };
+type RecordPreflight = { id: string };
 
 type DeleteErrorKind = 'authorization' | 'configuration' | 'server' | 'transient' | 'service' | 'unknown';
 type AccountDeletionPhase =
@@ -209,94 +195,6 @@ export type HandlerDeps = {
   createAdmin: (url: string, adminSecretKey: string) => Admin;
 };
 
-/** Every entry directly under `folder`, across all pages. */
-async function listFolderEntries(bucket: Bucket, folder: string): Promise<StorageEntry[]> {
-  const entries: StorageEntry[] = [];
-  for (let offset = 0; ; offset += STORAGE_PAGE_SIZE) {
-    const { data, error } = await bucket.list(folder, {
-      limit: STORAGE_PAGE_SIZE,
-      offset,
-      sortBy: { column: 'name', order: 'asc' },
-    });
-    if (error) {
-      throw new Error(`Unable to list media folder ${folder}: ${error.message}`);
-    }
-    if (!data?.length) break;
-    for (const entry of data) {
-      if (!entry.name) {
-        throw new Error(`Unable to identify every object in media folder ${folder}`);
-      }
-      entries.push({ name: entry.name, id: entry.id ?? null });
-    }
-    if (data.length < STORAGE_PAGE_SIZE) break;
-  }
-  return entries;
-}
-
-/**
- * Every real object path under `folder`, descending into prefixes.
- *
- * A listing entry with a null `id` is a prefix derived from a nested object name
- * rather than an object. `remove()` ignores those without reporting an error, so
- * passing one back is what previously made the confirmation loop spin forever.
- * The objects beneath it have to be enumerated explicitly.
- */
-async function collectObjectPaths(
-  bucket: Bucket,
-  folder: string,
-  depth = 0,
-): Promise<string[]> {
-  if (depth > MAX_STORAGE_DEPTH) {
-    throw new Error(`Media folder ${folder} is nested deeper than deletion supports`);
-  }
-  const paths: string[] = [];
-  for (const entry of await listFolderEntries(bucket, folder)) {
-    const path = `${folder}/${entry.name}`;
-    if (entry.id === null) {
-      paths.push(...await collectObjectPaths(bucket, path, depth + 1));
-    } else {
-      paths.push(path);
-    }
-  }
-  return paths;
-}
-
-/**
- * Remove and then confirm the absence of every object under each record path.
- *
- * Confirmation is a fresh enumeration rather than the removal response, because
- * Storage answers 200 while silently skipping entries it did not delete. The
- * round cap turns "Storage will not let go of this object" into a failed
- * deletion the caller can retry instead of a hung request.
- */
-async function removeAndConfirmRecordMedia(
-  admin: Admin,
-  records: RecordMediaScope[],
-): Promise<void> {
-  const bucket = admin.storage.from(MEDIA_BUCKET);
-
-  for (const record of records) {
-    const folder = `${record.couple_id}/${record.id}`;
-
-    for (let round = 1; ; round += 1) {
-      const paths = await collectObjectPaths(bucket, folder);
-      if (paths.length === 0) break;
-      if (round > MAX_STORAGE_ROUNDS) {
-        throw new Error(
-          `Unable to clear media folder ${folder}: ${paths.length} object(s) still present after ${MAX_STORAGE_ROUNDS} attempts`,
-        );
-      }
-      for (let index = 0; index < paths.length; index += STORAGE_PAGE_SIZE) {
-        const batch = paths.slice(index, index + STORAGE_PAGE_SIZE);
-        const { error: removeError } = await bucket.remove(batch);
-        if (removeError) {
-          throw new Error(`Unable to clear media folder ${folder}: ${removeError.message}`);
-        }
-      }
-    }
-  }
-}
-
 export async function handleDeleteAccountRequest(
   request: Request,
   deps: HandlerDeps,
@@ -394,17 +292,17 @@ export async function handleDeleteAccountRequest(
 
   try {
     // Read-only preflight. These exact IDs are passed to the transactional RPC,
-    // which fails closed if a record appeared/disappeared during media cleanup.
+    // which fails closed if a record appeared/disappeared before preparation.
     const { data: recordRows, error: recordsError } = await admin
       .from('daily_records')
-      .select('id, couple_id')
+      .select('id')
       .eq('user_id', userId);
     if (recordsError) throw recordsError;
 
-    const records = (recordRows || []) as RecordMediaScope[];
+    const records = (recordRows || []) as RecordPreflight[];
 
     // This marker is non-destructive. Migration 015's Storage INSERT policy
-    // uses it to close the upload race while media is being removed/confirmed.
+    // uses it to close the upload race while deletion advances.
     const { data: beginResult, error: beginError } = await admin.rpc('begin_account_deletion_v2', {
       p_user_id: userId,
       p_expected_record_ids: records.map((record) => record.id),
@@ -463,9 +361,9 @@ export async function handleDeleteAccountRequest(
       );
     }
 
-    // E2EE key material comes before every irreversible cleanup, including
-    // Storage. Its structured orphan refusal is the only safe cancellation
-    // point: no media or relational data has been removed yet.
+    // E2EE key material comes before irreversible relational cleanup. Its
+    // structured orphan refusal is the only safe cancellation point: no record
+    // or relational data has been removed yet.
     //
     // It runs before the relational preparation because it is the step that can
     // legitimately refuse: if removing this account would leave the surviving
@@ -613,32 +511,9 @@ export async function handleDeleteAccountRequest(
     }
     currentPhase = e2eePhase;
 
-    // Storage cleanup is allowed only after the database has durably advanced
-    // to the exact e2ee_prepared phase. A later phase means a previous attempt
-    // already completed this step before advancing relational deletion.
-    //
-    // Once E2EE preparation has committed, cancellation is no longer safe. A
-    // Storage error may also be partially applied, so preserve the deletion
-    // fence and report dataRemoved=true for deterministic retry/recovery.
-    if (currentPhase === 'e2ee_prepared') {
-      try {
-        await removeAndConfirmRecordMedia(admin, records);
-      } catch (mediaError) {
-        const kind = safeDeleteErrorKind(mediaError);
-        console.error('[delete-account] Media cleanup failed after E2EE preparation', { kind });
-        return jsonResponse(
-          {
-            error: 'Account deletion was partially completed, but stored media could not be fully removed. Please try again to finish deleting the account.',
-            dataRemoved: true,
-            warnings: [],
-          },
-          500,
-          cors.headers,
-        );
-      }
-    }
-
-    // Migration 015 owns all destructive relational work. In particular,
+    // The database owns all destructive relational work. Migration 083's
+    // record trigger also enqueues cleanup tombstones in this transaction. In
+    // particular,
     // ownership transfer is no longer a best-effort direct table update: an
     // RPC error aborts before auth deletion, preventing ON DELETE CASCADE from
     // destroying shared events or trips.

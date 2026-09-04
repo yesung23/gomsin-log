@@ -135,8 +135,29 @@ describe('PKCE token transport timeout', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('also deadlines refresh-token recovery without changing its request payload', async () => {
+    vi.useFakeTimers();
+    const transport = abortableFetch();
+    const headers = { apikey: 'publishable-key', 'content-type': 'application/json' };
+    const body = '{"refresh_token":"opaque-refresh-token"}';
+    const request = createPkceTimeoutFetch(transport.fetchImpl)(
+      'https://project.supabase.co/auth/v1/token?grant_type=refresh_token',
+      { method: 'POST', headers, body },
+    );
+    void request.catch(() => undefined);
+
+    await vi.advanceTimersByTimeAsync(AUTH_CALLBACK_TIMEOUT_MS);
+
+    expect(transport.getSignal()?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(transport.fetchImpl).toHaveBeenCalledWith(
+      'https://project.supabase.co/auth/v1/token?grant_type=refresh_token',
+      expect.objectContaining({ method: 'POST', headers, body }),
+    );
+  });
+
   it.each([
-    'https://project.supabase.co/auth/v1/token?grant_type=refresh_token',
+    'https://project.supabase.co/auth/v1/token?grant_type=password',
     'https://project.supabase.co/rest/v1/token?grant_type=pkce',
     'not a url',
   ])('passes non-PKCE requests through unchanged: %s', async (url) => {
@@ -245,6 +266,21 @@ describe('PKCE token transport deadline over the response body', () => {
     const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
     await vi.advanceTimersByTimeAsync(1);
     await rejection;
+  });
+
+  it('keeps the refresh-token deadline armed until its response body finishes', async () => {
+    vi.useFakeTimers();
+    const transport = stalledBodyFetch('{"access_token":"late-refresh"}');
+    const request = createPkceTimeoutFetch(transport.fetchImpl)(
+      'https://project.supabase.co/auth/v1/token?grant_type=refresh_token',
+      { method: 'POST', body: '{"refresh_token":"opaque"}' },
+    );
+    void request.catch(() => undefined);
+
+    await vi.advanceTimersByTimeAsync(AUTH_CALLBACK_TIMEOUT_MS);
+
+    expect(transport.getSignal()?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('aborts and rejects when headers arrive in time but the body does not', async () => {

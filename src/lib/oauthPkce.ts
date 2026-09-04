@@ -1,6 +1,7 @@
 import { AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
 
 const PKCE_FLOW_ID_PATTERN = /^[a-zA-Z0-9_-]{8,64}$/;
+const DEADLINED_TOKEN_GRANTS = new Set(['pkce', 'refresh_token']);
 
 /** Statuses the `Response` constructor refuses to pair with a body. */
 const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
@@ -9,7 +10,7 @@ export function validatePkceFlowId(value: unknown): string | null {
   return typeof value === 'string' && PKCE_FLOW_ID_PATTERN.test(value) ? value : null;
 }
 
-function isPkceTokenRequest(input: RequestInfo | URL): boolean {
+function isDeadlinedTokenRequest(input: RequestInfo | URL): boolean {
   try {
     const url = new URL(
       typeof input === 'string'
@@ -18,7 +19,8 @@ function isPkceTokenRequest(input: RequestInfo | URL): boolean {
           ? input.href
           : input.url,
     );
-    return url.pathname === '/auth/v1/token' && url.searchParams.get('grant_type') === 'pkce';
+    return url.pathname === '/auth/v1/token'
+      && DEADLINED_TOKEN_GRANTS.has(url.searchParams.get('grant_type') ?? '');
   } catch {
     return false;
   }
@@ -64,7 +66,7 @@ async function readWithinDeadline(response: Response, signal: AbortSignal): Prom
 
 export function createPkceTimeoutFetch(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {
-    if (!isPkceTokenRequest(input)) return fetchImpl(input, init);
+    if (!isDeadlinedTokenRequest(input)) return fetchImpl(input, init);
 
     const controller = new AbortController();
     const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);

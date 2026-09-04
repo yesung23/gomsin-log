@@ -23,12 +23,22 @@ const EXISTING_APP_METADATA = {
 
 type AdminOptions = {
   flagError?: unknown;
+  flagReject?: unknown;
+  reassertFlagError?: unknown;
+  reassertFlagReject?: unknown;
   clearFlagError?: unknown;
+  clearFlagReject?: unknown;
   deleteUserError?: unknown;
   beginError?: unknown;
   beginData?: unknown;
   cancelError?: unknown;
+  cancelReject?: unknown;
   cancelData?: unknown;
+  inspectError?: unknown;
+  inspectReject?: unknown;
+  inspectRejectOnCall?: number;
+  inspectData?: unknown;
+  interleave?: 'new_attempt_before_cancel' | 'new_attempt_before_clear' | 'new_attempt_after_clear';
   e2eePrepareError?: unknown;
   e2eePrepareData?: unknown;
   prepareError?: unknown;
@@ -49,16 +59,21 @@ function makeAdmin(options: AdminOptions = {}) {
   const rpcCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   const metadataWrites: unknown[] = [];
   const storageObjects = new Set(options.storageObjectPaths ?? []);
+  const runtime = {
+    appMetadata: { ...EXISTING_APP_METADATA } as Record<string, unknown>,
+    fence: null as null | { attemptId: string; phase: string },
+  };
   const admin = {
     calls,
     rpcCalls,
     metadataWrites,
+    runtime,
     storageObjects,
     auth: {
       getUser: vi.fn(async () => {
         calls.push('auth.getUser');
         return {
-          data: { user: { id: 'user-a', app_metadata: { ...EXISTING_APP_METADATA } } },
+          data: { user: { id: 'user-a', app_metadata: { ...runtime.appMetadata } } },
           error: null,
         };
       }),
@@ -66,11 +81,32 @@ function makeAdmin(options: AdminOptions = {}) {
         updateUserById: vi.fn(async (_id: string, payload: Record<string, unknown>) => {
           calls.push('auth.admin.updateUserById');
           metadataWrites.push(payload.app_metadata);
-          const isInitialFlagWrite = metadataWrites.length === 1;
-          const error = isInitialFlagWrite ? options.flagError : options.clearFlagError;
-          return error
-            ? { data: null, error }
-            : { data: {}, error: null };
+          const metadata = payload.app_metadata as Record<string, unknown>;
+          const isPendingWrite = metadata?.account_deletion_pending === true;
+          const pendingWriteCount = metadataWrites.filter((write) => (
+            (write as Record<string, unknown>)?.account_deletion_pending === true
+          )).length;
+          const isInitialFlagWrite = isPendingWrite && pendingWriteCount === 1;
+          const rejection = isInitialFlagWrite
+            ? options.flagReject
+            : isPendingWrite
+              ? options.reassertFlagReject
+              : options.clearFlagReject;
+          if (rejection) throw rejection;
+          const error = isInitialFlagWrite
+            ? options.flagError
+            : isPendingWrite
+              ? options.reassertFlagError
+              : options.clearFlagError;
+          if (error) return { data: null, error };
+          runtime.appMetadata = { ...metadata };
+          if (!isPendingWrite && options.interleave === 'new_attempt_after_clear') {
+            runtime.fence = {
+              attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+              phase: 'media_cleanup',
+            };
+          }
+          return { data: {}, error: null };
         }),
         deleteUser: vi.fn(async () => {
           calls.push('auth.admin.deleteUser');
@@ -93,26 +129,81 @@ function makeAdmin(options: AdminOptions = {}) {
       calls.push(`rpc:${name}`);
       rpcCalls.push({ name, args });
       if (name === 'begin_account_deletion_v2') {
-        return options.beginError
-          ? { data: null, error: options.beginError }
+        if (options.beginError) return { data: null, error: options.beginError };
+        const data = Object.hasOwn(options, 'beginData')
+          ? options.beginData
           : {
-            data: Object.hasOwn(options, 'beginData')
-              ? options.beginData
-              : {
-                ok: true,
-                attempt_id: args?.p_attempt_id,
-                phase: 'media_cleanup',
-              },
-            error: null,
+            ok: true,
+            attempt_id: args?.p_attempt_id,
+            phase: 'media_cleanup',
           };
+        if (
+          data && typeof data === 'object'
+          && (data as Record<string, unknown>).ok === true
+          && typeof (data as Record<string, unknown>).attempt_id === 'string'
+          && typeof (data as Record<string, unknown>).phase === 'string'
+        ) {
+          runtime.fence = {
+            attemptId: (data as Record<string, unknown>).attempt_id as string,
+            phase: (data as Record<string, unknown>).phase as string,
+          };
+        }
+        return { data, error: null };
       }
       if (name === 'cancel_account_deletion_v2') {
-        return options.cancelError
-          ? { data: null, error: options.cancelError }
-          : {
-            data: Object.hasOwn(options, 'cancelData') ? options.cancelData : true,
-            error: null,
+        if (options.cancelReject) throw options.cancelReject;
+        if (options.cancelError) return { data: null, error: options.cancelError };
+        if (options.interleave === 'new_attempt_before_cancel') {
+          runtime.fence = {
+            attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+            phase: 'media_cleanup',
           };
+          runtime.appMetadata = {
+            ...runtime.appMetadata,
+            account_deletion_pending: true,
+            account_deletion_attempt_id: runtime.fence.attemptId,
+          };
+        }
+        const data = Object.hasOwn(options, 'cancelData')
+          ? options.cancelData
+          : runtime.fence?.attemptId === args?.p_attempt_id
+            && runtime.fence.phase === 'media_cleanup';
+        if (data === true) {
+          runtime.fence = null;
+          if (options.interleave === 'new_attempt_before_clear') {
+            runtime.fence = {
+              attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+              phase: 'media_cleanup',
+            };
+            runtime.appMetadata = {
+              ...runtime.appMetadata,
+              account_deletion_pending: true,
+              account_deletion_attempt_id: runtime.fence.attemptId,
+            };
+          }
+        }
+        return { data, error: null };
+      }
+      if (name === 'inspect_account_deletion_fence_v2') {
+        const inspectCall = rpcCalls.filter((call) => (
+          call.name === 'inspect_account_deletion_fence_v2'
+        )).length;
+        if (
+          options.inspectReject
+          && (options.inspectRejectOnCall ?? 1) === inspectCall
+        ) throw options.inspectReject;
+        if (options.inspectError) return { data: null, error: options.inspectError };
+        const data = Object.hasOwn(options, 'inspectData')
+          ? options.inspectData
+          : runtime.fence
+            ? {
+              ok: true,
+              pending: true,
+              attempt_id: runtime.fence.attemptId,
+              phase: runtime.fence.phase,
+            }
+            : { ok: true, pending: false };
+        return { data, error: null };
       }
       // E2EE key-material cleanup runs before the relational preparation and
       // can legitimately refuse, so a failure here must abort the deletion.
@@ -242,7 +333,10 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(flagAt).toBeGreaterThanOrEqual(0);
     expect(flagAt).toBeLessThan(admin.calls.indexOf('from:daily_records.select'));
     expect(flagAt).toBeLessThan(admin.calls.indexOf('rpc:begin_account_deletion_v2'));
-    expect(admin.metadataWrites[0]).toMatchObject({ account_deletion_pending: true });
+    expect(admin.metadataWrites[0]).toMatchObject({
+      account_deletion_pending: true,
+      account_deletion_attempt_id: expect.any(String),
+    });
   });
 
   it('spreads the existing app_metadata first, so the rendered sign-in provider is unchanged', async () => {
@@ -251,7 +345,72 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(admin.metadataWrites[0]).toEqual({
       ...EXISTING_APP_METADATA,
       account_deletion_pending: true,
+      account_deletion_attempt_id: expect.any(String),
     });
+  });
+
+  it('reasserts the pending metadata after begin and inspects the exact fence before E2EE', async () => {
+    const admin = makeAdmin();
+
+    expect((await post(admin)).status).toBe(200);
+
+    const beginAt = admin.calls.indexOf('rpc:begin_account_deletion_v2');
+    const pendingWrites = admin.metadataWrites.filter((write) => (
+      (write as Record<string, unknown>).account_deletion_pending === true
+    )) as Array<Record<string, unknown>>;
+    const secondPendingAt = admin.calls.indexOf('auth.admin.updateUserById', beginAt + 1);
+    const inspectAt = admin.calls.indexOf('rpc:inspect_account_deletion_fence_v2');
+    const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion_v2');
+
+    expect(pendingWrites).toHaveLength(2);
+    expect(pendingWrites[1].account_deletion_attempt_id)
+      .toBe(pendingWrites[0].account_deletion_attempt_id);
+    expect(secondPendingAt).toBeGreaterThan(beginAt);
+    expect(inspectAt).toBeGreaterThan(secondPendingAt);
+    expect(e2eeAt).toBeGreaterThan(inspectAt);
+  });
+
+  it('starts no irreversible phase when the post-begin Auth reassertion fails', async () => {
+    const admin = makeAdmin({ reassertFlagError: { message: 'metadata unavailable' } });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).toContain('rpc:begin_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('starts no irreversible phase when the post-begin Auth reassertion rejects', async () => {
+    const admin = makeAdmin({ reassertFlagReject: new Error('metadata transport rejected') });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: false, recoveryRequired: true });
+    expect(admin.calls).toContain('rpc:begin_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('starts no irreversible phase when the post-begin fence inspection is unavailable', async () => {
+    const admin = makeAdmin({ inspectError: { message: 'inspection unavailable' } });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: false, recoveryRequired: true });
+    expect(admin.calls).toContain('rpc:inspect_account_deletion_fence_v2');
+    expect(admin.calls).not.toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
   /** Deletion-Recovery Suite - test 7. */
@@ -310,10 +469,15 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const response = await post(admin);
 
     expect(response.status).toBe(500);
-    expect(admin.metadataWrites).toEqual([
-      { ...EXISTING_APP_METADATA, account_deletion_pending: true },
-      EXISTING_APP_METADATA,
-    ]);
+    expect(admin.metadataWrites).toHaveLength(3);
+    const [initialPending, postBeginPending, cleared] = admin.metadataWrites as Array<Record<string, unknown>>;
+    expect(initialPending).toMatchObject({
+      ...EXISTING_APP_METADATA,
+      account_deletion_pending: true,
+      account_deletion_attempt_id: expect.any(String),
+    });
+    expect(postBeginPending).toEqual(initialPending);
+    expect(cleared).toEqual(EXISTING_APP_METADATA);
     const cancelAt = admin.calls.indexOf('rpc:cancel_account_deletion_v2');
     const clearAt = admin.calls.lastIndexOf('auth.admin.updateUserById');
     expect(cancelAt).toBeGreaterThanOrEqual(0);
@@ -341,6 +505,157 @@ describe('delete-account - the server-authoritative pending flag', () => {
     });
     expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
     expect(admin.calls).not.toContain('storage.remove');
+  });
+
+  it('requires recovery when clearing the Auth flag rejects instead of returning an error', async () => {
+    const admin = makeAdmin({
+      clearFlagReject: new Error('metadata transport rejected'),
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('requires recovery when the exact fenced cancellation RPC rejects', async () => {
+    const admin = makeAdmin({
+      cancelReject: new Error('cancel transport rejected'),
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('does not clear metadata owned by a newer attempt that begins before cancellation cleanup', async () => {
+    const admin = makeAdmin({
+      interleave: 'new_attempt_before_clear',
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.runtime.appMetadata).toMatchObject({
+      account_deletion_pending: true,
+      account_deletion_attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+    expect(admin.metadataWrites.at(-1)).toMatchObject({ account_deletion_pending: true });
+  });
+
+  it('reasserts a newer fence found after clearing the cancelled attempt metadata', async () => {
+    const admin = makeAdmin({
+      interleave: 'new_attempt_after_clear',
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).toContain('rpc:inspect_account_deletion_fence_v2');
+    expect(admin.runtime.appMetadata).toMatchObject({
+      account_deletion_pending: true,
+      account_deletion_attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+  });
+
+  it('never clears Auth metadata after a newer attempt supersedes the exact DB fence', async () => {
+    const admin = makeAdmin({
+      interleave: 'new_attempt_before_cancel',
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.runtime.appMetadata).toMatchObject({
+      account_deletion_pending: true,
+      account_deletion_attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+    expect(admin.metadataWrites.every((write) => (
+      (write as Record<string, unknown>).account_deletion_pending === true
+    ))).toBe(true);
+  });
+
+  it('restores pending metadata and requires recovery when post-cancel inspection rejects', async () => {
+    const admin = makeAdmin({
+      inspectReject: new Error('inspection transport rejected'),
+      inspectRejectOnCall: 2,
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.runtime.appMetadata.account_deletion_pending).toBe(true);
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
   it('preserves every media object when E2EE refuses deletion before irreversible cleanup', async () => {
@@ -417,7 +732,10 @@ describe('delete-account - the server-authoritative pending flag', () => {
       deletionCancelled: false,
     });
     expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
-    expect(admin.metadataWrites).toHaveLength(1);
+    expect(admin.metadataWrites).toHaveLength(2);
+    expect(admin.metadataWrites.every((write) => (
+      (write as Record<string, unknown>).account_deletion_pending === true
+    ))).toBe(true);
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
@@ -555,9 +873,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(body.dataRemoved).toBe(true);
     // Three attempts, exactly as before.
     expect(admin.calls.filter((call) => call === 'auth.admin.deleteUser')).toHaveLength(3);
-    // The pending flag is written once and never cleared: recovery must stay
-    // active for an account whose data is already gone.
-    expect(admin.metadataWrites).toHaveLength(1);
+    // The pending flag is written before and after fenced begin, and never
+    // cleared: recovery must stay active for an account whose data is gone.
+    expect(admin.metadataWrites).toHaveLength(2);
     expect(admin.metadataWrites[0]).toMatchObject({ account_deletion_pending: true });
     // The database marker is now the durable server-side barrier that prevents
     // this still-live Auth account from creating or joining a new generation.
@@ -568,9 +886,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const admin = makeAdmin();
     const response = await post(admin);
     expect(response.status).toBe(200);
-    expect(admin.metadataWrites).toHaveLength(1);
-    // No second write setting it back to false, which would open a window in
-    // which the flag is false while the user still exists.
+    expect(admin.metadataWrites).toHaveLength(2);
+    // Neither write sets it back to false, which would open a window in which
+    // the flag is false while the user still exists.
     expect(admin.metadataWrites.every((write) => (
       (write as Record<string, unknown>).account_deletion_pending === true
     ))).toBe(true);
@@ -584,6 +902,9 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'auth.admin.updateUserById',
       'from:daily_records.select',
       'rpc:begin_account_deletion_v2',
+      'auth.getUser',
+      'auth.admin.updateUserById',
+      'rpc:inspect_account_deletion_fence_v2',
       'rpc:e2ee_prepare_account_deletion_v2',
       'rpc:prepare_account_deletion_v2',
       'rpc:close_account_relationship_generations_v2',

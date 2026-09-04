@@ -54,6 +54,8 @@ const AUTH_DELETE_ATTEMPTS = 3;
 
 /** Admin-only Auth flag. NEVER `user_metadata`, which a browser can rewrite. */
 const ACCOUNT_DELETION_PENDING_FIELD = 'account_deletion_pending';
+const ACCOUNT_DELETION_ATTEMPT_FIELD = 'account_deletion_attempt_id';
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function jsonResponse(
   body: Record<string, unknown>,
@@ -115,6 +117,87 @@ function accountDeletionPhase(value: unknown): AccountDeletionPhase | null {
   return typeof value === 'string' && ACCOUNT_DELETION_PHASES.has(value as AccountDeletionPhase)
     ? value as AccountDeletionPhase
     : null;
+}
+
+type FenceInspection =
+  | { kind: 'none' }
+  | { kind: 'active'; attemptId: string; phase: AccountDeletionPhase }
+  | { kind: 'unavailable' };
+
+async function readCurrentAppMetadata(
+  admin: Admin,
+  token: string,
+  expectedUserId: string,
+): Promise<Record<string, unknown> | null> {
+  try {
+    const { data: { user }, error } = await admin.auth.getUser(token);
+    if (error || !user || user.id !== expectedUserId) return null;
+    return isRecord(user.app_metadata) ? { ...user.app_metadata } : {};
+  } catch {
+    return null;
+  }
+}
+
+async function writePendingDeletionMetadata(
+  admin: Admin,
+  token: string,
+  userId: string,
+  attemptId: string,
+): Promise<boolean> {
+  const current = await readCurrentAppMetadata(admin, token, userId);
+  if (!current) return false;
+  try {
+    const { error } = await admin.auth.admin.updateUserById(userId, {
+      app_metadata: {
+        ...current,
+        [ACCOUNT_DELETION_PENDING_FIELD]: true,
+        [ACCOUNT_DELETION_ATTEMPT_FIELD]: attemptId,
+      },
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+async function inspectDeletionFence(admin: Admin, userId: string): Promise<FenceInspection> {
+  try {
+    const { data, error } = await admin.rpc(
+      'inspect_account_deletion_fence_v2',
+      { p_user_id: userId },
+    );
+    if (error || !isRecord(data) || data.ok !== true) return { kind: 'unavailable' };
+    if (data.pending === false) return { kind: 'none' };
+    const phase = accountDeletionPhase(data.phase);
+    if (
+      data.pending === true
+      && typeof data.attempt_id === 'string'
+      && UUID_PATTERN.test(data.attempt_id)
+      && phase !== null
+    ) {
+      return { kind: 'active', attemptId: data.attempt_id, phase };
+    }
+    return { kind: 'unavailable' };
+  } catch {
+    return { kind: 'unavailable' };
+  }
+}
+
+function deletionRecoveryResponse(
+  corsHeaders: Record<string, string>,
+  dataRemoved = false,
+) {
+  return jsonResponse(
+    {
+      error: 'Account deletion could not be completed safely. Please try again.',
+      dataRemoved,
+      deletionCancelled: false,
+      recoveryRequired: true,
+      warnings: [],
+    },
+    500,
+    corsHeaders,
+  );
 }
 
 export type HandlerDeps = {
@@ -277,6 +360,7 @@ export async function handleDeleteAccountRequest(
       app_metadata: {
         ...(user.app_metadata ?? {}),
         [ACCOUNT_DELETION_PENDING_FIELD]: true,
+        [ACCOUNT_DELETION_ATTEMPT_FIELD]: attemptId,
       },
     });
     if (flagError) throw flagError;
@@ -338,6 +422,33 @@ export async function handleDeleteAccountRequest(
     currentPhase = beginPhase;
     destructiveDatabasePreparationMayHaveCommitted = beginPhase !== 'media_cleanup';
 
+    // Auth and Postgres cannot share a transaction. Reassert the Auth recovery
+    // flag after the DB attempt exists, then inspect the exact serialized fence.
+    // This second half closes a cancellation race: if another invocation starts
+    // after an older one clears Auth metadata, its post-begin write restores the
+    // pending authority before either invocation reaches E2EE.
+    if (!await writePendingDeletionMetadata(admin, token, userId, attemptId)) {
+      console.error('[delete-account] Could not reassert pending deletion after fenced begin');
+      return deletionRecoveryResponse(
+        cors.headers,
+        destructiveDatabasePreparationMayHaveCommitted,
+      );
+    }
+    const begunFence = await inspectDeletionFence(admin, userId);
+    if (begunFence.kind !== 'active' || begunFence.attemptId !== attemptId) {
+      // If a newer attempt already owns the fence, leave its attempt token in
+      // Auth metadata. If inspection itself was unavailable, the existing true
+      // pending flag remains the conservative recovery authority.
+      if (begunFence.kind === 'active') {
+        await writePendingDeletionMetadata(admin, token, userId, begunFence.attemptId);
+      }
+      console.error('[delete-account] Fenced begin could not be reconciled before E2EE');
+      return deletionRecoveryResponse(
+        cors.headers,
+        destructiveDatabasePreparationMayHaveCommitted,
+      );
+    }
+
     // E2EE key material comes before every irreversible cleanup, including
     // Storage. Its structured orphan refusal is the only safe cancellation
     // point: no media or relational data has been removed yet.
@@ -370,49 +481,91 @@ export async function handleDeleteAccountRequest(
       && e2eePreparation.phase === 'media_cleanup'
     ) {
       destructiveDatabasePreparationMayHaveCommitted = false;
-      const { data: cancelled, error: cancelError } = await admin.rpc(
-        'cancel_account_deletion_v2',
-        { p_user_id: userId, p_attempt_id: attemptId },
-      );
+      let cancelled: unknown = null;
+      let cancelError: unknown = null;
+      try {
+        const cancelResult = await admin.rpc(
+          'cancel_account_deletion_v2',
+          { p_user_id: userId, p_attempt_id: attemptId },
+        );
+        cancelled = cancelResult.data;
+        cancelError = cancelResult.error;
+      } catch (cancelFailure) {
+        const kind = safeDeleteErrorKind(cancelFailure);
+        console.error('[delete-account] Exact orphan refusal cancellation did not settle', { kind });
+        return jsonResponse(
+          {
+            error: 'Account deletion could not be cancelled completely. Please try again.',
+            dataRemoved: false,
+            deletionCancelled: false,
+            recoveryRequired: true,
+            warnings: [],
+          },
+          500,
+          cors.headers,
+        );
+      }
       if (cancelError || cancelled !== true) {
         const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
         console.error('[delete-account] Exact orphan refusal could not clear its fence', { kind });
-      } else {
-        deletionMarkerStarted = false;
-        // The database fence is gone and no irreversible phase ran. Restore the
-        // Auth metadata to its pre-request shape so the next login cannot be
-        // trapped behind a deletion that was explicitly cancelled. The Admin
-        // API replaces app_metadata wholesale, so preserve every unrelated key.
-        const restoredAppMetadata = { ...(user.app_metadata ?? {}) };
-        delete restoredAppMetadata[ACCOUNT_DELETION_PENDING_FIELD];
-        const { error: clearFlagError } = await admin.auth.admin.updateUserById(userId, {
+        return deletionRecoveryResponse(cors.headers);
+      }
+
+      deletionMarkerStarted = false;
+      // The database fence is gone and no irreversible phase ran. Read Auth
+      // metadata again: using the request-start snapshot here can overwrite a
+      // newer invocation's pending flag and unrelated server-owned keys.
+      const currentAppMetadata = await readCurrentAppMetadata(admin, token, userId);
+      if (
+        !currentAppMetadata
+        || currentAppMetadata[ACCOUNT_DELETION_PENDING_FIELD] !== true
+        || currentAppMetadata[ACCOUNT_DELETION_ATTEMPT_FIELD] !== attemptId
+      ) {
+        console.error('[delete-account] Cancelled attempt no longer owns Auth metadata');
+        return deletionRecoveryResponse(cors.headers);
+      }
+
+      const restoredAppMetadata = { ...currentAppMetadata };
+      delete restoredAppMetadata[ACCOUNT_DELETION_PENDING_FIELD];
+      delete restoredAppMetadata[ACCOUNT_DELETION_ATTEMPT_FIELD];
+      let clearFlagError: unknown = null;
+      try {
+        const clearResult = await admin.auth.admin.updateUserById(userId, {
           app_metadata: restoredAppMetadata,
         });
-        if (!clearFlagError) {
-          return jsonResponse(
-            {
-              error: 'Account deletion was refused to preserve shared encrypted history.',
-              dataRemoved: false,
-              deletionCancelled: true,
-              recoveryRequired: false,
-              warnings: [],
-            },
-            500,
-            cors.headers,
-          );
-        }
+        clearFlagError = clearResult.error;
+      } catch (clearFailure) {
+        clearFlagError = clearFailure;
+      }
+      if (clearFlagError) {
         const kind = safeDeleteErrorKind(clearFlagError);
         console.error(
           '[delete-account] Exact orphan refusal was cancelled but its Auth flag could not be cleared',
           { kind },
         );
+        return deletionRecoveryResponse(cors.headers);
       }
+
+      // Reconcile after the cross-service clear. A new DB attempt means the
+      // just-cleared Auth flag must be restored; an unavailable inspection is
+      // also fail-closed. If a new attempt begins only after this `none` result,
+      // that invocation's mandatory post-begin reassertion restores the flag.
+      const fenceAfterClear = await inspectDeletionFence(admin, userId);
+      if (fenceAfterClear.kind !== 'none') {
+        const pendingAttemptId = fenceAfterClear.kind === 'active'
+          ? fenceAfterClear.attemptId
+          : attemptId;
+        await writePendingDeletionMetadata(admin, token, userId, pendingAttemptId);
+        console.error('[delete-account] A pending fence remained after Auth cancellation cleanup');
+        return deletionRecoveryResponse(cors.headers);
+      }
+
       return jsonResponse(
         {
-          error: 'Account deletion could not be cancelled completely. Please try again.',
+          error: 'Account deletion was refused to preserve shared encrypted history.',
           dataRemoved: false,
-          deletionCancelled: false,
-          recoveryRequired: true,
+          deletionCancelled: true,
+          recoveryRequired: false,
           warnings: [],
         },
         500,

@@ -424,17 +424,17 @@ describe('interactive companion garden characters', () => {
     expect(position.style.willChange).toBe('');
   });
 
-  it('renders the two visually distinct bag characters from the exact historical WebP', () => {
+  it('renders lossless crops of the two visually distinct historical bag characters', () => {
     render(<ControlledGarden />);
     const first = screen.getByTestId('garden-exact-character-peach');
     const second = screen.getByTestId('garden-exact-character-sage');
 
     expect(first).toHaveAttribute('viewBox', '0 0 175 185');
     expect(second).toHaveAttribute('viewBox', '0 0 175 185');
-    expect(first.querySelector('image')).toHaveAttribute('x', '-440');
-    expect(second.querySelector('image')).toHaveAttribute('x', '-285');
-    expect(first.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
-    expect(second.querySelector('image')?.getAttribute('href')).toContain('paper-pair-v1.webp');
+    expect(first.querySelector('image')).toHaveAttribute('x', '0');
+    expect(second.querySelector('image')).toHaveAttribute('x', '0');
+    expect(first.querySelector('image')?.getAttribute('href')).toContain('paper-companion-peach-v1.webp');
+    expect(second.querySelector('image')?.getAttribute('href')).toContain('paper-companion-sage-v1.webp');
   });
 
   it('renders every motion as source-pixel layers instead of line limbs or floating glyphs', () => {
@@ -540,7 +540,7 @@ describe('interactive companion garden characters', () => {
     expect(screen.getByTestId('garden-exact-character-peach')).toHaveAttribute('viewBox', '0 0 175 185');
     expect(screen.getByTestId('garden-exact-character-sage')).toHaveAttribute('viewBox', '0 0 175 185');
     expect(screen.getByTestId('garden-exact-character-peach').querySelector('image'))
-      .toHaveAttribute('href', expect.stringContaining('paper-pair-v1.webp'));
+      .toHaveAttribute('href', expect.stringContaining('paper-companion-peach-v1.webp'));
     expect(screen.getByTestId(`garden-accessory-peach-${accessory}`)).toBeVisible();
     expect(screen.queryByTestId(`garden-accessory-sage-${accessory}`)).not.toBeInTheDocument();
   });
@@ -551,7 +551,10 @@ describe('interactive companion garden characters', () => {
       const accessories: GardenAccessoryState = { version: 1, peach: accessory, sage: 'none' };
       render(<ControlledGarden initial={accessories} />);
 
-      expect(screen.getByTestId(`garden-accessory-peach-${accessory}`)).toBeVisible();
+      const accessoryArt = screen.getByTestId(`garden-accessory-peach-${accessory}`);
+      expect(accessoryArt).toBeVisible();
+      expect(accessoryArt.querySelector('image')?.getAttribute('href'))
+        .toContain(`paper-accessory-${accessory}-v1.webp`);
       expect(screen.queryByTestId(`garden-accessory-sage-${accessory}`)).not.toBeInTheDocument();
     },
   );

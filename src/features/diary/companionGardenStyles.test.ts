@@ -61,7 +61,6 @@ describe('companion garden motion CSS', () => {
     expect(reduced).toContain('animation: none');
     expect(reduced).toContain('transition: none');
     expect(reduced).not.toMatch(/\.garden-companion-position\s*\{[^}]*transition:\s*none/s);
-    expect(reduced).toContain('.accessory-roulette-spinning');
     expect(reduced).toContain('.garden-pixel-limb');
     expect(reduced).toMatch(/\.garden-motion-shy \.garden-companion-body\s*\{[^}]*transform:/s);
     expect(reduced).toMatch(/\.garden-motion-shy \.garden-pixel-limb-arm-left\s*\{[^}]*transform:/s);
@@ -80,11 +79,8 @@ describe('companion garden motion CSS', () => {
     expect(css).not.toContain('.garden-care-score');
   });
 
-  it('defines an accessory-roulette-spin keyframe and spinning class', () => {
-    expect(css).toContain('@keyframes accessory-roulette-spin');
-    expect(css).toContain('.accessory-roulette-spinning');
-    expect(css).toMatch(
-      /\.accessory-roulette-spinning\s*\{[^}]*animation:\s*accessory-roulette-spin\s+var\(--accessory-roulette-duration,\s*1200ms\)/s,
-    );
+  it('does not keep the superseded random roulette animation', () => {
+    expect(css).not.toContain('@keyframes accessory-roulette-spin');
+    expect(css).not.toContain('.accessory-roulette-spinning');
   });
 });

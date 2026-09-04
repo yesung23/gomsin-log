@@ -102,7 +102,7 @@ describe('companion garden route authority', () => {
 
     const treeArt = screen.getByTestId('garden-tree-art-3');
     expect(treeArt).toHaveAttribute('alt', '');
-    expect(treeArt.getAttribute('src')).toContain('garden-tree-stage-3-v1.webp');
+    expect(treeArt.getAttribute('src')).toContain('garden-tree-stage-3-display-v1.webp');
     expect(tree).toHaveStyle({ height: 'min(76vw, 237px)' });
   });
 
@@ -113,8 +113,12 @@ describe('companion garden route authority', () => {
     expect(screen.getByRole('dialog', { name: '살구 친구와 함께 놀기' })).toBeInTheDocument();
     expect(screen.getByTestId('garden-selector-portrait-peach')).toBeInTheDocument();
     expect(screen.getByTestId('garden-selector-portrait-sage')).toBeInTheDocument();
-    expect(screen.getByTestId('garden-selector-portrait-peach')).toHaveAttribute('viewBox', '440 675 175 185');
-    expect(screen.getByTestId('garden-selector-portrait-sage')).toHaveAttribute('viewBox', '285 675 175 185');
+    expect(screen.getByTestId('garden-selector-portrait-peach')).toHaveAttribute('viewBox', '0 0 175 185');
+    expect(screen.getByTestId('garden-selector-portrait-sage')).toHaveAttribute('viewBox', '0 0 175 185');
+    expect(screen.getByTestId('garden-selector-portrait-peach').querySelector('image')?.getAttribute('href'))
+      .toContain('paper-companion-peach-v1.webp');
+    expect(screen.getByTestId('garden-selector-portrait-sage').querySelector('image')?.getAttribute('href'))
+      .toContain('paper-companion-sage-v1.webp');
     expect(screen.getByRole('button', { name: '초록 친구' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '첫째 친구' })).not.toBeInTheDocument();
   });

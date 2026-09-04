@@ -23,14 +23,15 @@ describe('GardenAccessoryArt source crop rendering', () => {
     expect(SOURCE_ACCESSORY_CROPS.plane.viewBox).toBe('1100 530 108 127');
   });
 
-  it('renders SVG with the paperPairAsset and auto/smooth image-rendering', () => {
+  it('renders the exact lossless accessory crop without loading the full source sheet', () => {
     render(<GardenAccessoryArt accessory="boots" testId="test-boots" />);
     const svg = screen.getByTestId('test-boots');
-    expect(svg).toHaveAttribute('viewBox', '330 506 96 150');
+    expect(svg).toHaveAttribute('viewBox', '0 0 96 150');
     const img = svg.querySelector('image');
     expect(img).not.toBeNull();
-    expect(img?.getAttribute('width')).toBe('1254');
-    expect(img?.getAttribute('height')).toBe('1254');
+    expect(img?.getAttribute('href')).toContain('paper-accessory-boots-v1.webp');
+    expect(img?.getAttribute('width')).toBe('96');
+    expect(img?.getAttribute('height')).toBe('150');
     expect(img?.style.imageRendering).not.toBe('pixelated');
   });
 });

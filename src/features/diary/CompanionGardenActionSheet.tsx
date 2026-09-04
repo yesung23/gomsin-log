@@ -13,7 +13,6 @@ import {
 import { useDialogFocus } from '@/lib/useDialogFocus';
 import { useSheetDrag } from '@/lib/useSheetDrag';
 import { cn } from '@/lib/utils';
-import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
 import {
   GARDEN_COMPANION_LABELS,
   GARDEN_ACCESSORY_OPTIONS,
@@ -24,7 +23,8 @@ import {
 import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import { GardenAccessoryArt } from './GardenAccessoryArt';
 import { isSourceAccessory } from './gardenAccessoryCrops';
-import { gardenCharacterSourceViewBox } from './gardenCharacterCrops';
+import { GARDEN_CHARACTER_SOURCE_CROPS } from './gardenCharacterCrops';
+import { GARDEN_CHARACTER_DISPLAY_ASSETS } from './gardenDisplayAssets';
 
 export type GardenMoveDirection = 'up' | 'down' | 'left' | 'right';
 export type GardenCareAction = 'pet' | 'wave' | 'play';
@@ -175,11 +175,16 @@ export function CompanionGardenActionSheet({
             >
               <svg
                 data-testid={`garden-selector-portrait-${id}`}
-                viewBox={gardenCharacterSourceViewBox(id)}
+                viewBox={`0 0 ${GARDEN_CHARACTER_SOURCE_CROPS[id].width} ${GARDEN_CHARACTER_SOURCE_CROPS[id].height}`}
                 className="h-9 w-8 shrink-0"
                 aria-hidden="true"
               >
-                <image href={paperPairAsset} width="1254" height="1254" pointerEvents="none" />
+                <image
+                  href={GARDEN_CHARACTER_DISPLAY_ASSETS[id]}
+                  width={GARDEN_CHARACTER_SOURCE_CROPS[id].width}
+                  height={GARDEN_CHARACTER_SOURCE_CROPS[id].height}
+                  pointerEvents="none"
+                />
               </svg>
               {COMPANION_LABELS[id]} 친구
             </button>

@@ -11,7 +11,6 @@ import {
 import { Palette, Sprout } from 'lucide-react';
 import { AppBar } from '@/components/ui/AppBar';
 import { cn } from '@/lib/utils';
-import paperPairAsset from '@/assets/characters/paper-pair-v1.webp';
 import {
   DEFAULT_GARDEN_ACCESSORIES,
   GARDEN_COMPANION_LABELS,
@@ -22,6 +21,10 @@ import {
 import type { CollectibleGardenAccessory } from '@/lib/companionShopLocalState';
 import { isSourceAccessory, SOURCE_ACCESSORY_CROPS } from './gardenAccessoryCrops';
 import { GARDEN_CHARACTER_SOURCE_CROPS } from './gardenCharacterCrops';
+import {
+  GARDEN_ACCESSORY_DISPLAY_ASSETS,
+  GARDEN_CHARACTER_DISPLAY_ASSETS,
+} from './gardenDisplayAssets';
 import type { CompanionGardenState } from './companionGarden';
 import {
   CompanionGardenActionSheet,
@@ -223,10 +226,11 @@ function GardenAccessoryGlyph({
   if (isSourceAccessory(accessory)) {
     const crop = SOURCE_ACCESSORY_CROPS[accessory];
     const placement = SOURCE_ACCESSORY_PLACEMENTS[accessory];
+    const displayAsset = GARDEN_ACCESSORY_DISPLAY_ASSETS[accessory];
     return (
       <svg
         data-testid={testId}
-        viewBox={crop.viewBox}
+        viewBox={`0 0 ${crop.width} ${crop.height}`}
         x={placement.x}
         y={placement.y}
         width={placement.width}
@@ -234,9 +238,9 @@ function GardenAccessoryGlyph({
         style={{ overflow: 'visible' }}
       >
         <image
-          href={paperPairAsset}
-          width="1254"
-          height="1254"
+          href={displayAsset}
+          width={crop.width}
+          height={crop.height}
           pointerEvents="none"
           style={{ imageRendering: 'auto' }}
         />
@@ -301,6 +305,7 @@ function CompanionGlyph({
   careReaction: GardenCareAction | null;
 }) {
   const crop = GARDEN_CHARACTER_SOURCE_CROPS[companion];
+  const displayAsset = GARDEN_CHARACTER_DISPLAY_ASSETS[companion];
   const clipPrefix = `garden-pixel-${companion}`;
   const clips = {
     armLeft: `${clipPrefix}-arm-left`,
@@ -312,11 +317,11 @@ function CompanionGlyph({
     <image
       data-testid={testId}
       data-source-pixel="true"
-      href={paperPairAsset}
-      x={-crop.x}
-      y={-crop.y}
-      width="1254"
-      height="1254"
+      href={displayAsset}
+      x="0"
+      y="0"
+      width={crop.width}
+      height={crop.height}
       pointerEvents="none"
     />
   );

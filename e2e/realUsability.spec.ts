@@ -194,7 +194,7 @@ for (const width of [320, 375]) {
 }
 
 for (const width of [320, 393]) {
-  test(`finite free Shop reveal stays usable and persists at ${width}px`, async ({ browser }) => {
+  test(`finite free Shop direct choice stays usable and persists at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 852 } });
     const { unrouted } = await installMockBackend(context, CREATOR);
     const page = await context.newPage();
@@ -203,22 +203,21 @@ for (const width of [320, 393]) {
 
     await bootedInto(page, '/shop');
     await expect(page.getByRole('heading', { level: 2, name: '액세서리 컬렉션' })).toBeVisible();
-    await expect(page.getByText(/오늘|마감|자정|기회/)).toHaveCount(0);
+    await expect(page.getByText(/뽑기|회전|랜덤|오늘|마감|자정|기회/)).toHaveCount(0);
 
-    const roulette = page.getByTestId('accessory-draw-roulette');
-    const drawButton = page.getByRole('button', { name: '회전 뽑기로 장식 받기' });
-    const drawBox = await drawButton.boundingBox();
-    expect(drawBox?.height ?? 0, 'the reveal action keeps a 44px touch target').toBeGreaterThanOrEqual(44);
-    expect((await roulette.boundingBox())?.width ?? width + 1).toBeLessThanOrEqual(width - 32);
+    await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
+    const accessoryGrid = page.locator('[aria-label="액세서리 목록"]');
+    const letterButton = page.getByRole('button', { name: '하트 편지 무료로 받기' });
+    const choiceBox = await letterButton.boundingBox();
+    expect(choiceBox?.height ?? 0, 'each direct choice keeps a 44px touch target').toBeGreaterThanOrEqual(44);
+    expect((await accessoryGrid.boundingBox())?.width ?? width + 1).toBeLessThanOrEqual(width - 32);
 
-    await drawButton.click();
-    await expect(roulette).toHaveAttribute('aria-busy', 'true');
-    await expect(page.getByTestId('accessory-roulette-wheel')).toHaveClass(/accessory-roulette-spinning/);
+    await letterButton.click();
     await expect(
       page.locator('section[aria-labelledby="accessory-collection-title"]').getByRole('status'),
-    ).toContainText('무료로 받았어요', { timeout: 4_000 });
-    await expect(page.getByTestId('starter-reveal-result')).toBeVisible();
-    await expect(page.locator('[aria-label="액세서리 목록"]').getByText('보유 중', { exact: true })).toHaveCount(1);
+    ).toContainText('하트 편지를 무료로 받았어요.');
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '검정 부츠 무료로 받기' })).toBeEnabled();
 
     await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
     await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
@@ -227,8 +226,8 @@ for (const width of [320, 393]) {
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
     await page.reload();
-    await expect(page.locator('[aria-label="액세서리 목록"]').getByText('보유 중', { exact: true })).toHaveCount(1);
-    await expect(page.getByText('남은 무료 장식: 4개', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '검정 부츠 무료로 받기' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 

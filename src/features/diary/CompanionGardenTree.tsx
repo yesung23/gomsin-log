@@ -1,7 +1,7 @@
-import treeStage1 from '@/assets/garden/garden-tree-stage-1-v1.webp';
-import treeStage2 from '@/assets/garden/garden-tree-stage-2-v1.webp';
-import treeStage3 from '@/assets/garden/garden-tree-stage-3-v1.webp';
-import treeStage4 from '@/assets/garden/garden-tree-stage-4-v1.webp';
+import treeStage1 from '@/assets/garden/garden-tree-stage-1-display-v1.webp';
+import treeStage2 from '@/assets/garden/garden-tree-stage-2-display-v1.webp';
+import treeStage3 from '@/assets/garden/garden-tree-stage-3-display-v1.webp';
+import treeStage4 from '@/assets/garden/garden-tree-stage-4-display-v1.webp';
 import { getCompanionGardenTreeHeightPx, type CompanionGardenStageLevel } from './companionGarden';
 
 const GARDEN_TREE_ASSETS: Record<CompanionGardenStageLevel, string> = {
@@ -29,7 +29,7 @@ export function CompanionGardenTree({
       className="garden-tree pointer-events-none absolute bottom-[21%] left-0 z-[1] flex w-full justify-center landscape:bottom-[2%]"
       style={{ height: `min(76vw, ${height}px)` }}
       data-testid={`garden-tree-stage-${level}`}
-      data-tree-asset-version="generated-v1"
+      data-tree-asset-version="display-v1"
       data-tree-height={height}
       aria-hidden="true"
     >

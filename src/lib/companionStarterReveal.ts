@@ -2,9 +2,6 @@ import type { CollectibleGardenAccessory } from './companionShopLocalState';
 
 export type StarterAccessoryId = 'boots' | 'sneakers' | 'letter' | 'dogtag' | 'plane';
 
-/** Shared by the React completion fallback and the CSS custom property. */
-export const STARTER_REVEAL_DURATION_MS = 1200;
-
 export interface StarterAccessoryOption {
   id: StarterAccessoryId;
   label: string;
@@ -27,46 +24,4 @@ export function getAvailableStarterPool(
 ): StarterAccessoryId[] {
   const ownedSet = new Set(ownedAccessories);
   return STARTER_ACCESSORY_IDS.filter((id) => !ownedSet.has(id));
-}
-
-export type StarterDrawResult =
-  | {
-      status: 'drawn';
-      item: StarterAccessoryOption;
-      remainingCount: number;
-    }
-  | {
-      status: 'complete';
-      remainingCount: 0;
-    };
-
-export function drawStarterAccessory(
-  ownedAccessories: readonly (CollectibleGardenAccessory | string)[],
-  random: () => number = Math.random,
-): StarterDrawResult {
-  const available = getAvailableStarterPool(ownedAccessories);
-  if (available.length === 0) {
-    return {
-      status: 'complete',
-      remainingCount: 0,
-    };
-  }
-
-  let raw = random();
-  if (typeof raw !== 'number' || Number.isNaN(raw) || !Number.isFinite(raw) || raw < 0) {
-    raw = 0;
-  }
-  if (raw >= 1) {
-    raw = 0.9999999999999999;
-  }
-
-  const index = Math.min(available.length - 1, Math.max(0, Math.floor(raw * available.length)));
-  const chosenId = available[index];
-  const item = STARTER_ACCESSORY_OPTIONS.find((opt) => opt.id === chosenId)!;
-
-  return {
-    status: 'drawn',
-    item,
-    remainingCount: available.length - 1,
-  };
 }

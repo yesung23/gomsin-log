@@ -1,30 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">곰신로그 군화와 벚꽃 뿔단추 하트</title>
-  <desc id="desc">깊은 올리브색 군화 하트와 화사한 벚꽃색 하트를 세 개의 더플 코트형 뿔단추가 이어 주는 심볼</desc>
+  <title id="title">곰신로그 뿔단추 하트</title>
+  <desc id="desc">밝은 올리브색과 벚꽃색 두 면의 온전한 하트를 세 개의 더플 코트형 뿔단추가 이어 주는 심볼</desc>
   <rect data-brand-background="true" width="1024" height="1024" rx="224" fill="#FCFBF7"/>
 
   <g data-brand-mark="true">
-    <path data-brand-half="military" d="M512 300C452 220 350 205 274 250C185 302 155 405 188 507C227 626 336 728 512 848V300Z" fill="#596B50"/>
-    <path data-brand-half="rose" d="M512 300C572 220 674 205 750 250C839 302 869 405 836 507C797 626 688 728 512 848V300Z" fill="#ED6F91"/>
-
-    <!-- Quiet white silhouettes make the two halves read as military life and flower-shoe waiting. -->
-    <g data-brand-emblem="military-boot" fill="#FFFDF7" transform="translate(25 20) scale(.9)">
-      <path d="M273 548H346L341 615C340 626 347 636 358 641L399 660C414 667 421 679 418 691C415 703 405 710 390 710H270C258 710 249 701 249 689V660C249 650 256 641 266 638L273 636V548Z"/>
-      <path d="M254 687H418V705C418 714 411 721 402 721H270C261 721 254 714 254 705V687Z"/>
-      <g fill="none" stroke="#596B50" stroke-width="14" stroke-linecap="round">
-        <path d="M294 578H333"/>
-        <path d="M292 602H331"/>
-      </g>
-    </g>
-
-    <g data-brand-emblem="cherry-blossom" fill="#FFFDF7" transform="translate(718 625) scale(1.2) translate(-738 -625)">
-      <ellipse cx="738" cy="579" rx="27" ry="42"/>
-      <ellipse cx="781" cy="611" rx="27" ry="42" transform="rotate(72 781 611)"/>
-      <ellipse cx="765" cy="662" rx="27" ry="42" transform="rotate(144 765 662)"/>
-      <ellipse cx="711" cy="662" rx="27" ry="42" transform="rotate(-144 711 662)"/>
-      <ellipse cx="695" cy="611" rx="27" ry="42" transform="rotate(-72 695 611)"/>
-      <path d="M738 611L753 622L747 640H729L723 622Z"/>
-    </g>
+    <path data-brand-half="military" d="M512 300C452 220 350 205 274 250C185 302 155 405 188 507C227 626 336 728 512 848V300Z" fill="#7B8F69"/>
+    <path data-brand-half="rose" d="M512 300C572 220 674 205 750 250C839 302 869 405 836 507C797 626 688 728 512 848V300Z" fill="#EE7898"/>
 
     <!-- The cord stays quiet; the asymmetric horn toggle is the recognizable closure. -->
     <g fill="none" stroke="#FFF8EA" stroke-width="18" stroke-linecap="round">

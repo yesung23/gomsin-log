@@ -568,6 +568,7 @@ DECLARE
   v_original_owner UUID;
   v_notification iap_private.apple_notifications%ROWTYPE;
   v_verified_product_type TEXT;
+  v_effective_event_kind TEXT;
 BEGIN
   PERFORM iap_private.require_service_role();
   IF p_notification_uuid IS NOT NULL
@@ -602,6 +603,7 @@ BEGIN
   v_purchase_at := to_timestamp(p_purchase_date_ms / 1000.0);
   v_expires_at := CASE WHEN p_expires_date_ms IS NULL THEN NULL ELSE to_timestamp(p_expires_date_ms / 1000.0) END;
   v_revocation_at := CASE WHEN p_revocation_date_ms IS NULL THEN NULL ELSE to_timestamp(p_revocation_date_ms / 1000.0) END;
+  v_effective_event_kind := p_event_kind;
 
   SELECT c.* INTO v_catalog
   FROM iap_private.apple_product_catalog AS c
@@ -668,11 +670,22 @@ BEGIN
        OR v_existing.app_account_token_hash IS DISTINCT FROM p_app_account_token_hash THEN
       RAISE EXCEPTION 'Apple transaction identity conflict';
     END IF;
+    -- Transaction-history and client-sync JWS payloads carry current
+    -- revocation state, not the notification type that produced it. If a
+    -- strictly newer verified payload clears a previously recorded refund,
+    -- treat it as the missed REFUND_REVERSED event so entitlements and only
+    -- the credits actually reclaimed by that refund are restored.
+    IF p_event_kind = 'purchase'
+       AND p_revocation_date_ms IS NULL
+       AND v_existing.last_event_kind IN ('refund', 'refund_reversed')
+       AND v_signed_at >= v_existing.signed_at THEN
+      v_effective_event_kind := 'refund_reversed';
+    END IF;
     IF v_signed_at < v_existing.signed_at THEN
       v_stale := TRUE;
     ELSIF v_signed_at = v_existing.signed_at THEN
       IF v_existing.payload_hash IS DISTINCT FROM p_payload_hash
-         OR v_existing.last_event_kind IS DISTINCT FROM p_event_kind THEN
+         OR v_existing.last_event_kind IS DISTINCT FROM v_effective_event_kind THEN
         RAISE EXCEPTION 'Apple transaction signedDate payload conflict';
       END IF;
       v_duplicate := TRUE;
@@ -681,10 +694,10 @@ BEGIN
 
   IF NOT v_stale AND NOT v_duplicate THEN
     IF NOT FOUND THEN
-      IF p_event_kind = 'refund_reversed' THEN
+      IF v_effective_event_kind = 'refund_reversed' THEN
         RAISE EXCEPTION 'Cannot reverse an unknown consumable transaction';
       END IF;
-      v_credit := CASE WHEN p_event_kind = 'purchase' THEN v_catalog.credit_amount ELSE 0 END;
+      v_credit := CASE WHEN v_effective_event_kind = 'purchase' THEN v_catalog.credit_amount ELSE 0 END;
       INSERT INTO iap_private.apple_transactions (
         environment, transaction_id, original_transaction_id, billing_account_id,
         product_id, product_type, bundle_id, app_account_token_hash,
@@ -694,11 +707,11 @@ BEGIN
         p_environment, p_transaction_id, p_original_transaction_id, v_binding.billing_account_id,
         p_product_id, v_catalog.product_type, p_bundle_id, p_app_account_token_hash,
         v_purchase_at, v_expires_at, v_revocation_at,
-        CASE WHEN p_event_kind IN ('purchase', 'refund_reversed') THEN 'active' ELSE CASE WHEN p_event_kind = 'refund' THEN 'refunded' ELSE 'revoked' END END,
-        p_event_kind, v_credit, v_signed_at, p_payload_hash
+        CASE WHEN v_effective_event_kind IN ('purchase', 'refund_reversed') THEN 'active' ELSE CASE WHEN v_effective_event_kind = 'refund' THEN 'refunded' ELSE 'revoked' END END,
+        v_effective_event_kind, v_credit, v_signed_at, p_payload_hash
       );
 
-      IF p_event_kind = 'purchase' AND v_catalog.product_type = 'consumable' THEN
+      IF v_effective_event_kind = 'purchase' AND v_catalog.product_type = 'consumable' THEN
         INSERT INTO iap_private.export_credit_ledger (
           billing_account_id, environment, transaction_id, entry_kind, amount
         ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, 'purchase_grant', v_credit)
@@ -708,9 +721,9 @@ BEGIN
       v_credit := v_existing.credit_granted;
       UPDATE iap_private.apple_transactions
       SET expires_at = COALESCE(v_expires_at, expires_at),
-          revocation_at = CASE WHEN p_event_kind IN ('refund', 'revoke') THEN COALESCE(v_revocation_at, v_signed_at) ELSE NULL END,
-          status = CASE WHEN p_event_kind IN ('purchase', 'refund_reversed') THEN 'active' WHEN p_event_kind = 'refund' THEN 'refunded' ELSE 'revoked' END,
-          last_event_kind = p_event_kind,
+          revocation_at = CASE WHEN v_effective_event_kind IN ('refund', 'revoke') THEN COALESCE(v_revocation_at, v_signed_at) ELSE NULL END,
+          status = CASE WHEN v_effective_event_kind IN ('purchase', 'refund_reversed') THEN 'active' WHEN v_effective_event_kind = 'refund' THEN 'refunded' ELSE 'revoked' END,
+          last_event_kind = v_effective_event_kind,
           signed_at = v_signed_at,
           payload_hash = p_payload_hash,
           updated_at = now()
@@ -719,7 +732,7 @@ BEGIN
     END IF;
 
     IF v_catalog.product_type = 'consumable' AND v_credit > 0 THEN
-      IF p_event_kind IN ('refund', 'revoke') THEN
+      IF v_effective_event_kind IN ('refund', 'revoke') THEN
         v_reclaim := LEAST(
           v_credit,
           GREATEST(iap_private.credit_balance(v_binding.billing_account_id, p_environment), 0)
@@ -730,7 +743,7 @@ BEGIN
           ) VALUES (v_binding.billing_account_id, p_environment, p_transaction_id, 'refund_reclaim', -v_reclaim)
           ON CONFLICT DO NOTHING;
         END IF;
-      ELSIF p_event_kind = 'refund_reversed' THEN
+      ELSIF v_effective_event_kind = 'refund_reversed' THEN
         SELECT COALESCE(-l.amount, 0) INTO v_reclaim
         FROM iap_private.export_credit_ledger AS l
         WHERE l.environment = p_environment

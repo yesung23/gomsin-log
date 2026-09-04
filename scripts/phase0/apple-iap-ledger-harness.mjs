@@ -384,6 +384,23 @@ try {
   expectOk(callApply({ tx: '2002', product: 'export.3', hash: sha('purchase-2002'), purchase: 1000, signed: 1000, event: 'purchase' }), 'consumable purchase grant');
   expectOk(callApply({ tx: '2002', product: 'export.3', hash: sha('refund-2002'), purchase: 1000, signed: 2000, event: 'refund' }), 'consumable refund reclaim');
   expectOk(callApply({ tx: '2002', product: 'export.3', hash: sha('reverse-2002'), purchase: 1000, signed: 3000, event: 'refund_reversed' }), 'consumable refund reversed');
+  expectOk(callApply({ tx: '2004', product: 'export.3', hash: sha('purchase-2004'), purchase: 1000, signed: 1000, event: 'purchase' }), 'reconciliation reversal purchase grant');
+  const creditsBeforeMissedReversal = Number(actorScalar('authenticated', A, `SELECT export_credits::text FROM public.iap_get_state('Production') LIMIT 1`, 'credits before missed reversal'));
+  expectOk(callApply({ tx: '2004', product: 'export.3', hash: sha('refund-2004'), purchase: 1000, signed: 2000, revoke: 2000, event: 'refund' }), 'reconciliation reversal refund');
+  expectOk(callApply({ tx: '2004', product: 'export.3', hash: sha('reconciled-2004'), purchase: 1000, signed: 3000, event: 'purchase' }), 'newer non-revoked reconciliation transaction');
+  const implicitReversalReplay = jsonResult(expectOk(callApply({ tx: '2004', product: 'export.3', hash: sha('reconciled-2004'), purchase: 1000, signed: 3000, event: 'purchase' }), 'implicit reversal replay'), 'implicit reversal replay');
+  if (implicitReversalReplay.duplicate !== true) {
+    throw new Error('replaying the same non-revoked reconciliation payload was not idempotent');
+  }
+  if (actorScalar('authenticated', A, `SELECT export_credits::text FROM public.iap_get_state('Production') LIMIT 1`, 'credits after missed reversal recovery') !== String(creditsBeforeMissedReversal)) {
+    throw new Error('newer non-revoked reconciliation did not restore the credit reclaimed by the missed refund reversal');
+  }
+  if (scalar("SELECT last_event_kind FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '2004'", 'missed reversal normalized event') !== 'refund_reversed') {
+    throw new Error('newer non-revoked reconciliation was not normalized to refund_reversed');
+  }
+  if (scalar("SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE environment = 'Production' AND transaction_id = '2004' AND entry_kind = 'refund_reversed_grant'", 'missed reversal restoration evidence') !== '1') {
+    throw new Error('missed refund reversal did not retain exact restoration evidence');
+  }
   expectOk(callApply({ environment: 'Sandbox', tx: '2003', product: 'app.gomsinlog.book.export.credit.1', hash: sha('purchase-2003'), purchase: 1000, signed: 1000, event: 'purchase' }), 'sandbox consumable purchase grant');
   const consumed = jsonResult(actorScalar('authenticated', A, `SELECT row_to_json(x) FROM public.iap_export_credit_reserve('Sandbox', 1, '20000000-0000-4000-8000-000000000004'::uuid) AS x`, 'sandbox credit reserve'), 'sandbox credit reserve');
   expectOk(asActor('authenticated', A, `SELECT * FROM public.iap_export_credit_commit(${q(consumed.reservation_id)}::uuid)`), 'sandbox credit commit');
@@ -422,7 +439,7 @@ try {
 
   expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_list_reconciliation_targets()`), 'authenticated reconciliation target RPC');
   expectFail(asActor('service_role', null, `SELECT * FROM public.iap_list_reconciliation_targets()`, { setRoleClaim: false }), 'service_role reconciliation target without JWT role claim');
-  if (actorScalar('service_role', null, `SELECT count(*)::text FROM public.iap_list_reconciliation_targets()`, 'live reconciliation targets') !== '4') throw new Error('live reconciliation targets did not include the expected Apple chains');
+  if (actorScalar('service_role', null, `SELECT count(*)::text FROM public.iap_list_reconciliation_targets()`, 'live reconciliation targets') !== '5') throw new Error('live reconciliation targets did not include the expected Apple chains');
   if (actorScalar('service_role', null, `SELECT count(*)::text FROM public.iap_list_reconciliation_targets() WHERE environment = 'Xcode'`, 'Xcode reconciliation exclusion') !== '0') throw new Error('Xcode was exposed as an Apple Server API reconciliation target');
 
   const atomicRollbackId = '00000000-0000-4000-8000-000000000003';
@@ -477,7 +494,7 @@ try {
   if (scalar(`SELECT count(*)::text FROM iap_private.export_credit_ledger WHERE reservation_id = ${q(pendingReservation.reservation_id)}::uuid AND entry_kind = 'account_deletion'`, 'account deletion release evidence') !== '1') throw new Error('account deletion release was not recorded exactly once');
   if (scalar(`SELECT (user_id IS NULL)::text || '|' || (app_account_token IS NULL)::text || '|' || length(app_account_token_hash)::text FROM iap_private.apple_account_bindings WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'raw token/user tombstone') !== 'true|true|64') throw new Error('account deletion prep did not tombstone the user/raw token while preserving the hash');
   expectOk(admin(`DELETE FROM auth.users WHERE id = ${q(A)}::uuid`), 'auth delete after billing tombstone');
-  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'retained ledger after auth delete') !== '7') throw new Error('auth user deletion removed billing-account transaction evidence');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid`, 'retained ledger after auth delete') !== '8') throw new Error('auth user deletion removed billing-account transaction evidence');
   const deletedNotification = actorScalar('service_role', null, `SELECT row_to_json(x) FROM public.iap_process_verified_notification(
     '00000000-0000-4000-8000-000000000005', 'Production', 'REFUND', NULL, '2002', '2002', 7000, ${q(sha('deleted-notification'))},
     '2002', '2002', 'export.3', 'Consumable', 'app.gomsinlog', ${q(tokenHash(boundToken))}, 1000, 7000, NULL, 7000, 'refund', ${q(sha('deleted-refund'))}) AS x`, 'post-deletion notification');

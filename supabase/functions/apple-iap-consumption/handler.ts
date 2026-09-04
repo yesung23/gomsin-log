@@ -1,12 +1,27 @@
 import { timingSafeEqualSecret } from '../_shared/adminSecret.ts';
-import { json, readBoundedJson } from '../_shared/appleIapContract.ts';
+import { json } from '../_shared/appleIapContract.ts';
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export type AppleIapOperationalAlert = {
   alertId: string;
   source: 'consumption' | 'transaction_review';
   environment: 'Sandbox' | 'Production' | 'Xcode';
-  status: 'manual_review' | 'send_result_unknown' | 'terminal_failed' | 'expired';
-  deadlineBucket: 'overdue' | 'lt_1h' | 'lt_6h' | 'gte_6h' | 'not_applicable';
+  status:
+    | 'pending_evidence'
+    | 'queued'
+    | 'retryable_failed'
+    | 'manual_review'
+    | 'send_result_unknown'
+    | 'terminal_failed'
+    | 'expired';
+  deadlineBucket:
+    | 'overdue'
+    | 'lt_1h'
+    | 'lt_2h'
+    | 'lt_6h'
+    | 'gte_6h'
+    | 'not_applicable';
   attemptNo: number;
   errorCode: string;
 };
@@ -15,6 +30,8 @@ export type AppleIapReviewAcknowledgement = {
   reviewId: string;
   status: 'acknowledged';
   resolutionCode: 'NO_AUTOMATIC_ACTION' | 'APPLE_RECONCILIATION_REQUIRED';
+  operatorActorId: string;
+  operationId: string;
   duplicate: boolean;
 };
 
@@ -75,6 +92,8 @@ export type AppleIapConsumptionCompletion = {
 
 export type AppleIapConsumptionDeps = {
   schedulerSecret: string | null;
+  operatorSecret: string | null;
+  operatorActorId: string | null;
   now: () => number;
   claimNext: () => Promise<AppleIapConsumptionJob | null>;
   authorizeSend: (input: {
@@ -87,8 +106,54 @@ export type AppleIapConsumptionDeps = {
   acknowledgeManualReview: (input: {
     reviewId: string;
     resolutionCode: AppleIapReviewAcknowledgement['resolutionCode'];
+    operatorActorId: string;
+    operationId: string;
   }) => Promise<AppleIapReviewAcknowledgement>;
 };
+
+async function readActionBoundary(
+  request: Request,
+  maxBytes = 2_000,
+): Promise<
+  | { kind: 'drain' }
+  | { kind: 'operation'; value: Record<string, unknown> }
+  | { kind: 'invalid' }
+> {
+  const contentLength = request.headers.get('Content-Length');
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isSafeInteger(declaredLength) || declaredLength < 0 || declaredLength > maxBytes) {
+      return { kind: 'invalid' };
+    }
+  }
+  if (!request.body) return { kind: 'drain' };
+
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) {
+        await reader.cancel();
+        return { kind: 'invalid' };
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    if (text.trim().length === 0) return { kind: 'drain' };
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { kind: 'invalid' };
+    }
+    return { kind: 'operation', value: parsed as Record<string, unknown> };
+  } catch {
+    return { kind: 'invalid' };
+  }
+}
 
 function isOperationalAlert(value: unknown): value is AppleIapOperationalAlert {
   if (!value || typeof value !== 'object') return false;
@@ -100,12 +165,16 @@ function isOperationalAlert(value: unknown): value is AppleIapOperationalAlert {
     (alert.environment === 'Sandbox' ||
       alert.environment === 'Production' ||
       alert.environment === 'Xcode') &&
-    (alert.status === 'manual_review' ||
+    (alert.status === 'pending_evidence' ||
+      alert.status === 'queued' ||
+      alert.status === 'retryable_failed' ||
+      alert.status === 'manual_review' ||
       alert.status === 'send_result_unknown' ||
       alert.status === 'terminal_failed' ||
       alert.status === 'expired') &&
     (alert.deadlineBucket === 'overdue' ||
       alert.deadlineBucket === 'lt_1h' ||
+      alert.deadlineBucket === 'lt_2h' ||
       alert.deadlineBucket === 'lt_6h' ||
       alert.deadlineBucket === 'gte_6h' ||
       alert.deadlineBucket === 'not_applicable') &&
@@ -149,6 +218,8 @@ function buildRequest(
   job: AppleIapConsumptionJob,
   authorization: AppleIapSendAuthorization,
 ): AppleIapConsumptionSend['request'] {
+  // Apple gives Production requests 12 hours, but Sandbox refund testing only
+  // applies consumption information received within five minutes.
   const responseWindowMs = authorization.environment === 'Sandbox'
     ? 5 * 60 * 1000
     : 12 * 60 * 60 * 1000;
@@ -190,20 +261,29 @@ export async function handleAppleIapConsumption(
   deps: AppleIapConsumptionDeps,
 ): Promise<Response> {
   if (request.method !== 'POST') return json({ error: 'E_METHOD_NOT_ALLOWED' }, 405);
-  const provided = request.headers.get('x-iap-scheduler-secret');
   if (
-    !deps.schedulerSecret || !provided ||
-    !(await timingSafeEqualSecret(provided, deps.schedulerSecret))
+    deps.schedulerSecret && deps.operatorSecret &&
+    await timingSafeEqualSecret(deps.schedulerSecret, deps.operatorSecret)
   ) {
+    return json({ error: 'E_IAP_NOT_CONFIGURED' }, 503);
+  }
+  const boundary = await readActionBoundary(request);
+  if (boundary.kind === 'invalid') return json({ error: 'E_BAD_REQUEST' }, 400);
+
+  const schedulerProvided = request.headers.get('x-iap-scheduler-secret');
+  const operatorProvided = request.headers.get('x-iap-operator-secret');
+  if (schedulerProvided && operatorProvided) {
     return json({ error: 'E_UNAUTHENTICATED' }, 401);
   }
 
-  if (request.body) {
-    const operation = await readBoundedJson(request, 2_000);
-    if (!operation || typeof operation !== 'object') {
-      return json({ error: 'E_BAD_REQUEST' }, 400);
+  if (boundary.kind === 'operation') {
+    if (
+      !deps.operatorSecret || !operatorProvided || schedulerProvided ||
+      !(await timingSafeEqualSecret(operatorProvided, deps.operatorSecret))
+    ) {
+      return json({ error: 'E_UNAUTHENTICATED' }, 401);
     }
-    const operationRecord = operation as Record<string, unknown>;
+    const operationRecord = boundary.value;
     if (operationRecord.action === 'alerts') {
       try {
         const alerts = await deps.listOperationalAlerts();
@@ -232,22 +312,30 @@ export async function handleAppleIapConsumption(
     if (operationRecord.action === 'acknowledge-review') {
       if (
         typeof operationRecord.reviewId !== 'string' ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-          .test(operationRecord.reviewId) ||
+        !UUID.test(operationRecord.reviewId) ||
+        typeof operationRecord.operationId !== 'string' ||
+        !UUID.test(operationRecord.operationId) ||
         (operationRecord.resolutionCode !== 'NO_AUTOMATIC_ACTION' &&
           operationRecord.resolutionCode !== 'APPLE_RECONCILIATION_REQUIRED')
       ) {
         return json({ error: 'E_BAD_REQUEST' }, 400);
       }
+      if (!deps.operatorActorId || !UUID.test(deps.operatorActorId)) {
+        return json({ error: 'E_IAP_OPERATOR_NOT_CONFIGURED' }, 503);
+      }
       try {
         const result = await deps.acknowledgeManualReview({
           reviewId: operationRecord.reviewId,
           resolutionCode: operationRecord.resolutionCode,
+          operatorActorId: deps.operatorActorId,
+          operationId: operationRecord.operationId,
         });
         if (
           result.reviewId !== operationRecord.reviewId ||
           result.status !== 'acknowledged' ||
           result.resolutionCode !== operationRecord.resolutionCode ||
+          result.operatorActorId !== deps.operatorActorId ||
+          result.operationId !== operationRecord.operationId ||
           typeof result.duplicate !== 'boolean'
         ) {
           throw new Error('E_IAP_REVIEW_SHAPE_INVALID');
@@ -256,6 +344,8 @@ export async function handleAppleIapConsumption(
           reviewId: result.reviewId,
           status: result.status,
           resolutionCode: result.resolutionCode,
+          operatorActorId: result.operatorActorId,
+          operationId: result.operationId,
           duplicate: result.duplicate,
         }, 200);
       } catch {
@@ -263,6 +353,13 @@ export async function handleAppleIapConsumption(
       }
     }
     return json({ error: 'E_BAD_REQUEST' }, 400);
+  }
+
+  if (
+    !deps.schedulerSecret || !schedulerProvided || operatorProvided ||
+    !(await timingSafeEqualSecret(schedulerProvided, deps.schedulerSecret))
+  ) {
+    return json({ error: 'E_UNAUTHENTICATED' }, 401);
   }
 
   const counts = {

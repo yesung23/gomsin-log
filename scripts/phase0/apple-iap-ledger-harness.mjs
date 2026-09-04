@@ -38,6 +38,8 @@ const ATTEMPT_B = '30000000-0000-4000-8000-00000000000b';
 const ATTEMPT_C = '30000000-0000-4000-8000-00000000000c';
 const ATTEMPT_D = '30000000-0000-4000-8000-00000000000d';
 const ATTEMPT_F = '30000000-0000-4000-8000-00000000000f';
+const OPERATOR_ACTOR = '60000000-0000-4000-8000-000000000001';
+const REVIEW_OPERATION = '70000000-0000-4000-8000-000000000001';
 let boundToken = TOKEN_A;
 let checks = 0;
 
@@ -785,6 +787,12 @@ try {
   if (expandV1Privileges !== 'true|true') {
     throw new Error(`migration 079 retired V1 before Edge deploy/canary (${expandV1Privileges})`);
   }
+  if (scalar(`SELECT count(*)::text FROM pg_attribute AS attribute
+      WHERE attribute.attrelid = 'iap_private.apple_consumption_requests'::regclass
+        AND attribute.attname = 'consumption_request_reason'
+        AND NOT attribute.attisdropped`, 'consumption reason is not retained') !== '0') {
+    throw new Error('consumption request reason was retained without an approved policy');
+  }
   expectOk(admin(`
     INSERT INTO auth.users (id) VALUES (${q(E)}::uuid), (${q(F)}::uuid);
     INSERT INTO iap_private.apple_account_bindings
@@ -867,7 +875,8 @@ try {
       ${token === null ? 'NULL' : q(tokenHash(token))},
       ${purchase}::bigint, ${signed}::bigint, NULL, ${revoke}::bigint,
       ${q(event)}, ${q(sha(`tokenless-transaction-${notificationId}`))},
-      1::integer, ${q(revocationType)}, ${revocationPercentage}::integer
+      1::integer, ${revocationType === null ? 'NULL' : q(revocationType)},
+      ${revocationPercentage === null ? 'NULL' : `${revocationPercentage}::integer`}
     ) AS x`);
   const recordDelivery = ({
     tx,
@@ -926,6 +935,26 @@ try {
       ${sample ? 'TRUE' : 'FALSE'}
     ) AS x`,
   );
+
+  const deletedConsumptionId = '79000000-0000-4000-8000-000000000090';
+  const deletedConsumption = jsonResult(expectOk(processConsumption({
+    notificationId: deletedConsumptionId,
+    notificationHash: sha('deleted-account-consumption-request'),
+    token: TOKEN_D,
+    tx: '8190',
+    original: '8190',
+    product: 'paper.paid',
+    purchase: 9_000,
+    signed: 9_100,
+  }), 'deleted-account consumption request'), 'deleted-account consumption request');
+  if (deletedConsumption.consumption_status !== 'skipped_account_deleted') {
+    throw new Error('deleted-account consumption request was not retained as a terminal no-send decision');
+  }
+  if (actorScalar('service_role', null,
+    'SELECT count(*)::text FROM public.iap_claim_consumption_request()',
+    'deleted-account consumption remains unclaimable') !== '0') {
+    throw new Error('deleted-account consumption request became sendable');
+  }
 
   const legacyConsumable = jsonResult(expectOk(callApply({
     user: F,
@@ -1071,6 +1100,60 @@ try {
     throw new Error('tokenless exact revoke did not converge through server-owned identity');
   }
 
+  expectOk(callApplyV2({
+    user: F, token: TOKEN_F, tx: '8112', purchase: 11_200, signed: 11_200,
+  }),
+    'incomplete-revocation source purchase');
+  expectOk(processVerifiedNotification({
+    notificationId: '79000000-0000-4000-8000-000000000044',
+    notificationType: 'REFUND',
+    tx: '8112',
+    product: 'app.gomsinlog.book.export.credit.1',
+    purchase: 11_200,
+    signed: 12_200,
+    event: 'refund',
+    revocationType: null,
+    revocationPercentage: null,
+    token: TOKEN_F,
+  }), 'verified refund with incomplete revocation metadata');
+  expectOk(callApplyV2({
+    user: F, token: TOKEN_F, tx: '8113', purchase: 11_300,
+    signed: 12_300, revoke: 12_300, event: 'refund',
+    revocationType: 'REFUND_FULL', revocationPercentage: 100_000,
+  }), 'refund before purchase history arrives');
+  expectOk(callApplyV2({
+    user: F, token: TOKEN_F, tx: '8113', purchase: 11_300,
+    signed: 13_300, event: 'purchase',
+  }), 'late purchase after refund-first history');
+  expectOk(processVerifiedNotification({
+    notificationId: '79000000-0000-4000-8000-000000000045',
+    notificationType: 'REFUND',
+    tx: '8114',
+    purchase: 11_400,
+    signed: 12_400,
+    event: 'refund',
+    revocationType: 'REFUND_FULL',
+    token: '10000000-0000-4000-8000-000000000099',
+  }), 'verified refund with unknown token binding');
+  const nonAutomaticReviewFacts = scalar(`SELECT count(*)::text || '|' ||
+      count(DISTINCT reason_code)::text || '|' || count(event_id)::text
+    FROM iap_private.apple_transaction_review_facts
+    WHERE transaction_id IN ('8112', '8113', '8114')`,
+  'all non-automatic verified reversal paths create unique review facts');
+  if (nonAutomaticReviewFacts !== '4|4|3') {
+    throw new Error(`non-automatic verified reversal review facts were incomplete: ${nonAutomaticReviewFacts}`);
+  }
+  const nonAutomaticAlertFacts = actorScalar('service_role', null, `SELECT count(*)::text
+    FROM public.iap_list_operational_alerts()
+    WHERE source = 'transaction_review'
+      AND error_code IN (
+        'REVOCATION_METADATA_INCOMPLETE', 'REFUND_BEFORE_PURCHASE',
+        'EXACT_LOT_UNAVAILABLE', 'TOKEN_BINDING_UNKNOWN'
+      )`, 'all non-automatic verified reversal facts appear as alerts');
+  if (nonAutomaticAlertFacts !== '4') {
+    throw new Error('non-automatic verified reversal facts were absent from operational alerts');
+  }
+
   const unresolvedTokenless = jsonResult(expectOk(processVerifiedNotification({
     notificationId: '79000000-0000-4000-8000-000000000043',
     notificationType: 'REFUND',
@@ -1110,24 +1193,41 @@ try {
   }
   const acknowledgedReview = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(result)
     FROM public.iap_acknowledge_transaction_review(
-      ${q(unresolvedReviewId)}::uuid, 'APPLE_RECONCILIATION_REQUIRED'
+      ${q(unresolvedReviewId)}::uuid, 'APPLE_RECONCILIATION_REQUIRED',
+      ${q(OPERATOR_ACTOR)}::uuid, ${q(REVIEW_OPERATION)}::uuid
     ) AS result`, 'acknowledge transaction review'), 'acknowledge transaction review');
   if (acknowledgedReview.status !== 'acknowledged'
       || acknowledgedReview.resolution_code !== 'APPLE_RECONCILIATION_REQUIRED'
+      || acknowledgedReview.operator_actor_id !== OPERATOR_ACTOR
+      || acknowledgedReview.operation_id !== REVIEW_OPERATION
       || acknowledgedReview.duplicate !== false) {
     throw new Error('manual-review acknowledgement did not persist its bounded resolution');
   }
   const acknowledgedReplay = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(result)
     FROM public.iap_acknowledge_transaction_review(
-      ${q(unresolvedReviewId)}::uuid, 'APPLE_RECONCILIATION_REQUIRED'
+      ${q(unresolvedReviewId)}::uuid, 'APPLE_RECONCILIATION_REQUIRED',
+      ${q(OPERATOR_ACTOR)}::uuid, ${q(REVIEW_OPERATION)}::uuid
     ) AS result`, 'acknowledge transaction review replay'), 'acknowledge transaction review replay');
   if (acknowledgedReplay.duplicate !== true) {
     throw new Error('manual-review acknowledgement replay was not idempotent');
   }
   expectFail(asActor('service_role', null, `SELECT *
     FROM public.iap_acknowledge_transaction_review(
-      ${q(unresolvedReviewId)}::uuid, 'NO_AUTOMATIC_ACTION'
+      ${q(unresolvedReviewId)}::uuid, 'NO_AUTOMATIC_ACTION',
+      ${q(OPERATOR_ACTOR)}::uuid, ${q(REVIEW_OPERATION)}::uuid
     )`), 'manual-review acknowledgement collision');
+  expectFail(asActor('service_role', null, `SELECT *
+    FROM public.iap_acknowledge_transaction_review(
+      ${q(unresolvedReviewId)}::uuid, 'APPLE_RECONCILIATION_REQUIRED',
+      '60000000-0000-4000-8000-000000000002'::uuid,
+      ${q(REVIEW_OPERATION)}::uuid
+    )`), 'manual-review actor collision');
+  if (scalar(`SELECT reviewed_by_actor_id::text || '|' || review_operation_id::text
+      FROM iap_private.apple_transaction_review_facts
+      WHERE review_id = ${q(unresolvedReviewId)}::uuid`,
+  'manual-review audit identity') !== `${OPERATOR_ACTOR}|${REVIEW_OPERATION}`) {
+    throw new Error('manual-review acknowledgement did not retain actor and operation identity');
+  }
   if (scalar("SELECT count(*)::text FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '8119'", 'manual review acknowledgement grants nothing') !== '0') {
     throw new Error('manual-review acknowledgement created a transaction or grant');
   }
@@ -1335,6 +1435,45 @@ try {
     signed: 21_000,
   }), 'consumption notification UUID/hash collision');
 
+  const imminentPendingId = '79000000-0000-4000-8000-000000000022';
+  const imminentPending = jsonResult(expectOk(processConsumption({
+    notificationId: imminentPendingId,
+    notificationHash: sha('imminent-pending-evidence'),
+    tx: '8151',
+    purchase: 25_100,
+    signed: 25_600,
+  }), 'imminent pending-evidence fixture'), 'imminent pending-evidence fixture');
+  if (imminentPending.consumption_status !== 'pending_evidence') {
+    throw new Error('imminent pending-evidence fixture did not remain pending');
+  }
+  expectOk(admin(`UPDATE iap_private.apple_consumption_requests AS request
+    SET received_at = boundary.received_at,
+        deadline_at = boundary.received_at + interval '12 hours',
+        updated_at = clock_timestamp()
+    FROM (SELECT clock_timestamp() - interval '10 hours 1 minute' AS received_at) AS boundary
+    WHERE notification_uuid IN (
+      ${q(queuedId)}::uuid, ${q(imminentPendingId)}::uuid
+    )`), 'move pending and queued requests to the 10-hour alert boundary');
+  const queuedRequestId = scalar(`SELECT request_id::text
+    FROM iap_private.apple_consumption_requests
+    WHERE notification_uuid = ${q(queuedId)}::uuid`, 'imminent queued request id');
+  const imminentPendingRequestId = scalar(`SELECT request_id::text
+    FROM iap_private.apple_consumption_requests
+    WHERE notification_uuid = ${q(imminentPendingId)}::uuid`, 'imminent pending request id');
+  const imminentPreSendAlerts = actorScalar('service_role', null, `SELECT string_agg(
+      alert.status || '|' || alert.deadline_bucket || '|' || alert.error_code,
+      ',' ORDER BY alert.status
+    )
+    FROM public.iap_list_operational_alerts() AS alert
+    WHERE alert.alert_id IN (
+      ${q(queuedRequestId)}::uuid,
+      ${q(imminentPendingRequestId)}::uuid
+    )`, 'imminent pending and queued alerts');
+  if (imminentPreSendAlerts !==
+      'pending_evidence|lt_2h|APPLE_DEADLINE_IMMINENT,queued|lt_2h|APPLE_DEADLINE_IMMINENT') {
+    throw new Error(`10-hour pending/queued obligations were absent from opaque alerts: ${imminentPreSendAlerts}`);
+  }
+
   const preauthorizationLease = jsonResult(actorScalar('service_role', null,
     'SELECT row_to_json(x) FROM public.iap_claim_consumption_request() AS x',
     'claim request for pre-authorization retry'), 'pre-authorization retry claim');
@@ -1346,6 +1485,13 @@ try {
   ), 'complete pre-authorization retry');
   if (preauthorizationRetry.status !== 'retryable_failed') {
     throw new Error('a pre-authorization lease exhaustion became terminal before the 12-hour deadline');
+  }
+  if (actorScalar('service_role', null, `SELECT status || '|' || deadline_bucket || '|' || error_code
+      FROM public.iap_list_operational_alerts()
+      WHERE alert_id = ${q(preauthorizationLease.request_id)}::uuid`,
+  'imminent retryable-failed alert') !==
+      'retryable_failed|lt_2h|APPLE_SEND_WINDOW_EXHAUSTED') {
+    throw new Error('10-hour retryable failure was absent from opaque alerts');
   }
 
   const withdrawKey = '79000000-0000-4000-8000-000000000102';
@@ -1762,6 +1908,10 @@ try {
 
   const reserveA = jsonResult(actorScalar('authenticated', E, `SELECT row_to_json(x)
     FROM public.iap_export_credit_reserve('Production', 1, '79000000-0000-4000-8000-000000000201'::uuid) AS x`, 'reserve exact purchase A'), 'reserve exact purchase A');
+  expectFail(asActor('authenticated', E, `SELECT *
+    FROM public.iap_export_credit_reserve(
+      'Production', 2, '79000000-0000-4000-8000-000000000201'::uuid
+    )`), 'reservation idempotency key rejects a different amount');
   if (scalar(`SELECT source_transaction_id FROM iap_private.export_credit_allocations
     WHERE reservation_id = ${q(reserveA.reservation_id)}::uuid`, 'reserved source transaction A') !== '8101') {
     throw new Error('FIFO reservation did not pin purchase A');
@@ -1863,6 +2013,174 @@ try {
   }
   checks += 1;
 
+  expectFail(asActor('anon', null,
+    'SELECT * FROM public.iap_claim_reconciliation_targets(1)'),
+  'anon reconciliation claim');
+  expectFail(asActor('authenticated', E,
+    'SELECT * FROM public.iap_claim_reconciliation_targets(1)'),
+  'authenticated reconciliation claim');
+  expectFail(asActor('service_role', null,
+    'SELECT * FROM public.iap_claim_reconciliation_targets(3)'),
+  'oversized reconciliation claim');
+  const reconciliationPairCount = scalar(`SELECT count(*)::text FROM (
+      SELECT DISTINCT transaction.billing_account_id, transaction.environment
+      FROM iap_private.apple_transactions AS transaction
+      WHERE transaction.environment IN ('Sandbox', 'Production')
+    ) AS pair`, 'Apple customer/environment reconciliation pairs');
+  if (scalar(`SELECT count(*)::text
+      FROM iap_private.apple_reconciliation_checkpoints`,
+  'trigger-seeded reconciliation checkpoints') !== reconciliationPairCount) {
+    throw new Error('reconciliation checkpoints were not seeded once per Apple customer/environment');
+  }
+  if (scalar(`SELECT count(*)::text FROM (
+      SELECT transaction.billing_account_id, transaction.environment
+      FROM iap_private.apple_transactions AS transaction
+      WHERE transaction.environment IN ('Sandbox', 'Production')
+      GROUP BY transaction.billing_account_id, transaction.environment
+      HAVING count(DISTINCT transaction.original_transaction_id) > 1
+    ) AS multi_chain`, 'multi-chain Apple customer fixture') === '0') {
+    throw new Error('reconciliation test lacks a customer with multiple transaction chains');
+  }
+  const claimableReconciliationCount = Number(scalar(`SELECT count(*)::text
+      FROM iap_private.apple_reconciliation_checkpoints AS checkpoint
+      JOIN iap_private.apple_account_bindings AS binding
+        ON binding.billing_account_id = checkpoint.billing_account_id
+      WHERE binding.user_id IS NOT NULL
+        AND binding.deleted_at IS NULL
+        AND NOT iap_private.is_account_deletion_pending(binding.user_id)
+        AND checkpoint.next_attempt_at <= clock_timestamp()`,
+  'claimable reconciliation checkpoint count'));
+  const reconciliationBatchA = jsonResult(expectOk(asActor('service_role', null, `SELECT COALESCE(
+      json_agg(target ORDER BY target.checkpoint_id), '[]'::json
+    )::text
+    FROM public.iap_claim_reconciliation_targets(2) AS target`),
+  'first bounded reconciliation claim'), 'first bounded reconciliation claim');
+  const reconciliationBatchB = jsonResult(expectOk(asActor('service_role', null, `SELECT COALESCE(
+      json_agg(target ORDER BY target.checkpoint_id), '[]'::json
+    )::text
+    FROM public.iap_claim_reconciliation_targets(2) AS target`),
+  'second bounded reconciliation claim'), 'second bounded reconciliation claim');
+  if (reconciliationBatchA.length !== Math.min(2, claimableReconciliationCount)
+      || reconciliationBatchB.length !== Math.min(2, Math.max(0, claimableReconciliationCount - 2))
+      || reconciliationBatchA.some((first) =>
+        reconciliationBatchB.some((second) => second.checkpoint_id === first.checkpoint_id))) {
+    throw new Error('bounded reconciliation claims did not rotate past active leases');
+  }
+  const completedReconciliation = reconciliationBatchA[0];
+  const failedReconciliation = reconciliationBatchA[1];
+  expectFail(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      '20000000-0000-4000-8000-000000000099'::uuid, TRUE, NULL,
+      'revision-page-1', TRUE
+    )`), 'wrong reconciliation lease completion');
+  expectFail(asActor('authenticated', E, `SELECT *
+    FROM public.iap_record_reconciliation_review(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid,
+      ${q(completedReconciliation.environment)}, '8999', '8999',
+      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
+      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
+      'TOKEN_BINDING_MISSING'
+    )`), 'authenticated reconciliation review write');
+  expectFail(asActor('service_role', null, `SELECT *
+    FROM public.iap_record_reconciliation_review(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      '20000000-0000-4000-8000-000000000099'::uuid,
+      ${q(completedReconciliation.environment)}, '8999', '8999',
+      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
+      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
+      'TOKEN_BINDING_MISSING'
+    )`), 'wrong-lease reconciliation review write');
+  const reconciliationReview = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(review)
+    FROM public.iap_record_reconciliation_review(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid,
+      ${q(completedReconciliation.environment)}, '8999', '8999',
+      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
+      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
+      'TOKEN_BINDING_MISSING'
+    ) AS review`, 'record tokenless reconciliation review'), 'record tokenless reconciliation review');
+  if (reconciliationReview.duplicate !== false) {
+    throw new Error('first reconciliation review was not recorded as new');
+  }
+  const reconciliationReviewReplay = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(review)
+    FROM public.iap_record_reconciliation_review(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid,
+      ${q(completedReconciliation.environment)}, '8999', '8999',
+      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
+      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
+      'TOKEN_BINDING_MISSING'
+    ) AS review`, 'replay tokenless reconciliation review'), 'replay tokenless reconciliation review');
+  if (reconciliationReviewReplay.review_id !== reconciliationReview.review_id
+      || reconciliationReviewReplay.duplicate !== true) {
+    throw new Error('reconciliation review replay was not idempotent');
+  }
+  expectFail(asActor('service_role', null, `SELECT *
+    FROM public.iap_record_reconciliation_review(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid,
+      ${q(completedReconciliation.environment)}, '8999', '8999',
+      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
+      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-collision'))},
+      'TOKEN_BINDING_MISSING'
+    )`), 'reconciliation review payload collision');
+  if (actorScalar('service_role', null, `SELECT count(*)::text
+      FROM public.iap_list_operational_alerts()
+      WHERE alert_id = ${q(reconciliationReview.review_id)}::uuid
+        AND source = 'transaction_review'
+        AND error_code = 'TOKEN_BINDING_MISSING'`,
+  'reconciliation review operational alert') !== '1') {
+    throw new Error('reconciliation review was not visible to operators');
+  }
+  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
+      'revision-page-1', TRUE
+    )`), 'successful reconciliation completion');
+  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
+      'revision-page-1', TRUE
+    )`), 'idempotent reconciliation completion replay');
+  expectFail(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
+      'revision-conflict', TRUE
+    )`), 'reconciliation completion replay collision');
+  expectOk(admin(`UPDATE iap_private.apple_reconciliation_checkpoints
+      SET next_revision = 'revision-prior'
+      WHERE checkpoint_id = ${q(failedReconciliation.checkpoint_id)}::uuid`),
+  'seed prior reconciliation cursor');
+  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+      ${q(failedReconciliation.checkpoint_id)}::uuid,
+      ${q(failedReconciliation.lease_token)}::uuid, FALSE,
+      'RECONCILIATION_TARGET_FAILED', NULL, NULL
+    )`), 'failed reconciliation completion');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_reconciliation_checkpoints
+      WHERE checkpoint_id IN (
+        ${q(completedReconciliation.checkpoint_id)}::uuid,
+        ${q(failedReconciliation.checkpoint_id)}::uuid
+      ) AND lease_token IS NULL AND lease_expires_at IS NULL`,
+  'completed reconciliation leases cleared') !== '2') {
+    throw new Error('reconciliation completion left a live lease');
+  }
+  if (scalar(`SELECT last_error_code FROM iap_private.apple_reconciliation_checkpoints
+      WHERE checkpoint_id = ${q(failedReconciliation.checkpoint_id)}::uuid`,
+  'failed reconciliation reason') !== 'RECONCILIATION_TARGET_FAILED') {
+    throw new Error('reconciliation failure did not retain its bounded reason');
+  }
+  if (scalar(`SELECT next_revision FROM iap_private.apple_reconciliation_checkpoints
+      WHERE checkpoint_id = ${q(completedReconciliation.checkpoint_id)}::uuid`,
+  'successful reconciliation cursor') !== 'revision-page-1') {
+    throw new Error('successful reconciliation did not durably advance its revision cursor');
+  }
+  if (scalar(`SELECT next_revision FROM iap_private.apple_reconciliation_checkpoints
+      WHERE checkpoint_id = ${q(failedReconciliation.checkpoint_id)}::uuid`,
+  'failed reconciliation cursor preservation') !== 'revision-prior') {
+    throw new Error('failed reconciliation advanced or erased its prior revision cursor');
+  }
+
   const deleteReservation = jsonResult(actorScalar('authenticated', E, `SELECT row_to_json(x)
     FROM public.iap_export_credit_reserve('Production', 1, '79000000-0000-4000-8000-000000000206'::uuid) AS x`, 'reserve before account deletion'), 'reserve before account deletion');
   const attemptE = '79000000-0000-4000-8000-000000000301';
@@ -1876,7 +2194,10 @@ try {
   if (scalar(`SELECT count(*)::text FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
       JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = 'iap_private'
-        AND c.relname IN ('refund_data_consent_events','fulfillment_usage_evidence','apple_consumption_requests')
+        AND c.relname IN (
+          'refund_data_consent_events','fulfillment_usage_evidence',
+          'apple_consumption_requests','apple_reconciliation_checkpoints'
+        )
         AND a.attname IN ('user_id','raw_jws','payload') AND NOT a.attisdropped`, 'minimal refund evidence columns') !== '0') {
     throw new Error('refund evidence schema retained user content, raw JWS, or direct user identity');
   }
@@ -1886,10 +2207,12 @@ try {
         AND p.proname IN (
           'iap_refresh_consumption_request', 'iap_claim_consumption_request',
           'iap_authorize_consumption_send', 'iap_complete_consumption_request',
-          'iap_export_credit_commit_after_fulfillment'
+          'iap_export_credit_commit_after_fulfillment',
+          'iap_claim_reconciliation_targets', 'iap_complete_reconciliation_target',
+          'iap_record_reconciliation_review'
         )
         AND p.prosecdef
-        AND p.proconfig @> ARRAY['search_path=public, pg_temp']`, 'new IAP definer search paths') !== '5') {
+        AND p.proconfig @> ARRAY['search_path=public, pg_temp']`, 'new IAP definer search paths') !== '8') {
     throw new Error('new IAP SECURITY DEFINER functions lack a fixed search_path');
   }
   if (scalar(`SELECT
@@ -1897,7 +2220,12 @@ try {
       || '|' || has_function_privilege('authenticated', 'public.iap_authorize_consumption_send(uuid,uuid)', 'EXECUTE')::text
       || '|' || has_function_privilege('service_role', 'public.iap_authorize_consumption_send(uuid,uuid)', 'EXECUTE')::text
       || '|' || has_function_privilege('authenticated', 'public.iap_export_credit_commit(uuid)', 'EXECUTE')::text
-      || '|' || has_function_privilege('service_role', 'public.iap_export_credit_commit_after_fulfillment(uuid,text,text,boolean)', 'EXECUTE')::text`, 'IAP function privilege matrix') !== 'false|false|true|false|true') {
+      || '|' || has_function_privilege('service_role', 'public.iap_export_credit_commit_after_fulfillment(uuid,text,text,boolean)', 'EXECUTE')::text
+      || '|' || has_function_privilege('authenticated', 'public.iap_claim_reconciliation_targets(integer)', 'EXECUTE')::text
+      || '|' || has_function_privilege('service_role', 'public.iap_claim_reconciliation_targets(integer)', 'EXECUTE')::text
+      || '|' || has_function_privilege('service_role', 'public.iap_complete_reconciliation_target(uuid,uuid,boolean,text,text,boolean)', 'EXECUTE')::text
+      || '|' || has_function_privilege('authenticated', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text)', 'EXECUTE')::text
+      || '|' || has_function_privilege('service_role', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text)', 'EXECUTE')::text`, 'IAP function privilege matrix') !== 'false|false|true|false|true|false|true|true|false|true') {
     throw new Error('IAP send authorization or fulfillment commit grants are unsafe');
   }
 

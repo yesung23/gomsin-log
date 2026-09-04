@@ -11,6 +11,8 @@ const DEADLINE_AT = RECEIVED_AT + 12 * 60 * 60 * 1000;
 const SANDBOX_DEADLINE_AT = RECEIVED_AT + 5 * 60 * 1000;
 const LEASE_EXPIRES_AT = RECEIVED_AT + 5 * 60 * 1000;
 const SEND_AUTHORIZATION_TOKEN = '50000000-0000-4000-8000-000000000001';
+const OPERATOR_ACTOR_ID = '60000000-0000-4000-8000-000000000001';
+const OPERATION_ID = '70000000-0000-4000-8000-000000000001';
 
 const request = (secret = 'scheduler-secret', body?: unknown) =>
   new Request(
@@ -24,6 +26,16 @@ const request = (secret = 'scheduler-secret', body?: unknown) =>
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
   );
+
+const operationRequest = (body: unknown, secret = 'operator-secret') =>
+  new Request('https://edge.test/apple-iap-consumption', {
+    method: 'POST',
+    headers: {
+      'x-iap-operator-secret': secret,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
 
 function job(overrides: Partial<AppleIapConsumptionJob> = {}): AppleIapConsumptionJob {
   return {
@@ -62,6 +74,8 @@ function deps(jobs: AppleIapConsumptionJob[] = [job()]) {
   const completed: Array<Record<string, unknown>> = [];
   const value: AppleIapConsumptionDeps = {
     schedulerSecret: 'scheduler-secret',
+    operatorSecret: 'operator-secret',
+    operatorActorId: OPERATOR_ACTOR_ID,
     now: () => RECEIVED_AT + 60_000,
     claimNext: async () => queue.shift() ?? null,
     authorizeSend: async () =>
@@ -75,10 +89,17 @@ function deps(jobs: AppleIapConsumptionJob[] = [job()]) {
       completed.push(input);
     },
     listOperationalAlerts: async () => [],
-    acknowledgeManualReview: async ({ reviewId, resolutionCode }) => ({
+    acknowledgeManualReview: async ({
+      reviewId,
+      resolutionCode,
+      operatorActorId,
+      operationId,
+    }) => ({
       reviewId,
       status: 'acknowledged',
       resolutionCode,
+      operatorActorId,
+      operationId,
       duplicate: false,
     }),
   };
@@ -95,6 +116,41 @@ Deno.test('apple-iap-consumption: rejects the wrong scheduler secret before clai
   const response = await handleAppleIapConsumption(request('wrong'), fixture.value);
   assert.equal(response.status, 401);
   assert.equal(claims, 0);
+});
+
+Deno.test('apple-iap-consumption: real Deno ingress drains zero-byte and whitespace POST bodies', async () => {
+  const fixture = deps([]);
+  const bodyPresence: boolean[] = [];
+  const server = Deno.serve(
+    { hostname: '127.0.0.1', port: 0, onListen: () => {} },
+    (incoming) => {
+      bodyPresence.push(incoming.body !== null);
+      return handleAppleIapConsumption(incoming, fixture.value);
+    },
+  );
+  const origin = `http://127.0.0.1:${(server.addr as Deno.NetAddr).port}`;
+  try {
+    for (const body of ['', ' \n\t']) {
+      const response = await fetch(origin, {
+        method: 'POST',
+        headers: { 'x-iap-scheduler-secret': 'scheduler-secret' },
+        body,
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), {
+        claimed: 0,
+        sent: 0,
+        retryable: 0,
+        terminal: 0,
+        expired: 0,
+        unknown: 0,
+        warnings: 0,
+      });
+    }
+    assert.deepEqual(bodyPresence, [true, true]);
+  } finally {
+    await server.shutdown();
+  }
 });
 
 Deno.test('apple-iap-consumption: sends one minimal immutable V2 payload and never refundPreference', async () => {
@@ -150,8 +206,15 @@ Deno.test('apple-iap-consumption: enforces Apple’s five-minute Sandbox respons
   assert.equal(fixture.sent.length, 1);
   assert.equal(fixture.sent[0].environment, 'Sandbox');
 
-  const invalid = deps();
-  invalid.value.authorizeSend = async () => authorization({ environment: 'Sandbox' });
+  const invalid = deps([job({
+    deadlineAtMs: DEADLINE_AT,
+    leaseExpiresAtMs: LEASE_EXPIRES_AT,
+  })]);
+  invalid.value.authorizeSend = async () =>
+    authorization({
+      environment: 'Sandbox',
+      sendAuthorizationExpiresAtMs: LEASE_EXPIRES_AT,
+    });
   const invalidResponse = await handleAppleIapConsumption(request(), invalid.value);
   assert.equal(invalidResponse.status, 200);
   assert.equal(invalid.sent.length, 0);
@@ -319,33 +382,116 @@ Deno.test('apple-iap-consumption: builds the Apple body only from the just-in-ti
 Deno.test('apple-iap-consumption: returns only bounded opaque operational alerts', async () => {
   const fixture = deps([]);
   Object.assign(fixture.value, {
-    listOperationalAlerts: async () => [{
-      alertId: '30000000-0000-4000-8000-000000000099',
-      source: 'consumption',
-      environment: 'Production',
-      status: 'send_result_unknown',
-      deadlineBucket: 'overdue',
-      attemptNo: 2,
-      errorCode: 'SEND_RESULT_UNKNOWN',
-    }],
+    listOperationalAlerts: async () => [
+      {
+        alertId: '30000000-0000-4000-8000-000000000099',
+        source: 'consumption',
+        environment: 'Production',
+        status: 'send_result_unknown',
+        deadlineBucket: 'overdue',
+        attemptNo: 2,
+        errorCode: 'SEND_RESULT_UNKNOWN',
+      },
+      {
+        alertId: '30000000-0000-4000-8000-000000000097',
+        source: 'consumption',
+        environment: 'Sandbox',
+        status: 'pending_evidence',
+        deadlineBucket: 'lt_2h',
+        attemptNo: 0,
+        errorCode: 'APPLE_DEADLINE_IMMINENT',
+      },
+    ],
   });
   const response = await handleAppleIapConsumption(
-    request('scheduler-secret', { action: 'alerts' }),
+    operationRequest({ action: 'alerts' }),
     fixture.value,
   );
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
-    alerts: [{
-      alertId: '30000000-0000-4000-8000-000000000099',
-      source: 'consumption',
-      environment: 'Production',
-      status: 'send_result_unknown',
-      deadlineBucket: 'overdue',
-      attemptNo: 2,
-      errorCode: 'SEND_RESULT_UNKNOWN',
-    }],
+    alerts: [
+      {
+        alertId: '30000000-0000-4000-8000-000000000099',
+        source: 'consumption',
+        environment: 'Production',
+        status: 'send_result_unknown',
+        deadlineBucket: 'overdue',
+        attemptNo: 2,
+        errorCode: 'SEND_RESULT_UNKNOWN',
+      },
+      {
+        alertId: '30000000-0000-4000-8000-000000000097',
+        source: 'consumption',
+        environment: 'Sandbox',
+        status: 'pending_evidence',
+        deadlineBucket: 'lt_2h',
+        attemptNo: 0,
+        errorCode: 'APPLE_DEADLINE_IMMINENT',
+      },
+    ],
   });
+});
+
+Deno.test('apple-iap-consumption: scheduler authorization is drain-only', async () => {
+  const fixture = deps([]);
+  let operatorReads = 0;
+  fixture.value.listOperationalAlerts = async () => {
+    operatorReads += 1;
+    return [];
+  };
+
+  const response = await handleAppleIapConsumption(
+    request('scheduler-secret', { action: 'alerts' }),
+    fixture.value,
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(operatorReads, 0);
+});
+
+Deno.test('apple-iap-consumption: rejects a shared scheduler/operator secret as unsafe configuration', async () => {
+  const fixture = deps([]);
+  fixture.value.operatorSecret = fixture.value.schedulerSecret;
+  let claims = 0;
+  let operatorReads = 0;
+  fixture.value.claimNext = async () => {
+    claims += 1;
+    return null;
+  };
+  fixture.value.listOperationalAlerts = async () => {
+    operatorReads += 1;
+    return [];
+  };
+
+  const drain = await handleAppleIapConsumption(request(), fixture.value);
+  const alerts = await handleAppleIapConsumption(
+    operationRequest({ action: 'alerts' }, 'scheduler-secret'),
+    fixture.value,
+  );
+
+  assert.equal(drain.status, 503);
+  assert.equal(alerts.status, 503);
+  assert.equal(claims, 0);
+  assert.equal(operatorReads, 0);
+});
+
+Deno.test('apple-iap-consumption: operator authorization cannot drain the scheduler queue', async () => {
+  const fixture = deps();
+  let claims = 0;
+  fixture.value.claimNext = async () => {
+    claims += 1;
+    return null;
+  };
+  const response = await handleAppleIapConsumption(
+    new Request('https://edge.test/apple-iap-consumption', {
+      method: 'POST',
+      headers: { 'x-iap-operator-secret': 'operator-secret' },
+    }),
+    fixture.value,
+  );
+  assert.equal(response.status, 401);
+  assert.equal(claims, 0);
 });
 
 Deno.test('apple-iap-consumption: manual review can only be acknowledged without a resend or account binding', async () => {
@@ -358,15 +504,18 @@ Deno.test('apple-iap-consumption: manual review can only be acknowledged without
         reviewId: input.reviewId,
         status: 'acknowledged',
         resolutionCode: input.resolutionCode,
+        operatorActorId: input.operatorActorId,
+        operationId: input.operationId,
         duplicate: false,
       };
     },
   });
   const response = await handleAppleIapConsumption(
-    request('scheduler-secret', {
+    operationRequest({
       action: 'acknowledge-review',
       reviewId: '30000000-0000-4000-8000-000000000098',
       resolutionCode: 'APPLE_RECONCILIATION_REQUIRED',
+      operationId: OPERATION_ID,
       userId: 'must-not-bind',
       transactionId: 'must-not-resend',
     }),
@@ -378,10 +527,14 @@ Deno.test('apple-iap-consumption: manual review can only be acknowledged without
     reviewId: '30000000-0000-4000-8000-000000000098',
     status: 'acknowledged',
     resolutionCode: 'APPLE_RECONCILIATION_REQUIRED',
+    operatorActorId: OPERATOR_ACTOR_ID,
+    operationId: OPERATION_ID,
     duplicate: false,
   });
   assert.deepEqual(calls, [{
     reviewId: '30000000-0000-4000-8000-000000000098',
     resolutionCode: 'APPLE_RECONCILIATION_REQUIRED',
+    operatorActorId: OPERATOR_ACTOR_ID,
+    operationId: OPERATION_ID,
   }]);
 });

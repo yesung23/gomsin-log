@@ -5,6 +5,7 @@ import {
   parseSchedulerSecret,
   timingSafeEqualSecret,
 } from '../_shared/adminSecret.ts';
+import { isUuid } from '../_shared/appleIapContract.ts';
 import { createAppleIapConsumptionSender } from '../_shared/appleIapServerApi.ts';
 import { type AppleIapConsumptionJob, handleAppleIapConsumption } from './handler.ts';
 
@@ -17,11 +18,34 @@ Deno.serve(async (request) => {
   }
 
   const schedulerSecret = parseSchedulerSecret(Deno.env.get('APPLE_IAP_SCHEDULER_SECRET'));
-  const providedSecret = request.headers.get('x-iap-scheduler-secret');
+  const operatorSecret = parseSchedulerSecret(Deno.env.get('APPLE_IAP_OPERATOR_SECRET'));
+  const operatorActorId = Deno.env.get('APPLE_IAP_OPERATOR_ACTOR_ID') ?? null;
+  const providedSchedulerSecret = request.headers.get('x-iap-scheduler-secret');
+  const providedOperatorSecret = request.headers.get('x-iap-operator-secret');
   if (
-    !schedulerSecret || !providedSecret ||
-    !(await timingSafeEqualSecret(providedSecret, schedulerSecret))
+    schedulerSecret && operatorSecret &&
+    await timingSafeEqualSecret(schedulerSecret, operatorSecret)
   ) {
+    return new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  if (providedSchedulerSecret && providedOperatorSecret) {
+    return new Response(JSON.stringify({ error: 'E_UNAUTHENTICATED' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const schedulerAuthenticated = Boolean(
+    schedulerSecret && providedSchedulerSecret &&
+      await timingSafeEqualSecret(providedSchedulerSecret, schedulerSecret),
+  );
+  const operatorAuthenticated = Boolean(
+    operatorSecret && providedOperatorSecret &&
+      await timingSafeEqualSecret(providedOperatorSecret, operatorSecret),
+  );
+  if (!schedulerAuthenticated && !operatorAuthenticated) {
     return new Response(JSON.stringify({ error: 'E_UNAUTHENTICATED' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -37,14 +61,18 @@ Deno.serve(async (request) => {
     });
   }
 
-  let sendConsumptionInformation: ReturnType<typeof createAppleIapConsumptionSender>;
-  try {
-    sendConsumptionInformation = createAppleIapConsumptionSender();
-  } catch {
-    return new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
+  let sendConsumptionInformation: ReturnType<typeof createAppleIapConsumptionSender> = async () => {
+    throw new Error('E_IAP_SCHEDULER_AUTHORIZATION_REQUIRED');
+  };
+  if (schedulerAuthenticated) {
+    try {
+      sendConsumptionInformation = createAppleIapConsumptionSender();
+    } catch {
+      return new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   const admin = createClient(url, secret, {
@@ -54,6 +82,8 @@ Deno.serve(async (request) => {
 
   return handleAppleIapConsumption(request, {
     schedulerSecret,
+    operatorSecret,
+    operatorActorId: isUuid(operatorActorId) ? operatorActorId : null,
     now: Date.now,
     claimNext: async () => {
       const { data, error } = await admin.rpc('iap_claim_consumption_request');
@@ -121,10 +151,17 @@ Deno.serve(async (request) => {
         errorCode: String(row.error_code),
       }));
     },
-    acknowledgeManualReview: async ({ reviewId, resolutionCode }) => {
+    acknowledgeManualReview: async ({
+      reviewId,
+      resolutionCode,
+      operatorActorId,
+      operationId,
+    }) => {
       const { data, error } = await admin.rpc('iap_acknowledge_transaction_review', {
         p_review_id: reviewId,
         p_resolution_code: resolutionCode,
+        p_operator_actor_id: operatorActorId,
+        p_operation_id: operationId,
       });
       const row = Array.isArray(data) ? data[0] : null;
       if (error || !row) throw new Error('E_IAP_REVIEW_UPDATE_FAILED');
@@ -132,6 +169,8 @@ Deno.serve(async (request) => {
         reviewId: String(row.review_id),
         status: row.status,
         resolutionCode: row.resolution_code,
+        operatorActorId: String(row.operator_actor_id),
+        operationId: String(row.operation_id),
         duplicate: row.duplicate,
       };
     },

@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
 import {
-  buildOnDeviceItems,
+  buildAllOnDeviceBatches,
   MAX_DAILY_SUMMARY_EXCERPT_CHARS,
-  MAX_DAILY_SUMMARY_MODEL_CANDIDATES,
+  MAX_DAILY_SUMMARY_MODEL_RECORDS,
   type OnDeviceSummaryFailure,
   type DailySummaryRefinementReason,
   type DailySummaryRefinementStatus,
@@ -14,6 +14,7 @@ import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import {
   cancelOnDeviceSummary,
   onDeviceSummaryGate,
+  ON_DEVICE_SUMMARY_TIMEOUT_MS,
   preflightOnDeviceSummary,
   refineOnDeviceSummary,
 } from '@/lib/dailySummary/nativeOnDeviceSummary';
@@ -125,7 +126,8 @@ export function useOnDeviceDailySummary(
     중요도 선별이 아니라 UTF-16 길이 하나만 보는 기계적 필터다.
 
     attachment-only/짧은 본문은 즉시 그려진 기준선에 그대로 남고 네이티브 경계에는 가지
-    않는다. 후보가 여섯 개 이상이면 일부만 고르지 않고 모델 호출 전체를 생략한다.
+    않는다. 긴 문장 후보는 시간순 그대로 5개씩 나누며, 20개를 넘으면 일부만 고르지 않고
+    모델 호출 전체를 생략한다.
   */
   const candidateLines = useMemo(
     () => summaryLines.filter((line) => (
@@ -134,14 +136,15 @@ export function useOnDeviceDailySummary(
     )),
     [summaryLines],
   );
-  const candidateItems = useMemo(
-    () => buildOnDeviceItems(candidateLines),
+  const candidateBatches = useMemo(
+    () => buildAllOnDeviceBatches(candidateLines),
     [candidateLines],
   );
-  const tooManyCandidates = candidateLines.length > MAX_DAILY_SUMMARY_MODEL_CANDIDATES;
+  const tooManyCandidates = candidateLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS;
   const candidatePayloadReady = candidateLines.length > 0
     && !tooManyCandidates
-    && candidateItems.length === candidateLines.length;
+    && candidateBatches !== null
+    && candidateBatches.length > 0;
 
   /*
     CTA 이전의 콘텐츠 없는 preflight.
@@ -209,22 +212,42 @@ export function useOnDeviceDailySummary(
     };
 
     void (async () => {
-      // 출시 검증 범위는 긴 문장 최대 다섯 개, 정확히 한 번의 native generation이다.
-      const outcome = await refineOnDeviceSummary(candidateItems);
-      if (!active) return;
-      if (!outcome.ok) {
-        fallback(outcome.reason);
+      if (!candidateBatches) {
+        fallback('rejected');
         return;
       }
-      const bound = verifyAndBindRefinedLines(outcome.items, candidateLines, candidateItems);
-      if (!bound.ok || bound.refined.size !== candidateLines.length) {
+
+      // 검증된 batch도 하루 전체가 성공하기 전에는 화면에 공개하지 않는다.
+      const staged = new Map<string, string>();
+      for (const batch of candidateBatches) {
+        if (!active) return;
+        const outcome = await refineOnDeviceSummary(
+          batch.items,
+          { timeoutMs: ON_DEVICE_SUMMARY_TIMEOUT_MS },
+        );
+        if (!active) return;
+        if (!outcome.ok) {
+          fallback(outcome.reason);
+          return;
+        }
+        const bound = verifyAndBindRefinedLines(outcome.items, batch.lines, batch.items);
+        if (!bound.ok || bound.refined.size !== batch.lines.length) {
+          fallback('rejected');
+          return;
+        }
+        for (const [recordId, refinedText] of bound.refined) {
+          staged.set(recordId, refinedText);
+        }
+      }
+      if (!active) return;
+      if (staged.size !== candidateLines.length) {
         fallback('rejected');
         return;
       }
       setResult({
         payloadKey,
         requestVersion,
-        values: bound.refined,
+        values: staged,
         status: 'applied',
         reason: undefined,
       });
@@ -235,7 +258,7 @@ export function useOnDeviceDailySummary(
       cancelOnDeviceSummary();
     };
   }, [
-    candidateItems,
+    candidateBatches,
     candidateLines,
     candidatePayloadReady,
     corpus.ok,

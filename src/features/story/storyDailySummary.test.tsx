@@ -371,7 +371,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     }
   });
 
-  it('긴 문장 후보가 6개면 generation은 0회이고 baseline 6줄과 원본 이동을 모두 보존한다', async () => {
+  it('긴 문장 후보 6개를 [5, 1]로 처리하고 baseline 6줄과 원본 이동을 모두 보존한다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = Array.from({ length: 6 }, (_, i) => record({
@@ -383,9 +383,10 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
 
     open('/story/partner');
     expect(screen.getByText('오늘 기록 6개 · 시간순 정리됨')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
-    expect(plugin.availability).not.toHaveBeenCalled();
-    expect(plugin.refineLines).not.toHaveBeenCalled();
+    await requestAiSummary();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(plugin.refineLines).mock.calls.map(([options]) => options.items.length))
+      .toEqual([5, 1]);
     await userEvent.click(screen.getByRole('button', { name: '1개 더 보기' }));
     await userEvent.click(screen.getByText(/긴 기록 5 /));
     await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=r5'));

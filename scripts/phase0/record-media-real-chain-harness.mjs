@@ -2,8 +2,8 @@
 
 /**
  * Bounded fresh-chain compatibility gate for record/media lifecycle migration
- * 084. Unlike the focused actor/race harness, this applies every active SQL
- * migration from 001 through 084, in canonical filename order, to one fresh
+ * 085. Unlike the focused actor/race harness, this applies every active SQL
+ * migration from 001 through 085, in canonical filename order, to one fresh
  * PostgreSQL cluster before exercising the final record-media contract.
  *
  * Hosted Supabase Storage HTTP is intentionally out of scope. The storage
@@ -20,10 +20,10 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const MIGRATIONS = join(ROOT, 'supabase/migrations');
 const migrationFiles = readdirSync(MIGRATIONS)
   .filter((file) => /^\d{3}_.+[.]sql$/.test(file))
-  .filter((file) => Number(file.slice(0, 3)) <= 84)
+  .filter((file) => Number(file.slice(0, 3)) <= 85)
   .sort((left, right) => left.localeCompare(right, 'en'));
 
-const expectedLastMigration = '084_record_media_object_lifecycle.sql';
+const expectedLastMigration = '085_harden_record_media_cleanup.sql';
 if (migrationFiles.at(-1) !== expectedLastMigration) {
   console.error(`MISSING VERIFICATION: canonical chain does not end at ${expectedLastMigration}.`);
   process.exit(2);
@@ -188,7 +188,7 @@ INSERT INTO public.couple_members(couple_id, user_id, role, status) VALUES
   ('${COUPLE}', '${USER_B}', 'soldier', 'active');
 INSERT INTO public.daily_records(id, user_id, couple_id, record_date, log_text, is_private)
 VALUES ('${RECORD}', '${USER_A}', '${COUPLE}', CURRENT_DATE, 'legacy chain fixture', false);
-`, 'seed 001..084 compatibility actor');
+`, 'seed 001..085 compatibility actor');
 
 const serviceVersion = mustRun(`
 BEGIN;
@@ -196,8 +196,8 @@ SET LOCAL ROLE service_role;
 SELECT set_config('request.jwt.claim.role', 'service_role', true);
 SELECT public.record_media_cleanup_contract_version()::text;
 COMMIT;
-`, 'probe 084 contract as service role').split('\n').at(-1);
-expectEqual(serviceVersion, '2', '001..084 service contract version');
+`, 'probe 085 contract as service role').split('\n').at(-1);
+expectEqual(serviceVersion, '2', '001..085 service contract version');
 
 const beginState = mustRun(`
 BEGIN;
@@ -209,8 +209,8 @@ SELECT public.begin_record_media_mutation(
   ARRAY[]::TEXT[], ARRAY[]::UUID[]
 ) ->> 'state';
 COMMIT;
-`, 'begin 084 mutation on the real chain').split('\n').at(-1);
-expectEqual(beginState, 'pending', '001..084 owner begin');
+`, 'begin 085 mutation on the real chain').split('\n').at(-1);
+expectEqual(beginState, 'pending', '001..085 owner begin');
 
 const committedShape = mustRun(`
 BEGIN;
@@ -222,20 +222,41 @@ SET log_text = 'ordinary v1 edit', last_media_operation_id = '${OPERATION}'
 WHERE id = '${RECORD}'
 RETURNING content_revision::text || '|' || media_contract_version::text || '|' || media_manifest_revision::text;
 COMMIT;
-`, 'commit 084 mutation after actual E2EE revision trigger').split('\n').at(-1);
-expectEqual(committedShape, '2|1|2', '001..084 E2EE-before-media trigger compatibility');
+`, 'commit 085 mutation after actual E2EE revision trigger').split('\n').at(-1);
+expectEqual(committedShape, '2|1|2', '001..085 E2EE-before-media trigger compatibility');
 
 const catalogShape = mustRun(`
 SELECT concat_ws('|',
   (to_regclass('public.record_media_mutations') IS NOT NULL)::text,
   (to_regclass('public.record_media_objects') IS NOT NULL)::text,
   (to_regprocedure('public.record_media_cleanup_contract_version()') IS NOT NULL)::text,
+  (to_regprocedure('public.enforce_daily_record_identity_immutable()') IS NOT NULL)::text,
+  (EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = 'public.daily_records'::regclass
+      AND tgname = 'aab_085_daily_record_identity_immutable'
+      AND NOT tgisinternal
+  ))::text,
   (SELECT count(*) FROM information_schema.columns
    WHERE table_schema = 'public' AND table_name = 'daily_records'
      AND column_name IN ('media_contract_version', 'media_manifest_revision', 'last_media_operation_id'))::text
 );
-`, 'read final 084 catalog shape');
-expectEqual(catalogShape, 'true|true|true|3', '001..084 final catalog shape');
+`, 'read final 085 catalog shape');
+expectEqual(catalogShape, 'true|true|true|true|true|3', '001..085 final catalog shape');
+
+const identityRewrite = psqlScript(`
+UPDATE public.daily_records
+SET id = '84000000-0000-4000-8000-000000000099'
+WHERE id = '${RECORD}';
+`);
+if (
+  identityRewrite.status === 0 ||
+  !/daily_record_identity_immutable/i.test(`${identityRewrite.stderr}\n${identityRewrite.stdout}`)
+) {
+  throw new Error(
+    `001..085 identity gate failed for the wrong reason:\n${identityRewrite.stderr || identityRewrite.stdout}`,
+  );
+}
 
 const oldWriter = psqlScript(`
 BEGIN;
@@ -246,9 +267,9 @@ UPDATE public.daily_records SET log_text = 'stale old client' WHERE id = '${RECO
 COMMIT;
 `);
 if (oldWriter.status === 0 || !/media_operation_required/i.test(`${oldWriter.stderr}\n${oldWriter.stdout}`)) {
-  throw new Error(`001..084 old-writer gate failed for the wrong reason:\n${oldWriter.stderr || oldWriter.stdout}`);
+  throw new Error(`001..085 old-writer gate failed for the wrong reason:\n${oldWriter.stderr || oldWriter.stdout}`);
 }
 
 console.log(
-  `PASS — record/media real migration-chain compatibility: ${migrationFiles.length} migrations (001..084), 5 assertions`,
+  `PASS — record/media real migration-chain compatibility: ${migrationFiles.length} migrations (001..085), 6 assertions`,
 );

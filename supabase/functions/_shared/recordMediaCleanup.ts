@@ -53,7 +53,7 @@ export type RecordMediaCleanupDeps = {
     leaseId: string,
     errorCode: string,
   ) => Promise<'pending' | 'blocked' | null>;
-  object?: {
+  object: {
     claim: (
       leaseId: string,
       leaseSeconds: number,
@@ -294,8 +294,7 @@ async function settleObjectComplete(
   job: RecordMediaObjectCleanupJob,
   deletedObjects: number,
 ): Promise<RecordMediaCleanupResult> {
-  if (!deps.object) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
-  const completed = await replayBooleanSettlement(() => deps.object!.settle(job));
+  const completed = await replayBooleanSettlement(() => deps.object.settle(job));
   if (!completed) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
   return { outcome: 'completed', deletedObjects };
 }
@@ -305,7 +304,6 @@ async function settleObjectFailure(
   job: RecordMediaObjectCleanupJob,
   errorCode: string,
 ): Promise<RecordMediaCleanupResult> {
-  if (!deps.object) throw new Error('E_CLEANUP_SETTLEMENT_FAILED');
   let state: 'pending' | 'blocked' | null;
   try {
     state = await deps.object.fail(job, errorCode);
@@ -325,8 +323,6 @@ async function runObjectCleanup(
   deps: RecordMediaCleanupDeps,
   leaseId: string,
 ): Promise<RecordMediaCleanupResult> {
-  if (!deps.object) return { outcome: 'idle', deletedObjects: 0 };
-
   let job: RecordMediaObjectCleanupJob | null;
   try {
     job = await deps.object.claim(leaseId, RECORD_MEDIA_CLEANUP_LEASE_SECONDS);
@@ -358,19 +354,17 @@ async function runObjectCleanup(
   return settleObjectComplete(deps, job, 1);
 }
 
-export async function runRecordMediaCleanup(
+async function runPrefixCleanup(
   deps: RecordMediaCleanupDeps,
+  leaseId: string,
 ): Promise<RecordMediaCleanupResult> {
-  const leaseId = deps.createLeaseId();
-  if (!isUuid(leaseId)) throw new Error('E_CLEANUP_LEASE_INVALID');
-
   let job: RecordMediaCleanupJob | null;
   try {
     job = await deps.claim(leaseId, RECORD_MEDIA_CLEANUP_LEASE_SECONDS);
   } catch {
     throw new Error('E_CLEANUP_CLAIM_FAILED');
   }
-  if (job === null) return runObjectCleanup(deps, leaseId);
+  if (job === null) return { outcome: 'idle', deletedObjects: 0 };
   if (
     !isUuid(job.recordId) || !isUuid(job.coupleId) || !isUuid(job.leaseId) ||
     job.leaseId !== leaseId
@@ -403,4 +397,56 @@ export async function runRecordMediaCleanup(
     if (!(error instanceof CleanupStorageError)) throw error;
     return settleFailure(deps, job, storageErrorCode(error), deletedObjects);
   }
+}
+
+const CLEANUP_OUTCOME_PRIORITY: Record<RecordMediaCleanupResult['outcome'], number> = {
+  idle: 0,
+  completed: 1,
+  deferred: 2,
+  retry_scheduled: 3,
+  blocked: 4,
+};
+
+function combineLaneResults(
+  prefix: RecordMediaCleanupResult,
+  object: RecordMediaCleanupResult,
+): RecordMediaCleanupResult {
+  const outcome = CLEANUP_OUTCOME_PRIORITY[prefix.outcome]
+      >= CLEANUP_OUTCOME_PRIORITY[object.outcome]
+    ? prefix.outcome
+    : object.outcome;
+  return {
+    outcome,
+    deletedObjects: prefix.deletedObjects + object.deletedObjects,
+  };
+}
+
+export async function runRecordMediaCleanup(
+  deps: RecordMediaCleanupDeps,
+): Promise<RecordMediaCleanupResult> {
+  const leaseId = deps.createLeaseId();
+  if (!isUuid(leaseId)) throw new Error('E_CLEANUP_LEASE_INVALID');
+
+  let prefixResult: RecordMediaCleanupResult | null = null;
+  let objectResult: RecordMediaCleanupResult | null = null;
+  let laneFailed = false;
+
+  try {
+    prefixResult = await runPrefixCleanup(deps, leaseId);
+  } catch {
+    laneFailed = true;
+  }
+
+  // The object claim also advances one stale mutation expiry in PostgreSQL.
+  // It must run on every invocation, even when prefix work exists or fails.
+  try {
+    objectResult = await runObjectCleanup(deps, leaseId);
+  } catch {
+    laneFailed = true;
+  }
+
+  if (laneFailed || prefixResult === null || objectResult === null) {
+    throw new Error('E_CLEANUP_LANE_FAILED');
+  }
+  return combineLaneResults(prefixResult, objectResult);
 }

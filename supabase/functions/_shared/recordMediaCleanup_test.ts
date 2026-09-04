@@ -6,6 +6,7 @@ import {
   MAX_OBJECTS_PER_INVOCATION,
   type RecordMediaCleanupDeps,
   type RecordMediaCleanupJob,
+  type RecordMediaObjectCleanupJob,
   runRecordMediaCleanup,
 } from './recordMediaCleanup.ts';
 
@@ -13,9 +14,21 @@ const COUPLE_ID = '10000000-0000-4000-8000-000000000001';
 const RECORD_ID = '20000000-0000-4000-8000-000000000001';
 const LEASE_ID = '30000000-0000-4000-8000-000000000001';
 const ROOT = `${COUPLE_ID}/${RECORD_ID}`;
+const OBJECT_RECORD_ID = '20000000-0000-4000-8000-000000000002';
+const MEDIA_OBJECT_ID = '40000000-0000-4000-8000-000000000001';
+const STORAGE_OBJECT_ID = '50000000-0000-4000-8000-000000000001';
+const OBJECT_PATH = `${COUPLE_ID}/${OBJECT_RECORD_ID}/${MEDIA_OBJECT_ID}.jpg`;
 
 const JOB: RecordMediaCleanupJob = {
   recordId: RECORD_ID,
+  coupleId: COUPLE_ID,
+  leaseId: LEASE_ID,
+};
+
+const OBJECT_JOB: RecordMediaObjectCleanupJob = {
+  mediaObjectId: MEDIA_OBJECT_ID,
+  storageObjectId: STORAGE_OBJECT_ID,
+  recordId: OBJECT_RECORD_ID,
   coupleId: COUPLE_ID,
   leaseId: LEASE_ID,
 };
@@ -72,12 +85,47 @@ function createFixture(initialObjects: string[] = []) {
       failed.push([recordId, leaseId, errorCode]);
       return 'pending';
     },
+    object: {
+      claim: async () => null,
+      resolvePath: async () => null,
+      settle: async () => true,
+      fail: async () => 'pending',
+    },
   };
   return { objects, listed, removed, completed, deferred, failed, value };
 }
 
 function flattenRemoved(fixture: Fixture): string[] {
   return fixture.removed.flat();
+}
+
+function installObjectLane(
+  fixture: Fixture,
+  options: {
+    path?: string | null;
+    failureState?: 'pending' | 'blocked';
+  } = {},
+) {
+  const calls: string[] = [];
+  fixture.value.object = {
+    claim: async () => {
+      calls.push('claim');
+      return OBJECT_JOB;
+    },
+    resolvePath: async () => {
+      calls.push('resolve');
+      return options.path === undefined ? OBJECT_PATH : options.path;
+    },
+    settle: async () => {
+      calls.push('settle');
+      return true;
+    },
+    fail: async (_job, errorCode) => {
+      calls.push(`fail:${errorCode}`);
+      return options.failureState ?? 'pending';
+    },
+  };
+  return calls;
 }
 
 Deno.test('record media cleanup: an empty claim is idle and never touches Storage', async () => {
@@ -98,23 +146,7 @@ Deno.test('record media cleanup: after no prefix job it deletes one exact object
   fixture.value.claim = async () => null;
   const objectPath = `${ROOT}/legacy-photo.jpg`;
   const calls: string[] = [];
-  const objectAware = fixture.value as RecordMediaCleanupDeps & {
-    object?: {
-      claim: (leaseId: string, leaseSeconds: number) => Promise<{
-        mediaObjectId: string;
-        storageObjectId: string;
-        recordId: string;
-        coupleId: string;
-        leaseId: string;
-      } | null>;
-      resolvePath: (job: { storageObjectId: string }) => Promise<string | null>;
-      settle: (job: { storageObjectId: string }) => Promise<boolean>;
-      fail: (
-        job: { storageObjectId: string },
-        errorCode: string,
-      ) => Promise<'pending' | 'blocked' | null>;
-    };
-  };
+  const objectAware = fixture.value;
   objectAware.object = {
     claim: async (leaseId, leaseSeconds) => {
       calls.push(`claim:${leaseId}:${leaseSeconds}`);
@@ -155,6 +187,76 @@ Deno.test('record media cleanup: after no prefix job it deletes one exact object
   ]);
 });
 
+Deno.test('record media cleanup: prefix backlog still advances one exact-object job in the same invocation', async () => {
+  const prefixPath = `${ROOT}/prefix.jpg`;
+  const fixture = createFixture([prefixPath, OBJECT_PATH]);
+  const objectCalls = installObjectLane(fixture);
+
+  assert.deepEqual(await runRecordMediaCleanup(fixture.value), {
+    outcome: 'completed',
+    deletedObjects: 2,
+  });
+  assert.deepEqual(objectCalls, ['claim', 'resolve', 'settle']);
+  assert.deepEqual(new Set(flattenRemoved(fixture)), new Set([prefixPath, OBJECT_PATH]));
+});
+
+Deno.test('record media cleanup: a blocked object lane prevents a false completed response after prefix progress', async () => {
+  const prefixPath = `${ROOT}/prefix.jpg`;
+  const fixture = createFixture([prefixPath]);
+  const objectCalls = installObjectLane(fixture, {
+    path: `${COUPLE_ID}/${OBJECT_RECORD_ID}/../sibling.jpg`,
+    failureState: 'blocked',
+  });
+
+  assert.deepEqual(await runRecordMediaCleanup(fixture.value), {
+    outcome: 'blocked',
+    deletedObjects: 1,
+  });
+  assert.deepEqual(objectCalls, ['claim', 'resolve', 'fail:E_STORAGE_PATH_INVALID']);
+  assert.deepEqual(fixture.completed, [[RECORD_ID, LEASE_ID]]);
+});
+
+Deno.test('record media cleanup: a prefix-lane exception does not starve object claim and is not swallowed', async () => {
+  const fixture = createFixture();
+  let objectClaims = 0;
+  fixture.value.claim = async () => {
+    throw new Error('prefix backend unavailable');
+  };
+  fixture.value.object = {
+    claim: async () => {
+      objectClaims += 1;
+      return null;
+    },
+    resolvePath: async () => null,
+    settle: async () => true,
+    fail: async () => 'pending',
+  };
+
+  await assert.rejects(
+    () => runRecordMediaCleanup(fixture.value),
+    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_LANE_FAILED',
+  );
+  assert.equal(objectClaims, 1);
+});
+
+Deno.test('record media cleanup: an object-lane exception cannot be reported as prefix success', async () => {
+  const fixture = createFixture();
+  fixture.value.object = {
+    claim: async () => {
+      throw new Error('object backend unavailable');
+    },
+    resolvePath: async () => null,
+    settle: async () => true,
+    fail: async () => 'pending',
+  };
+
+  await assert.rejects(
+    () => runRecordMediaCleanup(fixture.value),
+    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_LANE_FAILED',
+  );
+  assert.deepEqual(fixture.completed, [[RECORD_ID, LEASE_ID]]);
+});
+
 Deno.test('record media cleanup: recursively drains only the exact UUID prefix and completes after a fresh empty scan', async () => {
   const paths = [
     `${ROOT}/root.jpg`,
@@ -181,7 +283,7 @@ Deno.test('record media cleanup: rejects untrusted job identifiers before listin
 
   await assert.rejects(
     () => runRecordMediaCleanup(fixture.value),
-    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_JOB_INVALID',
+    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_LANE_FAILED',
   );
   assert.deepEqual(fixture.listed, []);
   assert.deepEqual(fixture.failed, []);

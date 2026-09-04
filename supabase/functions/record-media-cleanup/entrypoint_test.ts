@@ -142,7 +142,7 @@ Deno.test({
       );
       assert(
         stub.seen[1].path.endsWith('/rest/v1/rpc/claim_record_media_object_cleanup_job'),
-        'the second backend call may claim one exact object only after an empty prefix queue',
+        'the second backend call advances one exact object lane on every invocation',
       );
       assertEquals(stub.seen[0].apikey, VALID_ADMIN_KEY, 'opaque key must be sent as apikey');
       assertEquals(stub.seen[0].authorization, null, 'opaque admin key must not be sent as bearer');

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * PostgreSQL actor/race harness for migrations 083 and 084.
+ * PostgreSQL actor/race harness for migrations 083 through 085.
  *
  * This runs the migration against a minimal current-schema fixture and proves
  * behavior with real roles, RLS, triggers, transactions, record-scoped
@@ -18,6 +18,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const MIGRATION_028 = join(ROOT, 'supabase/migrations/028_restore_couple_media_authorization.sql');
 const MIGRATION_083 = join(ROOT, 'supabase/migrations/083_record_media_cleanup_jobs.sql');
 const MIGRATION_084 = join(ROOT, 'supabase/migrations/084_record_media_object_lifecycle.sql');
+const MIGRATION_085 = join(ROOT, 'supabase/migrations/085_harden_record_media_cleanup.sql');
 const DB = 'record_media_cleanup_harness';
 // PostgreSQL's Unix socket path is capped at roughly 100 bytes. macOS tmpdir()
 // is already deeply nested, so keep this harness-owned path deliberately short.
@@ -44,11 +45,14 @@ const IDS = {
   coupleCascadeUser: '10000000-0000-4000-8000-000000000006',
   accountUser: '10000000-0000-4000-8000-000000000007',
   lifecycleAccountUser: '10000000-0000-4000-8000-000000000008',
+  fenceUser: '10000000-0000-4000-8000-000000000009',
   couple: '20000000-0000-4000-8000-000000000001',
   cascadeCouple: '20000000-0000-4000-8000-000000000002',
   coupleCascade: '20000000-0000-4000-8000-000000000003',
   accountCouple: '20000000-0000-4000-8000-000000000004',
   lifecycleAccountCouple: '20000000-0000-4000-8000-000000000005',
+  fenceCouple: '20000000-0000-4000-8000-000000000006',
+  foreignFenceCouple: '20000000-0000-4000-8000-000000000007',
   ownerRecord: '30000000-0000-4000-8000-000000000001',
   partnerTarget: '30000000-0000-4000-8000-000000000002',
   raceRecord: '30000000-0000-4000-8000-000000000003',
@@ -67,7 +71,14 @@ const IDS = {
   lifecycleAccountRecord: '30000000-0000-4000-8000-000000000016',
   scopeHoldRecord: '30000000-0000-4000-8000-000000000017',
   scopeOtherRecord: '30000000-0000-4000-8000-000000000018',
+  identityV0Record: '30000000-0000-4000-8000-000000000019',
+  identityV0Replacement: '30000000-0000-4000-8000-000000000020',
+  identityV1Record: '30000000-0000-4000-8000-000000000021',
+  identityV1Replacement: '30000000-0000-4000-8000-000000000022',
+  fenceRecord: '30000000-0000-4000-8000-000000000023',
+  foreignFenceRecord: '30000000-0000-4000-8000-000000000024',
   attempt: '40000000-0000-4000-8000-000000000001',
+  fenceAttempt: '40000000-0000-4000-8000-000000000002',
 };
 
 let serverStarted = false;
@@ -486,6 +497,7 @@ expectOk(psql(['-q', '-c', fixture]), 'create PostgreSQL fixture');
 expectOk(psql(['-q', '-f', MIGRATION_028]), 'apply migration 028');
 expectOk(psql(['-q', '-f', MIGRATION_083]), 'apply migration 083');
 expectOk(psql(['-q', '-f', MIGRATION_084]), 'apply migration 084');
+expectOk(psql(['-q', '-f', MIGRATION_085]), 'apply migration 085');
 expectOk(psql(['-q', '-c', `
 CREATE FUNCTION public.fixture_log_cleanup_job() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -502,23 +514,30 @@ CREATE TRIGGER fixture_log_cleanup_job
 const insertFixtures = `
 INSERT INTO auth.users(id) VALUES
   ('${IDS.owner}'), ('${IDS.partner}'), ('${IDS.unrelated}'), ('${IDS.former}'),
-  ('${IDS.cascadeUser}'), ('${IDS.coupleCascadeUser}'), ('${IDS.accountUser}');
+  ('${IDS.cascadeUser}'), ('${IDS.coupleCascadeUser}'), ('${IDS.accountUser}'),
+  ('${IDS.fenceUser}');
 INSERT INTO public.couples(id) VALUES
-  ('${IDS.couple}'), ('${IDS.cascadeCouple}'), ('${IDS.coupleCascade}'), ('${IDS.accountCouple}');
+  ('${IDS.couple}'), ('${IDS.cascadeCouple}'), ('${IDS.coupleCascade}'), ('${IDS.accountCouple}'),
+  ('${IDS.fenceCouple}'), ('${IDS.foreignFenceCouple}');
 INSERT INTO public.couple_members(couple_id, user_id, status) VALUES
   ('${IDS.couple}', '${IDS.owner}', 'active'),
   ('${IDS.couple}', '${IDS.partner}', 'active'),
   ('${IDS.couple}', '${IDS.former}', 'disconnected'),
   ('${IDS.cascadeCouple}', '${IDS.cascadeUser}', 'active'),
   ('${IDS.coupleCascade}', '${IDS.coupleCascadeUser}', 'active'),
-  ('${IDS.accountCouple}', '${IDS.accountUser}', 'active');
+  ('${IDS.accountCouple}', '${IDS.accountUser}', 'active'),
+  ('${IDS.fenceCouple}', '${IDS.fenceUser}', 'active');
 INSERT INTO public.daily_records(id, user_id, couple_id, is_private) VALUES
   ('${IDS.ownerRecord}', '${IDS.owner}', '${IDS.couple}', false),
   ('${IDS.partnerTarget}', '${IDS.owner}', '${IDS.couple}', true),
   ('${IDS.cascadeRecord}', '${IDS.cascadeUser}', '${IDS.cascadeCouple}', false),
   ('${IDS.coupleCascadeRecord}', '${IDS.coupleCascadeUser}', '${IDS.coupleCascade}', false),
   ('${IDS.accountRecord}', '${IDS.accountUser}', '${IDS.accountCouple}', false),
-  ('${IDS.siblingRecord}', '${IDS.partner}', '${IDS.couple}', false);
+  ('${IDS.siblingRecord}', '${IDS.partner}', '${IDS.couple}', false),
+  ('${IDS.identityV0Record}', '${IDS.owner}', '${IDS.couple}', false),
+  ('${IDS.identityV1Record}', '${IDS.owner}', '${IDS.couple}', true),
+  ('${IDS.fenceRecord}', '${IDS.fenceUser}', '${IDS.fenceCouple}', false),
+  ('${IDS.foreignFenceRecord}', '${IDS.unrelated}', '${IDS.foreignFenceCouple}', false);
 INSERT INTO public.push_delivery_state(user_id, has_unseen) VALUES ('${IDS.partner}', true);
 INSERT INTO public.couple_highlights(id) VALUES ('50000000-0000-4000-8000-000000000001');
 INSERT INTO public.couple_highlight_items(highlight_id, record_id)
@@ -526,6 +545,151 @@ VALUES ('50000000-0000-4000-8000-000000000001', '${IDS.ownerRecord}');
 TRUNCATE public.trigger_audit;
 `;
 expectOk(psql(['-q', '-c', insertFixtures]), 'insert actor fixtures');
+
+const IDENTITY = {
+  adoptOperation: '43000000-0000-4000-8000-000000000001',
+  removeOperation: '43000000-0000-4000-8000-000000000002',
+  mediaObject: '72000000-0000-4000-8000-000000000001',
+  fenceMediaObject: '72000000-0000-4000-8000-000000000002',
+  foreignMediaObject: '72000000-0000-4000-8000-000000000003',
+};
+
+expectOk(
+  asActor('authenticated', IDS.owner, `UPDATE public.daily_records
+    SET is_private = true WHERE id = '${IDS.identityV0Record}'`),
+  'ordinary v0 content update',
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|', id, user_id, couple_id, is_private::text)
+    FROM public.daily_records WHERE id = '${IDS.identityV0Record}'`), 'read ordinary v0 update'),
+  `${IDS.identityV0Record}|${IDS.owner}|${IDS.couple}|true`,
+  'v0 content updates must remain available without changing routing identity',
+);
+for (const [assignment, label] of [
+  [`id = '${IDS.identityV0Replacement}'`, 'v0 record id'],
+  [`couple_id = '${IDS.cascadeCouple}'`, 'v0 couple id'],
+]) {
+  expectFail(
+    asActor('authenticated', IDS.owner, `UPDATE public.daily_records SET ${assignment}
+      WHERE id = '${IDS.identityV0Record}'`),
+    `${label} mutation`,
+    /daily_record_identity_immutable/i,
+  );
+}
+expectFail(
+  sql(`UPDATE public.daily_records SET user_id = '${IDS.unrelated}'
+    WHERE id = '${IDS.identityV0Record}'`),
+  'v0 owner id mutation through privileged path',
+  /daily_record_identity_immutable/i,
+);
+
+const identityV1Path = `${IDS.couple}/${IDS.identityV1Record}/${IDENTITY.mediaObject}.jpg`;
+expectOk(asActor('authenticated', IDS.owner, `INSERT INTO storage.objects(bucket_id, name)
+  VALUES ('couple-media', '${identityV1Path}')`), 'insert identity v1 legacy object');
+expectOk(asActor('authenticated', IDS.owner, beginMutationSql({
+  operationId: IDENTITY.adoptOperation,
+  recordId: IDS.identityV1Record,
+  userId: IDS.owner,
+  coupleId: IDS.couple,
+  baseRevision: 1,
+  paths: [identityV1Path],
+})), 'begin identity v1 adoption');
+expectOk(asActor('authenticated', IDS.owner, `UPDATE public.daily_records
+  SET content_revision = 2, last_media_operation_id = '${IDENTITY.adoptOperation}'
+  WHERE id = '${IDS.identityV1Record}'`), 'commit identity v1 adoption');
+expectOk(asActor('authenticated', IDS.owner, beginMutationSql({
+  operationId: IDENTITY.removeOperation,
+  recordId: IDS.identityV1Record,
+  userId: IDS.owner,
+  coupleId: IDS.couple,
+  baseRevision: 2,
+})), 'begin valid identity-change media operation');
+expectFail(
+  sql(`UPDATE public.daily_records SET
+    id = '${IDS.identityV1Replacement}',
+    user_id = '${IDS.unrelated}',
+    couple_id = '${IDS.cascadeCouple}',
+    content_revision = 3,
+    last_media_operation_id = '${IDENTITY.removeOperation}'
+    WHERE id = '${IDS.identityV1Record}'`),
+  'v1 identity mutation with valid media operation',
+  /daily_record_identity_immutable/i,
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT count(*) FROM public.daily_records WHERE id = '${IDS.identityV1Record}'
+      AND user_id = '${IDS.owner}' AND couple_id = '${IDS.couple}'),
+    (SELECT count(*) FROM public.daily_records WHERE id = '${IDS.identityV1Replacement}'),
+    (SELECT state FROM public.record_media_mutations
+      WHERE operation_id = '${IDENTITY.removeOperation}'),
+    (SELECT state FROM public.record_media_objects
+      WHERE media_object_id = '${IDENTITY.mediaObject}'))`), 'read identity-change rollback state'),
+  '1|0|pending|active',
+  'failed v1 identity change must roll back record, operation and object transitions',
+);
+
+expectOk(sql(`
+INSERT INTO public.account_deletion_requests(user_id, attempt_id, phase)
+VALUES ('${IDS.fenceUser}', '${IDS.fenceAttempt}', 'relational_prepared');
+DELETE FROM public.daily_records WHERE id = '${IDS.fenceRecord}';
+UPDATE public.record_media_cleanup_jobs
+SET state = 'completed', completed_at = clock_timestamp(), updated_at = clock_timestamp()
+WHERE record_id = '${IDS.fenceRecord}';
+WITH object AS (
+  INSERT INTO storage.objects(bucket_id, name)
+  VALUES ('couple-media', '${IDS.fenceCouple}/${IDS.fenceRecord}/${IDENTITY.fenceMediaObject}.jpg')
+  RETURNING id
+)
+INSERT INTO public.record_media_objects(
+  media_object_id, storage_object_id, record_id, couple_id, owner_user_id, state
+)
+SELECT '${IDENTITY.fenceMediaObject}', object.id, '${IDS.fenceRecord}', '${IDS.fenceCouple}',
+       '${IDS.unrelated}', 'active'
+FROM object;
+`), 'insert wrong-owner object in deleting owner namespace');
+for (const state of ['active', 'reserved', 'superseded']) {
+  expectOk(sql(`UPDATE public.record_media_objects SET state = '${state}'
+    WHERE media_object_id = '${IDENTITY.fenceMediaObject}'`), `set defensive fence ${state} state`);
+  const output = expectFail(
+    asActor('service_role', null, `SELECT public.close_account_relationship_generations_v2(
+      '${IDS.fenceUser}', '${IDS.fenceAttempt}')`),
+    `account close with ${state} object in owned namespace`,
+    /record_media_cleanup_pending/i,
+  );
+  if (output.includes(IDENTITY.fenceMediaObject) || output.includes(IDS.unrelated)) {
+    throw new Error(`account cleanup fence exposed foreign object identity for ${state}`);
+  }
+  checks += 1;
+}
+expectFail(
+  asActor('authenticated', IDS.fenceUser, `SELECT public.assert_account_record_media_cleanup_complete(
+    '${IDS.fenceUser}', '${IDS.fenceAttempt}')`),
+  'authenticated caller probing account cleanup object existence',
+  /permission denied/i,
+);
+expectOk(sql(`
+UPDATE public.record_media_objects
+SET state = 'deleted', deleted_at = clock_timestamp()
+WHERE media_object_id = '${IDENTITY.fenceMediaObject}';
+INSERT INTO public.record_media_objects(
+  media_object_id, record_id, couple_id, owner_user_id, state
+) VALUES (
+  '${IDENTITY.foreignMediaObject}', '${IDS.foreignFenceRecord}', '${IDS.foreignFenceCouple}',
+  '${IDS.unrelated}', 'active'
+);
+`), 'retire target object and retain unrelated live object');
+expectOk(
+  asActor('service_role', null, `SELECT public.close_account_relationship_generations_v2(
+    '${IDS.fenceUser}', '${IDS.fenceAttempt}')`),
+  'account close with only an unrelated namespace object',
+);
+expectEqual(
+  expectOk(sql(`SELECT (closed_at IS NOT NULL)::text FROM public.couples
+    WHERE id = '${IDS.fenceCouple}'`), 'read defensive fence relationship close'),
+  'true',
+  'unrelated namespaces must not block or disclose their object existence',
+);
+expectOk(sql('TRUNCATE public.trigger_audit'), 'clear identity test trigger audit');
 
 expectEqual(
   expectOk(sql("SELECT relrowsecurity::text FROM pg_class WHERE oid = 'public.record_media_cleanup_jobs'::regclass"), 'read job RLS'),
@@ -1273,6 +1437,40 @@ expectFail(
     VALUES ('couple-media', '${lifecycleLegacyPath}')`),
   'upload under retired record prefix',
   /record_id_retired_for_media_cleanup/i,
+);
+const lifecyclePrefixLease = '62000000-0000-4000-8000-000000000099';
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT record_id::text
+    FROM public.claim_record_media_cleanup_job('${lifecyclePrefixLease}', 120)`), 'claim lifecycle prefix cleanup').split('\n').at(-1),
+  IDS.lifecycleRecord,
+  'prefix cleanup must claim the retired lifecycle namespace',
+);
+expectOk(
+  asActor('service_role', null, `DELETE FROM storage.objects
+    WHERE name = '${lifecycleLegacyPath}'`),
+  'delete final lifecycle prefix object',
+);
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${IDS.lifecycleRecord}', '${lifecyclePrefixLease}')::text`), 'settle lifecycle prefix cleanup').split('\n').at(-1),
+  'true',
+  'fresh-empty prefix settlement must complete',
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT state FROM public.record_media_cleanup_jobs WHERE record_id = '${IDS.lifecycleRecord}'),
+    (SELECT string_agg(state, ',' ORDER BY media_object_id)
+      FROM public.record_media_objects WHERE record_id = '${IDS.lifecycleRecord}'),
+    (SELECT count(*) FROM storage.objects
+      WHERE name LIKE '${IDS.couple}/${IDS.lifecycleRecord}/%'))`), 'read prefix settlement ledger state'),
+  'completed|deleted,deleted|0',
+  'prefix settlement must retire every non-deleted ledger object in the exact empty namespace',
+);
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${IDS.lifecycleRecord}', '${lifecyclePrefixLease}')::text`), 'replay lifecycle prefix settlement').split('\n').at(-1),
+  'true',
+  'prefix object retirement must remain idempotent after response loss',
 );
 
 // An actively leased exact-object job wins over record deletion; once expired,

@@ -1183,3 +1183,33 @@ supabase functions deploy delete-account
   authenticated 직접 DELETE나 v1 이전 writer를 복원하지 않습니다.
 - **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
   Supabase, Vercel, App Store에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.
+
+## 085 — 기록 identity 불변성과 cleanup 공정성 보강 (2026-09-05)
+
+- `085_harden_record_media_cleanup.sql`은 기존 001–084를 수정하지 않는 forward-only
+  migration입니다. `daily_records.id`, `user_id`, `couple_id`를 v0/v1 모두에서 UPDATE로
+  바꿀 수 없게 하되 본문·공개 범위·media manifest 같은 정상 UPDATE는 그대로 허용합니다.
+  identity trigger는 media mutation commit trigger보다 먼저 실행되므로 유효 operation ID를
+  붙인 잘못된 identity 변경도 record·operation·object 상태를 한 transaction에서 롤백합니다.
+- account deletion fence는 대상 사용자의 현재 record뿐 아니라 cleanup job, mutation,
+  object ledger에 남은 과거 소유 증거로 exact record/couple namespace를 귀속합니다. 그
+  namespace에 `deleted`가 아닌 객체가 하나라도 있으면 active/reserved/superseded를 포함해
+  일반화된 `record_media_cleanup_pending`으로 중단하며 object ID·경로·다른 owner 존재는
+  응답에 노출하지 않습니다. fresh-empty prefix 완료는 같은 namespace의 ledger 객체도
+  `deleted`로 수렴시켜 barrier가 사실과 일치하게 종료되도록 합니다.
+- cleanup Edge worker는 한 invocation에서 prefix lane과 exact-object lane을 각각 한 번씩
+  bounded하게 진행합니다. object claim에 결합된 stale mutation expiry도 prefix backlog나
+  prefix 오류와 무관하게 매번 실행됩니다. 어느 lane이든 실패하면 다른 lane의 기회는
+  보존하지만 전체 API 호출은 실패하므로 부분 성공을 완료로 오보하지 않습니다.
+- 로컬 검증은 실제 PostgreSQL actor/transaction harness, 001..085 fresh migration chain,
+  공유 worker·실제 Edge entrypoint Deno 테스트와 migration source contract에서 수행합니다.
+  Hosted Storage HTTP, PostgREST schema reload, scheduler 동작은 staging canary 전까지
+  `UNVERIFIED`입니다.
+- 안전한 rollout은 **새 dual-lane worker를 inert 상태로 준비 → 083/084/085 순서 적용 및
+  catalog/contract-v2 probe → 호환 delete-account artifact 배포 → hosted prefix/object 및
+  stale-expiry canary → scheduler 시작** 순서입니다. rollback은 scheduler와 영향 artifact를
+  멈추고 더 큰 번호의 forward fix를 내며 identity 불변성, deletion fence, 직접 DELETE
+  회수를 약화하지 않습니다.
+- 다음 사용 가능한 migration 번호는 **086**입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.

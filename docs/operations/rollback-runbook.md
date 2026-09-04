@@ -92,29 +92,35 @@ active membership, RLS, grant, schema cache를 각각 확인한다. 원인이 �
 3. authenticated의 직접 Storage DELETE grant/policy를 복원하지 않는다. 구버전 앱이
    blob 삭제 전에 실패하는 것이 데이터 보존을 위한 의도된 호환 동작이다.
 4. tombstone trigger, no-FK 보존, exact-prefix/exact-object service lease, v1 record revision
-   CAS, 논리 삭제 즉시 read 차단, account relationship-close barrier는 유지한다. worker가
+   CAS, `daily_records` identity 불변성, 논리 삭제 즉시 read 차단, 모든 non-deleted
+   owned-namespace 객체를 포함하는 account relationship-close barrier는 유지한다. worker가
    멈춘 동안 계정 삭제가 Auth 단계 전에 대기하는 것은 안전한 실패이며, 이를 우회해
    relationship이나 Auth 사용자를 직접 삭제하지 않는다.
 5. 원인을 수정한 이전과 호환되는 Edge artifact 또는 더 큰 번호의 forward migration을
    staging에 적용하고, owner/partner/unrelated/anon, service-role lease, response-loss,
-   upload/delete race를 다시 확인한 뒤 scheduler를 재개한다.
+   upload/delete race, prefix backlog 중 exact-object 진행과 stale mutation expiry를 다시
+   확인한 뒤 scheduler를 재개한다. 어느 lane의 실패도 성공 응답으로 바꾸지 않는다.
 
 이미 발급된 signed URL은 논리 삭제 시 즉시 회수되지 않고 자체 만료 시점까지 유효할 수
 있다. 이 한계를 cleanup 완료로 오보하지 않으며, URL을 로그·지원 티켓에 수집하지 않는다.
 
-083/084 rollout 순서는 다음과 같이 고정한다.
+083/084/085 rollout 순서는 다음과 같이 고정한다.
 
-1. 새 `record-media-cleanup` artifact를 준비하되 scheduler는 호출하지 않는 inert 상태로 둔다.
-2. 083과 084를 순서대로 적용한 뒤 private catalog, grant/policy/trigger, PostgREST reload,
-   service-role-only `record_media_cleanup_contract_version() = 2`를 확인한다.
+1. prefix와 exact-object lane을 모두 매 invocation 진행하는 새 `record-media-cleanup`
+   artifact를 준비하되 scheduler는 호출하지 않는 inert 상태로 둔다.
+2. 083, 084, 085를 순서대로 적용한 뒤 private catalog, grant/policy/trigger, identity
+   immutability, PostgREST reload, service-role-only
+   `record_media_cleanup_contract_version() = 2`를 확인한다.
 3. 이 exact contract를 destructive phase 전에 probe하는 새 `delete-account` artifact를 배포한다.
-4. hosted Storage에서 prefix job과 exact-object job canary를 모두 확인한다.
+4. hosted Storage에서 prefix job과 exact-object job의 동시 bounded progress, prefix backlog
+   중 stale mutation expiry, fresh-empty prefix 완료 뒤 ledger settlement를 canary로 확인한다.
 5. 그 후에만 scheduler를 시작한다.
 
-이미 적용된 083/084를 되감기 위해 과거 migration을 수정하거나 lifecycle/tombstone 행을
+이미 적용된 083/084/085를 되감기 위해 과거 migration을 수정하거나 lifecycle/tombstone 행을
 drop하지 않는다. 문제가 생기면 scheduler와 영향 artifact를 멈추고 더 큰 번호의 forward
 fix를 낸다. 앱 artifact를 되돌려야 한다면 `delete_my_record` RPC와 v1 media operation 계약을
-모두 지키는 버전만 허용하며, authenticated 직접 DELETE나 v1 이전 writer를 복원하지 않는다.
+모두 지키는 버전만 허용하며, authenticated 직접 DELETE, mutable record identity, 약화된
+account deletion fence 또는 v1 이전 writer를 복원하지 않는다.
 
 ### 비대칭 연결 해제 데이터가 발견된 경우
 

@@ -8,6 +8,8 @@ import {
   clearRecoveryMarker,
   coerceWarnings,
   deletionStatusLogToken,
+  isLocalDeletionCleanupPending,
+  markLocalDeletionCleanupPending,
   markRecoveryPending,
   readRecoveryMarker,
   recoveryKeyFor,
@@ -119,6 +121,18 @@ describe('C1 - per-user recovery marker fails closed', () => {
     expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
     // Not inside STORE_KEY, and carrying no deleted-account content.
     expect(localStorage.getItem('gomsinlog.state.v2')).toBeNull();
+  });
+
+  it('distinguishes the content-free local-cleanup phase without weakening fail-closed reads', () => {
+    markLocalDeletionCleanupPending('user-a');
+
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('local_cleanup');
+    expect(readRecoveryMarker('user-a')).toBe('active');
+    expect(isLocalDeletionCleanupPending('user-a')).toBe(true);
+
+    localStorage.setItem(recoveryKeyFor('user-a'), '{"broken":');
+    expect(readRecoveryMarker('user-a')).toBe('active');
+    expect(isLocalDeletionCleanupPending('user-a')).toBe(false);
   });
 
   it('returns absent ONLY for a genuinely missing key', () => {

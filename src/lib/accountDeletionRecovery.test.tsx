@@ -295,6 +295,15 @@ describe('Deletion-Recovery Suite', () => {
     callLog.length = 0;
     localStorage.clear();
     h.outboxEntries.clear();
+    h.outboxPersistence.all.mockReset().mockImplementation(
+      async () => Array.from(h.outboxEntries.values()),
+    );
+    h.outboxPersistence.put.mockReset().mockImplementation(async (entry: QueuedRecord) => {
+      h.outboxEntries.set(entry.id, entry);
+    });
+    h.outboxPersistence.remove.mockReset().mockImplementation(async (id: string) => {
+      h.outboxEntries.delete(id);
+    });
     getUser.mockReset().mockResolvedValue(NOT_PENDING);
     deleteAccountFromDB.mockReset().mockResolvedValue(FAILED);
     fetchFullStateFromDB.mockReset().mockResolvedValue(serverState());
@@ -547,6 +556,43 @@ describe('Deletion-Recovery Suite', () => {
     await waitFor(() => {
       expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBeNull();
     });
+  });
+
+  it('keeps a deleted account in local cleanup recovery until its queued files are actually purged', async () => {
+    h.outboxEntries.set('queued-a', {
+      id: 'queued-a', userId: 'user-a', coupleId: 'couple-1', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-a'], 'private-a.jpg', { type: 'image/jpeg' })],
+    });
+    h.outboxEntries.set('queued-b', {
+      id: 'queued-b', userId: 'user-b', coupleId: 'couple-2', queuedAt: '2026-08-01T00:00:00Z',
+      attempts: 0, record: {} as never,
+      files: [new File(['private-b'], 'private-b.jpg', { type: 'image/jpeg' })],
+    });
+    h.outboxPersistence.remove.mockRejectedValueOnce(new Error('IndexedDB unavailable'));
+    deleteAccountFromDB.mockResolvedValue(DELETED);
+    renderApp();
+    await signIn();
+
+    await act(async () => { screen.getByText('delete-account').click(); });
+
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('local_cleanup');
+    expect(screen.getByTestId('recovery')).toHaveTextContent('active');
+    expect(screen.getByTestId('user')).toHaveTextContent('user-a');
+    expect(h.outboxEntries.has('queued-a')).toBe(true);
+    expect(h.outboxEntries.has('queued-b')).toBe(true);
+    expect(authRepositorySignOut).not.toHaveBeenCalled();
+
+    const remoteAttempts = deleteAccountFromDB.mock.calls.length;
+    await act(async () => { screen.getByText('retry-deletion').click(); });
+
+    expect(deleteAccountFromDB.mock.calls).toHaveLength(remoteAttempts);
+    expect(h.outboxEntries.has('queued-a')).toBe(false);
+    expect(h.outboxEntries.has('queued-b')).toBe(true);
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBeNull();
+    expect(screen.getByTestId('recovery')).toHaveTextContent('none');
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(authRepositorySignOut).toHaveBeenCalledOnce();
   });
 
   it('a safely cancelled retry clears recovery and ends the purged local session', async () => {

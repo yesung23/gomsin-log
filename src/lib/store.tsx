@@ -123,6 +123,8 @@ import {
   classifyDeletionStatus,
   clearRecoveryMarker,
   deletionStatusLogToken,
+  isLocalDeletionCleanupPending,
+  markLocalDeletionCleanupPending,
   markRecoveryPending,
   readRecoveryMarker,
   registerServerCallGate,
@@ -281,6 +283,7 @@ const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
 /** Push-token cleanup is best effort and must never hold the logout UI hostage. */
 const PUSH_TOKEN_REVOKE_TIMEOUT_MS = 2_000;
+const LOCAL_DELETION_CLEANUP_WARNING = '이 기기의 보내지 못한 기록을 아직 정리하지 못했어요.';
 
 class DevicePreferencesRepository {
   isConfigured(): boolean {
@@ -4141,6 +4144,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Finish the device-local half after the server has positively confirmed that
+   * the Auth account is gone. The durable `local_cleanup` marker is kept until
+   * every queued record/File for this account has actually been removed.
+   */
+  const finishDeletedAccountLocally = async (
+    identity: ActiveIdentity,
+    warnings: string[],
+  ): Promise<AccountDeletionOutcome> => {
+    cancelDeferredSyncRef.current?.();
+    revokeCycleSensitiveConsent(identity.userId);
+
+    if (!await purgeOutboxForAccount(identity.userId)) {
+      const nextWarnings = [...new Set([...warnings, LOCAL_DELETION_CLEANUP_WARNING])];
+      if (isCurrentIdentity(identity)) {
+        purgeLocalContentRetainingIdentity(identity);
+        setAccountDeletionRecovery({ warnings: nextWarnings });
+        applyDeletionStatus({ kind: 'pending' });
+      }
+      return { status: 'partially_deleted', dataRemoved: true, warnings: nextWarnings };
+    }
+
+    // A late account switch must never let A's deletion clear B's session.
+    if (!purgeLocalAccountData(identity)) {
+      return {
+        status: 'partially_deleted',
+        dataRemoved: true,
+        warnings: [...new Set([...warnings, LOCAL_DELETION_CLEANUP_WARNING])],
+      };
+    }
+
+    setAccountDeletionRecovery(null);
+    applyDeletionStatus({ kind: 'clear' });
+    try {
+      await authRepository.signOut();
+    } catch {
+      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared.');
+    }
+    clearRecoveryMarker(identity.userId);
+    return { status: 'deleted', dataRemoved: true, warnings };
+  };
+
+  /**
    * DELIBERATELY NOT GATED by `ensureNotPendingBeforeServerCall`.
    *
    * This and `retryAccountDeletion` / `signOut` are the paths OUT of recovery.
@@ -4150,6 +4195,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const deleteAccount = async (): Promise<AccountDeletionOutcome> => {
     const identity = captureActiveIdentity();
     if (!identity) return { status: 'failed', dataRemoved: false, warnings: [] };
+
+    // The server already deleted this account. Retrying the remote endpoint with
+    // a now-invalid token cannot help; retry only the failed device cleanup.
+    if (isLocalDeletionCleanupPending(identity.userId)) {
+      return finishDeletedAccountLocally(identity, []);
+    }
+
     const outcome = await deleteAccountFromDB();
     // Account A's completion must never clear a session that has switched to B.
     if (!isCurrentIdentity(identity)) {
@@ -4195,32 +4247,29 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setAccountDeletionRecovery({ warnings: outcome.warnings });
       applyDeletionStatus({ kind: 'pending' });
       cancelDeferredSyncRef.current?.();
-      await purgeOutboxForAccount(identity.userId);
-      return outcome;
+      const outboxPurged = await purgeOutboxForAccount(identity.userId);
+      if (outboxPurged) return outcome;
+      const nextWarnings = [
+        ...new Set([...outcome.warnings, LOCAL_DELETION_CLEANUP_WARNING]),
+      ];
+      setAccountDeletionRecovery({ warnings: nextWarnings });
+      return {
+        ...outcome,
+        warnings: nextWarnings,
+      };
     }
 
-    // `deleted`: the Auth user is gone, which is the ONLY confirmation that
-    // permits clearing the marker.
-    if (!purgeLocalAccountData(identity)) return outcome;
-    revokeCycleSensitiveConsent(identity.userId);
-    // The queue is deliberately kept across sign-out, so deletion is the one place
-    // it must be removed: this account will never sign in again, and leaving its
-    // unsent records on the device would outlive the account they belong to.
-    await purgeOutboxForAccount(identity.userId);
-    setAccountDeletionRecovery(null);
-    applyDeletionStatus({ kind: 'clear' });
-    try {
-      await authRepository.signOut();
-    } catch {
-      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared.');
-    }
-    clearRecoveryMarker(identity.userId);
-    return outcome;
+    // `deleted`: persist the remaining local-cleanup obligation BEFORE touching
+    // IndexedDB. A crash or failed transaction therefore resumes this exact
+    // account's cleanup instead of silently orphaning queued text or Files.
+    markLocalDeletionCleanupPending(identity.userId);
+    return finishDeletedAccountLocally(identity, outcome.warnings);
   };
 
   /**
-   * Retry from the recovery screen. Re-invokes the Edge Function, which
-   * re-writes the same `true` pending flag idempotently.
+   * Retry from the recovery screen. Re-invokes the Edge Function while server
+   * deletion is incomplete; after confirmed Auth deletion it retries only the
+   * device-local outbox cleanup recorded by the `local_cleanup` marker.
    *
    * A `partially_deleted`, `recovery_required` or ordinary failed retry stays in
    * recovery. A server-confirmed cancellation is the only non-deletion result

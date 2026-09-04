@@ -87,6 +87,7 @@ export function classifyDeletionErrorBody(body: unknown): AccountDeletionOutcome
  * deletion. No "adds no new data category" reasoning is relied on.
  */
 export const RECOVERY_KEY_PREFIX = 'gomsinlog.accountDeletionRecovery.v1.';
+const LOCAL_CLEANUP_MARKER = 'local_cleanup';
 
 export function recoveryKeyFor(userId: string): string {
   return `${RECOVERY_KEY_PREFIX}${userId}`;
@@ -107,6 +108,38 @@ export function markRecoveryPending(userId: string): void {
     // Losing the marker is a FAILURE, not a "fail-safe". It is mitigated only
     // by the server-authoritative `app_metadata.account_deletion_pending` flag.
     console.error('[gomsinlog] deletion_status=pending marker could not be stored.');
+  }
+}
+
+/**
+ * Persist that the server has already deleted the account but this device still
+ * has to remove its account-scoped outbox. The value carries no user content;
+ * `readRecoveryMarker` continues to treat it exactly like every other present
+ * marker, so a crash or reload remains fail-closed.
+ */
+export function markLocalDeletionCleanupPending(userId: string): boolean {
+  try {
+    window.localStorage.setItem(recoveryKeyFor(userId), LOCAL_CLEANUP_MARKER);
+    return true;
+  } catch {
+    console.error('[gomsinlog] deletion_status=pending local cleanup marker could not be stored.');
+    return false;
+  }
+}
+
+/**
+ * Detect only the exact, content-free local-cleanup phase. Unknown or malformed
+ * values stay active through `readRecoveryMarker`, but never gain the authority
+ * to skip the server-side deletion retry.
+ */
+export function isLocalDeletionCleanupPending(
+  userId: string,
+  storage: Pick<Storage, 'getItem'> = window.localStorage,
+): boolean {
+  try {
+    return storage.getItem(recoveryKeyFor(userId)) === LOCAL_CLEANUP_MARKER;
+  } catch {
+    return false;
   }
 }
 
@@ -135,11 +168,10 @@ export function readRecoveryMarker(
 }
 
 /**
- * Reachable from EXACTLY ONE place: the confirmed-Auth-deletion branch of
- * `deleteAccount` / `retryAccountDeletion`. Not logout, not a failed retry, not
- * an account switch, not corruption, not elapsed time. There is no
- * server-confirmed cancellation workflow today and no code path may behave as
- * though one exists.
+ * Reachable only after one of two positive authorities: confirmed Auth deletion
+ * plus successful local cleanup, or a server-confirmed safe cancellation. Not
+ * logout, not a failed retry, not an account switch, not corruption, and not
+ * elapsed time.
  */
 export function clearRecoveryMarker(userId: string): void {
   try {

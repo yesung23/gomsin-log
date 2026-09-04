@@ -10,17 +10,20 @@ export function buildPersonalExport(state: AppState, userId: string, exportedAt 
   const ownRecords = state.records.filter((record) => record.userId === userId);
   const ownEvents = state.events.filter((event) => event.createdBy === userId);
   const ownTrips = state.trips.filter((trip) => trip.createdBy === userId);
-  const isMilitaryRelationship = resolveRelationshipContext(
+  const relationshipContext = resolveRelationshipContext(
     state.profile.couple.relationshipContext,
-  ) === 'military';
+  );
+  const isMilitaryRelationship = relationshipContext === 'military';
 
   return {
     exportedAt,
     app: 'gomsinlog',
-    schemaVersion: 2,
+    schemaVersion: 3,
     profile: {
       myName: state.profile.myName,
       role: state.profile.role,
+      relationshipContext: relationshipContext ?? null,
+      genderIdentity: state.profile.genderIdentity ?? null,
       anniversaryDate: state.profile.couple.anniversaryDate ?? null,
       military: isMilitaryRelationship && state.profile.role === 'soldier'
         ? state.profile.military

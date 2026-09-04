@@ -280,6 +280,7 @@ function Probe({
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
       <span data-testid="username">{state.profile.username ?? 'none'}</span>
+      <span data-testid="gender">{state.profile.genderIdentity ?? 'none'}</span>
       <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
       <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
       <span data-testid="partnerId">{state.profile.couple.partnerUserId ?? 'none'}</span>
@@ -349,6 +350,8 @@ function Probe({
         profileCaption: '오늘도 함께',
         profileDateType: 'meeting',
       })}>update-profile-identity</button>
+      <button onClick={() => void updateProfile({ genderIdentity: 'woman' })}>set-gender</button>
+      <button onClick={() => void updateProfile({ genderIdentity: undefined })}>clear-gender</button>
       <button onClick={() => void updateProfile({
         couple: { ...state.profile.couple, anniversaryDate: undefined },
       })}>clear-anniversary</button>
@@ -3176,5 +3179,24 @@ describe('profile persistence acknowledgement', () => {
       profile_caption: '오늘도 함께',
       profile_date_type: 'meeting',
     });
+  });
+
+  it('persists an optional gender and erases it with SQL NULL before updating local state', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('none'));
+
+    await act(async () => {
+      screen.getByText('set-gender').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('woman'));
+    expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({ gender_identity: 'woman' });
+
+    await act(async () => {
+      screen.getByText('clear-gender').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('none'));
+    expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({ gender_identity: null });
   });
 });

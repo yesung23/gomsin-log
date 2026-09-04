@@ -47,7 +47,7 @@ import type { BootstrapResult } from '@/app/e2ee/useCases';
 import { NotificationPreferencesSection } from '@/components/NotificationPreferencesSection';
 import { ProfileCaptionEditor } from '@/components/ProfileCaptionEditor';
 import { isValidUsername, normalizeUsername } from '@/lib/profileCaption';
-import type { ProfileDateType } from '@/types';
+import type { GenderIdentity, ProfileDateType } from '@/types';
 import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
@@ -142,6 +142,7 @@ export function SettingsPage() {
     profile.couple.relationshipContext,
   );
   const isMilitaryRelationship = relationshipContext === 'military';
+  const isGeneralRelationship = relationshipContext === 'general';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
   const partnerRoleLabel = isMilitaryRelationship
     ? profile.role === 'gomsin' ? '군화' : '곰신'
@@ -468,6 +469,9 @@ export function SettingsPage() {
       ? ''
       : profile.profileDateType || ''
   ));
+  const [editGenderIdentity, setEditGenderIdentity] = useState<GenderIdentity | ''>(
+    profile.genderIdentity || '',
+  );
   const [editPartnerUsername, setEditPartnerUsername] = useState(profile.couple.partnerUsername || '');
 
   const closeProfileModal = useCallback(() => {
@@ -601,6 +605,9 @@ export function SettingsPage() {
         profileDateType: !isMilitaryRelationship && editProfileDateType === 'discharge'
           ? undefined
           : editProfileDateType || undefined,
+        ...(isGeneralRelationship
+          ? { genderIdentity: editGenderIdentity || undefined }
+          : {}),
       });
       if (!isCurrentIdentity(identity)) return;
       if (!saved) {
@@ -986,6 +993,7 @@ export function SettingsPage() {
                     ? ''
                     : profile.profileDateType || '',
                 );
+                setEditGenderIdentity(profile.genderIdentity || '');
                 setEditPartnerUsername(profile.couple.partnerUsername || '');
                 setShowProfileModal(true);
               }}
@@ -1254,6 +1262,25 @@ export function SettingsPage() {
                 onDateTypeChange={setEditProfileDateType}
                 allowDischarge={isMilitaryRelationship}
               />
+
+              {isGeneralRelationship ? (
+                <div className="space-y-2">
+                  <label htmlFor="edit-gender-identity" className="text-label font-semibold text-muted-foreground">
+                    성별 (선택)
+                  </label>
+                  <select
+                    id="edit-gender-identity"
+                    value={editGenderIdentity}
+                    onChange={(event) => setEditGenderIdentity(event.target.value as GenderIdentity | '')}
+                    className="w-full min-h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                  >
+                    <option value="">선택 안 함</option>
+                    <option value="woman">여성</option>
+                    <option value="man">남성</option>
+                  </select>
+                  <p className="text-caption text-muted-foreground">상대방에게 보이지 않아요.</p>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <label htmlFor="edit-anniversary" className="text-label font-semibold text-muted-foreground">

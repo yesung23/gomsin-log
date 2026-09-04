@@ -62,6 +62,7 @@ describe('personal data export ownership', () => {
       profile: {
         ...base.profile,
         role: 'soldier',
+        genderIdentity: 'woman',
         couple: {
           ...base.profile.couple,
           relationshipContext: 'general',
@@ -79,5 +80,15 @@ describe('personal data export ownership', () => {
     const result = buildPersonalExport(state, 'user-a');
 
     expect(result.profile.military).toBeNull();
+    expect(result.schemaVersion).toBe(3);
+    expect(result.profile.relationshipContext).toBe('general');
+    expect(result.profile.genderIdentity).toBe('woman');
+  });
+
+  it('exports legacy relationship context as military and an unanswered gender as null', () => {
+    const result = buildPersonalExport(baseState(), 'user-a');
+
+    expect(result.profile.relationshipContext).toBe('military');
+    expect(result.profile.genderIdentity).toBeNull();
   });
 });

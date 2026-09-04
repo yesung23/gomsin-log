@@ -2431,6 +2431,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       && profileUpdates.profileCaption.trim().length > PROFILE_CAPTION_MAX_LENGTH) return false;
     if (hasOwn('profileDateType') && profileUpdates.profileDateType
       && !['together', 'meeting', 'discharge'].includes(profileUpdates.profileDateType)) return false;
+    if (hasOwn('genderIdentity') && profileUpdates.genderIdentity !== undefined
+      && !['woman', 'man'].includes(profileUpdates.genderIdentity)) return false;
     const commitLocally = () => updateStateImmediately((current) => ({
       ...current,
       profile: { ...current.profile, ...profileUpdates },
@@ -2455,6 +2457,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         || hasOwn('username')
         || hasOwn('profileCaption')
         || hasOwn('profileDateType')
+        || hasOwn('genderIdentity')
       ) {
         const { data, error } = await supabase
           .from('profiles')
@@ -2465,6 +2468,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...(hasOwn('username') ? { username: normalizedUsername || null } : {}),
           ...(hasOwn('profileCaption') ? { profile_caption: newProfile.profileCaption?.trim() || null } : {}),
           ...(hasOwn('profileDateType') ? { profile_date_type: newProfile.profileDateType || null } : {}),
+          ...(hasOwn('genderIdentity') ? { gender_identity: newProfile.genderIdentity || null } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId)

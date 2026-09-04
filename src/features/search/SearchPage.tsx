@@ -103,6 +103,13 @@ function InlineServiceInfo({
   const remainingDays = isDischarged ? 0 : progress.remainingDays;
   const daysUntilEnlistment = progress.daysUntilEnlistment ?? 0;
   const percentLabel = formatServicePercent(percent);
+  const statusLabel = isDischarged
+    ? '전역했어요'
+    : progress.isBeforeEnlistment
+      ? STATUS_LABELS.planned
+      : military.militaryStatus === 'discharge_soon'
+        ? STATUS_LABELS.discharge_soon
+        : STATUS_LABELS.serving;
 
   return (
     <section
@@ -125,13 +132,7 @@ function InlineServiceInfo({
             </h2>
             <div className="text-caption text-muted-foreground">
               {BRANCH_LABELS[military.branch]} ·{' '}
-              <span data-testid="service-status">
-                {isDischarged
-                  ? '전역했어요'
-                  : progress.isBeforeEnlistment
-                    ? STATUS_LABELS[military.militaryStatus]
-                    : STATUS_LABELS[military.militaryStatus]}
-              </span>
+              <span data-testid="service-status">{statusLabel}</span>
             </div>
           </div>
         </div>

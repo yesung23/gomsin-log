@@ -178,6 +178,22 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-progress-summary')).toHaveTextContent(
       `입대까지 ${progress!.daysUntilEnlistment}일`,
     );
+    expect(screen.getByTestId('service-status')).toHaveTextContent('입대 예정');
+  });
+
+  it('저장된 예정 상태가 늦게 남아 있어도 입대일이 지났으면 날짜와 같은 복무 중 상태를 보여준다', () => {
+    currentState = stateWith({
+      role: 'soldier',
+      military: {
+        ...SERVING_MILITARY,
+        militaryStatus: 'planned',
+      },
+    });
+    renderSearch();
+
+    expect(screen.getByTestId('service-status')).toHaveTextContent('복무 중');
+    expect(screen.getByTestId('service-progress-summary')).toHaveTextContent('일 경과');
+    expect(screen.queryByText('입대 예정')).not.toBeInTheDocument();
   });
 
   it('인라인 복무 정보의 수정 버튼은 /service 로 이동한다', () => {

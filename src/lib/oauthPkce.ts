@@ -2,6 +2,7 @@ import { AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
 
 const PKCE_FLOW_ID_PATTERN = /^[a-zA-Z0-9_-]{8,64}$/;
 const DEADLINED_TOKEN_GRANTS = new Set(['pkce', 'refresh_token']);
+export const AUTH_LOGOUT_TIMEOUT_MS = 2_000;
 
 /** Statuses the `Response` constructor refuses to pair with a body. */
 const NULL_BODY_STATUSES = new Set([101, 103, 204, 205, 304]);
@@ -10,7 +11,7 @@ export function validatePkceFlowId(value: unknown): string | null {
   return typeof value === 'string' && PKCE_FLOW_ID_PATTERN.test(value) ? value : null;
 }
 
-function isDeadlinedTokenRequest(input: RequestInfo | URL): boolean {
+function authRequestDeadline(input: RequestInfo | URL): number | null {
   try {
     const url = new URL(
       typeof input === 'string'
@@ -19,10 +20,20 @@ function isDeadlinedTokenRequest(input: RequestInfo | URL): boolean {
           ? input.href
           : input.url,
     );
-    return url.pathname === '/auth/v1/token'
-      && DEADLINED_TOKEN_GRANTS.has(url.searchParams.get('grant_type') ?? '');
+    if (
+      url.pathname === '/auth/v1/token'
+      && DEADLINED_TOKEN_GRANTS.has(url.searchParams.get('grant_type') ?? '')
+    ) {
+      return AUTH_CALLBACK_TIMEOUT_MS;
+    }
+    // Supabase Auth removes its persisted local session after the remote logout
+    // request settles, including when that request returns a retryable error. A
+    // transport that never settles would otherwise leave a restart-restorable
+    // session on a device whose UI already looks signed out.
+    if (url.pathname === '/auth/v1/logout') return AUTH_LOGOUT_TIMEOUT_MS;
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -66,7 +77,8 @@ async function readWithinDeadline(response: Response, signal: AbortSignal): Prom
 
 export function createPkceTimeoutFetch(fetchImpl: typeof fetch): typeof fetch {
   return async (input, init) => {
-    if (!isDeadlinedTokenRequest(input)) return fetchImpl(input, init);
+    const deadline = authRequestDeadline(input);
+    if (deadline === null) return fetchImpl(input, init);
 
     const controller = new AbortController();
     const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
@@ -78,7 +90,7 @@ export function createPkceTimeoutFetch(fetchImpl: typeof fetch): typeof fetch {
       callerSignal?.addEventListener('abort', forwardAbort, { once: true });
     }
 
-    const timer = setTimeout(() => controller.abort(), AUTH_CALLBACK_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), deadline);
     const cleanup = () => {
       clearTimeout(timer);
       callerSignal?.removeEventListener('abort', forwardAbort);

@@ -2,7 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createClient } from '@supabase/supabase-js';
 import { AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
-import { createPkceTimeoutFetch, validatePkceFlowId } from '@/lib/oauthPkce';
+import {
+  AUTH_LOGOUT_TIMEOUT_MS,
+  createPkceTimeoutFetch,
+  validatePkceFlowId,
+} from '@/lib/oauthPkce';
 
 function abortableFetch() {
   let signal: AbortSignal | undefined;
@@ -156,11 +160,78 @@ describe('PKCE token transport timeout', () => {
     );
   });
 
+  it('deadlines the Supabase logout request so Auth can remove the local session offline', async () => {
+    vi.useFakeTimers();
+    const transport = abortableFetch();
+    const request = createPkceTimeoutFetch(transport.fetchImpl)(
+      'https://project.supabase.co/auth/v1/logout?scope=global',
+      { method: 'POST', headers: { Authorization: 'Bearer opaque' } },
+    );
+    const rejection = expect(request).rejects.toMatchObject({ name: 'AbortError' });
+
+    await vi.advanceTimersByTimeAsync(AUTH_LOGOUT_TIMEOUT_MS);
+
+    await rejection;
+    expect(transport.getSignal()?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('makes a hung SDK logout settle and erase its persisted session', async () => {
+    vi.useFakeTimers();
+    const transport = abortableFetch();
+    const values = new Map<string, string>();
+    const storageKey = 'gomsinlog-logout-timeout-test';
+    const encode = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const accessToken = `${encode({ alg: 'none', typ: 'JWT' })}.${encode({
+      sub: 'user-a',
+      aud: 'authenticated',
+      exp: Math.floor(Date.now() / 1000) + 3_600,
+    })}.test-signature`;
+    values.set(storageKey, JSON.stringify({
+      access_token: accessToken,
+      refresh_token: 'opaque-refresh-token',
+      token_type: 'bearer',
+      expires_in: 3_600,
+      expires_at: Math.floor(Date.now() / 1000) + 3_600,
+      user: {
+        id: 'user-a',
+        aud: 'authenticated',
+        role: 'authenticated',
+        app_metadata: {},
+        user_metadata: {},
+        created_at: '2026-01-01T00:00:00.000Z',
+      },
+    }));
+    const client = createClient('https://project.supabase.co', 'publishable-key', {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: true,
+        storageKey,
+        storage: {
+          getItem: (key) => values.get(key) ?? null,
+          setItem: (key, value) => { values.set(key, value); },
+          removeItem: (key) => { values.delete(key); },
+        },
+      },
+      global: { fetch: createPkceTimeoutFetch(transport.fetchImpl) },
+    });
+    await client.auth.getSession();
+
+    const signOut = client.auth.signOut();
+    await vi.advanceTimersByTimeAsync(AUTH_LOGOUT_TIMEOUT_MS);
+    const result = await signOut;
+
+    expect(result.error).not.toBeNull();
+    expect(values.has(storageKey)).toBe(false);
+    expect(transport.getSignal()?.aborted).toBe(true);
+  });
+
   it.each([
     'https://project.supabase.co/auth/v1/token?grant_type=password',
     'https://project.supabase.co/rest/v1/token?grant_type=pkce',
     'not a url',
-  ])('passes non-PKCE requests through unchanged: %s', async (url) => {
+  ])('passes non-deadlined requests through unchanged: %s', async (url) => {
     const response = new Response('ok');
     const fetchImpl = vi.fn(async () => response) as unknown as typeof fetch;
     const init = { method: 'POST', headers: { 'x-test': '1' } };

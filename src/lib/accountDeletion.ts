@@ -199,11 +199,11 @@ export type DeletionStatus =
   | { kind: 'unknown' };
 
 /**
- * The authoritative server answer.
+ * One authoritative server answer.
  *
- * `unavailable` means `getUser()` COULD NOT COMPLETE (reject, timeout,
- * offline). It is therefore NOT an answer, and must never be produced for a
- * response that positively reported "not pending".
+ * `unavailable` means one authority COULD NOT COMPLETE or returned a malformed
+ * payload. It is therefore NOT an answer and must never be collapsed into a
+ * negative.
  */
 export type ServerAnswer =
   | { kind: 'pending' }
@@ -261,17 +261,49 @@ export function deletionStatusLogToken(status: DeletionStatus): string {
 export const ACCOUNT_DELETION_PENDING_FIELD = 'account_deletion_pending';
 
 /**
- * Interpret an authoritative `getUser()` payload.
+ * Interpret an authoritative `getUser()` payload for exactly one account.
  *
- * Only called with a response that actually completed, so it can never return
- * `unavailable`.
+ * A completed but missing/mismatched user is still `unavailable`; only an exact
+ * user match can contribute a negative answer.
  */
-export function serverAnswerFromUser(user: unknown): ServerAnswer {
-  const metadata = (user as { app_metadata?: Record<string, unknown> } | null | undefined)
-    ?.app_metadata;
-  return metadata?.[ACCOUNT_DELETION_PENDING_FIELD] === true
+export function serverAnswerFromUser(expectedUserId: string, user: unknown): ServerAnswer {
+  if (!user || typeof user !== 'object' || Array.isArray(user)) {
+    return { kind: 'unavailable' };
+  }
+  const candidate = user as { id?: unknown; app_metadata?: unknown };
+  if (candidate.id !== expectedUserId) return { kind: 'unavailable' };
+  const metadata = candidate.app_metadata;
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return { kind: 'unavailable' };
+  }
+  return (metadata as Record<string, unknown>)[ACCOUNT_DELETION_PENDING_FIELD] === true
     ? { kind: 'pending' }
     : { kind: 'not_pending' };
+}
+
+/** Accept only the RPC's literal boolean contract. */
+export function serverAnswerFromDatabase(value: unknown): ServerAnswer {
+  if (value === true) return { kind: 'pending' };
+  if (value === false) return { kind: 'not_pending' };
+  return { kind: 'unavailable' };
+}
+
+/**
+ * Combine Auth metadata and the authenticated self-only database fence.
+ * Either positive dominates; a negative is authoritative only when both
+ * independent sources explicitly agree.
+ */
+export function combineServerAnswers(
+  auth: ServerAnswer,
+  database: ServerAnswer,
+): ServerAnswer {
+  if (auth.kind === 'pending' || database.kind === 'pending') {
+    return { kind: 'pending' };
+  }
+  if (auth.kind === 'not_pending' && database.kind === 'not_pending') {
+    return { kind: 'not_pending' };
+  }
+  return { kind: 'unavailable' };
 }
 
 /* ------------------------------------------------------------------ *

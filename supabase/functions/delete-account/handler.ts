@@ -119,6 +119,10 @@ function accountDeletionPhase(value: unknown): AccountDeletionPhase | null {
     : null;
 }
 
+function phaseMayHaveRemovedData(phase: AccountDeletionPhase): boolean {
+  return phase !== 'media_cleanup';
+}
+
 type FenceInspection =
   | { kind: 'none' }
   | { kind: 'active'; attemptId: string; phase: AccountDeletionPhase }
@@ -439,13 +443,23 @@ export async function handleDeleteAccountRequest(
       // If a newer attempt already owns the fence, leave its attempt token in
       // Auth metadata. If inspection itself was unavailable, the existing true
       // pending flag remains the conservative recovery authority.
+      let inspectedAttemptMayHaveRemovedData = destructiveDatabasePreparationMayHaveCommitted;
       if (begunFence.kind === 'active') {
-        await writePendingDeletionMetadata(admin, token, userId, begunFence.attemptId);
+        inspectedAttemptMayHaveRemovedData = phaseMayHaveRemovedData(begunFence.phase);
+        const restored = await writePendingDeletionMetadata(
+          admin,
+          token,
+          userId,
+          begunFence.attemptId,
+        );
+        if (!restored) {
+          console.error('[delete-account] Could not align pending metadata to inspected fence');
+        }
       }
       console.error('[delete-account] Fenced begin could not be reconciled before E2EE');
       return deletionRecoveryResponse(
         cors.headers,
-        destructiveDatabasePreparationMayHaveCommitted,
+        inspectedAttemptMayHaveRemovedData,
       );
     }
 
@@ -555,9 +569,22 @@ export async function handleDeleteAccountRequest(
         const pendingAttemptId = fenceAfterClear.kind === 'active'
           ? fenceAfterClear.attemptId
           : attemptId;
-        await writePendingDeletionMetadata(admin, token, userId, pendingAttemptId);
+        const newerAttemptMayHaveRemovedData = fenceAfterClear.kind === 'active'
+          && phaseMayHaveRemovedData(fenceAfterClear.phase);
+        const restored = await writePendingDeletionMetadata(
+          admin,
+          token,
+          userId,
+          pendingAttemptId,
+        );
+        if (!restored) {
+          console.error(
+            '[delete-account] Could not restore pending deletion metadata after cancellation cleanup',
+          );
+          return deletionRecoveryResponse(cors.headers, newerAttemptMayHaveRemovedData);
+        }
         console.error('[delete-account] A pending fence remained after Auth cancellation cleanup');
-        return deletionRecoveryResponse(cors.headers);
+        return deletionRecoveryResponse(cors.headers, newerAttemptMayHaveRemovedData);
       }
 
       return jsonResponse(

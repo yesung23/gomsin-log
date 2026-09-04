@@ -7,6 +7,7 @@ import { App } from '@/App';
 import { DEVICE_PREF_CARRY_OVER_KEYS, StoreProvider } from '@/lib/store';
 import { useStore } from '@/lib/useStore';
 import { recoveryKeyFor, type AccountDeletionOutcome } from '@/lib/accountDeletion';
+import { AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 /**
  * Deletion-Recovery Suite (nine tests) and the store/route half of the
@@ -30,6 +31,7 @@ const h = vi.hoisted(() => {
   /** Ordered log of every observable server interaction, for ordering assertions. */
   const callLog: string[] = [];
   const getUser = vi.fn();
+  const getDeletionPending = vi.fn();
   const authRepositorySignOut = vi.fn(async () => { callLog.push('authRepository.signOut'); });
   const deleteAccountFromDB = vi.fn();
   const fetchFullStateFromDB = vi.fn();
@@ -63,6 +65,9 @@ const h = vi.hoisted(() => {
     removeChannel: vi.fn(),
     rpc: vi.fn((name: string) => {
       callLog.push(`rpc:${name}`);
+      if (name === 'is_my_account_deletion_pending') {
+        return getDeletionPending();
+      }
       // Membership stays confirmed, so a reconciliation does not purge the
       // couple space out from under the mutation assertions below.
       return Promise.resolve({
@@ -89,13 +94,21 @@ const h = vi.hoisted(() => {
   };
 
   return {
-    authCallbacks, callLog, getUser, authRepositorySignOut, deleteAccountFromDB,
+    authCallbacks, callLog, getUser, getDeletionPending,
+    authRepositorySignOut, deleteAccountFromDB,
     fetchFullStateFromDB, saveRecordToDB, mockSupabase, FULL_STATE_UNAVAILABLE,
     outboxEntries, outboxPersistence,
   };
 });
 
-const { authCallbacks, callLog, getUser, authRepositorySignOut, mockSupabase } = h;
+const {
+  authCallbacks,
+  callLog,
+  getUser,
+  getDeletionPending,
+  authRepositorySignOut,
+  mockSupabase,
+} = h;
 const deleteAccountFromDB = h.deleteAccountFromDB as unknown as {
   mockReset: () => { mockResolvedValue: (v: AccountDeletionOutcome) => void };
   mockResolvedValue: (v: AccountDeletionOutcome) => void;
@@ -265,6 +278,8 @@ const PENDING = {
   },
   error: null,
 };
+const DB_NOT_PENDING = { data: false, error: null };
+const DB_PENDING = { data: true, error: null };
 
 const PARTIAL: AccountDeletionOutcome = {
   status: 'partially_deleted',
@@ -305,6 +320,7 @@ describe('Deletion-Recovery Suite', () => {
       h.outboxEntries.delete(id);
     });
     getUser.mockReset().mockResolvedValue(NOT_PENDING);
+    getDeletionPending.mockReset().mockResolvedValue(DB_NOT_PENDING);
     deleteAccountFromDB.mockReset().mockResolvedValue(FAILED);
     fetchFullStateFromDB.mockReset().mockResolvedValue(serverState());
     authRepositorySignOut.mockClear();
@@ -659,6 +675,133 @@ describe('Deletion-Recovery Suite', () => {
     expect(await screen.findByText('AUTH-CALLBACK-RENDERED')).toBeInTheDocument();
   });
 
+  it('blocks clean-device hydration when DB is pending even though Auth is not pending', async () => {
+    getUser.mockResolvedValue(NOT_PENDING);
+    getDeletionPending.mockResolvedValue(DB_PENDING);
+    renderApp();
+    await signIn();
+
+    await waitFor(() => expect(screen.getByTestId('recovery')).toHaveTextContent('active'));
+    expect(callLog).toContain('auth.getUser');
+    expect(callLog).toContain('rpc:is_my_account_deletion_pending');
+    expect(callLog).not.toContain('fetchFullStateFromDB');
+    expect(screen.queryByText('HOME-PAGE-RENDERED')).toBeNull();
+  });
+
+  it('continues clean-device hydration only when Auth and DB both answer not pending', async () => {
+    getUser.mockResolvedValue(NOT_PENDING);
+    getDeletionPending.mockResolvedValue(DB_NOT_PENDING);
+    renderApp();
+    await signIn();
+
+    expect(await screen.findByText('HOME-PAGE-RENDERED')).toBeInTheDocument();
+    expect(screen.getByTestId('deletionStatus')).toHaveTextContent('clear');
+    const authAt = callLog.indexOf('auth.getUser');
+    const dbAt = callLog.indexOf('rpc:is_my_account_deletion_pending');
+    const hydrationAt = callLog.indexOf('fetchFullStateFromDB');
+    expect(authAt).toBeGreaterThanOrEqual(0);
+    expect(dbAt).toBeGreaterThanOrEqual(0);
+    expect(hydrationAt).toBeGreaterThan(authAt);
+    expect(hydrationAt).toBeGreaterThan(dbAt);
+  });
+
+  it.each(['error', 'reject', 'malformed'] as const)(
+    'lets a literal DB true dominate an Auth %s',
+    async (failure) => {
+      if (failure === 'error') {
+        getUser.mockResolvedValue({ data: { user: null }, error: { message: 'unavailable' } });
+      } else if (failure === 'reject') {
+        getUser.mockRejectedValue(new Error('unavailable'));
+      } else {
+        getUser.mockResolvedValue({
+          data: { user: { id: 'other-user', app_metadata: { account_deletion_pending: false } } },
+          error: null,
+        });
+      }
+      getDeletionPending.mockResolvedValue(DB_PENDING);
+      renderApp();
+      await signIn();
+
+      await waitFor(() => expect(screen.getByTestId('recovery')).toHaveTextContent('active'));
+      expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
+    },
+  );
+
+  it.each(['error', 'reject', 'malformed'] as const)(
+    'lets Auth pending dominate a DB %s',
+    async (failure) => {
+      getUser.mockResolvedValue(PENDING);
+      if (failure === 'error') {
+        getDeletionPending.mockResolvedValue({ data: false, error: { message: 'unavailable' } });
+      } else if (failure === 'reject') {
+        getDeletionPending.mockRejectedValue(new Error('unavailable'));
+      } else {
+        getDeletionPending.mockResolvedValue({ data: 'true', error: null });
+      }
+      renderApp();
+      await signIn();
+
+      await waitFor(() => expect(screen.getByTestId('recovery')).toHaveTextContent('active'));
+      expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
+    },
+  );
+
+  it.each(['auth', 'database'] as const)(
+    'keeps a positive %s authority dominant when the other authority times out',
+    async (positiveAuthority) => {
+      renderApp();
+      await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+      if (positiveAuthority === 'auth') {
+        getUser.mockResolvedValue(PENDING);
+        getDeletionPending.mockImplementation(() => new Promise(() => {}));
+      } else {
+        getUser.mockImplementation(() => new Promise(() => {}));
+        getDeletionPending.mockResolvedValue(DB_PENDING);
+      }
+      vi.useFakeTimers();
+      act(() => { emitAuth('SIGNED_IN', 'user-a'); });
+
+      expect(getUser).toHaveBeenCalledOnce();
+      expect(getDeletionPending).toHaveBeenCalledOnce();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(AUTH_SYNC_TIMEOUT_MS);
+      });
+      expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
+      expect(screen.getByTestId('recovery')).toHaveTextContent('active');
+    },
+  );
+
+  it('starts both authorities concurrently, settles after one timeout, and handles late rejection', async () => {
+    let rejectAuth!: (error: Error) => void;
+    let rejectDatabase!: (error: Error) => void;
+    const unhandled = vi.fn((event: PromiseRejectionEvent) => event.preventDefault());
+    getUser.mockImplementation(() => new Promise((_, reject) => { rejectAuth = reject; }));
+    getDeletionPending.mockImplementation(
+      () => new Promise((_, reject) => { rejectDatabase = reject; }),
+    );
+    window.addEventListener('unhandledrejection', unhandled);
+    renderApp();
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    vi.useFakeTimers();
+    act(() => { emitAuth('SIGNED_IN', 'user-a'); });
+
+    expect(getUser).toHaveBeenCalledOnce();
+    expect(getDeletionPending).toHaveBeenCalledOnce();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(AUTH_SYNC_TIMEOUT_MS);
+    });
+    expect(screen.getByTestId('deletionStatus')).toHaveTextContent('unknown');
+    expect(screen.getByTestId('recovery')).toHaveTextContent('none');
+
+    await act(async () => {
+      rejectAuth(new Error('late auth rejection'));
+      rejectDatabase(new Error('late DB rejection'));
+      await Promise.resolve();
+    });
+    expect(unhandled).not.toHaveBeenCalled();
+    window.removeEventListener('unhandledrejection', unhandled);
+  });
+
   it('authority ranking: recovery is active whenever either authority says so', async () => {
     const combinations: Array<{
       marker: string | null;
@@ -717,6 +860,7 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
     callLog.length = 0;
     localStorage.clear();
     getUser.mockReset().mockResolvedValue(NOT_PENDING);
+    getDeletionPending.mockReset().mockResolvedValue(DB_NOT_PENDING);
     deleteAccountFromDB.mockReset().mockResolvedValue(FAILED);
     fetchFullStateFromDB.mockReset().mockResolvedValue(serverState());
     saveRecordToDB.mockClear();
@@ -748,6 +892,7 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
       // The route gate was already closed while no server answer existed, and
       // the marker required no round-trip to reach that verdict.
       expect(callLog, route).not.toContain('auth.getUser');
+      expect(callLog, route).not.toContain('rpc:is_my_account_deletion_pending');
       view.unmount();
     }
   });
@@ -771,26 +916,61 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
       await Promise.resolve();
     });
     await waitFor(() => expect(callLog).toContain('auth.getUser'));
+    await waitFor(() => expect(callLog).toContain('rpc:is_my_account_deletion_pending'));
     await waitFor(() => expect(
-      callLog.some((entry) => entry.startsWith('rpc:') || entry.startsWith('fetch')),
+      callLog.some((entry) => (
+        (entry.startsWith('rpc:') && entry !== 'rpc:is_my_account_deletion_pending')
+        || entry.startsWith('fetch')
+      )),
     ).toBe(true));
     const syncCheck = callLog.indexOf('auth.getUser');
-    const firstRead = callLog.findIndex((entry) => entry.startsWith('rpc:') || entry.startsWith('fetch'));
+    const dbSyncCheck = callLog.indexOf('rpc:is_my_account_deletion_pending');
+    const firstRead = callLog.findIndex((entry) => (
+      (entry.startsWith('rpc:') && entry !== 'rpc:is_my_account_deletion_pending')
+      || entry.startsWith('fetch')
+    ));
     expect(syncCheck, callLog.join(',')).toBeGreaterThanOrEqual(0);
+    expect(dbSyncCheck, callLog.join(',')).toBeGreaterThanOrEqual(0);
     expect(firstRead, callLog.join(',')).toBeGreaterThan(syncCheck);
+    expect(firstRead, callLog.join(',')).toBeGreaterThan(dbSyncCheck);
 
     // Mutation: same ordering guarantee.
     callLog.length = 0;
     await act(async () => { screen.getByText('add-record').click(); });
     const mutationCheck = callLog.indexOf('auth.getUser');
+    const mutationDbCheck = callLog.indexOf('rpc:is_my_account_deletion_pending');
     const firstWrite = callLog.indexOf('saveRecordToDB');
     expect(mutationCheck).toBeGreaterThanOrEqual(0);
+    expect(mutationDbCheck).toBeGreaterThanOrEqual(0);
     expect(firstWrite).toBeGreaterThan(mutationCheck);
+    expect(firstWrite).toBeGreaterThan(mutationDbCheck);
 
     // The status is NOT reused as if settled: a second attempt re-issues it.
-    const before = getUser.mock.calls.length;
+    const authBefore = getUser.mock.calls.length;
+    const databaseBefore = getDeletionPending.mock.calls.length;
     await act(async () => { screen.getByText('add-record').click(); });
-    expect(getUser.mock.calls.length).toBeGreaterThan(before);
+    expect(getUser.mock.calls.length).toBeGreaterThan(authBefore);
+    expect(getDeletionPending.mock.calls.length).toBeGreaterThan(databaseBefore);
+  });
+
+  it('stops a clean-device mutation before writes when the DB authority turns pending', async () => {
+    getUser.mockResolvedValue(NOT_PENDING);
+    getDeletionPending.mockResolvedValue(DB_NOT_PENDING);
+    renderApp();
+    await signIn();
+    expect(await screen.findByText('HOME-PAGE-RENDERED')).toBeInTheDocument();
+
+    callLog.length = 0;
+    saveRecordToDB.mockClear();
+    getDeletionPending.mockResolvedValue(DB_PENDING);
+    await act(async () => { screen.getByText('add-record').click(); });
+
+    expect(callLog).toContain('auth.getUser');
+    expect(callLog).toContain('rpc:is_my_account_deletion_pending');
+    expect(callLog).not.toContain('saveRecordToDB');
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(screen.getByTestId('deletionStatus')).toHaveTextContent('pending');
+    expect(screen.getByTestId('recovery')).toHaveTextContent('active');
   });
 
   it('4b - no elapsed time or retry count promotes unknown to clear', async () => {
@@ -825,7 +1005,9 @@ describe('Tri-State Verification Suite - store and route behaviour', () => {
     // ORDERING, not end state: a sync-then-reconcile implementation would reach
     // the same final screen and must still FAIL this assertion.
     const afterCheck = callLog.slice(checkAt + 1);
-    expect(afterCheck.filter((entry) => entry.startsWith('rpc:'))).toEqual([]);
+    expect(afterCheck.filter((entry) => (
+      entry.startsWith('rpc:') && entry !== 'rpc:is_my_account_deletion_pending'
+    ))).toEqual([]);
     expect(afterCheck).not.toContain('saveRecordToDB');
     expect(afterCheck).not.toContain('fetchRecordsResultFromDB');
     expect(afterCheck).not.toContain('fetchEventsResultFromDB');

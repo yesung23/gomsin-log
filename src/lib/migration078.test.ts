@@ -25,6 +25,15 @@ const migration074 = readFileSync(
   'utf8',
 );
 
+function functionBody(source: string, functionName: string): string {
+  const functionAt = source.indexOf(`CREATE OR REPLACE FUNCTION public.${functionName}(`);
+  if (functionAt < 0) throw new Error(`missing function ${functionName}`);
+  const bodyAt = source.indexOf('AS $$', functionAt);
+  const bodyEnd = source.indexOf('$$;', bodyAt);
+  if (bodyAt < 0 || bodyEnd < 0) throw new Error(`missing body for ${functionName}`);
+  return source.slice(bodyAt, bodyEnd);
+}
+
 function command(file: string, args: string[], input?: string): CommandResult {
   const result = spawnSync(file, args, {
     input,
@@ -355,11 +364,12 @@ WHERE deletion.user_id = '${userId}';
   });
 
   it('uses the same advisory-lock namespace as real begin and cancel', () => {
-    const lockNamespace = migration074.match(
-      /hashtextextended\(p_user_id::TEXT,\s*(\d+)\)/i,
-    )?.[1];
-    expect(lockNamespace).toBe('15013');
-    expect(migration).toContain(`hashtextextended(p_user_id::TEXT, ${lockNamespace})`);
+    expect(functionBody(migration074, 'begin_account_deletion_v2')).toMatch(
+      /pg_advisory_xact_lock\(\s*hashtextextended\(\s*v_participant::TEXT,\s*15013\s*\)\s*\)/i,
+    );
+    const directUserLock = /pg_advisory_xact_lock\(\s*(?:pg_catalog\.)?hashtextextended\(\s*p_user_id::TEXT,\s*15013\s*\)\s*\)/i;
+    expect(functionBody(migration074, 'cancel_account_deletion_v2')).toMatch(directUserLock);
+    expect(functionBody(migration, 'inspect_account_deletion_fence_v2')).toMatch(directUserLock);
     const begun = asService(`
 SELECT public.begin_account_deletion_v2(
   '${userId}', '{}'::uuid[], '${attemptId}'
@@ -402,5 +412,46 @@ SELECT public.inspect_account_deletion_fence_v2('${userId}');
 
     const finished = await holder.done;
     expect(finished.status, finished.stderr).toBe(0);
+  });
+
+  it('blocks inspection behind an uncommitted real cancel lock', async () => {
+    const begun = asService(`
+SELECT public.begin_account_deletion_v2(
+  '${userId}', '{}'::uuid[], '${attemptId}'
+);
+`);
+    expect(begun.status, begun.stderr).toBe(0);
+
+    const holder = asyncCommand(
+      join(PG_BIN!, 'psql'),
+      psqlArgs(),
+      `
+\\set VERBOSITY verbose
+BEGIN;
+SET LOCAL ROLE service_role;
+SET LOCAL "request.jwt.claim.role" = 'service_role';
+SELECT public.cancel_account_deletion_v2('${userId}', '${attemptId}');
+SELECT '078_READY';
+SELECT pg_sleep(0.5);
+ROLLBACK;
+`,
+    );
+    await holder.ready;
+
+    const blocked = asService(`
+SET LOCAL lock_timeout = '100ms';
+SELECT public.inspect_account_deletion_fence_v2('${userId}');
+`);
+    expect(blocked.status).not.toBe(0);
+    expect(blocked.stderr).toContain('55P03');
+
+    const finished = await holder.done;
+    expect(finished.status, finished.stderr).toBe(0);
+    expect(inspect()).toMatchObject({ pending: true, attempt_id: attemptId });
+    const cleaned = asService(
+      `SELECT public.cancel_account_deletion_v2('${userId}', '${attemptId}');`,
+    );
+    expect(cleaned.status, cleaned.stderr).toBe(0);
+    expect(cleaned.stdout.trim()).toBe('t');
   });
 });

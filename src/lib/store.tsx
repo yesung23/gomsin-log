@@ -122,12 +122,14 @@ import {
   assertNever,
   classifyDeletionStatus,
   clearRecoveryMarker,
+  combineServerAnswers,
   deletionStatusLogToken,
   isLocalDeletionCleanupPending,
   markLocalDeletionCleanupPending,
   markRecoveryPending,
   readRecoveryMarker,
   registerServerCallGate,
+  serverAnswerFromDatabase,
   serverAnswerFromUser,
   type AccountDeletionOutcome,
   type DeletionStatus,
@@ -1008,28 +1010,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const client = supabase;
     if (!client) return applyDeletionStatus(classifyDeletionStatus(marker, { kind: 'unavailable' }));
 
-    // `supabase.auth.getUser()` is a SERVER round-trip. `session.user.app_metadata`
-    // is deliberately not used: that JWT was issued before the flag was written
-    // and reports the stale value on exactly the reload that must catch it.
-    //
-    // `withTimeout` resolves the CALLER'S OWN fallback on both timeout and
-    // rejection, so the fallback's type IS the state. It must be `unavailable`.
-    // Passing `not_pending` (or `false`) here would reintroduce the original
-    // defect exactly: an unanswered question becoming an authoritative negative.
-    const server = await withTimeout<ServerAnswer>(
+    // Auth metadata and the relational fence are independent server recovery
+    // authorities. Start both fresh checks before awaiting either one: a slow
+    // source gets its own existing auth-sync deadline and cannot delay the gate
+    // for two serial timeout windows.
+    const unavailable: ServerAnswer = { kind: 'unavailable' };
+    const authAnswer = withTimeout<ServerAnswer>(
       (async (): Promise<ServerAnswer> => {
         try {
           const { data, error } = await client.auth.getUser();
-          return error ? { kind: 'unavailable' } : serverAnswerFromUser(data?.user);
+          return error ? unavailable : serverAnswerFromUser(userId, data?.user);
         } catch {
-          // The question could not be answered. That is NOT an answer, and
-          // specifically not `not_pending`.
-          return { kind: 'unavailable' };
+          return unavailable;
         }
       })(),
       AUTH_SYNC_TIMEOUT_MS,
-      { kind: 'unavailable' } as ServerAnswer,
+      unavailable,
     );
+    const databaseAnswer = withTimeout<ServerAnswer>(
+      (async (): Promise<ServerAnswer> => {
+        try {
+          const { data, error } = await client.rpc('is_my_account_deletion_pending');
+          return error ? unavailable : serverAnswerFromDatabase(data);
+        } catch {
+          return unavailable;
+        }
+      })(),
+      AUTH_SYNC_TIMEOUT_MS,
+      unavailable,
+    );
+    const [auth, database] = await Promise.all([authAnswer, databaseAnswer]);
+    const server = combineServerAnswers(auth, database);
     // A positive server answer also writes the local marker, so the next reload
     // is instant and does not depend on repeating the round-trip.
     if (server.kind === 'pending') markRecoveryPending(userId);

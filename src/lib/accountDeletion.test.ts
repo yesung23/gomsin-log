@@ -6,6 +6,7 @@ import {
   classifyDeletionStatus,
   classifyDeletionSuccess,
   clearRecoveryMarker,
+  combineServerAnswers,
   coerceWarnings,
   deletionStatusLogToken,
   isLocalDeletionCleanupPending,
@@ -13,6 +14,7 @@ import {
   markRecoveryPending,
   readRecoveryMarker,
   recoveryKeyFor,
+  serverAnswerFromDatabase,
   serverAnswerFromUser,
   type DeletionStatus,
   type MarkerState,
@@ -259,22 +261,57 @@ describe('Tri-State Verification Suite - 1. classification is total and exclusiv
     expect(classifyDeletionStatus('absent', { kind: 'pending' })).toEqual({ kind: 'pending' });
   });
 
-  it('reads the pending flag only from an authoritative user payload', () => {
-    expect(serverAnswerFromUser({ app_metadata: { account_deletion_pending: true } }))
-      .toEqual({ kind: 'pending' });
-    // Anything that is not an explicit `true` is a positive negative, never
-    // `unavailable` -- this function is only ever called with a real answer.
-    for (const user of [null, undefined, {}, { app_metadata: {} },
-      { app_metadata: { account_deletion_pending: false } },
-      { app_metadata: { account_deletion_pending: 'true' } }]) {
-      expect(serverAnswerFromUser(user)).toEqual({ kind: 'not_pending' });
+  it('accepts an Auth answer only from the expected real user', () => {
+    expect(serverAnswerFromUser('user-a', {
+      id: 'user-a',
+      app_metadata: { account_deletion_pending: true },
+    })).toEqual({ kind: 'pending' });
+    expect(serverAnswerFromUser('user-a', {
+      id: 'user-a',
+      app_metadata: { account_deletion_pending: false },
+    })).toEqual({ kind: 'not_pending' });
+    for (const user of [
+      null,
+      undefined,
+      {},
+      { id: 'user-b', app_metadata: { account_deletion_pending: true } },
+      { id: 'user-a' },
+      { id: 'user-a', app_metadata: null },
+      { id: 'user-a', app_metadata: 'not-an-object' },
+      { id: 'user-a', app_metadata: [] },
+    ]) {
+      expect(serverAnswerFromUser('user-a', user)).toEqual({ kind: 'unavailable' });
     }
   });
 
   it('preserves unrelated app_metadata fields in the answer decision', () => {
-    expect(serverAnswerFromUser({
+    expect(serverAnswerFromUser('user-a', {
+      id: 'user-a',
       app_metadata: { provider: 'google', providers: ['google'], account_deletion_pending: true },
     })).toEqual({ kind: 'pending' });
+  });
+
+  it('accepts only literal booleans from the database authority', () => {
+    expect(serverAnswerFromDatabase(true)).toEqual({ kind: 'pending' });
+    expect(serverAnswerFromDatabase(false)).toEqual({ kind: 'not_pending' });
+    for (const malformed of [null, undefined, 'true', 'false', 1, 0, {}, []]) {
+      expect(serverAnswerFromDatabase(malformed)).toEqual({ kind: 'unavailable' });
+    }
+  });
+
+  it('uses positive dominance and requires two explicit negatives to clear', () => {
+    const pending: ServerAnswer = { kind: 'pending' };
+    const notPending: ServerAnswer = { kind: 'not_pending' };
+    const unavailable: ServerAnswer = { kind: 'unavailable' };
+
+    expect(combineServerAnswers(pending, unavailable)).toEqual(pending);
+    expect(combineServerAnswers(unavailable, pending)).toEqual(pending);
+    expect(combineServerAnswers(pending, notPending)).toEqual(pending);
+    expect(combineServerAnswers(notPending, pending)).toEqual(pending);
+    expect(combineServerAnswers(notPending, notPending)).toEqual(notPending);
+    expect(combineServerAnswers(notPending, unavailable)).toEqual(unavailable);
+    expect(combineServerAnswers(unavailable, notPending)).toEqual(unavailable);
+    expect(combineServerAnswers(unavailable, unavailable)).toEqual(unavailable);
   });
 });
 

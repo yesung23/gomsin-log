@@ -28,6 +28,8 @@ type AdminOptions = {
   reassertFlagReject?: unknown;
   clearFlagError?: unknown;
   clearFlagReject?: unknown;
+  restoreFlagError?: unknown;
+  restoreFlagReject?: unknown;
   deleteUserError?: unknown;
   beginError?: unknown;
   beginData?: unknown;
@@ -39,6 +41,7 @@ type AdminOptions = {
   inspectRejectOnCall?: number;
   inspectData?: unknown;
   interleave?: 'new_attempt_before_cancel' | 'new_attempt_before_clear' | 'new_attempt_after_clear';
+  newAttemptPhase?: string;
   e2eePrepareError?: unknown;
   e2eePrepareData?: unknown;
   prepareError?: unknown;
@@ -87,14 +90,19 @@ function makeAdmin(options: AdminOptions = {}) {
             (write as Record<string, unknown>)?.account_deletion_pending === true
           )).length;
           const isInitialFlagWrite = isPendingWrite && pendingWriteCount === 1;
+          const isPostClearRestoration = isPendingWrite && pendingWriteCount >= 3;
           const rejection = isInitialFlagWrite
             ? options.flagReject
+            : isPostClearRestoration
+              ? options.restoreFlagReject
             : isPendingWrite
               ? options.reassertFlagReject
               : options.clearFlagReject;
           if (rejection) throw rejection;
           const error = isInitialFlagWrite
             ? options.flagError
+            : isPostClearRestoration
+              ? options.restoreFlagError
             : isPendingWrite
               ? options.reassertFlagError
               : options.clearFlagError;
@@ -103,7 +111,7 @@ function makeAdmin(options: AdminOptions = {}) {
           if (!isPendingWrite && options.interleave === 'new_attempt_after_clear') {
             runtime.fence = {
               attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-              phase: 'media_cleanup',
+              phase: options.newAttemptPhase ?? 'media_cleanup',
             };
           }
           return { data: {}, error: null };
@@ -156,7 +164,7 @@ function makeAdmin(options: AdminOptions = {}) {
         if (options.interleave === 'new_attempt_before_cancel') {
           runtime.fence = {
             attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-            phase: 'media_cleanup',
+            phase: options.newAttemptPhase ?? 'media_cleanup',
           };
           runtime.appMetadata = {
             ...runtime.appMetadata,
@@ -173,7 +181,7 @@ function makeAdmin(options: AdminOptions = {}) {
           if (options.interleave === 'new_attempt_before_clear') {
             runtime.fence = {
               attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-              phase: 'media_cleanup',
+              phase: options.newAttemptPhase ?? 'media_cleanup',
             };
             runtime.appMetadata = {
               ...runtime.appMetadata,
@@ -413,6 +421,28 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
+  it('uses a newer post-begin inspected phase when reporting possible data removal', async () => {
+    const admin = makeAdmin({
+      inspectData: {
+        ok: true,
+        pending: true,
+        attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        phase: 'e2ee_prepared',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: true,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.calls).not.toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('storage.remove');
+  });
+
   /** Deletion-Recovery Suite - test 7. */
   it('7 - a pending-flag write failure blocks ALL application-data deletion', async () => {
     const admin = makeAdmin({ flagError: { message: 'metadata write failed' } });
@@ -604,6 +634,72 @@ describe('delete-account - the server-authoritative pending flag', () => {
       account_deletion_attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
     });
   });
+
+  it.each([
+    'e2ee_prepared',
+    'relational_prepared',
+    'relationships_closed',
+    'solo_cleanup_complete',
+  ])('reports dataRemoved for a newer inspected attempt in phase %s', async (newAttemptPhase) => {
+    const admin = makeAdmin({
+      interleave: 'new_attempt_after_clear',
+      newAttemptPhase,
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: true,
+      recoveryRequired: true,
+      deletionCancelled: false,
+    });
+    expect(admin.runtime.appMetadata).toMatchObject({
+      account_deletion_pending: true,
+      account_deletion_attempt_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    });
+  });
+
+  it.each(['error', 'reject'] as const)(
+    'explicitly keeps DB-backed recovery when newer pending metadata restoration returns %s',
+    async (failure) => {
+      const admin = makeAdmin({
+        interleave: 'new_attempt_after_clear',
+        ...(failure === 'error'
+          ? { restoreFlagError: { message: 'metadata restore unavailable' } }
+          : { restoreFlagReject: new Error('metadata restore unavailable') }),
+        e2eePrepareData: {
+          ok: false,
+          rollback_confirmed: true,
+          refusal_code: 'e2ee_would_orphan_partner',
+          phase: 'media_cleanup',
+        },
+      });
+
+      const response = await post(admin);
+
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({
+        dataRemoved: false,
+        recoveryRequired: true,
+        deletionCancelled: false,
+      });
+      expect(admin.runtime.fence).toEqual({
+        attemptId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        phase: 'media_cleanup',
+      });
+      expect(admin.runtime.appMetadata.account_deletion_pending).not.toBe(true);
+      expect(console.error).toHaveBeenCalledWith(
+        expect.stringContaining('restore pending deletion metadata'),
+      );
+    },
+  );
 
   it('never clears Auth metadata after a newer attempt supersedes the exact DB fence', async () => {
     const admin = makeAdmin({

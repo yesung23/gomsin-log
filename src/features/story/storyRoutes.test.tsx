@@ -25,10 +25,12 @@ vi.mock('@/lib/productEvents', () => ({ recordProductEvent }));
 */
 
 const TODAY = '2026-08-22';
+const MISSED_DAY = '2026-08-21';
+let defaultRecordDate = TODAY;
 
 function record(over: Partial<DailyRecord> = {}): DailyRecord {
   return {
-    id: 'r1', userId: 'partner-id', date: TODAY, time: '09:00',
+    id: 'r1', userId: 'partner-id', date: defaultRecordDate, time: '09:00',
     authorRole: 'gomsin', log: '오늘 시험 끝났어', isPrivate: false,
     createdAt: '2026-08-22T00:00:00.000Z', ...over,
   } as DailyRecord;
@@ -124,6 +126,7 @@ beforeEach(() => {
   appLocale = 'ko';
   profileId = 'me';
   partnerUserId = 'partner-id';
+  defaultRecordDate = TODAY;
   vi.unstubAllEnvs();
 });
 
@@ -340,6 +343,10 @@ describe('/story/partner', () => {
   });
 
   describe('Partner Briefing feature flag', () => {
+    beforeEach(() => {
+      defaultRecordDate = MISSED_DAY;
+    });
+
     const eightRecords = () => Array.from({ length: 8 }, (_, index) => record({
       id: `brief-${index + 1}`,
       time: `${String(9 + index).padStart(2, '0')}:00`,
@@ -388,6 +395,26 @@ describe('/story/partner', () => {
       expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
       expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
       expect(screen.getByRole('button', { name: /점심/ })).toBeTruthy();
+      expect(plugin.availability).not.toHaveBeenCalled();
+    });
+
+    it('ON이어도 오늘 기록만 있으면 놓친 기록 브리핑 대신 오늘 표지를 유지한다', () => {
+      vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+      defaultRecordDate = TODAY;
+      const plugin = nativeBriefingPlugin();
+      __setOnDeviceBriefingPluginForTests(plugin);
+      surface = [record({ id: 'today-a', log: '오늘 첫 기록' }), record({
+        id: 'today-b',
+        time: '13:00',
+        log: '오늘 둘째 기록',
+      })];
+      records = surface;
+
+      open('/story/partner');
+
+      expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+      expect(screen.getByRole('button', { name: /오늘 첫 기록/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /오늘 둘째 기록/ })).toBeTruthy();
       expect(plugin.availability).not.toHaveBeenCalled();
     });
 

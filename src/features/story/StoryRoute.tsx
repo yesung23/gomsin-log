@@ -67,8 +67,7 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     [viewerUserId, profile.role],
   );
   const briefingLocale = state.locale === 'en' ? 'en' : 'ko';
-  const partnerBriefingEnabled = mode === 'today'
-    && import.meta.env.VITE_PARTNER_BRIEFING_ENABLED === 'true';
+  const partnerBriefingFeatureEnabled = import.meta.env.VITE_PARTNER_BRIEFING_ENABLED === 'true';
 
   /*
     `persist`는 상대 스토리에서만 켠다.
@@ -77,6 +76,20 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     버튼을 가진 유일한 곳이므로 이 화면이 소유자다. 내 스토리와 보관 스토리는 읽기만 한다.
   */
   const { surface, todayStr, acknowledge } = usePartnerDay({ persist: mode === 'today' });
+
+  /*
+    오늘과 놓친 구간은 같은 기록을 두 AI가 경쟁해서 요약하지 않는다.
+
+    - 오늘 기록만 있으면: 기존 Daily Summary가 기록마다 한 줄을 유지한다.
+    - 읽을 수 있는 지난 기록이 하나라도 있으면: Partner Briefing이 여러 날을 압축한다.
+
+    날짜는 여기서 화면 소유권을 고르는 데만 쓰며 PartnerDay의 OUTSTANDING/확인 의미에는
+    손대지 않는다. 읽을 수 없는 지난 기록 하나 때문에 오늘 요약까지 사라지지 않도록
+    실제 내용에 접근 가능한 surface만 판정에 사용한다.
+  */
+  const partnerBriefingEnabled = mode === 'today'
+    && partnerBriefingFeatureEnabled
+    && withReadableContent(surface).some((record) => record.date !== todayStr);
 
   const dateParam = params.date;
   const highlightId = params.highlightId;

@@ -713,7 +713,10 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
-    surface = twoToday();
+    surface = [
+      record({ id: 'missed', date: '2026-08-21', log: longBody('어제 남긴 기록') }),
+      record({ id: 'today', time: '13:00', log: longBody('오늘 남긴 기록') }),
+    ];
     records = surface;
 
     open('/story/partner');
@@ -722,6 +725,20 @@ describe('기능 ON이어도 호출하지 않는 자리', () => {
     await Promise.resolve();
     await waitFor(() => expect(plugin.availability).not.toHaveBeenCalled());
     expect(plugin.refineLines).not.toHaveBeenCalled();
+  });
+
+  it('Partner Briefing flag가 켜져도 오늘 기록만이면 Daily Summary가 맡는다', async () => {
+    vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+
+    expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+    await requestAiSummary();
+    await waitFor(() => expect(plugin.refineLines).toHaveBeenCalledTimes(1));
   });
 
   it('나의 오늘', async () => {

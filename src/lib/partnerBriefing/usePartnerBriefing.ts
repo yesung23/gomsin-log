@@ -42,6 +42,13 @@ export type PartnerBriefingStatus =
   | 'unavailable'
   | 'ready';
 
+export type PartnerBriefingRefinementStatus =
+  | 'idle'
+  | 'running'
+  | 'applied'
+  | 'fallback'
+  | 'unavailable';
+
 export interface UsePartnerBriefingInput {
   readonly enabled: boolean;
   readonly surface: readonly DailyRecord[];
@@ -50,6 +57,8 @@ export interface UsePartnerBriefingInput {
   readonly coupleConnected: boolean;
   readonly coupleStatus?: CoupleStatus | null;
   readonly provider?: BriefingProvider | null;
+  /** 0에서는 모델을 실행하지 않는다. 사용자의 명시적 요청마다 증가시킨다. */
+  readonly requestVersion?: number;
   readonly timeoutMs?: number;
   readonly locale?: BriefingLocale;
 }
@@ -57,6 +66,8 @@ export interface UsePartnerBriefingInput {
 export interface UsePartnerBriefingResult {
   readonly status: PartnerBriefingStatus;
   readonly briefing: PartnerBriefing | null;
+  readonly refinementStatus: PartnerBriefingRefinementStatus;
+  readonly canRequestRefinement: boolean;
 }
 
 interface SynchronousEvaluation {
@@ -153,6 +164,7 @@ export function usePartnerBriefing(
     coupleConnected,
     coupleStatus,
     provider,
+    requestVersion = 0,
     timeoutMs,
     locale = DEFAULT_BRIEFING_LOCALE,
   } = input;
@@ -177,9 +189,11 @@ export function usePartnerBriefing(
     locale,
   ]);
 
-  const [refined, setRefined] = useState<{
+  const [refinement, setRefinement] = useState<{
     inputKey: string;
-    briefing: PartnerBriefing;
+    requestVersion: number;
+    status: Exclude<PartnerBriefingRefinementStatus, 'idle' | 'unavailable'>;
+    briefing: PartnerBriefing | null;
   } | null>(null);
 
   const runnerRef = useRef<PartnerBriefingRunner | null>(null);
@@ -200,23 +214,42 @@ export function usePartnerBriefing(
 
   const currentInputKey = syncEval.inputKey;
   const currentStatus = syncEval.status;
+  const requestedInputRef = useRef({ requestVersion: 0, inputKey: '' });
+  if (requestVersion > requestedInputRef.current.requestVersion) {
+    requestedInputRef.current = { requestVersion, inputKey: currentInputKey };
+  }
+  const requestMatchesCurrentInput = requestVersion > 0
+    && requestedInputRef.current.requestVersion === requestVersion
+    && requestedInputRef.current.inputKey === currentInputKey;
+  const completedRequestsRef = useRef(new Set<string>());
 
   useEffect(() => {
     if (
       !enabled ||
       currentStatus !== 'ready' ||
       !provider ||
-      !normalizedRef.current
+      !normalizedRef.current ||
+      !requestMatchesCurrentInput
     ) {
       runner.cancel();
       return;
     }
+
+    const requestKey = `${requestVersion}:${currentInputKey}`;
+    if (completedRequestsRef.current.has(requestKey)) return;
 
     const normalized = normalizedRef.current;
     const abortController = new AbortController();
     let isMounted = true;
 
     const { events, sources, days } = normalized;
+
+    setRefinement({
+      inputKey: currentInputKey,
+      requestVersion,
+      status: 'running',
+      briefing: null,
+    });
 
     void (async () => {
       try {
@@ -230,16 +263,26 @@ export function usePartnerBriefing(
           locale,
         });
 
-        if (!isMounted || abortController.signal.aborted || !result) {
+        if (!isMounted || abortController.signal.aborted) {
           return;
         }
+        completedRequestsRef.current.add(requestKey);
 
-        setRefined({
+        setRefinement({
           inputKey: currentInputKey,
+          requestVersion,
+          status: result ? 'applied' : 'fallback',
           briefing: result,
         });
       } catch {
-        // Fallback baseline is preserved on throw
+        if (!isMounted || abortController.signal.aborted) return;
+        completedRequestsRef.current.add(requestKey);
+        setRefinement({
+          inputKey: currentInputKey,
+          requestVersion,
+          status: 'fallback',
+          briefing: null,
+        });
       }
     })();
 
@@ -253,6 +296,8 @@ export function usePartnerBriefing(
     currentStatus,
     currentInputKey,
     provider,
+    requestVersion,
+    requestMatchesCurrentInput,
     effectiveTimeoutMs,
     runner,
     locale,
@@ -262,16 +307,32 @@ export function usePartnerBriefing(
     return {
       status: syncEval.status,
       briefing: null,
+      refinementStatus: 'unavailable',
+      canRequestRefinement: false,
     };
   }
 
+  const activeRefinement = refinement
+    && refinement.inputKey === syncEval.inputKey
+    && refinement.requestVersion === requestVersion
+      ? refinement
+      : null;
   const effectiveBriefing =
-    refined && refined.inputKey === syncEval.inputKey
-      ? refined.briefing
+    activeRefinement?.briefing
+      ? activeRefinement.briefing
       : syncEval.briefing;
+  const refinementAvailable = Boolean(provider && syncEval.normalized);
+  const refinementStatus: PartnerBriefingRefinementStatus = !refinementAvailable
+    ? 'unavailable'
+    : !requestMatchesCurrentInput
+      ? 'idle'
+      : activeRefinement?.status ?? 'running';
 
   return {
     status: 'ready',
     briefing: effectiveBriefing,
+    refinementStatus,
+    canRequestRefinement: refinementAvailable
+      && (refinementStatus === 'idle' || refinementStatus === 'fallback'),
   };
 }

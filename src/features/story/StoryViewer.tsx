@@ -11,6 +11,7 @@ import type {
   DailySummaryRefinementStatus,
 } from '@/lib/dailySummary/contract';
 import type { TalkAboutActorState } from '@/lib/talkAboutList';
+import type { PartnerBriefingRefinementStatus } from '@/lib/partnerBriefing/usePartnerBriefing';
 
 /**
  * 스토리 뷰어 — 상대의 하루를 하나씩 넘겨 본다.
@@ -77,6 +78,9 @@ export interface StoryViewerProps {
   briefing?: PartnerBriefing | null;
   /** 브리핑 로케일. 기본값 ko. */
   briefingLocale?: BriefingLocale;
+  /** 사용자가 요청할 때만 Partner Briefing의 온디바이스 다듬기를 시작한다. */
+  onRefineBriefing?: () => void;
+  briefingRefinementStatus?: PartnerBriefingRefinementStatus;
 }
 
 type ViewerItem =
@@ -131,6 +135,8 @@ export function StoryViewer({
   coupleId,
   briefing,
   briefingLocale,
+  onRefineBriefing,
+  briefingRefinementStatus,
 }: StoryViewerProps) {
   const items: ViewerItem[] = useMemo(() => {
     const list: ViewerItem[] = [];
@@ -306,6 +312,8 @@ export function StoryViewer({
             briefing={item.briefing}
             locale={briefingLocale}
             onOpenRecord={onOpenRecord}
+            onRefine={onRefineBriefing}
+            refinementStatus={briefingRefinementStatus}
             className="mt-2"
           />
         ) : card?.kind === 'cover' ? (

@@ -391,7 +391,7 @@ describe('/story/partner', () => {
       expect(plugin.availability).not.toHaveBeenCalled();
     });
 
-    it('ON에서는 iOS provider를 호출하되 원본 이동과 확인 의미론을 바꾸지 않는다', async () => {
+    it('ON에서도 사용자가 요청하기 전에는 모델을 부르지 않고, 요청 뒤 원본·확인 의미론을 보존한다', async () => {
       vi.stubEnv('VITE_PARTNER_BRIEFING_ENABLED', 'true');
       const plugin = nativeBriefingPlugin();
       __setOnDeviceBriefingPluginForTests(plugin);
@@ -404,6 +404,8 @@ describe('/story/partner', () => {
 
       open('/story/partner');
 
+      expect(plugin.selectExtracts).not.toHaveBeenCalled();
+      await userEvent.click(screen.getByRole('button', { name: '기기에서 문장 다듬기' }));
       await waitFor(() => expect(plugin.selectExtracts).toHaveBeenCalled());
       expect(acknowledge).not.toHaveBeenCalled();
       await userEvent.click(screen.getByTestId('partner-briefing-expand'));

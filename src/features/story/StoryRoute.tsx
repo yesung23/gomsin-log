@@ -60,6 +60,7 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
 
   const { profile } = state;
   const [aiRequestVersion, setAiRequestVersion] = useState(0);
+  const [briefingRequestVersion, setBriefingRequestVersion] = useState(0);
   const viewerUserId = state.authenticatedUser?.id || profile.id;
   const viewer = useMemo(
     () => ({ userId: viewerUserId, role: profile.role }),
@@ -118,6 +119,7 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     coupleStatus: profile.couple.status,
     locale: briefingLocale,
     provider: partnerBriefingEnabled ? nativeOnDeviceBriefingProvider : null,
+    requestVersion: briefingRequestVersion,
   });
   const briefing = partnerBriefingResult.status === 'ready'
     ? partnerBriefingResult.briefing
@@ -176,6 +178,9 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     && (canRequestAiSummary || aiSummaryStatus === 'running' || aiSummaryStatus === 'applied');
   const requestAiSummary = useCallback(() => {
     setAiRequestVersion((version) => version + 1);
+  }, []);
+  const requestBriefingRefinement = useCallback(() => {
+    setBriefingRequestVersion((version) => version + 1);
   }, []);
 
   /*
@@ -363,6 +368,12 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
       }
       briefing={briefing}
       briefingLocale={briefingLocale}
+      onRefineBriefing={partnerBriefingResult.canRequestRefinement
+        || partnerBriefingResult.refinementStatus === 'running'
+        || partnerBriefingResult.refinementStatus === 'applied'
+        ? requestBriefingRefinement
+        : undefined}
+      briefingRefinementStatus={partnerBriefingResult.refinementStatus}
     />
   );
 }

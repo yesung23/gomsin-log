@@ -27,6 +27,7 @@ function makeDefaultInput(
 ): UsePartnerBriefingInput {
   return {
     enabled: true,
+    requestVersion: 1,
     surface: [makeValidRecord()],
     viewerUserId: 'viewer_123',
     partnerUserId: 'partner_456',
@@ -37,6 +38,71 @@ function makeDefaultInput(
 }
 
 describe('usePartnerBriefing (Phase B1)', () => {
+  describe('Explicit on-device refinement', () => {
+    it('does not invoke the provider before the user requests refinement', async () => {
+      const provider = new FakeBriefingProvider();
+      const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion: 0,
+      })));
+
+      expect(result.current.status).toBe('ready');
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.refinementStatus).toBe('idle');
+      expect(result.current.canRequestRefinement).toBe(true);
+      await act(async () => { await Promise.resolve(); });
+      expect(provider.getCallHistory()).toHaveLength(0);
+    });
+
+    it('runs once for a new explicit request and applies only the verified result', async () => {
+      const provider = new FakeBriefingProvider();
+      let requestVersion = 0;
+      const { result, rerender } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion,
+      })));
+
+      requestVersion = 1;
+      rerender();
+
+      await waitFor(() => expect(result.current.briefing?.generation).toBe('on_device'));
+      expect(result.current.refinementStatus).toBe('applied');
+      expect(result.current.canRequestRefinement).toBe(false);
+      const callCount = provider.getCallHistory().length;
+
+      rerender();
+      await act(async () => { await Promise.resolve(); });
+      expect(provider.getCallHistory()).toHaveLength(callCount);
+    });
+
+    it('does not send newly arriving records until the user makes another request', async () => {
+      const provider = new FakeBriefingProvider();
+      let requestVersion = 1;
+      let surface = [makeValidRecord({ id: 'first', log: '첫 기록' })];
+      const { result, rerender } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion,
+        surface,
+      })));
+
+      await waitFor(() => expect(result.current.briefing?.generation).toBe('on_device'));
+      const firstCallCount = provider.getCallHistory().length;
+
+      surface = [...surface, makeValidRecord({ id: 'late', time: '13:00', log: '늦게 온 기록' })];
+      rerender();
+      await act(async () => { await Promise.resolve(); });
+
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.refinementStatus).toBe('idle');
+      expect(provider.getCallHistory()).toHaveLength(firstCallCount);
+
+      requestVersion = 2;
+      rerender();
+      await waitFor(() => expect(result.current.briefing?.generation).toBe('on_device'));
+      expect(provider.getCallHistory().length).toBeGreaterThan(firstCallCount);
+    });
+  });
+
   describe('Disabled State', () => {
     it('returns disabled and null briefing without querying provider when enabled is false', () => {
       const provider = new FakeBriefingProvider();
@@ -479,6 +545,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
           makeDefaultInput({
             surface: [recordB],
             provider,
+            requestVersion: 2,
           }),
         );
       });
@@ -733,7 +800,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
       );
     });
 
-    it('on same records, switching ko to en immediately shows English baseline, restarts provider run, and late ko cannot overwrite it', async () => {
+    it('on same records, switching ko to en shows English baseline and only a new request restarts the provider', async () => {
       const provider = new FakeBriefingProvider({
         delayMs: 150,
       });
@@ -775,6 +842,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
             surface: [record],
             provider,
             locale: 'en' as BriefingLocale,
+            requestVersion: 2,
           }),
         );
       });

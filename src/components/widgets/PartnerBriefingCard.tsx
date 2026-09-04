@@ -1,5 +1,5 @@
 import { useState, useId } from 'react';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, LoaderCircle, Sparkles } from 'lucide-react';
 import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { cn } from '@/lib/utils';
@@ -10,11 +10,14 @@ import {
   type PartnerBriefing,
 } from '@/lib/partnerBriefing/contract';
 import { formatDateForLocale } from '@/lib/partnerBriefing/fallback';
+import type { PartnerBriefingRefinementStatus } from '@/lib/partnerBriefing/usePartnerBriefing';
 
 export interface PartnerBriefingCardProps {
   readonly briefing: PartnerBriefing;
   readonly locale?: BriefingLocale;
   readonly onOpenRecord: (recordId: string) => void;
+  readonly onRefine?: () => void;
+  readonly refinementStatus?: PartnerBriefingRefinementStatus;
   readonly className?: string;
 }
 const PERIOD_LABELS: Record<BriefingLocale, Record<BriefingPeriod, string>> = {
@@ -70,6 +73,8 @@ export function PartnerBriefingCard({
   briefing,
   locale = DEFAULT_BRIEFING_LOCALE,
   onOpenRecord,
+  onRefine,
+  refinementStatus = 'idle',
   className,
 }: PartnerBriefingCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -123,6 +128,42 @@ export function PartnerBriefingCard({
         <p className="text-body text-foreground break-keep">
           {briefing.overview.text}
         </p>
+      ) : null}
+
+      {onRefine ? (
+        <div className="flex flex-col items-start gap-1">
+          <button
+            type="button"
+            onClick={onRefine}
+            disabled={refinementStatus === 'running' || refinementStatus === 'applied'}
+            aria-busy={refinementStatus === 'running'}
+            className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-2 text-caption font-semibold text-foreground disabled:opacity-60"
+          >
+            {refinementStatus === 'running' ? (
+              <LoaderCircle size={15} className="motion-safe:animate-spin motion-reduce:hidden" aria-hidden="true" />
+            ) : (
+              <Sparkles size={15} aria-hidden="true" />
+            )}
+            {locale === 'en'
+              ? refinementStatus === 'running'
+                ? 'Refining on device'
+                : refinementStatus === 'applied'
+                  ? 'Refined on device'
+                  : 'Refine on device'
+              : refinementStatus === 'running'
+                ? '기기에서 다듬는 중'
+                : refinementStatus === 'applied'
+                  ? '기기에서 다듬기 완료'
+                  : '기기에서 문장 다듬기'}
+          </button>
+          {refinementStatus === 'fallback' ? (
+            <p role="status" className="text-caption text-muted-foreground">
+              {locale === 'en'
+                ? 'The chronological summary is still available.'
+                : '시간순 정리는 그대로 볼 수 있어요.'}
+            </p>
+          ) : null}
+        </div>
       ) : null}
 
       {/* Expand / Collapse Control */}

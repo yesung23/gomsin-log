@@ -1,12 +1,23 @@
 import { test, expect, type BrowserContext } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
-import { record } from './scenarios';
+import { record, TODAY } from './scenarios';
+
+function shiftCalendarDate(date: string, deltaDays: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + deltaDays);
+  return value.toISOString().slice(0, 10);
+}
+
+const MISSED_DAY = shiftCalendarDate(TODAY, -1);
 
 const RECORDS = Array.from({ length: 8 }, (_, index) => record({
   id: `briefing-source-${index + 1}`,
   user_id: 'user-creator',
+  record_date: MISSED_DAY,
   record_time: `${String(9 + index).padStart(2, '0')}:00`,
   log_text: `상대 기록 ${index + 1}`,
+  created_at: `${MISSED_DAY}T${String(9 + index).padStart(2, '0')}:00:00Z`,
 }));
 
 async function openPartnerStory(context: BrowserContext, locale: 'ko' | 'en') {
@@ -34,7 +45,7 @@ test('Partner Briefing은 8개 전체를 압축하고 정확한 원본을 유지
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const { page, unrouted } = await openPartnerStory(context, 'ko');
 
-  const dialog = page.getByRole('dialog', { name: '오늘' });
+  const dialog = page.getByRole('dialog', { name: '놓친 하루' });
   const briefing = page.getByTestId('partner-briefing-card');
   await expect(briefing).toBeVisible({ timeout: 20_000 });
   await expect(briefing.getByText('순간 8개')).toBeVisible();

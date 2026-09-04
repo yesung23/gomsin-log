@@ -1084,8 +1084,38 @@ supabase functions deploy delete-account
 - rollback은 forward-only입니다. 081 전에는 scheduler를 멈추고 호환 Edge를 되돌립니다.
   081 후 V1 Edge 복원이 불가피하면 새 migration으로 두 V1 grant만 임시 복원하되 sale
   hold와 legacy-consumable quarantine을 유지하며, 원장 이력을 drop/rewrite하지 않습니다.
-- 미래 082는 이 작업에 존재하지 않습니다. 법무·retention·원격 migration·V2 canary·cron
-  운영·실제 fulfillment·App Store/Sandbox/device 증거가 모두 별도 승인되기 전에는 sale
-  hold 제거를 만들거나 적용하지 않습니다.
+- 082는 079를 재작성하지 않고 refund/reconciliation 감사 경계를 보강하는 후속
+  forward migration입니다. 법무·retention·원격 migration·V2 canary·cron 운영·실제
+  fulfillment·App Store/Sandbox/device 증거가 모두 별도 승인되기 전에는 sale hold를
+  제거하지 않습니다.
 - **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 원격 Supabase에 접근하거나
   migration을 적용하지 않았습니다.
+
+## 082 — Apple IAP refund/reconciliation forward-only hardening (2026-09-05)
+
+- `082_apple_iap_refund_reconciliation_forward_fix.sql`은 기존 079를 역사 그대로 고정하고
+  081 뒤에 적용하는 전진 수정입니다. 시작 시 원본 079 catalog와 V1 권한 회수를
+  검증하며, 재작성된 079나 예상 밖 schema를 만나면 자동 추측 없이 중단합니다.
+- Apple transaction history cursor는 확인된 원거래 체인·환경마다 분리하고, 한 실행에서
+  target 1개와 한 page만 처리합니다. 각 거래는 페이지의 자체 appAccountToken hash로
+  귀속하며, 계정 충돌·삭제·미확인·토큰 없음은 원본 연결용 메타데이터와 함께 별도
+  review fact로 남깁니다. 페이지 처리와 cursor 전진은 하나의 DB transaction이고,
+  응답 유실 후 같은 lease/page 재호출도 저장된 page hash와 결과 수로 멱등 복구합니다.
+- 과거 `manual_review` 사유를 역추정하지 않습니다. 확인할 수 없는 기존 행은
+  `LEGACY_REVIEW_UNSPECIFIED`로 분리하고 정확한 event/payload hash에 연결된 review
+  fact를 한 건만 생성합니다. 새 review 승인에는 operator actor와 operation id가
+  필수이며, 이전 2인자 RPC의 모든 외부 실행권한은 회수됩니다.
+- 기존 `consumption_request_reason` 값은 감사 증거로 보존하지만 새 요청에서는
+  저장하지 않습니다. 컬럼은 삭제하지 않고 nullable로 전환합니다. Edge가 Apple에
+  보내는 body에도 이 값은 포함되지 않습니다.
+- 기존 whitelist CHECK는 새 CHECK를 먼저 추가·검증한 뒤 교체합니다. 새 reconciliation
+  table은 RLS를 켜고 모든 직접 접근을 회수하며, trigger/helper와 새 RPC는 필요한
+  service-role 경계만 허용합니다. 079의 sale hold와 081의 V1 회수는 유지됩니다.
+- 로컬 검증: `npm run test:iap:ledger`가 실제 PostgreSQL 17에서
+  `077 → 원본 079 → 081 → 082` upgrade/fresh 순서와 500개 actor·data·lease·권한
+  assertion을 통과했습니다. `src/lib/migration082.test.ts`와 전체 migration security
+  contract도 forward-only 형태, 079 hash, RLS, 권한, PostgREST reload를 검증합니다.
+- 다음 사용 가능한 migration 번호는 **083**입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** Production catalog fingerprint,
+  V2 Edge deploy/canary, scheduler secret, Apple Sandbox/Production, 실제 결제·환불은
+  확인하거나 변경하지 않았습니다.

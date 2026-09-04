@@ -3212,6 +3212,219 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+## 2026-09-05 — Apple IAP reconciliation forward-only safety closure
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: Apple IAP refund evidence, reconciliation correctness, and bounded worker reliability
+- Step: restore immutable migration 079, move the rejected rewrite into forward migration 082, and close cross-account attribution, cursor atomicity, replay, timeout, and authorization gates
+- Previous Gate: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- This Gate: local implementation commit `9cd0686d86b83b062301fc0dcb9e2e00f7235b03`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, and the latest explicit owner direction for paid Garden accessories/buildings while sales remain gated
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; privacy/E2EE/storage capacity remain outside paid gating and Book Studio remains outside this app-only tranche
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/migration-gate.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: exact worktree/branch/HEAD/status, repository implementation/tests, and `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-05 RC Task 3 and RC build/offline correction entries
+- MASTER PLAN version / 기준일: V5 / 2026-09-03, latest owner overrides through 2026-09-05
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex Control Tower with bounded read-only architecture consultation
+- Model: GPT-5.6 Sol, maximum reasoning for security review preparation; no model above Max
+- Role: primary implementation, integration, and local verification owner
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- Old HEAD: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- New HEAD / Reviewed HEAD: implementation `9cd0686d86b83b062301fc0dcb9e2e00f7235b03`; this ledger/report is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `supabase/migrations/079_apple_iap_refund_consumption.sql`, `supabase/migrations/082_apple_iap_refund_reconciliation_forward_fix.sql`
+- function/component/migration: immutable 079 restoration and forward-only 082 reconciliation contract
+- what changed/reviewed: restored migration 079 byte-for-byte to its previously reviewed content; added 082 with strict predecessor preflight, one checkpoint per Apple environment/original-transaction chain, per-transaction account-token attribution, durable review facts, atomic page settlement and cursor advance, same-lease/page response-loss replay, failure-only lease release, service-only RPCs, RLS, and sale-hold preservation
+- why: a historical migration must never be rewritten, one app billing account is not proof of one Apple customer, and cursor progress must never survive a partially applied page
+- file: `supabase/functions/apple-iap-reconcile/*`, `_shared/appleIapHistory.ts`, `_shared/appleIapContract.ts`, notification/sync token mapping
+- function/component/migration: bounded reconciliation worker and canonical appAccountToken hashing
+- what changed/reviewed: one target/page per invocation, ingress-based monotonic runtime budget, Apple history timeout bounded by remaining work time, a single atomic settlement RPC, and lowercase UUID hashing shared by notification, sync, and reconciliation paths
+- why: prevent cross-account attribution, ambiguous replay, Edge deadline overrun, and casing-dependent binding failures
+- file: `supabase/functions/apple-iap-consumption/*`, `_shared/adminSecret.ts`
+- function/component/migration: consumption worker deadline and bounded Supabase administration requests
+- what changed/reviewed: limits each invocation to one send job, reserves completion time, requires a minimum Apple network window, caps Apple I/O at 100 seconds, and composes caller aborts with a 10-second same-origin Supabase RPC timeout
+- why: never begin irreversible Apple I/O when the worker cannot safely persist its result
+- file: `scripts/phase0/apple-iap-ledger-harness.mjs`, `src/lib/migration082.test.ts`, focused Edge tests
+- function/component/migration: upgrade-path, actor/authz, failure atomicity, response-loss, and deadline regression proof
+- what changed/reviewed: real PostgreSQL chain `077 -> original 079 -> 081 -> 082` now exercises two owners in one Apple history page, missing/unknown/deleted/conflicting bindings, stale/wrong leases, page rollback, empty page, idempotent response recovery, RLS/role denial, and sale hold
+- why: static SQL presence is insufficient evidence for database behavior
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no E2EE algorithm, key, nonce, recovery, or ciphertext semantics changed
+- DB/migration semantics: migrations 077/078/080/081 were not changed; migration 079 was restored exactly, never evolved in place
+- product semantics: no app UI, entitlement pricing, Garden catalog, media, health, auth provider, or Book Studio behavior changed; IAP remains unavailable to customers
+- Production: no push, merge, deploy, remote Supabase, Apple App Store Server API, scheduler, product, transaction, or customer-data action
+
+### VERIFICATION
+- command: `git diff --exit-code 5315c129d3d7886a209e8a560901abba07e8a245 -- supabase/migrations/079_apple_iap_refund_consumption.sql`; `shasum -a 256 ...079...`
+- PASS / FAIL / UNVERIFIED: PASS — parent diff empty; SHA-256 `cda1defda9d197c91a997d0ff4e6f669e5edaa65dbd0fd5737ec69505d5dc132`
+- what it actually proves: migration 079 in the candidate is byte-identical to the reviewed predecessor content
+- command: `npm run test:iap:ledger`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 500 assertions
+- what it actually proves: local fresh/upgrade schema, actor authorization, ownership resolution, rollback, lease, replay, review evidence, and sale-hold behavior; expected permission/check failures are negative tests
+- command: `npm run check:iap && npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — four IAP entrypoints type-checked; 83 Deno tests passed
+- what it actually proves: local Edge type contracts and handler behavior including one-job/one-target limits, aborting timeouts, runtime reserves, and fail-closed entrypoints
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/adminSecret.test.ts src/lib/migration082.test.ts src/lib/migrationSecurityContracts.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files, 215 tests
+- what it actually proves: migration shape/hash/ACL/RLS contracts and composed administration-request abort semantics
+- command: `npm run typecheck`; scoped ESLint over every changed TypeScript file; `node --check scripts/phase0/apple-iap-ledger-harness.mjs`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: local TypeScript, configured lint, harness syntax, and staged whitespace integrity
+- command: default `deno fmt --check` over changed Deno files
+- PASS / FAIL / UNVERIFIED: NOT APPLICABLE — no repository Deno formatter configuration exists and the default formatter would rewrite the established project-wide single-quote style; configured ESLint passed without mass-formatting unrelated code
+- what it actually proves: no format PASS is claimed from a tool whose defaults conflict with the repository convention
+- command: remote Supabase catalog/migration state, Apple Sandbox/Production, deployed Edge functions, StoreKit/device refund lifecycle
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: local evidence is not generalized to external state
+
+### REVIEW IMPACT
+- FULL: payment/refund database state machines, service-role RPCs, worker deadlines, and migration history handling changed
+- whether an earlier review is stale: YES; an independent exact-HEAD Sol Max security review is required before any remote action
+
+### BLOCKERS
+- code: no blocking defect found by the executed local gates; independent exact-HEAD review still pending
+- environment: none for local PostgreSQL/Deno/Vitest/type/lint checks
+- external/manual: legal/retention approval, production catalog fingerprint, Apple credentials/products/server notifications, deployed V2 Edge canary, scheduler configuration, Sandbox purchase/refund, and physical-device evidence remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: forward-only implementation commit and complete local focused verification; documentation and independent review follow
+
+### REMAINING
+- independent exact-HEAD security review and any resulting delta; no sale, remote migration, deploy, or scheduler activation before all external gates are evidenced
+
+### NEXT ACTION
+- next owner: independent Sol Max read-only reviewer, then Control Tower
+- tool/model: GPT-5.6 Sol / Max
+- 기준 SHA: implementation `9cd0686d86b83b062301fc0dcb9e2e00f7235b03` plus the following factual documentation commit
+- exact next task: review migration upgrade safety, authz/RLS, lock ordering, idempotence, cross-account attribution, worker deadline composition, and test gaps; classify CRITICAL/HIGH/MEDIUM/LOW
+
+### DO NOT ADVANCE UNTIL
+- exact-HEAD independent review has no CRITICAL or HIGH finding
+- migration 079 remains byte-identical and 082 remains forward-only
+- remote migration/deploy/sale activation receives a separate evidence-backed release decision
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-05 — RC build/offline and migration 080 correction tranche
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: production build integrity, service-worker offline correctness, and migration 080 trigger-function ACL closure
+- Step: independently confirmed blockers A–D — cache namespace inputs, non-vacuous stale-cache proof, cold authenticated Home offline proof, and explicit role-grant revocation proof
+- Previous Gate: required starting commit `88d9aea98e632cdb81547896501a491fb42683df`
+- This Gate: local implementation commits `38e5c0ca336bc5c57e735ee12a6278c2e04bc4e5` and `21cbd699d39bbdc4fbe49a03f447087d503b37f9`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — this tranche corrects release/offline and exact ACL behavior without changing customer, product, AI, pricing, media, storage, or monetization strategy
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/offline-migration080-fix-brief.md`, and applicable procedures under `docs/skills/`
+- Current-state checked: exact worktree/branch/starting HEAD/status, repository implementation/tests, and `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-05 RC Task 3 entry immediately preceding this entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 Codex
+- Role: sole correction-tranche implementation owner and local verifier
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `88d9aea98e632cdb81547896501a491fb42683df`
+- Old HEAD: `88d9aea98e632cdb81547896501a491fb42683df`
+- New HEAD / Reviewed HEAD: implementation `21cbd699d39bbdc4fbe49a03f447087d503b37f9`; this ledger is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `build/buildEnv.ts`, `build/viteBuildEnvironmentPlugin.ts`, `vite.config.ts`, and their focused build/CSP/bundle/gate tests
+- function/component/migration: fail-closed production environment validation, CSP injection, empty-chunk/build gates, and service-worker build injection ordering
+- what changed/reviewed: preserved and completed the existing dirty release-build tranche, including scoped static regressions for build environment and artifact hygiene
+- why: release artifacts must fail closed on invalid configuration or structurally broken output
+- file: `build/serviceWorkerManifest.ts`, `public/sw.js`, `src/lib/serviceWorkerManifest.test.ts`, `src/lib/serviceWorkerRuntime.test.ts`, `e2e/serviceWorkerOffline.spec.ts`
+- function/component/migration: service-worker cache namespace derivation, activation cleanup, cold offline shell, and response-integrity behavior
+- what changed/reviewed: the cache id now hashes all final `dist` files except injected `sw.js`, the original service-worker template bytes, and the canonical sorted unique injected manifest; the injected build id is excluded to avoid a circular hash. Runtime and real-browser tests prove a prior cache is deleted/inaccessible, authenticated Home boots offline without warming Home, backend routes are unavailable, and the Home chunk is served by the worker
+- why: service-worker-only or manifest-only changes must invalidate the namespace, and browser tests must prove worker ownership rather than a fallback response
+- file: `supabase/migrations/080_revoke_private_record_trigger_execute.sql`, `scripts/phase0/migration080-trigger-acl-harness.mjs`, `src/lib/migration080.test.ts`
+- function/component/migration: `080_revoke_private_record_trigger_execute`
+- what changed/reviewed: the harness begins with PUBLIC revoked and explicit `anon`, `authenticated`, and `service_role` EXECUTE grants; it proves the exact pre-state, applies the real migration, proves all explicit grants and effective access are gone, and proves unrelated pre-existing/future function ACLs remain unchanged
+- why: a PUBLIC-only fixture cannot prove that migration 080 removes direct role grants
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, ciphertext, or E2EE change
+- DB/migration semantics: no migration other than new migration 080 was changed; migrations 079/081 and all IAP files were untouched
+- product semantics: no UI, Garden, media, health, auth, Book Studio, navigation, or user-flow redesign
+- Production: no push, merge, deploy, remote Supabase, Production, device, or customer-data action; no separate report file was created outside the explicit write set
+
+### VERIFICATION
+- command: focused service-worker manifest TDD RED, then `npx vitest run --config vitest.config.ts --configLoader runner src/lib/serviceWorkerManifest.test.ts`
+- PASS / FAIL / UNVERIFIED: expected RED — 3 passed, 1 failed because `deriveServiceWorkerBuildId` did not exist; GREEN — 4 passed, 0 failed
+- what it actually proves: template-only, manifest-only, and final-artifact byte changes affect the namespace, while manifest ordering alone does not
+- command: migration080 actor-harness TDD RED, then `node scripts/phase0/migration080-trigger-acl-harness.mjs`
+- PASS / FAIL / UNVERIFIED: expected RED — exit 1 because the revised PUBLIC-revoked fixture lacked explicit role grants; GREEN — 71 assertions passed
+- what it actually proves: real ephemeral PostgreSQL role/catalog/trigger behavior for the checked migration and unrelated ACL controls; it does not prove remote state
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/buildEnv.test.ts src/lib/bundleHygiene.test.ts src/lib/cspExternalResources.test.ts src/lib/gatePathCoverage.test.ts src/lib/serviceWorkerManifest.test.ts src/lib/serviceWorkerRuntime.test.ts src/lib/viteBuildGate.test.ts src/lib/migration080.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 8 files, 295 tests, 0 failed
+- what it actually proves: focused static/runtime regressions for every changed local build, service-worker, and migration test module
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/serviceWorkerOffline.spec.ts --config playwright.config.ts --project=chromium-390 --trace=off`
+- PASS / FAIL / UNVERIFIED: PASS — Google Chrome 152.0.7977.76, 4 passed, 0 failed, 24.0 seconds
+- what it actually proves: a real Chrome worker owns both cold signed-out/authenticated offline shells, rejects HTML-poisoned asset caching, and deletes the previous namespace. An earlier trace-enabled run reached 3 passed before one infrastructure FAIL while copying a retained trace with `ENOSPC`; after ephemeral cache cleanup, repeated trace-off runs passed 4/4
+- command: `npm run typecheck`; scoped ESLint over the changed TypeScript/test files; `node --check public/sw.js`; `node --check scripts/phase0/migration080-trigger-acl-harness.mjs`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: local TypeScript graph, scoped lint policy, and JavaScript syntax integrity
+- command: placeholder production `npm run build`, followed by an independent framed SHA-256 recomputation over the final artifacts, original worker template, and parsed canonical manifest
+- PASS / FAIL / UNVERIFIED: PASS — 2,582 modules transformed; injected/recomputed id `1e7bbe704780`; 21 manifest assets; 362 final artifacts
+- what it actually proves: the emitted worker's namespace matches all required local byte inputs without hashing its injected id; placeholder configuration is not Production configuration evidence
+- command: named-path staging checks for both implementation commits; `git diff --cached --stat`; `git diff --cached --check`; final `git diff --check`; exact committed-path and forbidden-path checks
+- PASS / FAIL / UNVERIFIED: PASS — build/offline and migration080 remained separate atomic commits; `control-tower/Now.md`, migrations 079/081, IAP, and all other forbidden product areas were absent from both commits
+- what it actually proves: the requested tranche did not absorb the preserved unrelated dirty Control Tower file or disallowed paths
+- command: remote Supabase catalog/migration state, Production deployment, CI, and physical-device offline behavior
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: local test results were not generalized to external state
+
+### REVIEW IMPACT
+- FULL: release-build hashing/service-worker update behavior and a database function authorization migration changed
+- whether an earlier review is stale: YES for these corrected paths; the exact implementation commits have complete scoped local verification but still require the independently owned release/security review before external promotion
+
+### BLOCKERS
+- code: none found by the scoped local acceptance gates
+- environment: none for the requested local gates after ephemeral derived-cache cleanup
+- external/manual: remote migration/catalog state, Production/CI, deployed update behavior, and physical-device offline behavior remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: two separate implementation commits, final focused Vitest/type/lint/syntax/build/hash/PostgreSQL actor gates, and real-Chrome service-worker E2E; only this factual ledger commit follows
+
+### REMAINING
+- fresh independent exact-HEAD release/security review and any explicitly authorized remote, deployment, CI, or device gates
+
+### NEXT ACTION
+- next owner: independent release/security reviewer, then an authorized release integrator only if review and external gates are clear
+- tool/model: strongest available read-only build/database security reviewer; deployment owner only after approval
+- 기준 SHA: implementation `21cbd699d39bbdc4fbe49a03f447087d503b37f9` plus this documentation-only ledger commit
+- exact next task: inspect the exact committed diff, then verify migration 080 target-state and service-worker update behavior in the authorized release environment without changing sales, UI, or unrelated product areas
+
+### DO NOT ADVANCE UNTIL
+- exact-HEAD independent review has no blocking finding
+- remote migration and deployment state are evidenced separately and never inferred from the repository
+- push, merge, deploy, Production, or remote Supabase work receives explicit authorization
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
 ### 2026-09-03 · 온디바이스 하루 정리의 공유 건강·위치 본문 입력 승인 반영
 
 #### PLAN POSITION

@@ -164,6 +164,11 @@ try {
     CREATE ROLE anon NOLOGIN;
     CREATE ROLE authenticated NOLOGIN;
     CREATE ROLE service_role NOLOGIN;
+    -- Supabase installs database extensions outside public. Migration 077 must
+    -- therefore work when pgcrypto already exists in the standard extensions
+    -- schema and CREATE EXTENSION IF NOT EXISTS leaves it there.
+    CREATE SCHEMA extensions;
+    CREATE EXTENSION pgcrypto WITH SCHEMA extensions;
     CREATE SCHEMA auth;
     CREATE TABLE auth.users (
       id uuid PRIMARY KEY,

@@ -13,8 +13,6 @@
 
 BEGIN;
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 CREATE SCHEMA IF NOT EXISTS iap_private;
 
 -- The schema and its tables are not a PostgREST data surface. Definer RPCs
@@ -327,7 +325,15 @@ BEGIN
   END IF;
 
   v_token := gen_random_uuid();
-  v_hash := encode(digest(lower(v_token::TEXT), 'sha256'), 'hex');
+  -- Use PostgreSQL core SHA-256 rather than pgcrypto.digest(). Supabase keeps
+  -- extensions in a separate schema, while this definer function deliberately
+  -- pins search_path to public, pg_temp.
+  v_hash := pg_catalog.encode(
+    pg_catalog.sha256(
+      pg_catalog.convert_to(pg_catalog.lower(v_token::TEXT), 'UTF8')
+    ),
+    'hex'
+  );
   INSERT INTO iap_private.apple_account_bindings (
     user_id, app_account_token, app_account_token_hash
   ) VALUES (v_uid, v_token, v_hash)

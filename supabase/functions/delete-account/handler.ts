@@ -338,37 +338,9 @@ export async function handleDeleteAccountRequest(
     currentPhase = beginPhase;
     destructiveDatabasePreparationMayHaveCommitted = beginPhase !== 'media_cleanup';
 
-    try {
-      await removeAndConfirmRecordMedia(admin, records);
-    } catch (mediaError) {
-      if (currentPhase === 'media_cleanup') {
-        const { data: cancelled, error: cancelError } = await admin.rpc(
-          'cancel_account_deletion_v2',
-          { p_user_id: userId, p_attempt_id: attemptId },
-        );
-        if (cancelError || cancelled !== true) {
-          const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
-          console.error('[delete-account] Failed to clear fenced deletion marker', { kind });
-        } else {
-          deletionMarkerStarted = false;
-        }
-      } else {
-        throw mediaError;
-      }
-      const kind = safeDeleteErrorKind(mediaError);
-      console.error('[delete-account] Media cleanup failed; database untouched', { kind });
-      return jsonResponse(
-        {
-          error: 'Account deletion failed because stored media could not be fully removed. Please try again.',
-          dataRemoved: false,
-          warnings: [],
-        },
-        500,
-        cors.headers,
-      );
-    }
-
-    // E2EE key material comes first, and its failure aborts the whole deletion.
+    // E2EE key material comes before every irreversible cleanup, including
+    // Storage. Its structured orphan refusal is the only safe cancellation
+    // point: no media or relational data has been removed yet.
     //
     // It runs before the relational preparation because it is the step that can
     // legitimately refuse: if removing this account would leave the surviving
@@ -434,6 +406,31 @@ export async function handleDeleteAccountRequest(
       throw new Error('E2EE deletion preparation did not confirm success');
     }
     currentPhase = e2eePhase;
+
+    // Storage cleanup is allowed only after the database has durably advanced
+    // to the exact e2ee_prepared phase. A later phase means a previous attempt
+    // already completed this step before advancing relational deletion.
+    //
+    // Once E2EE preparation has committed, cancellation is no longer safe. A
+    // Storage error may also be partially applied, so preserve the deletion
+    // fence and report dataRemoved=true for deterministic retry/recovery.
+    if (currentPhase === 'e2ee_prepared') {
+      try {
+        await removeAndConfirmRecordMedia(admin, records);
+      } catch (mediaError) {
+        const kind = safeDeleteErrorKind(mediaError);
+        console.error('[delete-account] Media cleanup failed after E2EE preparation', { kind });
+        return jsonResponse(
+          {
+            error: 'Account deletion was partially completed, but stored media could not be fully removed. Please try again to finish deleting the account.',
+            dataRemoved: true,
+            warnings: [],
+          },
+          500,
+          cors.headers,
+        );
+      }
+    }
 
     // Migration 015 owns all destructive relational work. In particular,
     // ownership transfer is no longer a best-effort direct table update: an

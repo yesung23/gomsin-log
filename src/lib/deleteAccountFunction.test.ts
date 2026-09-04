@@ -38,16 +38,21 @@ type AdminOptions = {
   cleanupCouplesData?: unknown;
   iapPrepareError?: unknown;
   iapPrepareData?: unknown;
+  recordRows?: Array<{ id: string; couple_id: string }>;
+  storageObjectPaths?: string[];
+  storageRemoveError?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
   const calls: string[] = [];
   const rpcCalls: Array<{ name: string; args?: Record<string, unknown> }> = [];
   const metadataWrites: unknown[] = [];
+  const storageObjects = new Set(options.storageObjectPaths ?? []);
   const admin = {
     calls,
     rpcCalls,
     metadataWrites,
+    storageObjects,
     auth: {
       getUser: vi.fn(async () => {
         calls.push('auth.getUser');
@@ -74,7 +79,10 @@ function makeAdmin(options: AdminOptions = {}) {
       select: () => ({
         eq: async () => {
           calls.push(`from:${table}.select`);
-          return { data: [], error: null };
+          return {
+            data: table === 'daily_records' ? (options.recordRows ?? []) : [],
+            error: null,
+          };
         },
       }),
     }),
@@ -188,8 +196,20 @@ function makeAdmin(options: AdminOptions = {}) {
     }),
     storage: {
       from: () => ({
-        list: async () => ({ data: [], error: null }),
-        remove: async () => ({ error: null }),
+        list: async (folder: string) => {
+          calls.push(`storage.list:${folder}`);
+          const prefix = `${folder}/`;
+          const data = [...storageObjects]
+            .filter((path) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
+            .map((path) => ({ name: path.slice(prefix.length), id: `object:${path}` }));
+          return { data, error: null };
+        },
+        remove: async (paths: string[]) => {
+          calls.push('storage.remove');
+          if (options.storageRemoveError) return { error: options.storageRemoveError };
+          for (const path of paths) storageObjects.delete(path);
+          return { error: null };
+        },
       }),
     },
   };
@@ -268,6 +288,61 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const begin = admin.rpcCalls.find((call) => call.name === 'begin_account_deletion_v2');
     const cancel = admin.rpcCalls.find((call) => call.name === 'cancel_account_deletion_v2');
     expect(cancel?.args?.p_attempt_id).toBe(begin?.args?.p_attempt_id);
+  });
+
+  it('preserves every media object when E2EE refuses deletion before irreversible cleanup', async () => {
+    const mediaPath = 'couple-a/record-a/photo.jpg';
+    const admin = makeAdmin({
+      recordRows: [{ id: 'record-a', couple_id: 'couple-a' }],
+      storageObjectPaths: [mediaPath],
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: false });
+    expect([...admin.storageObjects]).toEqual([mediaPath]);
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
+  });
+
+  it('removes media only after E2EE confirms preparation and before relational deletion', async () => {
+    const admin = makeAdmin({
+      recordRows: [{ id: 'record-a', couple_id: 'couple-a' }],
+      storageObjectPaths: ['couple-a/record-a/photo.jpg'],
+    });
+
+    expect((await post(admin)).status).toBe(200);
+
+    const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion_v2');
+    const mediaAt = admin.calls.indexOf('storage.remove');
+    const relationalAt = admin.calls.indexOf('rpc:prepare_account_deletion_v2');
+    expect(e2eeAt).toBeGreaterThanOrEqual(0);
+    expect(e2eeAt).toBeLessThan(mediaAt);
+    expect(mediaAt).toBeLessThan(relationalAt);
+  });
+
+  it('keeps the deletion barrier and reports removed data when media cleanup fails after E2EE', async () => {
+    const admin = makeAdmin({
+      recordRows: [{ id: 'record-a', couple_id: 'couple-a' }],
+      storageObjectPaths: ['couple-a/record-a/photo.jpg'],
+      storageRemoveError: { message: 'storage timeout' },
+    });
+
+    const response = await post(admin);
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ dataRemoved: true });
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).toContain('storage.remove');
+    expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
+    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
   });
 
   it('does not treat a zero-row fenced cancel as success', async () => {

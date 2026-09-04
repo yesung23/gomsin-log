@@ -12365,3 +12365,112 @@ PRODUCTION
 
 #### PRODUCTION
 - NOT APPLIED
+
+---
+
+## 2026-09-04 — account-deletion operation barrier · durable media outbox · E2EE release fuse
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: account lifecycle, outbound mutation safety, offline media durability
+- Step: account-deletion operation-lifetime barrier → exact-user mutation audit → immutable media retry plan → release fuse
+- Previous Gate: account-deletion bootstrap fence at `8a29e7f986142f2114a35c2cec9e696e70e71b99`
+- This Gate: local reliability commit `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+
+### DIRECTION CHECK
+- Product source checked: latest user-approved V5 direction, `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no customer, monetization, storage-tier, AI-selection, or Memory Product semantic change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, account-deletion/E2EE/outbox current code and tests
+- Current-state checked: `scripts/agent/session-start.sh`, exact branch/HEAD/status, current source and runnable suite
+- Latest relevant Work Log checked: 2026-09-03 realtime regression and Garden candidate entries plus account-deletion predecessor commits
+- MASTER PLAN version / 기준일: V5 / 2026-09-04
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex primary; independent reviewer feedback integrated before commit
+- Model: GPT-5.6 Sol primary; prior independent review supplied one remaining MEDIUM static-audit gap
+- Role: reliability implementation, integration, local verification, release-gate documentation
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `2e377afe622f6aa9da9b771c4097362365a07513`
+- Old HEAD: `2e377afe622f6aa9da9b771c4097362365a07513`
+- New HEAD / Reviewed HEAD: `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`; final exact-HEAD Sol Ultra review still pending
+
+### CHANGED / REVIEWED
+- file: `src/lib/accountDeletion.ts`, `src/lib/store.tsx`, server-mutation helpers and account-deletion tests
+- function/component/migration: operation-lifetime shared/exclusive Web Locks, intent lock, v2 recovery marker attempt authority, exact-user identity assertions
+- what changed/reviewed: outbound server writes now remain behind the same deletion barrier for their full operation; stale identity and a different deletion attempt fail closed; old Provider teardown cannot clear a surviving runtime
+- why: a preflight-only check left a race where deletion or account switching could happen after the check and before a write completed
+- file: `src/lib/outbox.ts`, `src/lib/outboxStorage.ts`, `src/lib/store.tsx`, media failure/outbox tests
+- function/component/migration: schema-v2 immutable media plan, stable UUID object paths, atomic IndexedDB row replacement, retry disposition and authoritative duplicate reconciliation
+- what changed/reviewed: queued media order/path identity survives retries; partial uploads no longer fabricate completion; definitive media errors block while connectivity failures remain retryable; an authoritative existing row is checked before decrypting or creating a media plan
+- why: prevent duplicate uploads, reordered attachments, plaintext handling before authority, and silent media loss during interrupted offline delivery
+- file: `build/buildEnv.ts`, `vite.config.ts`, E2EE runtime lifecycle and release tests
+- function/component/migration: exact-true E2EE production/release fuse and token-scoped runtime registrations
+- what changed/reviewed: release builds reject `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` until every reachable ceremony has the same account-deletion barrier and migration 076 is verified; stale Provider cleanup no longer tears down newer capabilities
+- why: keep currently incomplete crypto activation unreachable without removing the reviewed OFF-state implementation
+- file: `src/lib/gatePathCoverage.test.ts`, `src/lib/serverCallGate.test.ts`, author-role and feature regressions
+- function/component/migration: exact transport occurrence and exemption-token audit
+- what changed/reviewed: every direct Supabase/RPC/Edge mutation exemption is pinned to an expected transport token and occurrence count; adding a call inside an already allowlisted file now fails the audit
+- why: close the independent review's MEDIUM false-pass path
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, or ciphertext-format change; E2EE remains release-disabled when the flag is exactly `true`
+- DB/migration semantics: no migration or remote schema change in this commit
+- product semantics: records, exact-source briefing, unread/confirmed-through, couple lifecycle, role behavior, Garden, AI and health-sharing meaning unchanged
+- Production: no push, merge, deploy, Supabase, Vercel, TestFlight, App Store Connect, or customer-data action
+
+### VERIFICATION
+- command: focused account-deletion, store/outbox, server-gate and fixture suites during implementation
+- PASS / FAIL / UNVERIFIED: PASS — latest focused seven-file run 117 tests; static gate run 196 tests
+- what it actually proves: targeted race, exact-user, retry-plan and static-call-path regressions behave as encoded locally
+- command: `npm test -- --run --reporter=json --outputFile=/tmp/gomsinlog-full-vitest-latest.json`
+- PASS / FAIL / UNVERIFIED: PASS — 1,395 suites; 5,606 tests; 5,604 passed; 2 pending/skipped; 0 failed
+- what it actually proves: current local JavaScript/React unit and integration suite has no observed regression
+- command: `npm run typecheck`; `npm run lint`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, repository ESLint policy and staged patch whitespace integrity
+- command: bare `npm run build`
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — `VITE_SUPABASE_URL is missing or empty`
+- what it actually proves: the worktree does not silently emit a demo artifact without mandatory configuration
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_public_key_not_a_secret npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,581 modules transformed, production Vite bundle emitted
+- what it actually proves: the source/type/bundle graph builds with a non-secret validation fixture; it is not a Production configuration check
+- command: prior independent cumulative reliability review and post-finding focused rerun
+- PASS / FAIL / UNVERIFIED: PASS WITH CLOSED MEDIUM — CRITICAL/HIGH 0; one MEDIUM stale allowlist risk fixed by exact occurrence checks
+- what it actually proves: the reported static-audit gap is closed; final exact-HEAD independent security/release review remains required
+- command: physical iPhone, remote migration 076, live Supabase/RLS, Production deployment
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: local test evidence cannot be generalized to remote or device behavior
+
+### REVIEW IMPACT
+- FULL: account-deletion operation authority, outbound mutation call paths, E2EE runtime lifetime and outbox media delivery changed; older whole-app reliability/security reviews are stale for these paths
+- whether an earlier review is stale: YES; final convergence requires a fresh exact-HEAD Sol Ultra review
+
+### BLOCKERS
+- code: Apple IAP consumption/refund evidence, transaction-scoped credit attribution and user consent are not yet implemented; sales remain OFF
+- environment: physical-iPhone account switch/deletion/offline interruption and accessibility checks remain UNVERIFIED
+- external/manual: migration 076 target-state, remote RLS, Apple Sandbox/TestFlight and legal operator values remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: local reliability implementation, whole-suite/lint/type/build verification and commit `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+
+### REMAINING
+- forward migration 079 and IAP consumption worker; actual export reserve/commit/release integration; exact-HEAD Sol Ultra security/release review; remote and device gates
+
+### NEXT ACTION
+- next owner: Codex Control Tower with one bounded Sol Max IAP worker
+- tool/model: GPT-5.6 Sol Max implementation; GPT-5.6 Sol Ultra final independent reviewer
+- 기준 SHA: `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+- exact next task: build transaction-scoped refund/consumption evidence as additive migration 079 and server functions while keeping sale activation OFF
+
+### DO NOT ADVANCE UNTIL
+- no CRITICAL/HIGH remains in exact-HEAD Sol Ultra review
+- IAP sales, Apple login and E2EE activation fuses remain OFF until their external/manual gates have direct evidence
+- remote migrations/functions are not called APPLIED without querying the target project
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: no remote state was queried or changed by this gate
+
+---

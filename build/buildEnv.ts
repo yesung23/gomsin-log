@@ -14,6 +14,7 @@
 export const CSP_HTTP_MARKER = '__SUPABASE_HTTP_SRC__';
 export const CSP_CONNECT_MARKER = '__SUPABASE_CONNECT_SRC__';
 const APPLE_LOGIN_RELEASE_HOLD_CODE = 'APPLE_LOGIN_RELEASE_HOLD';
+const E2EE_DEVICE_PROTECTION_RELEASE_HOLD_CODE = 'E2EE_DEVICE_PROTECTION_RELEASE_HOLD';
 
 export type BuildEnvironment = {
   VITE_SUPABASE_URL?: string;
@@ -22,6 +23,7 @@ export type BuildEnvironment = {
   VITE_LEGAL_OPERATOR_NAME?: string;
   VITE_PRIVACY_CONTACT_EMAIL?: string;
   VITE_APPLE_LOGIN_ENABLED?: string;
+  VITE_E2EE_DEVICE_PROTECTION_ENABLED?: string;
   /** Vite mode for build-only safety gates; ordinary local validation may omit it. */
   buildMode?: string;
   /** Vercel sets this to `production` only for the public production target. */
@@ -55,6 +57,15 @@ export function validateBuildEnvironment(env: BuildEnvironment): ValidatedBuildE
       `${APPLE_LOGIN_RELEASE_HOLD_CODE}: VITE_APPLE_LOGIN_ENABLED=true is blocked in production/release builds. `
       + 'Remove this fuse only in a separately reviewed activation commit after same-email silent-merge '
       + 'prevention, the Apple token custody/revocation ledger, and native AuthenticationServices are verified.',
+    );
+  }
+  if (isAppleReleaseTarget && env.VITE_E2EE_DEVICE_PROTECTION_ENABLED === 'true') {
+    fail(
+      `${E2EE_DEVICE_PROTECTION_RELEASE_HOLD_CODE}: `
+      + 'VITE_E2EE_DEVICE_PROTECTION_ENABLED=true is blocked in production/release builds. '
+      + 'Remove this fuse only in a separately reviewed activation commit after every reachable '
+      + 'E2EE ceremony holds an operation-lifetime account-deletion barrier, exact-user race tests '
+      + 'pass, and migration 076 is verified on the target environment.',
     );
   }
   if (isProductionTarget) {

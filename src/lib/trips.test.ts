@@ -9,6 +9,19 @@ import {
   validateTripRangeAgainstItems,
 } from '@/lib/trips';
 
+vi.mock('@/lib/accountDeletion', () => ({
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => ({
+    kind: 'executed',
+    value: await operation({
+      userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+      assertCurrent: () => {},
+    }),
+  }),
+}));
+
 const { mockUpdatePayload, mockEq, mockSupabase } = vi.hoisted(() => {
   const mockUpdatePayload = vi.fn();
   /**

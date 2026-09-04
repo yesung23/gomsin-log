@@ -458,12 +458,12 @@ export function TodayLogWidget({ onSaved, onBusyChange }: TodayLogWidgetProps = 
       Fire-and-forget: the emitter swallows its own failures, so an offline
       analytics insert cannot make a successful save look unsuccessful.
     */
-    if (composerOpenedAt.current !== null) {
+    if (composerOpenedAt.current !== null && draftUserId) {
       void recordProductEvent({
         kind: 'record_composed',
         screen: 'home',
         durationMs: Date.now() - composerOpenedAt.current,
-      });
+      }, { expectedUserId: draftUserId });
       composerOpenedAt.current = null;
     }
 

@@ -146,11 +146,14 @@ export function TalkAboutListWidget() {
                     if (result.changed === false) {
                       toast.info('이미 목록에서 정리된 이야기거리예요.');
                     } else {
-                      void recordProductEvent({
-                        kind: 'talk_about_resolved',
-                        screen: 'home',
-                        subjectId: topic.recordId,
-                      });
+                      const eventUserId = state.authenticatedUser?.id || profile.id;
+                      if (eventUserId) {
+                        void recordProductEvent({
+                          kind: 'talk_about_resolved',
+                          screen: 'home',
+                          subjectId: topic.recordId,
+                        }, { expectedUserId: eventUserId });
+                      }
                       toast.success('이야기한 걸로 정리했어요.');
                     }
                   } catch {

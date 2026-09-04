@@ -677,10 +677,37 @@ export function classifyMediaFile(
   return match;
 }
 
-export function buildMediaPath(coupleId: string, recordId: string, ext: string): string {
+const MEDIA_OBJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidMediaObjectId(value: string): boolean {
+  return MEDIA_OBJECT_ID_PATTERN.test(value);
+}
+
+export function buildMediaPath(
+  coupleId: string,
+  recordId: string,
+  ext: string,
+  stableObjectId?: string,
+): string {
   // Must stay in sync with the storage RLS policies:
   // foldername[1] = coupleId, foldername[2] = recordId (migration 007).
-  return `${coupleId}/${recordId}/${crypto.randomUUID()}.${ext}`;
+  const objectId = stableObjectId && isValidMediaObjectId(stableObjectId)
+    ? stableObjectId
+    : crypto.randomUUID();
+  return `${coupleId}/${recordId}/${objectId}.${ext}`;
+}
+
+function isAlreadyUploadedStableObject(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { status?: unknown; statusCode?: unknown; code?: unknown; message?: unknown };
+  const status = Number(candidate.statusCode ?? candidate.status);
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : '';
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  return status === 409
+    || code === 'duplicate'
+    || code === 'resource_already_exists'
+    || message.includes('already exists')
+    || message.includes('duplicate');
 }
 
 /**
@@ -695,41 +722,55 @@ export async function uploadRecordMedia(
   coupleId: string,
   recordId: string,
   displayName?: string,
-): Promise<{ attachment: Attachment } | { error: string }> {
+  stableObjectId?: string,
+): Promise<{ attachment: Attachment } | { error: string; reason: ServerErrorKind }> {
   if (!isSupabaseConfigured || !supabase) {
-    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.' };
+    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.', reason: 'server' };
   }
   if (!coupleId || !recordId) {
-    return { error: '커플 공간이 연결된 뒤에 파일을 올릴 수 있어요.' };
+    return { error: '커플 공간이 연결된 뒤에 파일을 올릴 수 있어요.', reason: 'unknown' };
+  }
+  if (stableObjectId && !isValidMediaObjectId(stableObjectId)) {
+    return {
+      error: '첨부 파일 식별자가 올바르지 않아 업로드하지 않았어요.',
+      reason: 'unknown',
+    };
   }
 
   const classified = classifyMediaFile(file);
-  if ('error' in classified) return classified;
+  if ('error' in classified) return { ...classified, reason: 'unknown' };
 
   let uploadFile = file;
   let uploadExtension = classified.ext;
   if (classified.type === 'photo') {
     const sanitized = await sanitizePhotoForUpload(file);
-    if ('error' in sanitized) return sanitized;
+    if ('error' in sanitized) return { ...sanitized, reason: 'unknown' };
     uploadFile = sanitized.file;
     uploadExtension = sanitized.ext;
     if (uploadFile.size > MAX_BYTES.photo) {
-      return { error: '사진을 변환한 뒤에도 파일이 너무 커요. 다른 사진을 선택해 주세요.' };
+      return {
+        error: '사진을 변환한 뒤에도 파일이 너무 커요. 다른 사진을 선택해 주세요.',
+        reason: 'unknown',
+      };
     }
   }
 
-  const path = buildMediaPath(coupleId, recordId, uploadExtension);
+  const path = buildMediaPath(coupleId, recordId, uploadExtension, stableObjectId);
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, uploadFile, {
     contentType: uploadFile.type,
     upsert: false,
   });
 
-  if (error) {
+  if (error && !(stableObjectId && isAlreadyUploadedStableObject(error))) {
     console.error('[gomsinlog] Media upload failed.');
     // Classified from the real Storage error. This used to hard-code
     // "연결 상태를 확인하고" while holding the actual cause, so an RLS rejection,
     // a 413 and an expired JWT all told the user to check a working connection.
-    return { error: `파일을 올리지 못했어요. ${classifyServerError(error).message}` };
+    const classifiedError = classifyServerError(error);
+    return {
+      error: `파일을 올리지 못했어요. ${classifiedError.message}`,
+      reason: classifiedError.kind,
+    };
   }
 
   return {

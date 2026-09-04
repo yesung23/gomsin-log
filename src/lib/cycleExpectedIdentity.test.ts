@@ -3,10 +3,22 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const database = vi.hoisted(() => ({
   payload: null as null | Record<string, unknown>,
   filters: [] as Array<{ table: string; column: string; value: unknown }>,
+  barrierCalls: 0,
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
-  serverCallBlockedByPendingDeletion: async () => false,
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => {
+    database.barrierCalls += 1;
+    const expectedUserId = options.expectedUserId === 'current' ? 'user-b' : options.expectedUserId;
+    if (expectedUserId !== 'user-b') return { kind: 'blocked' };
+    return {
+      kind: 'executed',
+      value: await operation({ userId: expectedUserId, assertCurrent: () => {} }),
+    };
+  },
 }));
 
 vi.mock('@/lib/supabase', () => ({
@@ -59,22 +71,20 @@ describe('cycle writes preserve the account that initiated them', () => {
   beforeEach(() => {
     database.payload = null;
     database.filters = [];
+    database.barrierCalls = 0;
   });
 
-  it('never retargets an A daily-log action to a later B session', async () => {
-    await saveCycleDailyLogToDB(
+  it('blocks an A daily-log action after the current account has switched to B', async () => {
+    const result = await saveCycleDailyLogToDB(
       '2026-08-14',
       ['headache'],
       {},
       'user-a',
     );
 
-    // If the request uses B, RLS sees a valid B-owned write and cannot know it
-    // originated from A's stale UI. Pinning A makes a later B token fail closed.
-    expect(database.payload).toMatchObject({
-      user_id: 'user-a',
-      log_date: '2026-08-14',
-    });
+    expect(result).toEqual({ ok: false, reason: 'forbidden' });
+    expect(database.barrierCalls).toBe(1);
+    expect(database.payload).toBeNull();
   });
 
   it('pins every raw-health read to A even if the live session has changed to B', async () => {

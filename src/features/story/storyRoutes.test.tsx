@@ -144,7 +144,7 @@ describe('/story/partner', () => {
     await waitFor(() => expect(recordProductEvent).toHaveBeenCalledWith({
       kind: 'briefing_opened',
       screen: 'story',
-    }));
+    }, { expectedUserId: 'me' }));
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     expect(recordProductEvent.mock.calls.filter(([event]) => (
       event.kind === 'briefing_opened'
@@ -333,7 +333,7 @@ describe('/story/partner', () => {
     expect(recordProductEvent).toHaveBeenCalledWith({
       kind: 'briefing_to_original',
       screen: 'story',
-    });
+    }, { expectedUserId: 'me' });
     expect(mockNavigate).toHaveBeenCalledWith('/record?record=exact-source');
 
     await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));

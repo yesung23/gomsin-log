@@ -1,6 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+vi.mock('@/lib/accountDeletion', () => ({
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+  ) => ({
+    kind: 'executed',
+    value: await operation({ userId: 'user-a', assertCurrent: () => {} }),
+  }),
+}));
+
 import {
   generateInvitationCode,
   hashInvitationCode,

@@ -176,9 +176,9 @@ describe('no live client code blames the connection without classifying', () => 
   it('the media upload failure classifies its Storage error', () => {
     const source = read('src/lib/records.ts');
     expect(source).toContain("import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';");
-    expect(source).toContain(
-      '`파일을 올리지 못했어요. ${classifyServerError(error).message}`',
-    );
+    expect(source).toContain('const classifiedError = classifyServerError(error);');
+    expect(source).toContain('`파일을 올리지 못했어요. ${classifiedError.message}`');
+    expect(source).toContain('reason: classifiedError.kind');
     // The literal it replaced must not come back as live copy.
     expect(stripComments(source)).not.toContain('연결 상태');
   });

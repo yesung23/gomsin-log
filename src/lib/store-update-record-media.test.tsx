@@ -711,6 +711,8 @@ describe('updateRecordMedia', () => {
     expect(lastResult).toEqual({
       ok: true,
       failedFiles: ['good.png', 'bad.png'],
+      error: '파일을 올리지 못했어요.',
+      reason: 'unknown',
     });
     expect(callOrder).toEqual([
       'upload:good.png',

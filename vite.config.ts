@@ -59,6 +59,9 @@ function validateBuildEnvironmentPlugin(
           process.env.VITE_PRIVACY_CONTACT_EMAIL || fileEnv.VITE_PRIVACY_CONTACT_EMAIL,
         VITE_APPLE_LOGIN_ENABLED:
           process.env.VITE_APPLE_LOGIN_ENABLED ?? fileEnv.VITE_APPLE_LOGIN_ENABLED,
+        VITE_E2EE_DEVICE_PROTECTION_ENABLED:
+          process.env.VITE_E2EE_DEVICE_PROTECTION_ENABLED
+          ?? fileEnv.VITE_E2EE_DEVICE_PROTECTION_ENABLED,
         buildMode: mode,
         deploymentTarget: process.env.VERCEL_ENV,
         isRelease: isExplicitRelease,

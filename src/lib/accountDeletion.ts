@@ -87,10 +87,258 @@ export function classifyDeletionErrorBody(body: unknown): AccountDeletionOutcome
  * deletion. No "adds no new data category" reasoning is relied on.
  */
 export const RECOVERY_KEY_PREFIX = 'gomsinlog.accountDeletionRecovery.v1.';
+export const ACCOUNT_DELETION_LOCK_PREFIX = 'gomsinlog.accountDeletion.lock.v1.';
+export const ACCOUNT_DELETION_INTENT_LOCK_PREFIX = 'gomsinlog.accountDeletion.intent.v1.';
 const LOCAL_CLEANUP_MARKER = 'local_cleanup';
+export const RECOVERY_MARKER_VERSION = 2 as const;
+
+export type RecoveryPhase = 'pending' | 'local_cleanup';
+
+export type RecoveryMarkerV2 = {
+  version: typeof RECOVERY_MARKER_VERSION;
+  userId: string;
+  attemptId: string;
+  phase: RecoveryPhase;
+};
+
+export type RecoveryMarkerInspection =
+  | { kind: 'absent'; userId: string }
+  | { kind: 'v2'; userId: string; phase: RecoveryPhase; marker: RecoveryMarkerV2 }
+  | { kind: 'legacy_pending'; userId: string; phase: 'pending' }
+  | { kind: 'legacy_local_cleanup'; userId: string; phase: 'local_cleanup' }
+  | { kind: 'corrupt'; userId: string; phase: 'pending' }
+  | { kind: 'unreadable'; userId: string; phase: 'pending' };
+
+type MarkerStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type MarkerListStorage = Pick<Storage, 'length' | 'key' | 'getItem'>;
+
+const UUID_V4_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function recoveryKeyFor(userId: string): string {
   return `${RECOVERY_KEY_PREFIX}${userId}`;
+}
+
+export function accountDeletionLockNameFor(userId: string): string {
+  return `${ACCOUNT_DELETION_LOCK_PREFIX}${userId}`;
+}
+
+export function accountDeletionIntentLockNameFor(userId: string): string {
+  return `${ACCOUNT_DELETION_INTENT_LOCK_PREFIX}${userId}`;
+}
+
+export type AccountDeletionLockResult<T> =
+  | { kind: 'acquired'; value: T }
+  | { kind: 'unavailable'; reason: 'unsupported' | 'contended' | 'request_failed' };
+
+const ACCOUNT_DELETION_LOCK_LEASE = Symbol('account-deletion-lock-lease');
+const activeAccountDeletionLockLeases = new WeakSet<object>();
+
+/**
+ * Proof that this call stack currently owns one user's cooperative Web Lock.
+ * The symbol is module-private, so ordinary callers cannot construct a lease;
+ * runtime checks also reject re-use for a different user.
+ */
+export type AccountDeletionLockLease<UserId extends string = string> = {
+  readonly userId: UserId;
+  readonly mode: LockMode;
+  readonly [ACCOUNT_DELETION_LOCK_LEASE]: true;
+};
+
+export function accountDeletionLockLeaseMatchesUser(
+  lease: AccountDeletionLockLease | undefined,
+  userId: string,
+): boolean {
+  return !!lease
+    && lease.userId === userId
+    && lease[ACCOUNT_DELETION_LOCK_LEASE] === true
+    && activeAccountDeletionLockLeases.has(lease);
+}
+
+/**
+ * Run one account-scoped operation under the browser's same-origin reader or
+ * writer lock. Web Locks is the only cross-tab primitive used here: localStorage
+ * inspect/set/remove sequences are not atomic and must never impersonate CAS.
+ *
+ * `ifAvailable` is used by user actions that must fail closed instead of
+ * queuing behind a deletion already in flight. Startup cleanup may wait, then
+ * re-check both auth resolution and the marker inside the callback.
+ */
+export async function withAccountDeletionLock<UserId extends string, T>(
+  userId: UserId,
+  operation: (lease: AccountDeletionLockLease<UserId>) => T | Promise<T>,
+  options: { ifAvailable?: boolean; mode?: LockMode } = {},
+): Promise<AccountDeletionLockResult<T>> {
+  let lockManager: LockManager | undefined;
+  try {
+    lockManager = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  } catch {
+    lockManager = undefined;
+  }
+  if (!lockManager || typeof lockManager.request !== 'function') {
+    console.error('[gomsinlog] Account-deletion lock unavailable; failing closed.');
+    return { kind: 'unavailable', reason: 'unsupported' };
+  }
+
+  const noOperationError = Symbol('no-operation-error');
+  let operationError: unknown = noOperationError;
+  try {
+    return await lockManager.request(
+      accountDeletionLockNameFor(userId),
+      { mode: options.mode ?? 'exclusive', ifAvailable: options.ifAvailable === true },
+      async (lock): Promise<AccountDeletionLockResult<T>> => {
+        if (!lock) return { kind: 'unavailable', reason: 'contended' };
+        const lease = {
+          userId,
+          mode: options.mode ?? 'exclusive',
+          [ACCOUNT_DELETION_LOCK_LEASE]: true,
+        } as AccountDeletionLockLease<UserId>;
+        activeAccountDeletionLockLeases.add(lease);
+        try {
+          return { kind: 'acquired', value: await operation(lease) };
+        } catch (error) {
+          operationError = error;
+          throw error;
+        } finally {
+          activeAccountDeletionLockLeases.delete(lease);
+        }
+      },
+    );
+  } catch {
+    if (operationError !== noOperationError) throw operationError;
+    console.error('[gomsinlog] Account-deletion lock failed; failing closed.');
+    return { kind: 'unavailable', reason: 'request_failed' };
+  }
+}
+
+/**
+ * Admit only one deletion initiator for an account while allowing that winner
+ * to wait behind an ordinary write on the separate account lock. A losing
+ * Provider can join this intent lock after the winner finishes to reconcile
+ * its recovery UI, but must never issue a second deletion request.
+ */
+export async function withAccountDeletionIntentLock<T>(
+  userId: string,
+  operation: () => T | Promise<T>,
+  options: { ifAvailable?: boolean } = {},
+): Promise<AccountDeletionLockResult<T>> {
+  let lockManager: LockManager | undefined;
+  try {
+    lockManager = typeof navigator === 'undefined' ? undefined : navigator.locks;
+  } catch {
+    lockManager = undefined;
+  }
+  if (!lockManager || typeof lockManager.request !== 'function') {
+    console.error('[gomsinlog] Account-deletion intent lock unavailable; failing closed.');
+    return { kind: 'unavailable', reason: 'unsupported' };
+  }
+
+  const noOperationError = Symbol('no-operation-error');
+  let operationError: unknown = noOperationError;
+  try {
+    return await lockManager.request(
+      accountDeletionIntentLockNameFor(userId),
+      { mode: 'exclusive', ifAvailable: options.ifAvailable === true },
+      async (lock): Promise<AccountDeletionLockResult<T>> => {
+        if (!lock) return { kind: 'unavailable', reason: 'contended' };
+        try {
+          return { kind: 'acquired', value: await operation() };
+        } catch (error) {
+          operationError = error;
+          throw error;
+        }
+      },
+    );
+  } catch {
+    if (operationError !== noOperationError) throw operationError;
+    console.error('[gomsinlog] Account-deletion intent lock failed; failing closed.');
+    return { kind: 'unavailable', reason: 'request_failed' };
+  }
+}
+
+type RecoveryMarkerChangeListener = () => void;
+const recoveryMarkerChangeListeners = new Set<RecoveryMarkerChangeListener>();
+
+/** Same-document signal only; subscribers must re-read their current user's key. */
+export function subscribeToRecoveryMarkerChanges(
+  listener: RecoveryMarkerChangeListener,
+): () => void {
+  recoveryMarkerChangeListeners.add(listener);
+  return () => recoveryMarkerChangeListeners.delete(listener);
+}
+
+function isWindowLocalStorage(storage: object): boolean {
+  try {
+    return typeof window !== 'undefined' && storage === window.localStorage;
+  } catch {
+    return false;
+  }
+}
+
+function notifyRecoveryMarkerChanged(storage: object): void {
+  if (!isWindowLocalStorage(storage)) return;
+  for (const listener of recoveryMarkerChangeListeners) {
+    try {
+      listener();
+    } catch {
+      console.error('[gomsinlog] Recovery marker listener failed.');
+    }
+  }
+}
+
+function isRecoveryMarkerV2(value: unknown, expectedUserId: string): value is RecoveryMarkerV2 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  const keys = Object.keys(candidate).sort();
+  return keys.length === 4
+    && keys[0] === 'attemptId'
+    && keys[1] === 'phase'
+    && keys[2] === 'userId'
+    && keys[3] === 'version'
+    && candidate.version === RECOVERY_MARKER_VERSION
+    && candidate.userId === expectedUserId
+    && typeof candidate.attemptId === 'string'
+    && UUID_V4_PATTERN.test(candidate.attemptId)
+    && (candidate.phase === 'pending' || candidate.phase === 'local_cleanup');
+}
+
+export function inspectRecoveryMarker(
+  userId: string,
+  storage: Pick<Storage, 'getItem'> = window.localStorage,
+): RecoveryMarkerInspection {
+  let raw: string | null;
+  try {
+    raw = storage.getItem(recoveryKeyFor(userId));
+  } catch {
+    console.error('[gomsinlog] deletion_status marker unreadable; failing closed.');
+    return { kind: 'unreadable', userId, phase: 'pending' };
+  }
+  if (raw === null) return { kind: 'absent', userId };
+  if (raw === LOCAL_CLEANUP_MARKER) {
+    return { kind: 'legacy_local_cleanup', userId, phase: 'local_cleanup' };
+  }
+  if (raw === 'true') return { kind: 'legacy_pending', userId, phase: 'pending' };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (isRecoveryMarkerV2(parsed, userId)) {
+      return { kind: 'v2', userId, phase: parsed.phase, marker: parsed };
+    }
+  } catch {
+    // Every malformed payload remains active and pending below.
+  }
+  return { kind: 'corrupt', userId, phase: 'pending' };
+}
+
+function persistMarkerExactly(marker: RecoveryMarkerV2, storage: MarkerStorage): boolean {
+  const serialized = JSON.stringify(marker);
+  try {
+    storage.setItem(recoveryKeyFor(marker.userId), serialized);
+    const persisted = storage.getItem(recoveryKeyFor(marker.userId)) === serialized;
+    if (persisted) notifyRecoveryMarkerChanged(storage);
+    return persisted;
+  } catch {
+    console.error('[gomsinlog] deletion_status=pending marker could not be stored.');
+    return false;
+  }
 }
 
 /**
@@ -100,15 +348,32 @@ export function recoveryKeyFor(userId: string): string {
  */
 export type MarkerState = 'absent' | 'active';
 
-/** Boolean-only payload: never warnings, storage paths or account content. */
-export function markRecoveryPending(userId: string): void {
-  try {
-    window.localStorage.setItem(recoveryKeyFor(userId), 'true');
-  } catch {
-    // Losing the marker is a FAILURE, not a "fail-safe". It is mitigated only
-    // by the server-authoritative `app_metadata.account_deletion_pending` flag.
-    console.error('[gomsinlog] deletion_status=pending marker could not be stored.');
+/** Content-free V2 payload, confirmed by an exact read-back before returning. */
+export function markRecoveryPending(
+  userId: string,
+  storage: MarkerStorage = window.localStorage,
+  createAttemptId: () => string = () => crypto.randomUUID(),
+): RecoveryMarkerV2 | null {
+  const existing = inspectRecoveryMarker(userId, storage);
+  if (existing.kind === 'v2') {
+    return existing.phase === 'pending' ? existing.marker : null;
   }
+  if (existing.kind !== 'absent') return null;
+
+  let attemptId: string;
+  try {
+    attemptId = createAttemptId();
+  } catch {
+    return null;
+  }
+  if (!UUID_V4_PATTERN.test(attemptId)) return null;
+  const marker: RecoveryMarkerV2 = {
+    version: RECOVERY_MARKER_VERSION,
+    userId,
+    attemptId,
+    phase: 'pending',
+  };
+  return persistMarkerExactly(marker, storage) ? marker : null;
 }
 
 /**
@@ -117,14 +382,58 @@ export function markRecoveryPending(userId: string): void {
  * `readRecoveryMarker` continues to treat it exactly like every other present
  * marker, so a crash or reload remains fail-closed.
  */
-export function markLocalDeletionCleanupPending(userId: string): boolean {
+export function advanceRecoveryMarkerToLocalCleanup(
+  attempt: RecoveryMarkerV2,
+  storage: MarkerStorage = window.localStorage,
+): boolean {
+  const current = inspectRecoveryMarker(attempt.userId, storage);
+  if (current.kind !== 'v2'
+    || current.marker.attemptId !== attempt.attemptId
+    || current.phase !== 'pending') return false;
+  return persistMarkerExactly({ ...attempt, phase: 'local_cleanup' }, storage);
+}
+
+export function clearRecoveryMarkerForAttempt(
+  attempt: RecoveryMarkerV2,
+  expectedPhase: RecoveryPhase,
+  storage: MarkerStorage = window.localStorage,
+): boolean {
+  const current = inspectRecoveryMarker(attempt.userId, storage);
+  if (current.kind !== 'v2'
+    || current.marker.attemptId !== attempt.attemptId
+    || current.phase !== expectedPhase) return false;
   try {
-    window.localStorage.setItem(recoveryKeyFor(userId), LOCAL_CLEANUP_MARKER);
-    return true;
+    storage.removeItem(recoveryKeyFor(attempt.userId));
+    const cleared = storage.getItem(recoveryKeyFor(attempt.userId)) === null;
+    if (cleared) notifyRecoveryMarkerChanged(storage);
+    return cleared;
   } catch {
-    console.error('[gomsinlog] deletion_status=pending local cleanup marker could not be stored.');
+    console.error('[gomsinlog] recovery marker could not be cleared.');
     return false;
   }
+}
+
+export type ListedRecoveryMarker = Exclude<RecoveryMarkerInspection, { kind: 'absent' }>;
+
+/** Snapshot every compatible marker without normalising or deleting any value. */
+export function listRecoveryMarkers(
+  storage: MarkerListStorage = window.localStorage,
+): ListedRecoveryMarker[] {
+  const userIds: string[] = [];
+  try {
+    for (let index = 0; index < storage.length; index += 1) {
+      const key = storage.key(index);
+      if (!key?.startsWith(RECOVERY_KEY_PREFIX)) continue;
+      const userId = key.slice(RECOVERY_KEY_PREFIX.length);
+      if (userId) userIds.push(userId);
+    }
+  } catch {
+    return [];
+  }
+  return userIds.flatMap((userId) => {
+    const marker = inspectRecoveryMarker(userId, storage);
+    return marker.kind === 'absent' ? [] : [marker];
+  });
 }
 
 /**
@@ -136,11 +445,8 @@ export function isLocalDeletionCleanupPending(
   userId: string,
   storage: Pick<Storage, 'getItem'> = window.localStorage,
 ): boolean {
-  try {
-    return storage.getItem(recoveryKeyFor(userId)) === LOCAL_CLEANUP_MARKER;
-  } catch {
-    return false;
-  }
+  const marker = inspectRecoveryMarker(userId, storage);
+  return marker.kind === 'v2' && marker.phase === 'local_cleanup';
 }
 
 /**
@@ -157,28 +463,7 @@ export function readRecoveryMarker(
   userId: string,
   storage: Pick<Storage, 'getItem'> = window.localStorage,
 ): MarkerState {
-  try {
-    return storage.getItem(recoveryKeyFor(userId)) === null ? 'absent' : 'active';
-  } catch {
-    // Storage unreadable. We cannot prove the marker is absent, so we do not
-    // claim it is. Fail closed.
-    console.error('[gomsinlog] deletion_status marker unreadable; failing closed.');
-    return 'active';
-  }
-}
-
-/**
- * Reachable only after one of two positive authorities: confirmed Auth deletion
- * plus successful local cleanup, or a server-confirmed safe cancellation. Not
- * logout, not a failed retry, not an account switch, not corruption, and not
- * elapsed time.
- */
-export function clearRecoveryMarker(userId: string): void {
-  try {
-    window.localStorage.removeItem(recoveryKeyFor(userId));
-  } catch (error) {
-    console.error('[gomsinlog] recovery marker could not be cleared.');
-  }
+  return inspectRecoveryMarker(userId, storage).kind === 'absent' ? 'absent' : 'active';
 }
 
 /* ------------------------------------------------------------------ *
@@ -313,47 +598,325 @@ export function combineServerAnswers(
 /**
  * Re-issues the authoritative deletion check and, on `pending`, aborts.
  *
- * The store owns the only implementation, because aborting has to mark the
- * marker, purge local content and enter recovery -- all of which need store
- * state. Data-layer modules cannot do that, so they consult the store's gate
- * through this registry instead of growing their own half-version of it.
+ * The store owns the only implementation, because aborting has to make the
+ * marker durable, stop deferred work and enter recovery without deleting the
+ * pending account's local data. Data-layer modules consult that one gate rather
+ * than growing their own half-version of it.
  */
-export type ServerCallGate = () => Promise<DeletionStatus>;
+export type ServerCallGate = (
+  lease?: AccountDeletionLockLease,
+) => Promise<DeletionStatus>;
 
-let activeServerCallGate: ServerCallGate | null = null;
+export type BoundServerCallGate = {
+  /** The authenticated user this render-time Provider registration may serve. */
+  expectedUserId: string | null;
+  /** Read synchronously so an Auth switch closes the gate before React rerenders. */
+  getCurrentUserId: () => string | null;
+  gate: ServerCallGate;
+};
+
+export type ServerCallGateRegistration = Readonly<{
+  unregister: () => void;
+}>;
+
+type RegisteredServerCallGate = BoundServerCallGate & {
+  token: symbol;
+  order: number;
+};
+
+const registeredServerCallGates = new Map<symbol, RegisteredServerCallGate>();
+let nextServerCallGateOrder = 0;
+let hasRegisteredBoundServerCallGate = false;
 
 /**
- * Registered by `StoreProvider` on mount and cleared on unmount.
- *
- * Module-global on purpose: there is exactly one provider in the app, and the
- * data-layer functions that need the gate are plain module functions with no
- * access to React context.
+ * Compatibility boundary for older isolated data-layer tests. Production has
+ * exactly one caller (`StoreProvider`) and uses the user-bound overload below.
+ * Keeping this separate means legacy cleanup can never remove a Provider's
+ * tokenized registration.
  */
-export function registerServerCallGate(gate: ServerCallGate | null): void {
-  activeServerCallGate = gate;
+let unboundCompatibilityGate: ServerCallGate | null = null;
+
+export function registerServerCallGate(
+  registration: BoundServerCallGate,
+): ServerCallGateRegistration;
+/** @deprecated Production callers must use the user-bound registration. */
+export function registerServerCallGate(gate: ServerCallGate | null): void;
+export function registerServerCallGate(
+  registration: BoundServerCallGate | ServerCallGate | null,
+): ServerCallGateRegistration | void {
+  if (typeof registration === 'function' || registration === null) {
+    unboundCompatibilityGate = registration;
+    return;
+  }
+
+  const token = Symbol('server-call-gate-registration');
+  hasRegisteredBoundServerCallGate = true;
+  const entry: RegisteredServerCallGate = {
+    ...registration,
+    token,
+    order: nextServerCallGateOrder,
+  };
+  nextServerCallGateOrder += 1;
+  registeredServerCallGates.set(token, entry);
+
+  let registered = true;
+  return Object.freeze({
+    unregister: () => {
+      if (!registered) return;
+      registered = false;
+      registeredServerCallGates.delete(token);
+    },
+  });
+}
+
+async function gateBlocksServerCall(
+  gate: ServerCallGate,
+  lease?: AccountDeletionLockLease,
+): Promise<boolean> {
+  try {
+    return (await gate(lease)).kind === 'pending';
+  } catch {
+    console.error('[gomsinlog] deletion pre-flight gate failed; server call blocked.');
+    return true;
+  }
+}
+
+type ServerCallGateResolution =
+  | { kind: 'bound'; userId: string; registration: RegisteredServerCallGate }
+  | { kind: 'unbound'; gate: ServerCallGate }
+  | { kind: 'bootstrap' }
+  | { kind: 'blocked' };
+
+function resolveServerCallGate(): ServerCallGateResolution {
+  const registrations = Array.from(registeredServerCallGates.values());
+  if (registrations.length === 0) {
+    if (hasRegisteredBoundServerCallGate) {
+      console.error('[gomsinlog] deletion pre-flight Provider unavailable; server call blocked.');
+      return { kind: 'blocked' };
+    }
+    if (unboundCompatibilityGate) return { kind: 'unbound', gate: unboundCompatibilityGate };
+    return { kind: 'bootstrap' };
+  }
+
+  const currentUserIds = new Set<string>();
+  const observed = new Map<symbol, string | null>();
+  for (const registration of registrations) {
+    let currentUserId: string | null;
+    try {
+      currentUserId = registration.getCurrentUserId();
+    } catch {
+      console.error('[gomsinlog] deletion pre-flight identity unavailable; server call blocked.');
+      return { kind: 'blocked' };
+    }
+    observed.set(registration.token, currentUserId);
+    if (currentUserId) currentUserIds.add(currentUserId);
+  }
+
+  if (currentUserIds.size !== 1) {
+    console.error('[gomsinlog] deletion pre-flight identity ambiguous; server call blocked.');
+    return { kind: 'blocked' };
+  }
+
+  const [currentUserId] = currentUserIds;
+  const matching = registrations
+    .filter((registration) => registration.expectedUserId === currentUserId
+      && observed.get(registration.token) === currentUserId)
+    .sort((left, right) => right.order - left.order)[0];
+  if (!matching) {
+    console.error('[gomsinlog] deletion pre-flight gate unavailable for current user; server call blocked.');
+    return { kind: 'blocked' };
+  }
+  return { kind: 'bound', userId: currentUserId, registration: matching };
+}
+
+async function readGateStatus(
+  gate: ServerCallGate,
+  lease?: AccountDeletionLockLease,
+): Promise<DeletionStatus | null> {
+  try {
+    return await gate(lease);
+  } catch {
+    console.error('[gomsinlog] deletion pre-flight gate failed; server call blocked.');
+    return null;
+  }
+}
+
+export type ServerMutationBarrierResult<T> =
+  | { kind: 'executed'; value: T }
+  | { kind: 'blocked' };
+
+export type ServerMutationPolicy = 'ordinary' | 'best_effort';
+
+export type ServerMutationBarrierContext = {
+  readonly userId: string;
+  readonly lease?: AccountDeletionLockLease;
+  /** Throws a private stale-identity signal that the barrier converts to blocked. */
+  assertCurrent: () => void;
+};
+
+export type ServerMutationBarrierOptions = {
+  /** A concrete initiating user, or a synchronous capture at API entry. */
+  expectedUserId: string | 'current';
+  existingLease?: AccountDeletionLockLease;
+  /** Best-effort work never waits for a deletion lock and never runs on unknown. */
+  policy?: ServerMutationPolicy;
+};
+
+const STALE_SERVER_MUTATION = Symbol('stale-server-mutation');
+
+function throwIfServerMutationIdentityChanged(expectedUserId: string): void {
+  const current = resolveServerCallGate();
+  if (current.kind !== 'bound' || current.userId !== expectedUserId) {
+    throw STALE_SERVER_MUTATION;
+  }
+}
+
+/**
+ * Keep a complete remote mutation behind the account-deletion reader/writer
+ * barrier. Unlike a boolean pre-flight, this lease remains owned until the
+ * caller's final server write and reconciliation have settled, so deletion
+ * cannot begin in the check-to-write gap.
+ *
+ * The no-Provider branch exists only for bootstrap and isolated data-layer
+ * tests. Once any bound StoreProvider has mounted, losing that authority fails
+ * closed for the rest of the document lifetime.
+ */
+export async function runServerMutationBehindDeletionBarrier<T>(
+  operation: (context: ServerMutationBarrierContext) => Promise<T>,
+  options: ServerMutationBarrierOptions,
+): Promise<ServerMutationBarrierResult<T>> {
+  const initial = resolveServerCallGate();
+  if (initial.kind === 'blocked' || initial.kind === 'bootstrap') return { kind: 'blocked' };
+  const policy = options.policy ?? 'ordinary';
+
+  if (initial.kind === 'unbound') {
+    // Deprecated test authority only. Production StoreProvider always publishes
+    // a user-bound registration, so a current user cannot be inferred here.
+    if (options.expectedUserId === 'current') return { kind: 'blocked' };
+    const status = await readGateStatus(initial.gate, options.existingLease);
+    if (!status || status.kind === 'pending' || (policy === 'best_effort' && status.kind !== 'clear')) {
+      return { kind: 'blocked' };
+    }
+    const assertCurrent = () => {
+      const current = resolveServerCallGate();
+      if (current.kind !== 'unbound' || current.gate !== initial.gate) throw STALE_SERVER_MUTATION;
+    };
+    try {
+      assertCurrent();
+      const value = await operation({
+        userId: options.expectedUserId,
+        lease: options.existingLease,
+        assertCurrent,
+      });
+      assertCurrent();
+      return { kind: 'executed', value };
+    } catch (error) {
+      if (error === STALE_SERVER_MUTATION) return { kind: 'blocked' };
+      throw error;
+    }
+  }
+
+  const expectedUserId = options.expectedUserId === 'current'
+    ? initial.userId
+    : options.expectedUserId;
+  if (initial.userId !== expectedUserId) {
+    console.error('[gomsinlog] deletion mutation identity changed before admission; server call blocked.');
+    return { kind: 'blocked' };
+  }
+
+  const execute = async (
+    registration: RegisteredServerCallGate,
+    lease: AccountDeletionLockLease,
+  ): Promise<ServerMutationBarrierResult<T>> => {
+    const status = await readGateStatus(registration.gate, lease);
+    if (!status || status.kind === 'pending' || (policy === 'best_effort' && status.kind !== 'clear')) {
+      return { kind: 'blocked' };
+    }
+    const assertCurrent = () => throwIfServerMutationIdentityChanged(expectedUserId);
+    assertCurrent();
+    const value = await operation({ userId: expectedUserId, lease, assertCurrent });
+    assertCurrent();
+    return { kind: 'executed', value };
+  };
+
+  if (options.existingLease) {
+    if (!accountDeletionLockLeaseMatchesUser(options.existingLease, expectedUserId)) {
+      console.error('[gomsinlog] deletion mutation lease identity mismatch; server call blocked.');
+      return { kind: 'blocked' };
+    }
+    try {
+      return await execute(initial.registration, options.existingLease);
+    } catch (error) {
+      if (error === STALE_SERVER_MUTATION) return { kind: 'blocked' };
+      throw error;
+    }
+  }
+
+  let pendingNeedsExclusiveRecheck = false;
+  let locked: AccountDeletionLockResult<ServerMutationBarrierResult<T>>;
+  try {
+    locked = await withAccountDeletionLock(expectedUserId, async (lease) => {
+      const admitted = resolveServerCallGate();
+      if (admitted.kind !== 'bound' || admitted.userId !== expectedUserId) {
+        return { kind: 'blocked' } as const;
+      }
+      const status = await readGateStatus(admitted.registration.gate, lease);
+      if (!status) return { kind: 'blocked' } as const;
+      if (status.kind === 'pending') {
+        pendingNeedsExclusiveRecheck = true;
+        return { kind: 'blocked' } as const;
+      }
+      if (policy === 'best_effort' && status.kind !== 'clear') {
+        return { kind: 'blocked' } as const;
+      }
+      const assertCurrent = () => throwIfServerMutationIdentityChanged(expectedUserId);
+      assertCurrent();
+      const value = await operation({ userId: expectedUserId, lease, assertCurrent });
+      assertCurrent();
+      return { kind: 'executed', value } as const;
+    }, { mode: 'shared', ifAvailable: policy === 'best_effort' });
+  } catch (error) {
+    if (error === STALE_SERVER_MUTATION) return { kind: 'blocked' };
+    throw error;
+  }
+
+  if (pendingNeedsExclusiveRecheck) {
+    const current = resolveServerCallGate();
+    if (current.kind === 'bound' && current.userId === expectedUserId) {
+      // The Store gate persists a newly discovered pending marker only under
+      // an exclusive lease. Calling it after releasing our shared lease avoids
+      // a non-reentrant upgrade deadlock and makes the next launch fail closed.
+      await readGateStatus(current.registration.gate);
+    }
+  }
+
+  return locked.kind === 'acquired' ? locked.value : { kind: 'blocked' };
 }
 
 /**
  * `true` when the caller must abort before issuing its request.
  *
- * Mirrors the store's own decision exactly: only `pending` blocks. `unknown`
- * does NOT block -- it is the deliberate availability tradeoff -- but because
- * this calls the gate on every entry rather than reading a cached verdict, an
- * `unknown` device re-verifies before every server mutation, which is the point.
+ * A mounted Provider publishes both its render-time expected user and a
+ * synchronous reader for the current Auth user. A registration is eligible
+ * only when those identities match. Multiple Providers that disagree about the
+ * current user, a missing match, or a broken identity reader all fail closed.
+ * Among multiple registrations for the same user, the newest live Provider is
+ * used; unregistering an older Provider removes only its own opaque token.
  *
- * With no gate registered (for example, an isolated data-layer unit test) this
- * is a no-op and behaviour is exactly as before.
+ * Once a matching gate is found, the store's existing availability decision is
+ * preserved: `pending` blocks while `clear` and `unknown` continue. The check is
+ * still re-issued on every entry rather than cached.
  */
-export async function serverCallBlockedByPendingDeletion(): Promise<boolean> {
-  const gate = activeServerCallGate;
-  if (!gate) return false;
-  try {
-    return (await gate()).kind === 'pending';
-  } catch (error) {
-    // A broken gate must not silently open the door, but it also must not brick
-    // every write. Log loudly and let the caller proceed: the route gate and the
-    // store's own pre-flight remain in force.
-    console.error('[gomsinlog] deletion pre-flight gate failed.');
-    return false;
+export async function serverCallBlockedByPendingDeletion(
+  lease?: AccountDeletionLockLease,
+): Promise<boolean> {
+  const resolution = resolveServerCallGate();
+  if (resolution.kind === 'blocked') return true;
+  if (resolution.kind === 'bootstrap') return false;
+  if (resolution.kind === 'unbound') return gateBlocksServerCall(resolution.gate, lease);
+  if (lease && !accountDeletionLockLeaseMatchesUser(lease, resolution.userId)) {
+    console.error('[gomsinlog] deletion pre-flight lease identity mismatch; server call blocked.');
+    return true;
   }
+  return gateBlocksServerCall(resolution.registration.gate, lease);
 }

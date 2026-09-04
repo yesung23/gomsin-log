@@ -301,7 +301,7 @@ export function ComposePage() {
       kind: 'record_composed',
       screen: 'home',
       durationMs: Date.now() - openedAt.current,
-    });
+    }, { expectedUserId: userId });
 
     /*
       `failedFiles`에는 업로드 실패와 attachment-row 응답 유실이 함께 들어올 수 있다.

@@ -23,6 +23,9 @@ const {
   updateProfile,
   setSetupComplete,
   mockNavigate,
+  runServerMutationBehindDeletionBarrier,
+  currentMutationUserId,
+  switchAfterProfileWrite,
   profileUpserts,
   contactUpserts,
   mockSupabase,
@@ -30,6 +33,9 @@ const {
   profileUpserts: [] as Record<string, unknown>[],
   contactUpserts: [] as Record<string, unknown>[],
   mockNavigate: vi.fn(),
+  runServerMutationBehindDeletionBarrier: vi.fn(),
+  currentMutationUserId: { value: 'user-a' },
+  switchAfterProfileWrite: { value: false },
   createCoupleInvitation: vi.fn(),
   consumeCoupleInvitation: vi.fn(),
   fetchMyCoupleState: vi.fn(),
@@ -44,6 +50,9 @@ const {
       upsert: vi.fn(async (payload: Record<string, unknown>) => {
         if (table === 'profiles') profileUpserts.push(payload);
         if (table === 'contact_preferences') contactUpserts.push(payload);
+        if (table === 'profiles' && switchAfterProfileWrite.value) {
+          currentMutationUserId.value = 'user-b';
+        }
         return { error: null };
       }),
     })),
@@ -76,7 +85,10 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
-  serverCallBlockedByPendingDeletion: vi.fn().mockResolvedValue(false),
+  runServerMutationBehindDeletionBarrier: (
+    operation: (context: { userId: string; assertCurrent: () => void; lease?: object }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => runServerMutationBehindDeletionBarrier(operation, options),
 }));
 
 const toastCalls: { level: string; message: string }[] = [];
@@ -144,6 +156,28 @@ describe('OnboardingPage step 3 - couple space', () => {
     profileUpserts.length = 0;
     contactUpserts.length = 0;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
+    currentMutationUserId.value = 'user-a';
+    switchAfterProfileWrite.value = false;
+    runServerMutationBehindDeletionBarrier.mockReset().mockImplementation(async (
+      operation: (context: { userId: string; assertCurrent: () => void; lease?: object }) => Promise<unknown>,
+      options: { expectedUserId: string | 'current' },
+    ) => {
+      const userId = options.expectedUserId === 'current'
+        ? currentMutationUserId.value
+        : options.expectedUserId;
+      if (userId !== currentMutationUserId.value) return { kind: 'blocked' };
+      const assertCurrent = () => {
+        if (currentMutationUserId.value !== userId) throw new Error('stale identity');
+      };
+      try {
+        const value = await operation({ userId, assertCurrent });
+        assertCurrent();
+        return { kind: 'executed', value };
+      } catch (error) {
+        if (error instanceof Error && error.message === 'stale identity') return { kind: 'blocked' };
+        throw error;
+      }
+    });
     updateProfile.mockReset();
     setSetupComplete.mockReset();
     mockNavigate.mockReset();
@@ -1147,6 +1181,49 @@ describe('OnboardingPage step 3 - couple space', () => {
       expect(updateProfile).not.toHaveBeenCalled();
       expect(setSetupComplete).not.toHaveBeenCalled();
       expect(mockNavigate).not.toHaveBeenCalled();
+    });
+
+    it('stops after the first finishSetup write when the account switches', async () => {
+      storeState.onboardingStep = 1;
+      switchAfterProfileWrite.value = true;
+      render(<OnboardingPage />);
+      await waitFor(() => expect(screen.getByText('곰신로그를 어떻게 사용할까요?')).toBeInTheDocument());
+
+      await act(async () => { clickNext(); });
+      await waitFor(() => expect(screen.getByText('어떻게 불러드리면 될까요?')).toBeInTheDocument());
+      fireEvent.change(screen.getByLabelText(/내 닉네임/), { target: { value: '전환테스터' } });
+      await act(async () => { clickNext(); });
+
+      await waitFor(() => expect(screen.getByText('우리 둘만의 로그를 시작해볼까요?')).toBeInTheDocument());
+      createCoupleInvitation.mockResolvedValue({ coupleId: 'couple-switch', code: '123456' });
+      await act(async () => { clickNext(); });
+      await waitFor(() => expect(screen.getByText('123456')).toBeInTheDocument());
+      await act(async () => { clickNext(); });
+      await waitFor(() => expect(screen.getByText('둘은 언제부터 함께였나요?')).toBeInTheDocument());
+      await act(async () => { clickNext(); });
+      await waitFor(() => expect(screen.getByText('언제 알려드리면 좋을까요?')).toBeInTheDocument());
+      await act(async () => { screen.getByRole('button', { name: '완료하기' }).click(); });
+      await waitFor(() => expect(screen.getByText('우리 둘만의 곰신로그가 준비됐어요.')).toBeInTheDocument());
+
+      fetchMyCoupleState.mockResolvedValue({
+        ok: true,
+        state: {
+          coupleId: 'couple-switch',
+          role: 'gomsin',
+          memberStatus: 'active',
+          partnerPresent: false,
+          invitationActive: false,
+          invitationExpiresAt: null,
+          relationshipContext: 'military',
+        },
+      });
+      await act(async () => { screen.getByRole('button', { name: '오늘의 첫 순간 남기기' }).click(); });
+
+      await waitFor(() => expect(profileUpserts).toHaveLength(1));
+      expect(contactUpserts).toHaveLength(0);
+      expect(saveCoupleAnniversary).not.toHaveBeenCalled();
+      expect(updateProfile).not.toHaveBeenCalled();
+      expect(setSetupComplete).not.toHaveBeenCalled();
     });
 
     it('never calls saveCoupleAnniversary for joiner and routes gomsin to /compose on finish', async () => {

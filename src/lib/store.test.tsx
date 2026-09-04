@@ -20,6 +20,81 @@ vi.mock('@/app/e2ee/featureFlag', () => ({
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
+function installTestWebLocks(): void {
+  type PendingLock = {
+    mode: LockMode;
+    callback: (lock: Lock | null) => PromiseLike<unknown> | unknown;
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  };
+  type LockState = {
+    activeShared: number;
+    activeExclusive: boolean;
+    queue: PendingLock[];
+  };
+  const states = new Map<string, LockState>();
+
+  const pump = (name: string, state: LockState): void => {
+    if (state.activeExclusive || state.queue.length === 0) return;
+    if (state.queue[0]?.mode === 'exclusive' && state.activeShared > 0) return;
+
+    const grant = (entry: PendingLock) => {
+      if (entry.mode === 'exclusive') state.activeExclusive = true;
+      else state.activeShared += 1;
+      void Promise.resolve()
+        .then(() => entry.callback({ name, mode: entry.mode } as Lock))
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          if (entry.mode === 'exclusive') state.activeExclusive = false;
+          else state.activeShared -= 1;
+          if (!state.activeExclusive && state.activeShared === 0 && state.queue.length === 0) {
+            states.delete(name);
+          }
+          pump(name, state);
+        });
+    };
+
+    if (state.queue[0]?.mode === 'exclusive') {
+      grant(state.queue.shift()!);
+      return;
+    }
+    while (state.queue[0]?.mode === 'shared' && !state.activeExclusive) {
+      grant(state.queue.shift()!);
+    }
+  };
+
+  const request = vi.fn(async <T,>(
+    name: string,
+    options: LockOptions,
+    callback: (lock: Lock | null) => PromiseLike<T> | T,
+  ): Promise<T> => {
+    const mode = options.mode ?? 'exclusive';
+    const state = states.get(name) ?? {
+      activeShared: 0,
+      activeExclusive: false,
+      queue: [],
+    };
+    states.set(name, state);
+    const canGrantImmediately = state.queue.length === 0
+      && !state.activeExclusive
+      && (mode === 'shared' || state.activeShared === 0);
+    if (options.ifAvailable && !canGrantImmediately) return callback(null);
+    return new Promise<T>((resolve, reject) => {
+      state.queue.push({
+        mode,
+        callback: callback as PendingLock['callback'],
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      pump(name, state);
+    });
+  });
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request },
+  });
+}
+
 const authCallbacks: AuthCallback[] = [];
 const unsubscribe = vi.fn();
 const createdChannels: Array<{ name: string; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn> }> = [];
@@ -82,8 +157,16 @@ const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'serve
 const outboxEntries = new Map<string, QueuedRecord>();
 const outboxPersistence: OutboxPersistence = {
   all: vi.fn(async () => Array.from(outboxEntries.values())),
+  add: vi.fn(async (entry) => {
+    if (outboxEntries.has(entry.id)) throw new DOMException('duplicate', 'ConstraintError');
+    outboxEntries.set(entry.id, entry);
+  }),
   put: vi.fn(async (entry) => { outboxEntries.set(entry.id, entry); }),
+  putMany: vi.fn(async (entries) => {
+    for (const entry of entries) outboxEntries.set(entry.id, entry);
+  }),
   remove: vi.fn(async (id) => { outboxEntries.delete(id); }),
+  removeMany: vi.fn(async (ids) => { for (const id of ids) outboxEntries.delete(id); }),
 };
 
 vi.mock('@/lib/outboxStorage', () => ({
@@ -135,9 +218,23 @@ const saveRecordToDB = vi.fn(async (...args: unknown[]) => {
   }
   return { ok: true as const };
 });
-const uploadRecordMedia = vi.fn(async (file: File) => {
+const uploadRecordMedia = vi.fn(async (
+  file: File,
+  coupleId?: string,
+  recordId?: string,
+  _displayName?: string,
+  objectId?: string,
+) => {
   callOrder.push(`upload:${file.name}`);
-  return { attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } };
+  return {
+    attachment: {
+      type: 'photo' as const,
+      name: file.name,
+      path: objectId
+        ? `${coupleId}/${recordId}/${objectId}.png`
+        : `c/r/${file.name}`,
+    },
+  };
 });
 const removeRecordMedia = vi.fn(async () => {
   callOrder.push('removeMedia');
@@ -154,7 +251,9 @@ vi.mock('@/lib/records', () => ({
   deleteRecordFromDB: (...args: unknown[]) => deleteRecordFromDB(...(args as [])),
   fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
-  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
+  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(
+    ...(args as [File, string?, string?, string?, string?]),
+  ),
   removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
@@ -165,6 +264,9 @@ vi.mock('@/lib/records', () => ({
     if (typeof path !== 'string') return false;
     return path.startsWith(`${coupleId}/${recordId}/`);
   },
+  isValidMediaObjectId: (value: string) => (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ),
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -432,6 +534,7 @@ function serverState(overrides: Partial<AppState>): Partial<AppState> {
 
 describe('StoreProvider auth lifecycle', () => {
   beforeEach(() => {
+    installTestWebLocks();
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
@@ -517,6 +620,7 @@ describe('StoreProvider auth lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
     setOutboxLocalCacheKey(null);
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('clears module-level E2EE capabilities when the provider unmounts', async () => {
@@ -637,10 +741,11 @@ describe('StoreProvider auth lifecycle', () => {
         isPrivate: false,
       },
     }))));
-    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 0 }));
 
     expect(saveRecordToDB).not.toHaveBeenCalled();
-    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
+    expect(Array.from(outboxEntries.values())[0]).toMatchObject({ attempts: 0 });
+    expect(Array.from(outboxEntries.values())[0].blocked).toBeUndefined();
   });
 
   it('enters the app when Supabase restores the persisted initial session', async () => {
@@ -750,7 +855,12 @@ describe('StoreProvider auth lifecycle', () => {
     screen.getByText('mark-talk').click();
 
     await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
-    expect(markTalkAboutInDB).toHaveBeenCalledWith('record-talk', 'couple-1', 'user-a');
+    expect(markTalkAboutInDB).toHaveBeenCalledWith(
+      'record-talk',
+      'couple-1',
+      'user-a',
+      expect.objectContaining({ userId: 'user-a' }),
+    );
   });
 
   it('returns a fully reconciled talk-about success only after the authoritative list refreshes', async () => {
@@ -3159,6 +3269,7 @@ describe('profile persistence acknowledgement', () => {
   });
 
   beforeEach(() => {
+    installTestWebLocks();
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
@@ -3168,6 +3279,10 @@ describe('profile persistence acknowledgement', () => {
     mockSupabase.profileUpdateError = null;
     mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('keeps the confirmed local profile when the server update fails', async () => {
@@ -3210,7 +3325,11 @@ describe('profile persistence acknowledgement', () => {
       screen.getByText('clear-anniversary').click();
     });
 
-    await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith('couple-1', null));
+    await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith(
+      'couple-1',
+      null,
+      expect.objectContaining({ userId: 'user-a', mode: 'shared' }),
+    ));
     await waitFor(() => expect(screen.getByTestId('anniversary')).toHaveTextContent('none'));
   });
 

@@ -139,7 +139,8 @@ export interface StoreContextType {
    */
   recoverExpiredSession: () => Promise<boolean>;
   /**
-   * Non-null while this account's data has been removed but its login has not.
+   * Non-null while a deletion attempt blocks this account. Pending and failed
+   * attempts retain local recovery data; only local_cleanup may remove it.
    * `warnings` is in-memory only and is never persisted.
    */
   accountDeletionRecovery: { warnings: string[] } | null;

@@ -1,25 +1,33 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
   RECOVERY_KEY_PREFIX,
+  accountDeletionLockLeaseMatchesUser,
   assertNever,
   classifyDeletionErrorBody,
   classifyDeletionStatus,
   classifyDeletionSuccess,
-  clearRecoveryMarker,
+  clearRecoveryMarkerForAttempt,
   combineServerAnswers,
   coerceWarnings,
   deletionStatusLogToken,
+  inspectRecoveryMarker,
   isLocalDeletionCleanupPending,
-  markLocalDeletionCleanupPending,
+  listRecoveryMarkers,
   markRecoveryPending,
   readRecoveryMarker,
   recoveryKeyFor,
   serverAnswerFromDatabase,
   serverAnswerFromUser,
+  subscribeToRecoveryMarkerChanges,
+  withAccountDeletionLock,
+  advanceRecoveryMarkerToLocalCleanup,
   type DeletionStatus,
   type MarkerState,
   type ServerAnswer,
 } from '@/lib/accountDeletion';
+
+const ATTEMPT_A = '11111111-1111-4111-8111-111111111111';
+const ATTEMPT_B = '22222222-2222-4222-8222-222222222222';
 
 /* ================================================================== *
  * C1 bug condition: isBugConditionC1(input) =
@@ -117,23 +125,45 @@ describe('C1 - per-user recovery marker fails closed', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
-  it('stores a boolean-only payload at its own top-level key', () => {
-    markRecoveryPending('user-a');
+  it('stores and reads back a content-free V2 pending attempt before returning it', () => {
+    const marker = markRecoveryPending('user-a');
     expect(recoveryKeyFor('user-a')).toBe(`${RECOVERY_KEY_PREFIX}user-a`);
-    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('true');
+    expect(marker).toMatchObject({
+      version: 2,
+      userId: 'user-a',
+      phase: 'pending',
+    });
+    expect(marker?.attemptId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
+    expect(JSON.parse(localStorage.getItem(recoveryKeyFor('user-a')) || 'null')).toEqual(marker);
     // Not inside STORE_KEY, and carrying no deleted-account content.
     expect(localStorage.getItem('gomsinlog.state.v2')).toBeNull();
   });
 
   it('distinguishes the content-free local-cleanup phase without weakening fail-closed reads', () => {
-    markLocalDeletionCleanupPending('user-a');
+    const attempt = markRecoveryPending('user-a');
+    expect(attempt).not.toBeNull();
+    expect(advanceRecoveryMarkerToLocalCleanup(attempt!)).toBe(true);
 
-    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe('local_cleanup');
+    expect(JSON.parse(localStorage.getItem(recoveryKeyFor('user-a')) || 'null')).toMatchObject({
+      version: 2,
+      userId: 'user-a',
+      phase: 'local_cleanup',
+    });
     expect(readRecoveryMarker('user-a')).toBe('active');
     expect(isLocalDeletionCleanupPending('user-a')).toBe(true);
 
     localStorage.setItem(recoveryKeyFor('user-a'), '{"broken":');
     expect(readRecoveryMarker('user-a')).toBe('active');
+    expect(isLocalDeletionCleanupPending('user-a')).toBe(false);
+  });
+
+  it('never grants legacy local_cleanup destructive-cleanup authority', () => {
+    localStorage.setItem(recoveryKeyFor('user-a'), 'local_cleanup');
+
+    expect(readRecoveryMarker('user-a')).toBe('active');
+    expect(inspectRecoveryMarker('user-a')).toMatchObject({ kind: 'legacy_local_cleanup' });
     expect(isLocalDeletionCleanupPending('user-a')).toBe(false);
   });
 
@@ -166,9 +196,9 @@ describe('C1 - per-user recovery marker fails closed', () => {
   });
 
   it('is per-user: another account is neither blocked by nor able to clear it', () => {
-    markRecoveryPending('user-a');
+    const marker = markRecoveryPending('user-a');
     expect(readRecoveryMarker('user-b')).toBe('absent');
-    clearRecoveryMarker('user-b');
+    expect(clearRecoveryMarkerForAttempt({ ...marker!, userId: 'user-b' }, 'pending')).toBe(false);
     expect(readRecoveryMarker('user-a')).toBe('active');
   });
 
@@ -179,12 +209,172 @@ describe('C1 - per-user recovery marker fails closed', () => {
     expect(readRecoveryMarker('user-a', unreadableStorage)).toBe('active');
   });
 
-  it('clearRecoveryMarker removes exactly the one key', () => {
-    markRecoveryPending('user-a');
+  it('an exact V2 attempt clears only its own key', () => {
+    const markerA = markRecoveryPending('user-a');
     markRecoveryPending('user-b');
-    clearRecoveryMarker('user-a');
+    expect(clearRecoveryMarkerForAttempt(markerA!, 'pending')).toBe(true);
     expect(readRecoveryMarker('user-a')).toBe('absent');
     expect(readRecoveryMarker('user-b')).toBe('active');
+  });
+
+  it.each([
+    ['legacy pending', 'true'],
+    ['legacy local cleanup', 'local_cleanup'],
+    ['corrupt', '{broken'],
+    ['wrong-user V2', JSON.stringify({
+      version: 2, userId: 'user-b', attemptId: ATTEMPT_B, phase: 'pending',
+    })],
+    ['V2 local cleanup', JSON.stringify({
+      version: 2, userId: 'user-a', attemptId: ATTEMPT_A, phase: 'local_cleanup',
+    })],
+  ])('does not overwrite a fenced %s marker when marking pending', (_label, raw) => {
+    localStorage.setItem(recoveryKeyFor('user-a'), raw);
+
+    expect(markRecoveryPending('user-a', localStorage, () => ATTEMPT_B)).toBeNull();
+    expect(localStorage.getItem(recoveryKeyFor('user-a'))).toBe(raw);
+  });
+
+  it('reuses a pending attempt id and rejects a stale transition or clear', () => {
+    const first = markRecoveryPending('user-a', localStorage, () => ATTEMPT_A);
+    const retry = markRecoveryPending('user-a', localStorage, () => ATTEMPT_B);
+    expect(retry).toEqual(first);
+
+    const stale = { ...first!, attemptId: ATTEMPT_B };
+    expect(advanceRecoveryMarkerToLocalCleanup(stale)).toBe(false);
+    expect(clearRecoveryMarkerForAttempt(stale, 'pending')).toBe(false);
+    expect(inspectRecoveryMarker('user-a')).toMatchObject({
+      kind: 'v2',
+      phase: 'pending',
+      marker: { attemptId: ATTEMPT_A },
+    });
+  });
+
+  it('returns null when an exact marker read-back cannot be proven', () => {
+    let raw: string | null = null;
+    const storage = {
+      getItem: () => raw === null ? null : `${raw}corrupted`,
+      setItem: (_key: string, value: string) => { raw = value; },
+      removeItem: () => { raw = null; },
+    };
+    expect(markRecoveryPending('user-a', storage, () => ATTEMPT_A)).toBeNull();
+  });
+
+  it('inspects and lists V2, legacy cleanup, legacy pending, and corrupt markers fail closed', () => {
+    localStorage.setItem(recoveryKeyFor('user-a'), JSON.stringify({
+      version: 2, userId: 'user-a', attemptId: ATTEMPT_A, phase: 'pending',
+    }));
+    localStorage.setItem(recoveryKeyFor('user-b'), 'local_cleanup');
+    localStorage.setItem(recoveryKeyFor('user-c'), 'true');
+    localStorage.setItem(recoveryKeyFor('user-d'), '{broken');
+
+    expect(inspectRecoveryMarker('user-a')).toMatchObject({ kind: 'v2', phase: 'pending' });
+    expect(inspectRecoveryMarker('user-b')).toEqual({
+      kind: 'legacy_local_cleanup', userId: 'user-b', phase: 'local_cleanup',
+    });
+    expect(inspectRecoveryMarker('user-c')).toEqual({
+      kind: 'legacy_pending', userId: 'user-c', phase: 'pending',
+    });
+    expect(inspectRecoveryMarker('user-d')).toEqual({
+      kind: 'corrupt', userId: 'user-d', phase: 'pending',
+    });
+    expect(listRecoveryMarkers().map(({ userId, phase }) => [userId, phase]).sort())
+      .toEqual([
+        ['user-a', 'pending'],
+        ['user-b', 'local_cleanup'],
+        ['user-c', 'pending'],
+        ['user-d', 'pending'],
+      ]);
+  });
+
+  it('notifies same-document subscribers only until they unsubscribe', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeToRecoveryMarkerChanges(listener);
+    const marker = markRecoveryPending('user-a', localStorage, () => ATTEMPT_A);
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(clearRecoveryMarkerForAttempt(marker!, 'pending')).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+    markRecoveryPending('user-b', localStorage, () => ATTEMPT_B);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('allows prior shared mutations to overlap while an exclusive deletion and later mutation wait fairly', async () => {
+    let releaseShared!: () => void;
+    const sharedBarrier = new Promise<void>((resolve) => { releaseShared = resolve; });
+    let releaseDeletion!: () => void;
+    const deletionBarrier = new Promise<void>((resolve) => { releaseDeletion = resolve; });
+    const entered: string[] = [];
+
+    const first = withAccountDeletionLock('user-a', async () => {
+      entered.push('shared-1');
+      await sharedBarrier;
+    }, { mode: 'shared' });
+    const second = withAccountDeletionLock('user-a', async () => {
+      entered.push('shared-2');
+      await sharedBarrier;
+    }, { mode: 'shared' });
+
+    await vi.waitFor(() => expect(entered).toEqual(['shared-1', 'shared-2']));
+
+    const deletion = withAccountDeletionLock('user-a', async () => {
+      entered.push('deletion');
+      await deletionBarrier;
+    });
+    const lateMutation = withAccountDeletionLock('user-a', async () => {
+      entered.push('shared-late');
+    }, { mode: 'shared' });
+    await Promise.resolve();
+    expect(entered).toEqual(['shared-1', 'shared-2']);
+
+    releaseShared();
+    await vi.waitFor(() => expect(entered).toEqual(['shared-1', 'shared-2', 'deletion']));
+    releaseDeletion();
+    await Promise.all([first, second, deletion, lateMutation]);
+    expect(entered).toEqual(['shared-1', 'shared-2', 'deletion', 'shared-late']);
+  });
+
+  it('issues a branded lease that is valid only for the locked user', async () => {
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: vi.fn(async (
+          name: string,
+          _options: LockOptions,
+          callback: (lock: Lock | null) => unknown,
+        ) => callback({ name, mode: 'exclusive' } as Lock)),
+      },
+    });
+
+    const result = await withAccountDeletionLock('user-a', async (lease) => ({
+      own: accountDeletionLockLeaseMatchesUser(lease, 'user-a'),
+      other: accountDeletionLockLeaseMatchesUser(lease, 'user-b'),
+    }));
+
+    expect(result).toEqual({ kind: 'acquired', value: { own: true, other: false } });
+    Reflect.deleteProperty(navigator, 'locks');
+  });
+
+  it('expires a branded lease when its lock callback ends', async () => {
+    Object.defineProperty(navigator, 'locks', {
+      configurable: true,
+      value: {
+        request: vi.fn(async (
+          name: string,
+          _options: LockOptions,
+          callback: (lock: Lock | null) => unknown,
+        ) => callback({ name, mode: 'exclusive' } as Lock)),
+      },
+    });
+    let captured: Parameters<typeof accountDeletionLockLeaseMatchesUser>[0];
+
+    await withAccountDeletionLock('user-a', async (lease) => {
+      captured = lease;
+      expect(accountDeletionLockLeaseMatchesUser(lease, 'user-a')).toBe(true);
+    });
+
+    expect(accountDeletionLockLeaseMatchesUser(captured, 'user-a')).toBe(false);
+    Reflect.deleteProperty(navigator, 'locks');
   });
 });
 

@@ -235,6 +235,7 @@ export async function installE2eeRuntimeForAuthenticatedSession(input: {
   isCurrentSession?: () => boolean;
 }): Promise<RuntimeSessionResult> {
   if (!input.supabaseClient) return { status: 'guarded', reason: 'secure_storage_unavailable' };
+  if (input.isCurrentSession && !input.isCurrentSession()) return { status: 'stale' };
   const repository = createSupabaseE2eeRepository(input.supabaseClient);
   // This composition wrapper performs protected-state I/O before delegating to
   // `installE2eeRuntimeForSession`. Install the same fail-closed guard here,

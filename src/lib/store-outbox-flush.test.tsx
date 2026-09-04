@@ -32,6 +32,33 @@ import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
 
+function installTestWebLocks(): void {
+  const tails = new Map<string, Promise<void>>();
+  const request = vi.fn(async <T,>(
+    name: string,
+    options: LockOptions,
+    callback: (lock: Lock | null) => PromiseLike<T> | T,
+  ): Promise<T> => {
+    const previous = tails.get(name);
+    if (options.ifAvailable && previous) return callback(null);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const tail = (previous ?? Promise.resolve()).then(() => held);
+    tails.set(name, tail);
+    await previous;
+    try {
+      return await callback({ name, mode: 'exclusive' } as Lock);
+    } finally {
+      release();
+      if (tails.get(name) === tail) tails.delete(name);
+    }
+  });
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request },
+  });
+}
+
 const authCallbacks: AuthCallback[] = [];
 const unsubscribe = vi.fn();
 
@@ -85,8 +112,12 @@ vi.mock('@/lib/sync', () => ({
 
 /** The single observable. Only a delivery attempt reaches it. */
 const saveRecordToDB = vi.fn(async () => ({ ok: true as const, contentRevision: 1 }));
-const uploadRecordMedia = vi.fn(async (file: File) => ({
-  attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` },
+const uploadRecordMedia = vi.fn(async (file: File, _coupleId?: string, _recordId?: string, _displayName?: string, objectId?: string) => ({
+  attachment: {
+    type: 'photo' as const,
+    name: file.name,
+    path: `${_coupleId}/${_recordId}/${objectId ?? file.name}.png`,
+  },
 }));
 
 vi.mock('@/lib/records', () => ({
@@ -94,12 +125,17 @@ vi.mock('@/lib/records', () => ({
   deleteRecordFromDB: vi.fn(async () => ({ ok: true as const })),
   fetchRecordsFromDB: vi.fn(async () => []),
   fetchRecordsResultFromDB: vi.fn(async () => ({ ok: true, records: [] })),
-  uploadRecordMedia: (file: File) => uploadRecordMedia(file),
+  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(
+    ...(args as [File, string?, string?, string?, string?]),
+  ),
   removeRecordMedia: vi.fn(async () => {}),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/') ? { ext: 'png', type: 'photo' } : { error: 'unsupported' },
   isCanonicalRecordMediaPath: () => true,
+  isValidMediaObjectId: (value: string) => (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ),
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -133,12 +169,26 @@ vi.mock('@/lib/outboxStorage', () => ({
   isOutboxStorageAvailable: () => true,
   createIndexedDbOutbox: (): OutboxPersistence => ({
     all: async () => queue.map((entry) => ({ ...entry })),
+    add: async (entry) => {
+      if (queue.some((existing) => existing.id === entry.id)) {
+        throw new DOMException('duplicate', 'ConstraintError');
+      }
+      queue.push(entry);
+    },
     put: async (entry) => {
       const index = queue.findIndex((existing) => existing.id === entry.id);
       if (index === -1) queue.push(entry);
       else queue[index] = entry;
     },
+    putMany: async (entries) => {
+      for (const entry of entries) {
+        const index = queue.findIndex((existing) => existing.id === entry.id);
+        if (index === -1) queue.push(entry);
+        else queue[index] = entry;
+      }
+    },
     remove: async (id) => { queue = queue.filter((entry) => entry.id !== id); },
+    removeMany: async (ids) => { queue = queue.filter((entry) => !ids.includes(entry.id)); },
   }),
 }));
 
@@ -224,8 +274,8 @@ function buildConnectedState(): Partial<AppState> {
  * the realtime effect's listeners, so a cold launch on a good connection
  * delivered nothing until the user backgrounded and foregrounded the app.
  */
-async function coldLaunch() {
-  const state = buildConnectedState();
+async function coldLaunch(overrides: Partial<AppState> = {}) {
+  const state = { ...buildConnectedState(), ...overrides };
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
   fetchFullStateFromDB.mockResolvedValue(state);
 
@@ -244,13 +294,24 @@ async function coldLaunch() {
 
 describe('offline outbox flush', () => {
   beforeEach(() => {
+    installTestWebLocks();
     authCallbacks.length = 0;
     queue = [];
     saveRecordToDB.mockReset();
     saveRecordToDB.mockImplementation(async () => ({ ok: true as const, contentRevision: 1 }));
     uploadRecordMedia.mockReset();
-    uploadRecordMedia.mockImplementation(async (file: File) => ({
-      attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` },
+    uploadRecordMedia.mockImplementation(async (
+      file: File,
+      coupleId?: string,
+      recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => ({
+      attachment: {
+        type: 'photo' as const,
+        name: file.name,
+        path: `${coupleId}/${recordId}/${objectId ?? file.name}.png`,
+      },
     }));
     fetchMyCoupleState.mockReset();
     fetchMyCoupleState.mockResolvedValue({ ok: false, reason: 'server' });
@@ -260,6 +321,7 @@ describe('offline outbox flush', () => {
 
   afterEach(() => {
     localStorage.clear();
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('attempts delivery of a queued record on a cold launch, with no foreground event', async () => {
@@ -289,6 +351,177 @@ describe('offline outbox flush', () => {
     unmount();
   });
 
+  it('keeps a normal multi-photo record queued until every exact media slot is attached', async () => {
+    const first = new File(['first'], 'first.png', { type: 'image/png' });
+    const second = new File(['second'], 'second.png', { type: 'image/png' });
+    queue = [queuedEntry({ files: [first, second] })];
+    let secondAttempts = 0;
+    uploadRecordMedia.mockImplementation(async (
+      file: File,
+      _coupleId?: string,
+      _recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => {
+      if (file.name === 'second.png' && secondAttempts++ === 0) {
+        return { error: 'network unavailable', reason: 'unreachable' } as never;
+      }
+      return {
+        attachment: {
+          type: 'photo' as const,
+          name: file.name,
+          path: `couple-1/queued-rec-1/${objectId ?? file.name}.png`,
+        },
+      };
+    });
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => {
+      expect(queue).toHaveLength(1);
+      expect(queue[0].attempts).toBe(1);
+    });
+    expect(uploadRecordMedia.mock.calls.filter(([file]) => file.name === 'first.png')).toHaveLength(1);
+    expect(uploadRecordMedia.mock.calls.filter(([file]) => file.name === 'second.png')).toHaveLength(1);
+    expect(queue[0].mediaPlan?.slots).toHaveLength(2);
+    const plannedObjectIds = queue[0].mediaPlan!.slots.map((slot) => slot.objectId);
+
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    await act(async () => { screen.getByText('flush').click(); });
+
+    await waitFor(() => expect(queue).toHaveLength(0));
+    expect(uploadRecordMedia.mock.calls.filter(([file]) => file.name === 'first.png')).toHaveLength(1);
+    expect(uploadRecordMedia.mock.calls.filter(([file]) => file.name === 'second.png')).toHaveLength(2);
+    const savedVersions = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+    expect(savedVersions.at(-1)?.attachments?.map((attachment) => attachment.name))
+      .toEqual(['first.png', 'second.png']);
+    expect(savedVersions.at(-1)?.attachments?.map((attachment) => attachment.path))
+      .toEqual(plannedObjectIds.map((objectId) => `couple-1/queued-rec-1/${objectId}.png`));
+
+    unmount();
+  });
+
+  it('blocks a definitive media refusal after one attempt instead of retrying it as a network outage', async () => {
+    const file = new File(['private'], 'private.png', { type: 'image/png' });
+    queue = [queuedEntry({ files: [file] })];
+    uploadRecordMedia.mockResolvedValue({
+      error: '파일을 올리지 못했어요. 권한이 없어요.',
+      reason: 'forbidden',
+    } as never);
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => {
+      expect(queue).toHaveLength(1);
+      expect(queue[0].attempts).toBe(1);
+      expect(queue[0].blocked?.reason).toBe('forbidden');
+    });
+    expect(uploadRecordMedia).toHaveBeenCalledTimes(1);
+
+    await act(async () => { screen.getByText('flush').click(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(uploadRecordMedia).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('resumes after relaunch by uploading only the missing stable media slot', async () => {
+    const firstObjectId = '11111111-1111-4111-8111-111111111111';
+    const secondObjectId = '22222222-2222-4222-8222-222222222222';
+    const first = new File(['first'], 'same.png', { type: 'image/png' });
+    const second = new File(['second'], 'same.png', { type: 'image/png' });
+    const queued = queuedEntry({
+      attempts: 1,
+      files: [first, second],
+      mediaPlan: {
+        version: 1,
+        slots: [
+          { objectId: firstObjectId, fileIndex: 0, byteLength: first.size, mimeType: first.type },
+          { objectId: secondObjectId, fileIndex: 1, byteLength: second.size, mimeType: second.type },
+        ],
+      },
+    });
+    queue = [queued];
+    const existing: DailyRecord = {
+      ...queued.record!,
+      id: queued.id,
+      userId: queued.userId,
+      createdAt: '2026-01-01T09:00:00.000Z',
+      contentRevision: 1,
+      attachments: [{
+        type: 'photo',
+        name: 'same.png',
+        path: `couple-1/queued-rec-1/${firstObjectId}.png`,
+      }],
+    };
+
+    const unmount = await coldLaunch({ records: [existing] });
+
+    await waitFor(() => expect(queue).toHaveLength(0));
+    expect(uploadRecordMedia.mock.calls.filter(([, , , , objectId]) => (
+      objectId === firstObjectId
+    ))).toHaveLength(0);
+    expect(uploadRecordMedia.mock.calls.filter(([, , , , objectId]) => (
+      objectId === secondObjectId
+    ))).toHaveLength(1);
+    const lastSaved = saveRecordToDB.mock.calls.at(-1)?.[0] as DailyRecord;
+    expect(lastSaved.attachments?.map((attachment) => attachment.path)).toEqual([
+      `couple-1/queued-rec-1/${firstObjectId}.png`,
+      `couple-1/queued-rec-1/${secondObjectId}.png`,
+    ]);
+
+    unmount();
+  });
+
+  it('blocks a corrupt persisted media plan before any row or object write', async () => {
+    const file = new File(['photo'], 'photo.png', { type: 'image/png' });
+    queue = [queuedEntry({
+      files: [file],
+      mediaPlan: {
+        version: 1,
+        slots: [{
+          objectId: '11111111-1111-4111-8111-111111111111',
+          fileIndex: 0,
+          byteLength: file.size + 1,
+          mimeType: file.type,
+        }],
+      },
+    })];
+
+    const unmount = await coldLaunch();
+
+    await waitFor(() => expect(queue[0].blocked?.reason).toBe('invalid_media_plan'));
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it('blocks an ambiguous legacy partial upload instead of duplicating its photos', async () => {
+    const file = new File(['photo'], 'photo.png', { type: 'image/png' });
+    const queued = queuedEntry({ attempts: 1, files: [file] });
+    queue = [queued];
+    const existing: DailyRecord = {
+      ...queued.record!,
+      id: queued.id,
+      userId: queued.userId,
+      createdAt: '2026-01-01T09:00:00.000Z',
+      contentRevision: 1,
+      attachments: [{
+        type: 'photo',
+        name: 'photo.png',
+        path: 'couple-1/queued-rec-1/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.png',
+      }],
+    };
+
+    const unmount = await coldLaunch({ records: [existing] });
+
+    await waitFor(() => expect(queue[0].blocked?.reason).toBe('legacy_media_state_ambiguous'));
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
   it('preserves ordered post mode and publishes only with the complete media patch', async () => {
     queue = [queuedEntry({
       allOrNothingMedia: true,
@@ -311,7 +544,10 @@ describe('offline outbox flush', () => {
   it('keeps failed post media queued and resumes the same private row on retry', async () => {
     const postFile = new File(['photo'], 'post.png', { type: 'image/png' });
     queue = [queuedEntry({ allOrNothingMedia: true, files: [postFile] })];
-    uploadRecordMedia.mockResolvedValueOnce({ error: 'network unavailable' } as never);
+    uploadRecordMedia.mockResolvedValueOnce({
+      error: 'network unavailable',
+      reason: 'unreachable',
+    } as never);
 
     const unmount = await coldLaunch();
 

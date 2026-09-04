@@ -1,6 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fetchTasks } from '@/lib/tasks';
 
+vi.mock('@/lib/accountDeletion', () => ({
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => ({
+    kind: 'executed',
+    value: await operation({
+      userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+      assertCurrent: () => {},
+    }),
+  }),
+}));
+
 const supabaseMocks = vi.hoisted(() => ({
   rpc: vi.fn(),
   from: vi.fn(),

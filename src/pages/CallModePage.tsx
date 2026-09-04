@@ -75,6 +75,7 @@ export function CallModePage() {
   const navigate = useNavigate();
   const isOffline = !useOnlineStatus();
   const { profile } = state;
+  const eventUserId = state.authenticatedUser?.id || profile.id;
 
   const topics = useMemo(
     () => buildTalkAboutTopics(
@@ -158,8 +159,13 @@ export function CallModePage() {
     not imply it -- it says a screen was opened.
   */
   useEffect(() => {
-    void recordProductEvent({ kind: 'call_mode_opened', screen: 'call' });
-  }, []);
+    if (eventUserId) {
+      void recordProductEvent(
+        { kind: 'call_mode_opened', screen: 'call' },
+        { expectedUserId: eventUserId },
+      );
+    }
+  }, [eventUserId]);
 
   const topicsById = useMemo(
     () => new Map(topics.map((topic) => [topic.recordId, topic])),
@@ -246,11 +252,13 @@ export function CallModePage() {
       } else if (result.changed === false) {
         toast.info('이미 목록에서 정리된 이야기거리예요.');
       } else {
-        void recordProductEvent({
-          kind: 'talk_about_resolved',
-          screen: 'call',
-          subjectId: recordId,
-        });
+        if (eventUserId) {
+          void recordProductEvent({
+            kind: 'talk_about_resolved',
+            screen: 'call',
+            subjectId: recordId,
+          }, { expectedUserId: eventUserId });
+        }
         toast.success('이야기한 걸로 정리했어요.');
       }
     } catch {

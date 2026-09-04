@@ -58,7 +58,7 @@ export interface PushSetupResult {
  * without telling the app, so calling this on every launch is correct rather
  * than merely tolerable.
  */
-export async function setUpPushNotifications(): Promise<PushSetupResult> {
+export async function setUpPushNotifications(expectedUserId: string): Promise<PushSetupResult> {
   if (!pushSupported()) return { registered: false, reason: 'unsupported' };
 
   try {
@@ -119,7 +119,7 @@ export async function setUpPushNotifications(): Promise<PushSetupResult> {
 
     if (!token) return { registered: false, reason: 'failed' };
 
-    const result = await registerPushToken(platformName(), token);
+    const result = await registerPushToken(platformName(), token, expectedUserId);
     return result.ok ? { registered: true } : { registered: false, reason: 'failed' };
   } catch (error) {
     console.warn('[gomsinlog] Push setup failed.');

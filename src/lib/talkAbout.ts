@@ -1,4 +1,7 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  serverCallBlockedByPendingDeletion,
+  type AccountDeletionLockLease,
+} from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { isMissingTable } from '@/lib/serverErrors';
 import type { TalkAboutMark } from '@/types';
@@ -116,6 +119,7 @@ export async function markTalkAboutInDB(
   recordId: string,
   coupleId: string,
   actorUserId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 표시할 수 없어요.' };
@@ -123,7 +127,7 @@ export async function markTalkAboutInDB(
   if (!recordId || !coupleId || !actorUserId) {
     return { ok: false, error: '지금은 표시할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 표시할 수 없어요.' };
   }
 
@@ -162,11 +166,12 @@ export async function markTalkAboutInDB(
 export async function unmarkTalkAboutInDB(
   recordId: string,
   actorUserId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 해제할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 해제할 수 없어요.' };
   }
 
@@ -194,11 +199,12 @@ export async function unmarkTalkAboutInDB(
 export async function resolveTalkAboutInDB(
   recordId: string,
   coupleId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 처리할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 처리할 수 없어요.' };
   }
 

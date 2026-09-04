@@ -5,6 +5,8 @@ import {
   deliverableForAccount,
   discardEntry,
   enqueueRecord,
+  ensureQueuedMediaPlan,
+  isValidQueuedMediaPlan,
   isRetryableReason,
   pendingForAccount,
   purgeAccount,
@@ -37,14 +39,33 @@ function memoryPersistence(seed: QueuedRecord[] = []): OutboxPersistence & { row
   return {
     rows,
     all: async () => rows.map((row) => ({ ...row })),
+    add: async (entry) => {
+      if (rows.some((row) => row.id === entry.id)) {
+        throw new DOMException('The key already exists.', 'ConstraintError');
+      }
+      rows.push({ ...entry });
+    },
     put: async (entry) => {
       const index = rows.findIndex((row) => row.id === entry.id);
       if (index >= 0) rows[index] = { ...entry };
       else rows.push({ ...entry });
     },
+    putMany: async (entries) => {
+      for (const entry of entries) {
+        const index = rows.findIndex((row) => row.id === entry.id);
+        if (index >= 0) rows[index] = { ...entry };
+        else rows.push({ ...entry });
+      }
+    },
     remove: async (id) => {
       const index = rows.findIndex((row) => row.id === id);
       if (index >= 0) rows.splice(index, 1);
+    },
+    removeMany: async (ids) => {
+      for (const id of ids) {
+        const index = rows.findIndex((row) => row.id === id);
+        if (index >= 0) rows.splice(index, 1);
+      }
     },
   };
 }
@@ -128,6 +149,78 @@ describe('a refused write is kept instead of lost', () => {
 
     expect(queued.files).toHaveLength(1);
     expect(queued.files[0].name).toBe('photo.jpg');
+    expect(queued.mediaPlan?.slots).toHaveLength(1);
+    expect(queued.mediaPlan?.slots[0]).toMatchObject({
+      fileIndex: 0,
+      byteLength: 3,
+      mimeType: 'image/jpeg',
+    });
+    expect(isValidQueuedMediaPlan(queued.mediaPlan, queued.files)).toBe(true);
+  });
+
+  it('durably upgrades a legacy media entry before replay and never replaces that plan', async () => {
+    const files = [
+      new File(['a'], 'a.jpg', { type: 'image/jpeg' }),
+      new File(['bb'], 'b.jpg', { type: 'image/jpeg' }),
+    ];
+    const legacy = entry({ id: 'legacy', files });
+    await store.put(legacy);
+
+    const first = await ensureQueuedMediaPlan(store, legacy);
+    expect(first.kind).toBe('ready');
+    if (first.kind !== 'ready') throw new Error('plan was not created');
+    expect(first.created).toBe(true);
+    expect(isValidQueuedMediaPlan(first.entry.mediaPlan, files)).toBe(true);
+    const objectIds = first.entry.mediaPlan!.slots.map((slot) => slot.objectId);
+
+    const second = await ensureQueuedMediaPlan(store, store.rows[0]);
+    expect(second).toMatchObject({ kind: 'ready', created: false });
+    if (second.kind !== 'ready') throw new Error('plan was not preserved');
+    expect(second.entry.mediaPlan!.slots.map((slot) => slot.objectId)).toEqual(objectIds);
+  });
+
+  it('rejects a mismatched persisted media plan instead of remapping files after upload', async () => {
+    const file = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+    const corrupt = entry({
+      files: [file],
+      mediaPlan: {
+        version: 1,
+        slots: [{
+          objectId: '11111111-1111-4111-8111-111111111111',
+          fileIndex: 0,
+          byteLength: file.size + 1,
+          mimeType: file.type,
+        }],
+      },
+    });
+
+    await expect(ensureQueuedMediaPlan(store, corrupt)).resolves.toEqual({ kind: 'invalid' });
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it('never overwrites an existing same-id entry or File when a new insert conflicts', async () => {
+    const oldFile = new File([new Uint8Array([1, 2, 3])], 'old.jpg', { type: 'image/jpeg' });
+    const newFile = new File([new Uint8Array([9, 8, 7, 6])], 'new.jpg', { type: 'image/jpeg' });
+    const oldEntry = entry({
+      id: 'duplicate-id',
+      record: draft({ log: 'original record' }),
+      files: [oldFile],
+    });
+    store = memoryPersistence([oldEntry]);
+
+    await expect(enqueueRecord(store, {
+      id: 'duplicate-id',
+      userId: ME,
+      coupleId: 'couple-1',
+      record: draft({ log: 'replacement record' }),
+      files: [newFile],
+    })).rejects.toMatchObject({ name: 'ConstraintError' });
+
+    expect(store.rows).toHaveLength(1);
+    expect(store.rows[0]).toBe(oldEntry);
+    expect(store.rows[0].record?.log).toBe('original record');
+    expect(store.rows[0].files[0]).toBe(oldFile);
+    expect(store.rows[0].files[0]).toMatchObject({ name: 'old.jpg', size: 3 });
   });
 });
 
@@ -235,6 +328,42 @@ describe('retryable and definitive refusals are treated differently', () => {
     await store.put(queued);
 
     expect(await applyDeliveryOutcome(store, queued, { ok: true })).toBe('delivered');
+    expect(store.rows).toEqual([]);
+  });
+
+  it('preserves the exact entry when a fence is observed before an uncertain disposition', async () => {
+    const queued = entry({
+      attempts: 7,
+      blocked: { reason: 'forbidden', message: 'original', at: '2026-07-31T09:00:00.000Z' },
+      files: [new File(['original'], 'original.jpg', { type: 'image/jpeg' })],
+    });
+    store = memoryPersistence([queued]);
+
+    const disposition = await applyDeliveryOutcome(
+      store,
+      queued,
+      { ok: false, reason: 'unreachable', message: 'unknown result' },
+      () => false,
+    );
+
+    expect(disposition).toBe('preserved');
+    expect(store.rows).toEqual([queued]);
+    expect(store.rows[0]).toBe(queued);
+  });
+
+  it('removes a confirmed success exactly once when disposition remains authorized', async () => {
+    const queued = entry();
+    store = memoryPersistence([queued]);
+    let removeCalls = 0;
+    const remove = store.remove;
+    store.remove = async (id) => {
+      removeCalls += 1;
+      await remove(id);
+    };
+
+    expect(await applyDeliveryOutcome(store, queued, { ok: true }, () => true))
+      .toBe('delivered');
+    expect(removeCalls).toBe(1);
     expect(store.rows).toEqual([]);
   });
 

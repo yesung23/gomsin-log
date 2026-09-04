@@ -1,4 +1,4 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { runServerMutationBehindDeletionBarrier } from '@/lib/accountDeletion';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 
@@ -217,9 +217,6 @@ export async function grantCycleConsentInDB(
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     return { ok: false, reason: 'unknown' };
   }
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return { ok: false, reason: 'forbidden' };
-
   if (!isSupabaseConfigured || !supabase) {
     // No server to record consent on. Sensitive processing must not begin on a
     // promise we cannot store.
@@ -227,20 +224,23 @@ export async function grantCycleConsentInDB(
   }
 
   try {
-    const { data, error } = await supabase
-      .rpc('grant_cycle_sensitive_consent', {
-        p_expected_user_id: userId,
-        p_expected_revision: expectedRevision,
-        p_version: CYCLE_CONSENT_VERSION,
-      })
-      .single();
-
-    if (error) {
-      console.error('[gomsinlog] Failed to record sensitive consent.');
-      return consentFailure(error);
-    }
-
-    return parseConsentMutation(data);
+    const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+      assertCurrent();
+      const { data, error } = await supabase!
+        .rpc('grant_cycle_sensitive_consent', {
+          p_expected_user_id: userId,
+          p_expected_revision: expectedRevision,
+          p_version: CYCLE_CONSENT_VERSION,
+        })
+        .single();
+      assertCurrent();
+      if (error) {
+        console.error('[gomsinlog] Failed to record sensitive consent.');
+        return consentFailure(error);
+      }
+      return parseConsentMutation(data);
+    }, { expectedUserId: userId });
+    return result.kind === 'executed' ? result.value : { ok: false, reason: 'forbidden' };
   } catch (err) {
     console.error('[gomsinlog] Failed to record sensitive consent.');
     return consentFailure(err);
@@ -266,7 +266,16 @@ export async function revokeCycleConsentInDB(
   // deletion is pending. Privacy must not depend on the cleanup job finishing.
 
   try {
-    const { data, error } = await supabase
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || user?.id !== userId) {
+      console.error('[gomsinlog] Sensitive consent revoke identity mismatch.');
+      return { ok: false, reason: 'forbidden' };
+    }
+
+    // This is intentionally outside the ordinary barrier so revocation remains
+    // available during deletion. The identity read above prevents a stale
+    // account from using the privacy-reduction exception for another account.
+    const { data, error } = await supabase!
       .rpc('revoke_cycle_sensitive_consent', {
         p_expected_user_id: userId,
       })

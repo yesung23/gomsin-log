@@ -24,14 +24,11 @@ import { resolve } from 'node:path';
  * deletion gate? They are not enumerated in `gatePathCoverage.test.ts` or
  * `serverCallGate.test.ts`.
  *
- * VERDICT: not a defect, and not an exemption either -- the gate is genuinely
- * called. `finishSetup()` awaits `serverCallBlockedByPendingDeletion()` and
- * returns before the first write. It calls the raw gate rather than the store's
- * `ensureNotPendingBeforeServerCall()` wrapper (it is a page, not a store
- * action), which is why a grep for the wrapper missed it. It is absent from
- * `gatePathCoverage.test.ts` because that suite enumerates exported FUNCTIONS of
- * five `src/lib` data modules; page components are outside its scope by
- * construction.
+ * VERDICT: not a defect, and not an exemption either. `finishSetup()` runs its
+ * authority read, profile/contact writes, nested anniversary write and local
+ * reconciliation inside one `runServerMutationBehindDeletionBarrier()` callback.
+ * The callback receives one shared lease and reuses it for the nested helper, so
+ * deletion cannot begin between a boolean pre-flight and the final write.
  */
 
 const store = readFileSync(resolve(process.cwd(), 'src/lib/store.tsx'), 'utf8');
@@ -94,43 +91,47 @@ describe('M-9: authorRole is recomputed on every path that loads records', () =>
   });
 });
 
-describe('M-10: the onboarding writes really are behind the pre-flight gate', () => {
-  it('finishSetup calls the gate', () => {
-    expect(onboarding).toContain('if (await serverCallBlockedByPendingDeletion()) return;');
+describe('M-10: onboarding holds the operation-lifetime deletion barrier', () => {
+  const finishAt = onboarding.indexOf('const finishSetup = async ()');
+  const barrierAt = onboarding.indexOf(
+    'runServerMutationBehindDeletionBarrier(async ({ lease, assertCurrent }) => {',
+    finishAt,
+  );
+  const barrierEnd = onboarding.indexOf('}, { expectedUserId: userId });', barrierAt);
+
+  it('finishSetup enters the operation-lifetime barrier', () => {
+    expect(finishAt).toBeGreaterThan(-1);
+    expect(barrierAt).toBeGreaterThan(finishAt);
+    expect(barrierEnd).toBeGreaterThan(barrierAt);
     expect(onboarding).toContain(
-      "import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';",
+      'runServerMutationBehindDeletionBarrier,',
     );
   });
 
-  it('the gate runs BEFORE the profiles upsert', () => {
-    const gateAt = onboarding.indexOf('if (await serverCallBlockedByPendingDeletion()) return;');
-    const profileAt = onboarding.indexOf("supabase.from('profiles').upsert(");
-    expect(gateAt).toBeGreaterThan(-1);
+  it('the profiles upsert is inside the held barrier', () => {
+    const profileAt = onboarding.indexOf("supabase!.from('profiles').upsert(");
     expect(profileAt).toBeGreaterThan(-1);
-    expect(gateAt).toBeLessThan(profileAt);
+    expect(barrierAt).toBeLessThan(profileAt);
+    expect(profileAt).toBeLessThan(barrierEnd);
   });
 
-  it('the gate runs BEFORE the contact_preferences upsert', () => {
-    const gateAt = onboarding.indexOf('if (await serverCallBlockedByPendingDeletion()) return;');
-    const contactAt = onboarding.indexOf("supabase.from('contact_preferences').upsert(");
+  it('the contact_preferences upsert is inside the held barrier', () => {
+    const contactAt = onboarding.indexOf("supabase!.from('contact_preferences').upsert(");
     expect(contactAt).toBeGreaterThan(-1);
-    expect(gateAt).toBeLessThan(contactAt);
+    expect(barrierAt).toBeLessThan(contactAt);
+    expect(contactAt).toBeLessThan(barrierEnd);
   });
 
-  it('the gate runs BEFORE the anniversary write too', () => {
-    const gateAt = onboarding.indexOf('if (await serverCallBlockedByPendingDeletion()) return;');
+  it('the anniversary write is inside the barrier and reuses its lease', () => {
     const anniversaryAt = onboarding.indexOf('saveCoupleAnniversary(');
     expect(anniversaryAt).toBeGreaterThan(-1);
-    expect(gateAt).toBeLessThan(anniversaryAt);
+    expect(barrierAt).toBeLessThan(anniversaryAt);
+    expect(anniversaryAt).toBeLessThan(barrierEnd);
+    expect(onboarding.slice(anniversaryAt, anniversaryAt + 120)).toContain('lease');
   });
 
-  it('no server write in finishSetup precedes the gate', () => {
-    const start = onboarding.indexOf('const finishSetup = async ()');
-    const gateAt = onboarding.indexOf(
-      'if (await serverCallBlockedByPendingDeletion()) return;',
-      start,
-    );
-    const beforeGate = onboarding.slice(start, gateAt);
+  it('no server write in finishSetup precedes the held barrier', () => {
+    const beforeGate = onboarding.slice(finishAt, barrierAt);
     expect(beforeGate).not.toContain('.upsert(');
     expect(beforeGate).not.toContain('.insert(');
     expect(beforeGate).not.toContain('.update(');
@@ -139,9 +140,10 @@ describe('M-10: the onboarding writes really are behind the pre-flight gate', ()
   });
 
   it('local state is only mirrored after the server write succeeded', () => {
-    // The gate is worthless if the client marks onboarding complete anyway.
-    const profileAt = onboarding.indexOf("supabase.from('profiles').upsert(");
+    // The barrier is worthless if the client marks onboarding complete anyway.
+    const profileAt = onboarding.indexOf("supabase!.from('profiles').upsert(");
     const setCompleteAt = onboarding.indexOf('setSetupComplete(true);');
+    expect(profileAt).toBeGreaterThan(-1);
     expect(setCompleteAt).toBeGreaterThan(profileAt);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -20,19 +20,23 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 const { recordProductEvent, FORBIDDEN_EVENT_SUBSTRINGS } = await import('@/lib/productEvents');
+const { registerServerCallGate } = await import('@/lib/accountDeletion');
 
 const SOURCE = readFileSync(resolve(process.cwd(), 'src/lib/productEvents.ts'), 'utf8');
 
 beforeEach(() => {
+  registerServerCallGate(async () => ({ kind: 'clear' }));
   insert.mockClear().mockResolvedValue({ error: null });
   from.mockClear();
 });
+
+afterEach(() => registerServerCallGate(null));
 
 describe('what reaches the server', () => {
   it('sends a date bucket and never a time', async () => {
     await recordProductEvent(
       { kind: 'record_composed', durationMs: 4200 },
-      new Date('2026-08-21T11:30:00+09:00'),
+      { expectedUserId: 'user-a', now: new Date('2026-08-21T11:30:00+09:00') },
     );
 
     const row = insert.mock.calls[0][0] as Record<string, unknown>;
@@ -51,7 +55,7 @@ describe('what reaches the server', () => {
     */
     await recordProductEvent(
       { kind: 'record_composed' },
-      new Date('2026-08-21T02:00:00+09:00'),
+      { expectedUserId: 'user-a', now: new Date('2026-08-21T02:00:00+09:00') },
     );
     expect((insert.mock.calls[0][0] as { occurred_on: string }).occurred_on).toBe('2026-08-21');
   });
@@ -59,7 +63,7 @@ describe('what reaches the server', () => {
   it('sends no user id, so a client cannot attribute an event elsewhere', async () => {
     // The column defaults to auth.uid() in migration 049. Sending one from here
     // would be the shape in which that default could be overridden.
-    await recordProductEvent({ kind: 'couple_connected' });
+    await recordProductEvent({ kind: 'couple_connected' }, { expectedUserId: 'user-a' });
     expect(insert.mock.calls[0][0]).not.toHaveProperty('user_id');
   });
 
@@ -70,7 +74,7 @@ describe('what reaches the server', () => {
       screen: 'home',
       durationMs: 10,
       errorCode: 'forbidden',
-    });
+    }, { expectedUserId: 'user-a' });
     expect(Object.keys(insert.mock.calls[0][0] as object).sort()).toEqual(
       ['duration_ms', 'error_code', 'kind', 'occurred_on', 'screen', 'subject_id'],
     );
@@ -80,21 +84,30 @@ describe('what reaches the server', () => {
 describe('measurement can never damage what it measures', () => {
   it('stays silent when the insert is rejected', async () => {
     insert.mockResolvedValue({ error: { message: 'nope' } });
-    await expect(recordProductEvent({ kind: 'record_composed' })).resolves.toBeUndefined();
+    await expect(recordProductEvent(
+      { kind: 'record_composed' },
+      { expectedUserId: 'user-a' },
+    )).resolves.toBeUndefined();
   });
 
   it('stays silent when the call throws outright', async () => {
     // Someone writing a diary entry does not care that an analytics insert timed
     // out, and surfacing it would make the product worse for a number.
     insert.mockRejectedValue(new Error('offline'));
-    await expect(recordProductEvent({ kind: 'record_composed' })).resolves.toBeUndefined();
+    await expect(recordProductEvent(
+      { kind: 'record_composed' },
+      { expectedUserId: 'user-a' },
+    )).resolves.toBeUndefined();
   });
 
   it('does nothing at all without a configured backend', async () => {
     vi.resetModules();
     vi.doMock('@/lib/supabase', () => ({ supabase: null, isSupabaseConfigured: false }));
     const offline = await import('@/lib/productEvents');
-    await expect(offline.recordProductEvent({ kind: 'record_composed' })).resolves.toBeUndefined();
+    await expect(offline.recordProductEvent(
+      { kind: 'record_composed' },
+      { expectedUserId: 'user-a' },
+    )).resolves.toBeUndefined();
     vi.doUnmock('@/lib/supabase');
     vi.resetModules();
   });
@@ -120,7 +133,7 @@ describe('the vocabulary names nothing §19 forbids', () => {
   it('has no free-text field on the event type', () => {
     const shape = SOURCE.slice(
       SOURCE.indexOf('export interface ProductEvent'),
-      SOURCE.indexOf('FORBIDDEN_EVENT_SUBSTRINGS'),
+      SOURCE.indexOf('export interface ProductEventEmissionOptions'),
     );
     // `subjectId` is an id and `errorCode` is a classified kind. Anything else
     // typed `string` would be a place content could travel.

@@ -66,7 +66,7 @@ describe('NotificationPreferencesSection — the kill metric', () => {
     expect(recordProductEvent).toHaveBeenCalledWith({
       kind: 'notifications_disabled',
       screen: 'settings',
-    });
+    }, { expectedUserId: 'u1' });
   });
 
   it('sends nothing beyond the kind and the screen', async () => {

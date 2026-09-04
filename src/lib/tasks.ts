@@ -1,4 +1,4 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { runServerMutationBehindDeletionBarrier } from '@/lib/accountDeletion';
 import { supabase } from '@/lib/supabase';
 import type { CoupleTask } from '@/types';
 
@@ -56,24 +56,29 @@ export async function fetchTasks(coupleId: string): Promise<TasksResult> {
 export async function createTask(
   task: Omit<CoupleTask, 'id' | 'createdAt' | 'completed'>,
 ): Promise<CoupleTask | null> {
-  if (!supabase || validateTaskTitle(task.title) || await serverCallBlockedByPendingDeletion()) return null;
-  const { data, error } = await supabase.from('couple_tasks').insert({
-    couple_id: task.coupleId,
-    created_by: task.createdBy,
-    title: task.title.trim(),
-    due_date: task.dueDate,
-    due_time: task.dueTime || null,
-    assignee_id: task.assigneeId || null,
-    is_private: task.isPrivate,
-  }).select().single();
-  return error || !data ? null : mapTask(data);
+  if (!supabase || validateTaskTitle(task.title)) return null;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('couple_tasks').insert({
+      couple_id: task.coupleId,
+      created_by: task.createdBy,
+      title: task.title.trim(),
+      due_date: task.dueDate,
+      due_time: task.dueTime || null,
+      assignee_id: task.assigneeId || null,
+      is_private: task.isPrivate,
+    }).select().single();
+    assertCurrent();
+    return error || !data ? null : mapTask(data);
+  }, { expectedUserId: task.createdBy });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 export async function updateTask(
   task: CoupleTask,
   updates: Partial<Pick<CoupleTask, 'title' | 'dueDate' | 'dueTime' | 'assigneeId' | 'completed' | 'isPrivate'>>,
 ): Promise<CoupleTask | null> {
-  if (!supabase || !task.coupleId || await serverCallBlockedByPendingDeletion()) return null;
+  if (!supabase || !task.coupleId) return null;
   if (updates.title !== undefined && validateTaskTitle(updates.title)) return null;
   const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (updates.title !== undefined) payload.title = updates.title.trim();
@@ -82,14 +87,24 @@ export async function updateTask(
   if (updates.assigneeId !== undefined) payload.assignee_id = updates.assigneeId || null;
   if (updates.completed !== undefined) payload.completed = updates.completed;
   if (updates.isPrivate !== undefined) payload.is_private = updates.isPrivate;
-  const { data, error } = await supabase.from('couple_tasks').update(payload)
-    .eq('id', task.id).eq('couple_id', task.coupleId).select().maybeSingle();
-  return error || !data ? null : mapTask(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('couple_tasks').update(payload)
+      .eq('id', task.id).eq('couple_id', task.coupleId).select().maybeSingle();
+    assertCurrent();
+    return error || !data ? null : mapTask(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 export async function deleteTask(task: CoupleTask): Promise<boolean> {
-  if (!supabase || !task.coupleId || await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('couple_tasks').delete()
-    .eq('id', task.id).eq('couple_id', task.coupleId).select('id').maybeSingle();
-  return !error && Boolean(data);
+  if (!supabase || !task.coupleId) return false;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('couple_tasks').delete()
+      .eq('id', task.id).eq('couple_id', task.coupleId).select('id').maybeSingle();
+    assertCurrent();
+    return !error && Boolean(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }

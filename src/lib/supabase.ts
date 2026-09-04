@@ -4,7 +4,8 @@ import { authRedirectUrl, isNativePlatform } from '@/lib/platform';
 import {
   classifyDeletionErrorBody,
   classifyDeletionSuccess,
-  serverCallBlockedByPendingDeletion,
+  runServerMutationBehindDeletionBarrier,
+  type AccountDeletionLockLease,
   type AccountDeletionOutcome,
 } from '@/lib/accountDeletion';
 import {
@@ -165,23 +166,29 @@ export function generateInvitationCode(): string {
 export async function saveCoupleAnniversary(
   coupleId: string,
   anniversaryDate: string | null,
+  existingLease?: AccountDeletionLockLease,
 ): Promise<boolean> {
   if (!supabase || !coupleId) return false;
-  const { data, error } = await supabase
-    .from('couples')
-    .update({ anniversary_date: anniversaryDate, updated_at: new Date().toISOString() })
-    .eq('id', coupleId)
-    .select('id')
-    .maybeSingle();
-  if (error) {
-    console.error('[gomsinlog] Failed to save anniversary date.');
-    return false;
-  }
-  if (data?.id !== coupleId) {
-    console.error('[gomsinlog] Anniversary update matched no accessible couple row.');
-    return false;
-  }
-  return true;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase
+      .from('couples')
+      .update({ anniversary_date: anniversaryDate, updated_at: new Date().toISOString() })
+      .eq('id', coupleId)
+      .select('id')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to save anniversary date.');
+      return false;
+    }
+    if (data?.id !== coupleId) {
+      console.error('[gomsinlog] Anniversary update matched no accessible couple row.');
+      return false;
+    }
+    return true;
+  }, { expectedUserId: 'current', existingLease });
+  return result.kind === 'executed' ? result.value : false;
 }
 
 /** Draws before giving up on finding a code hash that is not already in use. */
@@ -247,71 +254,77 @@ export async function createCoupleInvitation(
   }
 
   try {
-    // Pre-flight: placed ahead of the caller-verification read as well, so that
-    // a pending deletion aborts before ANY request is issued, not merely before
-    // the mutation.
-    if (await serverCallBlockedByPendingDeletion()) {
-      return { coupleId: '', code: '', error: '탈퇴 처리가 진행 중이어서 커플 공간을 만들 수 없어요.' };
-    }
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData.user) {
-      return { coupleId: '', code: '', error: '인증되지 않은 사용자입니다. 로그인 후 다시 시도해주세요.' };
-    }
-
-    // Only one unused code hash may exist at a time, so a six-digit code that
-    // happens to match another couple's outstanding invitation is rejected.
-    // The server cannot pick a different code -- it only ever sees the hash --
-    // so drawing again is the client's job.
-    for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
-      const code = generateInvitationCode();
-      const codeHash = await hashInvitationCode(code);
-
-      // Atomic SECURITY DEFINER RPC creating couple, member and invitation.
-      const creationRpc = relationshipContext === 'general'
-        ? 'create_couple_and_invitation_v2'
-        : 'create_couple_and_invitation';
-      const creationArgs = relationshipContext === 'general'
-        ? {
-            p_role: role,
-            p_code_hash: codeHash,
-            p_relationship_context: relationshipContext,
-          }
-        : { p_role: role, p_code_hash: codeHash };
-      const { data: coupleIdData, error: rpcError } = await supabase.rpc(
-        creationRpc,
-        creationArgs,
-      );
-
-      if (!rpcError) return { coupleId: coupleIdData as string, code };
-      if (isInvitationCodeCollision(rpcError) && attempt < INVITATION_CODE_ATTEMPTS) continue;
-      if (isInvitationCodeCollision(rpcError)) {
+    const result = await runServerMutationBehindDeletionBarrier(async ({ userId, assertCurrent }) => {
+      assertCurrent();
+      const { data: userData } = await supabase!.auth.getUser();
+      assertCurrent();
+      if (!userData.user || userData.user.id !== userId) {
         return {
           coupleId: '',
           code: '',
-          error: '초대 코드를 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+          error: '인증되지 않은 사용자입니다. 로그인 후 다시 시도해주세요.',
         };
       }
-      // `already_in_couple` is a recoverable product state, not an error to show:
-      // the caller turns it into the "recover your existing space" flow, so the
-      // raw message is still carried for that branch only.
-      if (isAlreadyInCoupleMessage(rpcError.message)) {
+      // Only one unused code hash may exist at a time, so a six-digit code that
+      // happens to match another couple's outstanding invitation is rejected.
+      // The server cannot pick a different code -- it only ever sees the hash --
+      // so drawing again is the client's job.
+      for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
+        const code = generateInvitationCode();
+        const codeHash = await hashInvitationCode(code);
+
+        // Atomic SECURITY DEFINER RPC creating couple, member and invitation.
+        const creationRpc = relationshipContext === 'general'
+          ? 'create_couple_and_invitation_v2'
+          : 'create_couple_and_invitation';
+        const creationArgs = relationshipContext === 'general'
+          ? {
+              p_role: role,
+              p_code_hash: codeHash,
+              p_relationship_context: relationshipContext,
+            }
+          : { p_role: role, p_code_hash: codeHash };
+        assertCurrent();
+        const { data: coupleIdData, error: rpcError } = await supabase.rpc(
+          creationRpc,
+          creationArgs,
+        );
+        assertCurrent();
+
+        if (!rpcError) return { coupleId: coupleIdData as string, code };
+        if (isInvitationCodeCollision(rpcError) && attempt < INVITATION_CODE_ATTEMPTS) continue;
+        if (isInvitationCodeCollision(rpcError)) {
+          return {
+            coupleId: '',
+            code: '',
+            error: '초대 코드를 발급하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+          };
+        }
+        // `already_in_couple` is a recoverable product state, not an error to show:
+        // the caller turns it into the "recover your existing space" flow, so the
+        // raw message is still carried for that branch only.
+        if (isAlreadyInCoupleMessage(rpcError.message)) {
+          return {
+            coupleId: '',
+            code: '',
+            error: '이미 만들어진 커플 공간이 있어요.',
+            reason: 'already_in_couple' as const,
+          };
+        }
+        // Everything else goes through the classifier. Returning `rpcError.message`
+        // verbatim put raw Postgres/PostgREST English into a Korean toast -- the one
+        // invitation path that bypassed `classifyServerError`.
         return {
           coupleId: '',
           code: '',
-          error: '이미 만들어진 커플 공간이 있어요.',
-          reason: 'already_in_couple' as const,
+          error: `커플 공간을 만들지 못했어요. ${classifyServerError(rpcError).message}`,
         };
       }
-      // Everything else goes through the classifier. Returning `rpcError.message`
-      // verbatim put raw Postgres/PostgREST English into a Korean toast -- the one
-      // invitation path that bypassed `classifyServerError`.
-      return {
-        coupleId: '',
-        code: '',
-        error: `커플 공간을 만들지 못했어요. ${classifyServerError(rpcError).message}`,
-      };
-    }
-    return { coupleId: '', code: '', error: '커플 공간 생성에 실패했습니다.' };
+      return { coupleId: '', code: '', error: '커플 공간 생성에 실패했습니다.' };
+    }, { expectedUserId: 'current' });
+    return result.kind === 'executed'
+      ? result.value
+      : { coupleId: '', code: '', error: '탈퇴 처리가 진행 중이어서 커플 공간을 만들 수 없어요.' };
   } catch (err: any) {
     if (isAlreadyInCoupleMessage(err?.message)) {
       return {
@@ -452,61 +465,64 @@ export async function consumeCoupleInvitation(
   }
 
   try {
-    const codeHash = await hashInvitationCode(normalized);
-    // Pre-flight: a pending deletion aborts this write before it is issued.
-    if (await serverCallBlockedByPendingDeletion()) {
-      return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 사용할 수 없어요.' };
-    }
-    const redemptionRpc = expectedRelationshipContext === 'general'
-      ? 'redeem_invitation_v2'
-      : 'redeem_invitation';
-    const redemptionArgs = expectedRelationshipContext === 'general'
-      ? {
-          p_code_hash: codeHash,
-          p_expected_relationship_context: expectedRelationshipContext,
-        }
-      : { p_code_hash: codeHash };
-    const { data, error } = await supabase.rpc(redemptionRpc, redemptionArgs);
+    const barrierResult = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+      const codeHash = await hashInvitationCode(normalized);
+      const redemptionRpc = expectedRelationshipContext === 'general'
+        ? 'redeem_invitation_v2'
+        : 'redeem_invitation';
+      const redemptionArgs = expectedRelationshipContext === 'general'
+        ? {
+            p_code_hash: codeHash,
+            p_expected_relationship_context: expectedRelationshipContext,
+          }
+        : { p_code_hash: codeHash };
+      assertCurrent();
+      const { data, error } = await supabase.rpc(redemptionRpc, redemptionArgs);
+      assertCurrent();
 
-    if (error) {
-      if (error.code === 'PGRST202') {
+      if (error) {
+        if (error.code === 'PGRST202') {
+          return {
+            error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+            reason: 'server' as const,
+          };
+        }
+        console.error('[gomsinlog] redeem_invitation failed.');
+        // Classified exactly like the `catch` branch below. Left unclassified, the
+        // same 401 or 42501 read as a transient hiccup or as a permission problem
+        // depending only on how supabase-js chose to surface it.
+        const classified = classifyServerError(error);
         return {
-          error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
-          reason: 'server',
+          error: `초대 코드를 확인하지 못했습니다. ${classified.message}`,
+          reason: classified.kind,
         };
       }
-      console.error('[gomsinlog] redeem_invitation failed.');
-      // Classified exactly like the `catch` branch below. Left unclassified, the
-      // same 401 or 42501 read as a transient hiccup or as a permission problem
-      // depending only on how supabase-js chose to surface it.
-      const classified = classifyServerError(error);
-      return {
-        error: `초대 코드를 확인하지 못했습니다. ${classified.message}`,
-        reason: classified.kind,
-      };
-    }
 
-    const result = parseInvitationRedemptionResult(data);
-    if (!result) {
-      // Migration 013 returned a bare UUID. Refuse that legacy shape instead of
-      // falling back to consume_invitation and bypassing durable throttling.
-      console.error('[gomsinlog] Unexpected redeem_invitation result; migration 015 is required.');
-      return {
-        error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
-      };
-    }
+      const redemption = parseInvitationRedemptionResult(data);
+      if (!redemption) {
+        // Migration 013 returned a bare UUID. Refuse that legacy shape instead of
+        // falling back to consume_invitation and bypassing durable throttling.
+        console.error('[gomsinlog] Unexpected redeem_invitation result; migration 015 is required.');
+        return {
+          error: '서버에 안전한 초대 코드 확인 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+        };
+      }
 
-    if (!result.ok) {
-      const verdict = invitationErrorVerdict(result.error_code);
-      return { error: verdict.message, reason: verdict.reason };
-    }
-    if (!result.couple_id || result.error_code !== null) {
-      console.error('[gomsinlog] Invalid successful redeem_invitation result.');
-      return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
-    }
+      if (!redemption.ok) {
+        const verdict = invitationErrorVerdict(redemption.error_code);
+        return { error: verdict.message, reason: verdict.reason };
+      }
+      if (!redemption.couple_id || redemption.error_code !== null) {
+        console.error('[gomsinlog] Invalid successful redeem_invitation result.');
+        return { error: '초대 코드를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+      }
 
-    clearInviteAttempts();
-    return { coupleId: result.couple_id };
+      clearInviteAttempts();
+      return { coupleId: redemption.couple_id };
+    }, { expectedUserId: 'current' });
+    return barrierResult.kind === 'executed'
+      ? barrierResult.value
+      : { error: '탈퇴 처리가 진행 중이어서 초대 코드를 사용할 수 없어요.' };
   } catch (err: any) {
     console.error('[gomsinlog] redeem_invitation threw.');
     // The raw cause is in hand, so classify it. Blaming the internet
@@ -533,38 +549,40 @@ export async function regenerateCoupleInvitation(): Promise<{ code?: string; err
   if (!supabase) {
     return { error: '서비스 연결 설정이 완료되지 않아 초대 코드를 발급할 수 없어요. 운영자에게 문의해 주세요.' };
   }
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) {
-    return { error: '탈퇴 처리가 진행 중이어서 초대 코드를 새로 만들 수 없어요.' };
-  }
-
   try {
-    for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
-      const code = generateInvitationCode();
-      const codeHash = await hashInvitationCode(code);
-      const { error } = await supabase.rpc('regenerate_invitation', { p_code_hash: codeHash });
-      if (!error) return { code };
-      // PGRST202 = the function is not deployed on this project yet.
-      if (error.code === 'PGRST202') {
-        return {
-          error:
-            '서버에 초대 코드 재발급 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
-        };
-      }
-      if ((error.message || '').includes('No active couple')) {
-        return { error: '연결할 커플 공간이 없습니다. 먼저 우리 공간을 만들어 주세요.' };
-      }
-      if ((error.message || '').includes('already connected')) {
-        return { error: '이미 두 사람이 연결되어 있어 초대 코드가 필요하지 않습니다.' };
-      }
-      // A collided draw is retryable; anything else is not.
-      if (isInvitationCodeCollision(error) && attempt < INVITATION_CODE_ATTEMPTS) continue;
-      if (!isInvitationCodeCollision(error)) {
-        console.error('[gomsinlog] regenerate_invitation failed.');
+    const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+      for (let attempt = 1; attempt <= INVITATION_CODE_ATTEMPTS; attempt += 1) {
+        const code = generateInvitationCode();
+        const codeHash = await hashInvitationCode(code);
+        assertCurrent();
+        const { error } = await supabase.rpc('regenerate_invitation', { p_code_hash: codeHash });
+        assertCurrent();
+        if (!error) return { code };
+        // PGRST202 = the function is not deployed on this project yet.
+        if (error.code === 'PGRST202') {
+          return {
+            error:
+              '서버에 초대 코드 재발급 기능이 아직 배포되지 않았습니다. 관리자에게 문의해 주세요.',
+          };
+        }
+        if ((error.message || '').includes('No active couple')) {
+          return { error: '연결할 커플 공간이 없습니다. 먼저 우리 공간을 만들어 주세요.' };
+        }
+        if ((error.message || '').includes('already connected')) {
+          return { error: '이미 두 사람이 연결되어 있어 초대 코드가 필요하지 않습니다.' };
+        }
+        // A collided draw is retryable; anything else is not.
+        if (isInvitationCodeCollision(error) && attempt < INVITATION_CODE_ATTEMPTS) continue;
+        if (!isInvitationCodeCollision(error)) {
+          console.error('[gomsinlog] regenerate_invitation failed.');
+        }
+        return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
       }
       return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
-    }
-    return { error: '초대 코드를 재발급하지 못했습니다. 잠시 후 다시 시도해 주세요.' };
+    }, { expectedUserId: 'current' });
+    return result.kind === 'executed'
+      ? result.value
+      : { error: '탈퇴 처리가 진행 중이어서 초대 코드를 새로 만들 수 없어요.' };
   } catch (err: any) {
     console.error('[gomsinlog] regenerate_invitation threw.');
     return { error: '초대 코드 재발급 중 오류가 발생했습니다.' };
@@ -628,21 +646,28 @@ export async function fetchMyCoupleState(): Promise<
 /**
  * Disconnect active couple using disconnect_couple RPC.
  */
-export async function disconnectCoupleFromDB(): Promise<boolean> {
+export async function disconnectCoupleFromDB(
+  existingLease?: AccountDeletionLockLease,
+): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { error } = await supabase.rpc('disconnect_couple');
-    if (error) {
-      // A silent `false` here was indistinguishable from a permission failure or
-      // a dead network, so a missing schema reload looked like an app bug.
-      if (isSchemaCacheMiss(error)) {
-        console.error(schemaCacheMissLog('disconnect_couple', '015'));
+    const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+      assertCurrent();
+      const { error } = await supabase.rpc('disconnect_couple');
+      assertCurrent();
+      if (error) {
+        // A silent `false` here was indistinguishable from a permission failure or
+        // a dead network, so a missing schema reload looked like an app bug.
+        if (isSchemaCacheMiss(error)) {
+          console.error(schemaCacheMissLog('disconnect_couple', '015'));
+          return false;
+        }
+        console.error('[gomsinlog] disconnect_couple RPC failed.');
         return false;
       }
-      console.error('[gomsinlog] disconnect_couple RPC failed.');
-      return false;
-    }
-    return true;
+      return true;
+    }, { expectedUserId: 'current', existingLease });
+    return result.kind === 'executed' ? result.value : false;
   } catch (err) {
     console.error('[gomsinlog] Failed to call disconnect_couple RPC.');
     return false;

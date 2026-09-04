@@ -4,7 +4,9 @@ import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
 import { PenFace } from '@/components/paper/InkCircle';
 import { Button } from '@/components/ui/Button';
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  runServerMutationBehindDeletionBarrier,
+} from '@/lib/accountDeletion';
 import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
 import { useStore } from '@/lib/useStore';
 import {
@@ -798,18 +800,17 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       // straight back through onboarding.
       if (supabase && state.authenticatedUser) {
         const userId = state.authenticatedUser.id;
-        // Pre-flight: a pending deletion aborts every write below before the
-        // first one is issued, so onboarding cannot recreate a `profiles` row
-        // for an account whose data the server has already removed.
-        if (await serverCallBlockedByPendingDeletion()) return;
-        if (!isCurrentIdentity(identity)) return;
+        const barrierResult = await runServerMutationBehindDeletionBarrier(async ({ lease, assertCurrent }) => {
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
 
-        // Re-validate authority state before any server/local mutation
-        const authorityResult = await fetchMyCoupleState();
-        if (!isCurrentIdentity(identity)) return;
+          // Re-validate authority state before any server/local mutation
+          const authorityResult = await fetchMyCoupleState();
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
         if (!authorityResult || !authorityResult.ok || !authorityResult.state) {
           toast.error('커플 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-          return;
+            return false;
         }
 
         const authState = authorityResult.state;
@@ -830,7 +831,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           || !isPartnerValid
         ) {
           toast.error('커플 정보가 올바르지 않습니다. 다시 확인해 주세요.');
-          return;
+            return false;
         }
 
         const authoritativeRole: Role = authState.role as Role;
@@ -856,7 +857,8 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           enabled: contactEnabled,
         };
 
-        const { error: profileError } = await supabase.from('profiles').upsert({
+          assertCurrent();
+          const { error: profileError } = await supabase!.from('profiles').upsert({
           id: userId,
           display_name: finalNickname,
           role: authoritativeRole,
@@ -865,26 +867,29 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             : { gender_identity: genderIdentity ?? null }),
           onboarding_completed_at: nowIso,
           updated_at: nowIso,
-        });
-        if (!isCurrentIdentity(identity)) return;
+          });
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
 
         if (profileError) {
           console.error('[Onboarding] Profile save failed.');
           // Classified from the real error: an RLS or session failure must not be
           // reported as a connectivity problem.
           toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
-          return;
+            return false;
         }
 
         if (contactEnabled) {
-          const { error: contactError } = await supabase.from('contact_preferences').upsert({
+            assertCurrent();
+            const { error: contactError } = await supabase!.from('contact_preferences').upsert({
             user_id: userId,
             weekday_start: weekdayStart,
             weekday_end: weekdayEnd,
             weekend_start: weekendStart,
             weekend_end: weekendEnd,
-          });
-          if (!isCurrentIdentity(identity)) return;
+            });
+            assertCurrent();
+            if (!isCurrentIdentity(identity)) return false;
           if (contactError) {
             // Non-blocking: contact hours are editable later from settings.
             console.error('[Onboarding] Contact preferences save failed.');
@@ -892,8 +897,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
         }
 
         if (spaceMode === 'create' && createdCoupleId && anniversaryDate) {
-          const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
-          if (!isCurrentIdentity(identity)) return;
+            assertCurrent();
+            const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate, lease);
+            assertCurrent();
+            if (!isCurrentIdentity(identity)) return false;
           if (!anniversarySaved) {
             console.error('[Onboarding] Anniversary save failed.');
             // The anniversary lives on the SHARED `couples` row, so a failure here
@@ -905,7 +912,8 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           }
         }
 
-        await updateProfile({
+          assertCurrent();
+          await updateProfile({
           myName: finalNickname,
           role: authoritativeRole,
           ...(usesMilitaryFeatures(authoritativeRelationshipContext)
@@ -928,9 +936,15 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             ? military
             : state.profile.military,
           contact,
-        }, { persist: false });
+          }, { persist: false });
 
-        if (!isCurrentIdentity(identity)) return;
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
+          return { authoritativeRelationshipContext, authoritativeRole };
+        }, { expectedUserId: userId });
+
+        if (barrierResult.kind !== 'executed' || !barrierResult.value) return;
+        const { authoritativeRelationshipContext, authoritativeRole } = barrierResult.value;
         if (anniversaryNotSaved) {
           toast.warning(
             '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',

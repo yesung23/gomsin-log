@@ -16,15 +16,30 @@ const consentBackend = vi.hoisted(() => ({
   error: null as null | { code: string; message: string },
   rpcCalls: [] as Array<{ name: string; args: Record<string, unknown> }>,
   tableWrites: 0,
+  currentUserId: 'user-a',
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
-  serverCallBlockedByPendingDeletion: async () => consentBackend.deletionPending,
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current'; policy?: string },
+  ) => {
+    if (consentBackend.deletionPending && options.policy !== 'best_effort') {
+      return { kind: 'blocked' };
+    }
+    return {
+      kind: 'executed',
+      value: await operation({ userId: 'user-a', assertCurrent: () => {} }),
+    };
+  },
 }));
 
 vi.mock('@/lib/supabase', () => ({
   isSupabaseConfigured: true,
   supabase: {
+    auth: {
+      getUser: async () => ({ data: { user: { id: consentBackend.currentUserId } }, error: null }),
+    },
     from: () => {
       const read = {
         eq: () => read,
@@ -69,6 +84,7 @@ describe('server consent helpers leave local authority commits to their caller',
     consentBackend.rpcResult = { applied: true, granted: true, revision: 1 };
     consentBackend.rpcCalls = [];
     consentBackend.tableWrites = 0;
+    consentBackend.currentUserId = 'user-a';
   });
 
   it('does not unlock the local cache when a server read reports granted', async () => {
@@ -181,5 +197,15 @@ describe('server consent helpers leave local authority commits to their caller',
       name: 'revoke_cycle_sensitive_consent',
       args: { p_expected_user_id: 'user-a' },
     }]);
+  });
+
+  it('does not revoke using a stale identity after the account switches', async () => {
+    consentBackend.currentUserId = 'user-b';
+
+    await expect(revokeCycleConsentInDB('user-a')).resolves.toEqual({
+      ok: false,
+      reason: 'forbidden',
+    });
+    expect(consentBackend.rpcCalls).toHaveLength(0);
   });
 });

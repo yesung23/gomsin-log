@@ -50,7 +50,16 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
-  serverCallBlockedByPendingDeletion: vi.fn(async () => false),
+  runServerMutationBehindDeletionBarrier: vi.fn(async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => ({
+    kind: 'executed',
+    value: await operation({
+      userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+      assertCurrent: () => {},
+    }),
+  })),
 }));
 
 vi.mock('sonner', () => ({

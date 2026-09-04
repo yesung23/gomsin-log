@@ -211,12 +211,16 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     if (
       mode !== 'today'
       || briefingOpenedRef.current
+      || !viewerUserId
       || !cards.some((card) => card.kind === 'moment')
     ) return;
 
     briefingOpenedRef.current = true;
-    void recordProductEvent({ kind: 'briefing_opened', screen: 'story' });
-  }, [cards, mode]);
+    void recordProductEvent(
+      { kind: 'briefing_opened', screen: 'story' },
+      { expectedUserId: viewerUserId },
+    );
+  }, [cards, mode, viewerUserId]);
 
   const initialIndex = briefing
     ? (focusRecordId ? projection.initialIndex + 1 : 0)
@@ -254,11 +258,16 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     */
     if (mode === 'today' && !briefingToOriginalRef.current) {
       briefingToOriginalRef.current = true;
-      void recordProductEvent({ kind: 'briefing_to_original', screen: 'story' });
+      if (viewerUserId) {
+        void recordProductEvent(
+          { kind: 'briefing_to_original', screen: 'story' },
+          { expectedUserId: viewerUserId },
+        );
+      }
     }
     setHighlightedRecordId(recordId);
     navigate(`/record?record=${encodeURIComponent(recordId)}`);
-  }, [mode, navigate, setHighlightedRecordId]);
+  }, [mode, navigate, setHighlightedRecordId, viewerUserId]);
 
   const addToHighlight = useCallback((recordId: string) => {
     navigate(`/us?highlightRecord=${encodeURIComponent(recordId)}`);

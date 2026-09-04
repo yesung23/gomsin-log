@@ -50,6 +50,7 @@ import { serverErrorMessage } from '@/lib/serverErrors';
 
 const COUPLE_ID = '11111111-1111-4111-8111-111111111111';
 const RECORD_ID = '22222222-2222-4222-8222-222222222222';
+const STABLE_OBJECT_ID = '33333333-3333-4333-8333-333333333333';
 
 function pngFile(): File {
   return new File([new Uint8Array([1, 2, 3])], 'photo.png', { type: 'image/png' });
@@ -104,6 +105,17 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     expect(message).toBe(`파일을 올리지 못했어요. ${serverErrorMessage('server')}`);
   });
 
+  it.each([
+    [{ code: '42501', message: 'rls' }, 'forbidden'],
+    [{ code: 'PGRST301', message: 'JWT expired' }, 'auth_expired'],
+    [{ status: 500, message: 'boom' }, 'server'],
+    [new TypeError('Failed to fetch'), 'unreachable'],
+  ])('preserves the classified cause for durable replay: %#', async (storageError, reason) => {
+    mockUpload.mockResolvedValue({ error: storageError });
+    const result = await uploadRecordMedia(pngFile(), COUPLE_ID, RECORD_ID);
+    expect(result).toMatchObject({ reason });
+  });
+
   it('gives these four causes more than one distinct message', async () => {
     // The defect was that all of them produced the SAME sentence.
     const messages = new Set([
@@ -142,12 +154,76 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     expect(attachment.name).not.toBe('photo.png');
   });
 
+  it('reuses the exact durable object id supplied by an outbox replay', async () => {
+    mockUpload.mockResolvedValue({ error: null });
+
+    const result = await uploadRecordMedia(
+      pngFile(),
+      COUPLE_ID,
+      RECORD_ID,
+      undefined,
+      STABLE_OBJECT_ID,
+    );
+
+    expect(result).toEqual({
+      attachment: {
+        type: 'photo',
+        name: 'photo.jpg',
+        path: `${COUPLE_ID}/${RECORD_ID}/${STABLE_OBJECT_ID}.jpg`,
+      },
+    });
+    expect(mockUpload).toHaveBeenCalledWith(
+      `${COUPLE_ID}/${RECORD_ID}/${STABLE_OBJECT_ID}.jpg`,
+      expect.objectContaining({ name: 'photo.jpg', type: 'image/jpeg' }),
+      { contentType: 'image/jpeg', upsert: false },
+    );
+  });
+
+  it('reconciles a duplicate stable object after a lost upload response', async () => {
+    mockUpload.mockResolvedValue({
+      error: { statusCode: 409, code: 'Duplicate', message: 'The resource already exists' },
+    });
+
+    const result = await uploadRecordMedia(
+      pngFile(),
+      COUPLE_ID,
+      RECORD_ID,
+      undefined,
+      STABLE_OBJECT_ID,
+    );
+
+    expect(result).toEqual({
+      attachment: {
+        type: 'photo',
+        name: 'photo.jpg',
+        path: `${COUPLE_ID}/${RECORD_ID}/${STABLE_OBJECT_ID}.jpg`,
+      },
+    });
+  });
+
+  it('rejects a malformed stable object id before touching Storage', async () => {
+    const result = await uploadRecordMedia(
+      pngFile(),
+      COUPLE_ID,
+      RECORD_ID,
+      undefined,
+      '../not-an-object-id',
+    );
+
+    expect(result).toEqual({
+      error: '첨부 파일 식별자가 올바르지 않아 업로드하지 않았어요.',
+      reason: 'unknown',
+    });
+    expect(mockUpload).not.toHaveBeenCalled();
+    expect(mockSanitizePhoto).not.toHaveBeenCalled();
+  });
+
   it('never uploads the original when privacy sanitization fails', async () => {
     mockSanitizePhoto.mockResolvedValueOnce({ error: '사진을 안전하게 처리하지 못했어요.' });
 
     const result = await uploadRecordMedia(pngFile(), COUPLE_ID, RECORD_ID);
 
-    expect(result).toEqual({ error: '사진을 안전하게 처리하지 못했어요.' });
+    expect(result).toEqual({ error: '사진을 안전하게 처리하지 못했어요.', reason: 'unknown' });
     expect(mockUpload).not.toHaveBeenCalled();
   });
 

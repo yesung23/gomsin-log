@@ -15,6 +15,7 @@ import type { EmotionFlowItem } from '@/types';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isMarkedByViewer } from '@/lib/talkAboutList';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Sparkles, Clock, Calendar,
@@ -691,6 +692,8 @@ export function RecordPage() {
   };
 
   const partnerDisplayName = profile.couple.partnerName || '상대방';
+  const relationshipContext = resolveRelationshipContext(profile.couple.relationshipContext)
+    ?? 'military';
 
   /**
    * Attribution for the open record, so the detail modal names the author with
@@ -702,9 +705,10 @@ export function RecordPage() {
         selectedRecord,
         { userId: profile.id, role: profile.role },
         partnerDisplayName,
+        relationshipContext,
       )
       : null),
-    [selectedRecord, profile.id, profile.role, partnerDisplayName],
+    [selectedRecord, profile.id, profile.role, partnerDisplayName, relationshipContext],
   );
 
   // Check if selected month has any records at all
@@ -1079,6 +1083,7 @@ export function RecordPage() {
                 r,
                 { userId: profile.id, role: profile.role },
                 partnerDisplayName,
+                relationshipContext,
               );
               const isHighlighted = state.highlightedRecordId === r.id;
               const hasMedia = r.attachments && r.attachments.length > 0;

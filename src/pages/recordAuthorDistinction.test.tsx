@@ -5,7 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { AppState, DailyRecord } from '@/types';
+import type { AppState, DailyRecord, RelationshipContext } from '@/types';
 import { recordAuthorPresentation, ROLE_EMOJI, ROLE_LABEL } from '@/lib/recordAuthor';
 
 /**
@@ -83,7 +83,10 @@ function record(overrides: Partial<DailyRecord> = {}): DailyRecord {
 }
 
 /** The viewer is a 군화; the partner writing alongside them is a 곰신. */
-function makeState(records: DailyRecord[]): AppState {
+function makeState(
+  records: DailyRecord[],
+  relationshipContext: RelationshipContext = 'military',
+): AppState {
   return {
     setupComplete: true,
     onboardingStep: 0,
@@ -94,6 +97,7 @@ function makeState(records: DailyRecord[]): AppState {
       role: 'soldier',
       couple: {
         coupleId: 'couple-1',
+        relationshipContext,
         partnerName: '춘향',
         anniversaryDate: '2025-01-01',
         coupleCode: '',
@@ -112,8 +116,11 @@ function makeState(records: DailyRecord[]): AppState {
   } as AppState;
 }
 
-function renderPage(records: DailyRecord[]) {
-  currentState = makeState(records);
+function renderPage(
+  records: DailyRecord[],
+  relationshipContext: RelationshipContext = 'military',
+) {
+  currentState = makeState(records, relationshipContext);
   // Noon UTC is 21:00 KST the same day, so `localToday()` resolves to TODAY.
   vi.setSystemTime(new Date(`${TODAY}T12:00:00.000Z`));
   return render(
@@ -361,6 +368,24 @@ describe('the timeline tells 군화 and 곰신 apart', () => {
   });
 });
 
+describe('the general-couple timeline uses neutral author language', () => {
+  it('shows identity without exposing military slot labels or emoji', async () => {
+    const { container } = renderPage([MINE, THEIRS], 'general');
+    await screen.findByText('08:00');
+
+    expect(screen.getByText('나')).toBeInTheDocument();
+    expect(screen.getByText('춘향')).toBeInTheDocument();
+    expect(screen.queryByText(/군화|곰신|🪖|🌸/)).toBeNull();
+
+    const mine = cardOf(container, 'rec-mine');
+    const theirs = cardOf(container, 'rec-theirs');
+    expect(mine.querySelector('.sr-only')).toHaveTextContent('내가 남긴 기록');
+    expect(theirs.querySelector('.sr-only')).toHaveTextContent('춘향의 기록');
+    expect(mine.querySelector('[aria-hidden="true"]')?.className)
+      .not.toBe(theirs.querySelector('[aria-hidden="true"]')?.className);
+  });
+});
+
 describe('recordAuthorPresentation', () => {
   const viewer = { userId: ME, role: 'soldier' as const };
 
@@ -415,6 +440,37 @@ describe('recordAuthorPresentation', () => {
     // the table is the single definition new code should reach for.
     expect(ROLE_LABEL).toEqual({ gomsin: '곰신', soldier: '군화' });
     expect(ROLE_EMOJI).toEqual({ gomsin: '🌸', soldier: '🪖' });
+  });
+
+  it('uses ownership and names, not military vocabulary, for a general couple', () => {
+    const mine = recordAuthorPresentation(
+      { userId: ME, authorRole: 'soldier' },
+      viewer,
+      '춘향',
+      'general',
+    );
+    const theirs = recordAuthorPresentation(
+      { userId: PARTNER, authorRole: 'gomsin' },
+      viewer,
+      '춘향',
+      'general',
+    );
+
+    expect(mine).toMatchObject({
+      roleLabel: null,
+      roleEmoji: null,
+      attribution: '나',
+      srAttribution: '내가 남긴 기록',
+    });
+    expect(theirs).toMatchObject({
+      roleLabel: null,
+      roleEmoji: null,
+      attribution: '춘향',
+      srAttribution: '춘향의 기록',
+    });
+    expect(mine.stripeClass).not.toBe(theirs.stripeClass);
+    expect(`${mine.attribution}${theirs.attribution}${mine.srAttribution}${theirs.srAttribution}`)
+      .not.toMatch(/군화|곰신|🪖|🌸/);
   });
 
   it('assigns hue by role, so the same person is the same colour on both phones', () => {

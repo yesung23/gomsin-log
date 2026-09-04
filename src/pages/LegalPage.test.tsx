@@ -124,7 +124,7 @@ describe('LegalDocumentSheet shares its text with the public route', () => {
       // Every published clause is present in the sheet. The chrome differs (the route
       // has a back control, the sheet a close control), so this is containment of the
       // document body rather than string equality of the whole screen.
-      expect(sheetText).toContain('최종 개정일: 2026-08-27 · 시행일: 2026-09-03');
+      expect(sheetText).toContain('최종 개정일: 2026-09-04 · 시행일: 2026-09-11');
       const clauses = routeText
         .split('·')
         .map((part) => part.trim())

@@ -3212,6 +3212,106 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 ---
 
+## 2026-09-05 — Whole-repository gate closure after IAP integration
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: whole-repository release gate and Edge type-check coverage
+- Step: run the canonical full gate, convert both discovered failures into focused regressions, and re-run the complete gate from a clean process
+- Previous Gate: IAP documentation HEAD `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- This Gate: implementation HEAD `fddb857a44ebeab39e502cdddef5d9c7167bf2f6`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no customer, pricing, storage, media, AI-role, or monetization decision changed
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/release-validation.md`
+- Current-state checked: exact branch/HEAD/status and canonical `npm run verify` behavior
+- Latest relevant Work Log checked: immediately following Apple IAP forward-only safety entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03, latest owner overrides through 2026-09-05
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex Control Tower
+- Model: GPT-5.6 Sol / Max ceiling
+- Role: primary verifier and focused correction owner
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- Old HEAD: `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- New HEAD / Reviewed HEAD: `fddb857a44ebeab39e502cdddef5d9c7167bf2f6`; this ledger/report is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `src/pages/CallModePage.tsx`
+- function/component/migration: call topic card spacing
+- what changed/reviewed: replaced the lone off-scale 28px vertical padding with the canonical 24px spacing step
+- why: the repository-wide six-step spacing gate correctly detected visual-system drift
+- file: `package.json`
+- function/component/migration: `check:edge`
+- what changed/reviewed: added the four tracked Edge sources that the canonical Deno gate had omitted: Apple server API, notification RPC mapping, and consumption handler/entrypoint
+- why: an explicit-file gate that silently skips service-key code is not a valid release gate
+- file: `supabase/functions/_shared/appleIapServerApi.ts`, `deno.lock`
+- function/component/migration: node-fetch timeout subclass typing
+- what changed/reviewed: aligned request/response types with the exact `@types/node-fetch` contract used by Apple's base class and pinned that direct type dependency in the frozen Deno lock
+- why: once the source was directly checked, two real override incompatibilities surfaced; transitive entrypoint checks alone had hidden them
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; migrations 079/082 were not edited
+- product semantics: unchanged except one token-compliant spacing correction with no behavior removal
+- Production: no push, merge, deploy, remote Supabase, Apple, or customer-data action
+
+### VERIFICATION
+- command: first `npm run verify` at `a611aca`
+- PASS / FAIL / UNVERIFIED: FAIL as intended evidence — 5,681 passed, 2 failed, 2 skipped; failures were `CallModePage.tsx: py-7` and four omitted `check:edge` sources
+- what it actually proves: the canonical gate was non-vacuous and found two integration regressions that focused IAP tests did not cover
+- command: focused `typeScale.test.ts` and `lintGateStrictness.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 2 files, 34 tests
+- what it actually proves: spacing vocabulary and complete tracked Edge-source enumeration
+- command: `npm run check:edge`
+- PASS / FAIL / UNVERIFIED: PASS — every tracked non-test Edge TypeScript source named and checked
+- what it actually proves: direct Deno type compatibility, including Apple server API subclass override
+- command: `npm run check:iap && npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — frozen lock accepted; 83 tests passed
+- what it actually proves: IAP entrypoint/type/handler behavior after the explicit node-fetch type contract change
+- command: fresh `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck; zero-warning lint; 345 files, 5,683 tests passed and 2 device-dependent tests skipped; production Vite build completed with 2,582 modules transformed
+- what it actually proves: full local repository compile/lint/test/build consistency with placeholder configuration; it is not Production credential, device, or deployment evidence
+- command: remote Supabase/Apple/Production, physical device, CI
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: external state remains outside this local gate
+
+### REVIEW IMPACT
+- FULL: exact-HEAD independent IAP review must use `fddb857`, because the directly checked Apple server module and lockfile changed after the prior review was dispatched
+- whether an earlier review is stale: YES; the first reviewer was stopped before verdict and a fresh exact-HEAD Sol Max review was dispatched
+
+### BLOCKERS
+- code: separate CRITICAL record/media deletion atomicity flaw remains open; IAP exact-HEAD independent review is pending
+- environment: physical-device-only native tests remain intentionally skipped locally
+- external/manual: remote/Production/Apple/CI/device states remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: full local canonical verify PASS and two atomic implementation commits (`f90c708`, `fddb857`)
+
+### REMAINING
+- independent exact-HEAD IAP review; transactional record/media deletion repair; remaining app security/UX/device/release gates
+
+### NEXT ACTION
+- next owner: Sol Max independent reviewer and Control Tower
+- tool/model: GPT-5.6 Sol / Max
+- 기준 SHA: `fddb857a44ebeab39e502cdddef5d9c7167bf2f6` plus this documentation-only commit
+- exact next task: finish the IAP exact-HEAD verdict, then implement the reviewed forward-only record-media deletion outbox contract
+
+### DO NOT ADVANCE UNTIL
+- IAP review has no CRITICAL/HIGH finding
+- record/media deletion no longer has a Storage-first data-loss window
+- external state is verified separately before any Production action
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
 ## 2026-09-05 — Apple IAP reconciliation forward-only safety closure
 
 ### PLAN POSITION

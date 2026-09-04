@@ -317,7 +317,7 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
   afterEach(() => mockFrom.mockReset());
 
   it('maps explicit profile posts without changing the stored record time', async () => {
-    const secondOrder = vi.fn().mockResolvedValue({
+    const limit = vi.fn().mockResolvedValue({
       data: [{
         id: 'record-1',
         user_id: 'user-1',
@@ -333,6 +333,7 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
       }],
       error: null,
     });
+    const secondOrder = vi.fn().mockReturnValue({ limit });
     const firstOrder = vi.fn().mockReturnValue({ order: secondOrder });
     const eq = vi.fn().mockReturnValue({ order: firstOrder });
     const select = vi.fn().mockReturnValue({ eq });

@@ -150,6 +150,12 @@ export type RecordsFetchResult =
   | { ok: true; records: DailyRecord[]; mediaUnavailable?: ServerErrorKind }
   | { ok: false; records: []; error: unknown };
 
+/** Stay below Supabase/PostgREST's configurable response-row ceiling. */
+export const RECORDS_PAGE_SIZE = 500;
+
+/** Keep Storage signing requests small enough to retry and diagnose independently. */
+export const SIGNED_URL_BATCH_SIZE = 100;
+
 const ATTACHMENT_TYPES: ReadonlySet<Attachment['type']> = new Set([
   'photo',
   'video',
@@ -218,32 +224,115 @@ async function signValidatedAttachments(attachments: Attachment[]): Promise<Atta
   ));
   if (paths.length === 0) return attachments;
 
-  const { data, error } = await supabase.storage
-    .from(MEDIA_BUCKET)
-    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
-
-  if (error) {
-    console.error('[gomsinlog] Failed to sign media URLs.');
-    const reason = classifyServerError(error).kind;
-    return attachments.map((attachment) => ({ ...attachment, url: undefined, urlUnavailable: reason }));
-  }
-
   const byPath = new Map<string, string>();
-  (data || []).forEach((entry) => {
-    if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
-  });
+  const unavailableByPath = new Map<string, ServerErrorKind>();
+  for (let offset = 0; offset < paths.length; offset += SIGNED_URL_BATCH_SIZE) {
+    const batch = paths.slice(offset, offset + SIGNED_URL_BATCH_SIZE);
+    const { data, error } = await supabase.storage
+      .from(MEDIA_BUCKET)
+      .createSignedUrls(batch, SIGNED_URL_TTL_SECONDS);
+
+    if (error) {
+      console.error('[gomsinlog] Failed to sign media URLs.');
+      const reason = classifyServerError(error).kind;
+      batch.forEach((path) => unavailableByPath.set(path, reason));
+      continue;
+    }
+
+    const returned = new Set<string>();
+    (data || []).forEach((entry) => {
+      if (!entry.path || !entry.signedUrl || !batch.includes(entry.path)) return;
+      returned.add(entry.path);
+      byPath.set(entry.path, entry.signedUrl);
+    });
+    batch.forEach((path) => {
+      if (!returned.has(path)) unavailableByPath.set(path, 'forbidden');
+    });
+  }
 
   return attachments.map((attachment) => {
     if (attachment.path && byPath.has(attachment.path)) {
       return { ...attachment, url: byPath.get(attachment.path), urlUnavailable: undefined };
     }
-    // Signing was attempted for this path and the batch came back without it,
-    // e.g. the storage SELECT policy withheld that single object.
-    if (attachment.path) {
-      return { ...attachment, url: undefined, urlUnavailable: 'forbidden' as ServerErrorKind };
+    if (attachment.path && unavailableByPath.has(attachment.path)) {
+      return {
+        ...attachment,
+        url: undefined,
+        urlUnavailable: unavailableByPath.get(attachment.path),
+      };
     }
     return attachment;
   });
+}
+
+type RecordsPageCursor = { createdAt: string; id: string };
+
+function cursorForRecordRow(row: unknown): RecordsPageCursor | null {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const candidate = row as Record<string, unknown>;
+  if (typeof candidate.created_at !== 'string' || candidate.created_at.length === 0) return null;
+  if (typeof candidate.id !== 'string' || candidate.id.length === 0) return null;
+  return { createdAt: candidate.created_at, id: candidate.id };
+}
+
+function sameRecordsCursor(left: RecordsPageCursor | null, right: RecordsPageCursor): boolean {
+  return left?.createdAt === right.createdAt && left.id === right.id;
+}
+
+/**
+ * Read the complete authorized couple slice with a stable keyset cursor.
+ *
+ * A single PostgREST response is capped by the project's `max_rows`; treating
+ * that response as the whole diary silently erases older records on a fresh
+ * device. `created_at, id` is immutable and unique as a pair, so it remains a
+ * safe cursor while new records arrive. Any later-page failure discards the
+ * in-progress snapshot and lets the store keep its last complete one.
+ */
+async function fetchAllRecordRows(coupleId: string): Promise<
+  | { ok: true; rows: any[] }
+  | { ok: false; error: unknown }
+> {
+  const rowsById = new Map<string, any>();
+  let cursor: RecordsPageCursor | null = null;
+
+  while (true) {
+    let query = supabase!
+      .from('daily_records')
+      .select('*')
+      .eq('couple_id', coupleId);
+    if (cursor) {
+      query = query.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+    }
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(RECORDS_PAGE_SIZE);
+
+    if (error) return { ok: false, error };
+    const page = Array.isArray(data) ? data : [];
+    for (const row of page) {
+      if (typeof row?.id === 'string' && !rowsById.has(row.id)) rowsById.set(row.id, row);
+    }
+    if (page.length < RECORDS_PAGE_SIZE) break;
+
+    const nextCursor = cursorForRecordRow(page.at(-1));
+    if (!nextCursor || sameRecordsCursor(cursor, nextCursor)) {
+      return { ok: false, error: new Error('Records pagination did not advance') };
+    }
+    cursor = nextCursor;
+  }
+
+  return { ok: true, rows: [...rowsById.values()] };
+}
+
+function compareRecordsForDisplay(left: DailyRecord, right: DailyRecord): number {
+  return right.date.localeCompare(left.date)
+    || (right.time || '').localeCompare(left.time || '')
+    || (right.createdAt || '').localeCompare(left.createdAt || '')
+    || right.id.localeCompare(left.id);
 }
 
 export async function fetchRecordsResultFromDB(coupleId: string): Promise<RecordsFetchResult> {
@@ -251,21 +340,16 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
     return { ok: false, records: [], error: new Error('Records database is unavailable') };
   }
 
-  const { data, error } = await supabase
-    .from('daily_records')
-    .select('*')
-    .eq('couple_id', coupleId)
-    .order('record_date', { ascending: false })
-    .order('record_time', { ascending: false });
-
-  if (error) {
+  const fetched = await fetchAllRecordRows(coupleId);
+  if (!fetched.ok) {
     console.error('[gomsinlog] Failed to fetch records.');
-    return { ok: false, records: [], error };
+    return { ok: false, records: [], error: fetched.error };
   }
 
   const records: DailyRecord[] = await Promise.all(
-    (data || []).map((row: any) => mapRow(row, coupleId)),
+    fetched.rows.map((row: any) => mapRow(row, coupleId)),
   );
+  records.sort(compareRecordsForDisplay);
 
   const allAttachments = records.flatMap((record) => record.attachments || []);
   if (allAttachments.length === 0) return { ok: true, records };

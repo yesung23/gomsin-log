@@ -274,23 +274,25 @@ function mockRecordRows() {
     select: () => ({
       eq: () => ({
         order: () => ({
-          order: async () => ({
-            data: [
-              {
-                id: RECORD_ID,
-                record_date: '2026-03-01',
-                record_time: '10:00',
-                log_text: '오늘의 기록',
-                reaction: null,
-                attachments: [attachmentRow],
-                is_private: false,
-                emotion_flow: [],
-                emotion_updated_at: null,
-                created_at: '2026-03-01T10:00:00Z',
-                user_id: 'user-1',
-              },
-            ],
-            error: null,
+          order: () => ({
+            limit: async () => ({
+              data: [
+                {
+                  id: RECORD_ID,
+                  record_date: '2026-03-01',
+                  record_time: '10:00',
+                  log_text: '오늘의 기록',
+                  reaction: null,
+                  attachments: [attachmentRow],
+                  is_private: false,
+                  emotion_flow: [],
+                  emotion_updated_at: null,
+                  created_at: '2026-03-01T10:00:00Z',
+                  user_id: 'user-1',
+                },
+              ],
+              error: null,
+            }),
           }),
         }),
       }),
@@ -373,23 +375,25 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
       select: () => ({
         eq: () => ({
           order: () => ({
-            order: async () => ({
-              data: [
-                {
-                  id: RECORD_ID,
-                  record_date: '2026-03-01',
-                  record_time: '10:00',
-                  log_text: '글만 있는 기록',
-                  reaction: null,
-                  attachments: [],
-                  is_private: false,
-                  emotion_flow: [],
-                  emotion_updated_at: null,
-                  created_at: '2026-03-01T10:00:00Z',
-                  user_id: 'user-1',
-                },
-              ],
-              error: null,
+            order: () => ({
+              limit: async () => ({
+                data: [
+                  {
+                    id: RECORD_ID,
+                    record_date: '2026-03-01',
+                    record_time: '10:00',
+                    log_text: '글만 있는 기록',
+                    reaction: null,
+                    attachments: [],
+                    is_private: false,
+                    emotion_flow: [],
+                    emotion_updated_at: null,
+                    created_at: '2026-03-01T10:00:00Z',
+                    user_id: 'user-1',
+                  },
+                ],
+                error: null,
+              }),
             }),
           }),
         }),
@@ -408,7 +412,9 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
       select: () => ({
         eq: () => ({
           order: () => ({
-            order: async () => ({ data: null, error: { code: '42501', message: 'rls' } }),
+            order: () => ({
+              limit: async () => ({ data: null, error: { code: '42501', message: 'rls' } }),
+            }),
           }),
         }),
       }),

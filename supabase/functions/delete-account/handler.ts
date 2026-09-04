@@ -524,8 +524,8 @@ export async function handleDeleteAccountRequest(
     // user/token link and close unused rights before Auth deletion, while the
     // private ledger keeps only pseudonymous refund/delivery evidence.
     const { data: iapPreparation, error: iapPreparationError } = await admin.rpc(
-      'iap_prepare_account_deletion',
-      { p_user_id: userId },
+      'iap_prepare_account_deletion_v2',
+      { p_user_id: userId, p_attempt_id: attemptId },
     );
     if (iapPreparationError) throw iapPreparationError;
     const iapPreparationRow = Array.isArray(iapPreparation) ? iapPreparation[0] : iapPreparation;

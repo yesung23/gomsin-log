@@ -169,7 +169,7 @@ function makeAdmin(options: AdminOptions = {}) {
             error: null,
           };
       }
-      if (name === 'iap_prepare_account_deletion') {
+      if (name === 'iap_prepare_account_deletion_v2') {
         return options.iapPrepareError
           ? { data: null, error: options.iapPrepareError }
           : {
@@ -455,7 +455,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'rpc:prepare_account_deletion_v2',
       'rpc:close_account_relationship_generations_v2',
       'rpc:cleanup_account_solo_couples_v2',
-      'rpc:iap_prepare_account_deletion',
+      'rpc:iap_prepare_account_deletion_v2',
       'auth.admin.deleteUser',
     ]);
   });
@@ -473,6 +473,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'prepare_account_deletion_v2',
       'close_account_relationship_generations_v2',
       'cleanup_account_solo_couples_v2',
+      'iap_prepare_account_deletion_v2',
     ];
     const firstAttempts = firstAdmin.rpcCalls
       .filter((call) => destructiveV2Names.includes(call.name))
@@ -483,6 +484,10 @@ describe('delete-account - the server-authoritative pending flag', () => {
 
     expect(firstAttempts).toHaveLength(destructiveV2Names.length);
     expect(new Set(firstAttempts).size).toBe(1);
+    expect(
+      firstAdmin.rpcCalls.find((call) => call.name === 'iap_prepare_account_deletion_v2')
+        ?.args?.p_attempt_id,
+    ).toBe(firstAttempts[0]);
     expect(firstAttempts[0]).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
     );
@@ -519,7 +524,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const response = await post(admin);
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true });
-    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion');
+    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
@@ -528,7 +533,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
     const response = await post(admin);
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true });
-    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion');
+    expect(admin.calls).toContain('rpc:iap_prepare_account_deletion_v2');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 

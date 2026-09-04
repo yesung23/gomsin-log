@@ -15,6 +15,7 @@ const coordinator = client
     }),
   })
   : null;
+let bindingGeneration = 0;
 
 function isIosNative(): boolean {
   return Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
@@ -27,13 +28,23 @@ function environment(value: 'xcode' | 'sandbox' | 'production' | 'unknown') {
 }
 
 export async function bindAppleIapAccount(accountId: string): Promise<void> {
+  const expectedGeneration = ++bindingGeneration;
+  // Account changes close the old listener immediately. Waiting for StoreKit
+  // availability first leaves a window where account A can still emit while B
+  // is already the authenticated Supabase session.
+  coordinator?.dispose();
   if (!coordinator || !isIosNative()) return;
-  const currentEnvironment = environment((await GomsinlogStoreKit.availability()).environment);
+  const availability = await GomsinlogStoreKit.availability();
+  // This await sits outside the coordinator's own generation boundary. Guard
+  // it here so an older account cannot bind after a newer request or logout.
+  if (bindingGeneration !== expectedGeneration) return;
+  const currentEnvironment = environment(availability.environment);
   if (!currentEnvironment) throw new Error('E_IAP_ENVIRONMENT_UNKNOWN');
   await coordinator.bindAccount(accountId, currentEnvironment);
 }
 
 export function clearAppleIapAccount(): void {
+  bindingGeneration += 1;
   coordinator?.dispose();
 }
 

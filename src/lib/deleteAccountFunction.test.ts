@@ -54,7 +54,6 @@ type AdminOptions = {
   iapPrepareData?: unknown;
   recordRows?: Array<{ id: string; couple_id: string }>;
   storageObjectPaths?: string[];
-  storageRemoveError?: unknown;
 };
 
 function makeAdmin(options: AdminOptions = {}) {
@@ -308,7 +307,6 @@ function makeAdmin(options: AdminOptions = {}) {
         },
         remove: async (paths: string[]) => {
           calls.push('storage.remove');
-          if (options.storageRemoveError) return { error: options.storageRemoveError };
           for (const path of paths) storageObjects.delete(path);
           return { error: null };
         },
@@ -776,27 +774,34 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(admin.calls).toContain('rpc:cancel_account_deletion_v2');
   });
 
-  it('removes media only after E2EE confirms preparation and before relational deletion', async () => {
+  it('enqueues media cleanup during relational preparation without deleting Storage directly', async () => {
+    const mediaPath = 'couple-a/record-a/photo.jpg';
     const admin = makeAdmin({
       recordRows: [{ id: 'record-a', couple_id: 'couple-a' }],
-      storageObjectPaths: ['couple-a/record-a/photo.jpg'],
+      storageObjectPaths: [mediaPath],
     });
 
     expect((await post(admin)).status).toBe(200);
 
     const e2eeAt = admin.calls.indexOf('rpc:e2ee_prepare_account_deletion_v2');
-    const mediaAt = admin.calls.indexOf('storage.remove');
     const relationalAt = admin.calls.indexOf('rpc:prepare_account_deletion_v2');
+    const relationshipCloseAt = admin.calls.indexOf('rpc:close_account_relationship_generations_v2');
     expect(e2eeAt).toBeGreaterThanOrEqual(0);
-    expect(e2eeAt).toBeLessThan(mediaAt);
-    expect(mediaAt).toBeLessThan(relationalAt);
+    expect(e2eeAt).toBeLessThan(relationalAt);
+    expect(relationalAt).toBeLessThan(relationshipCloseAt);
+    expect(admin.calls).not.toContain('storage.remove');
+    expect(admin.calls.every((call) => !call.startsWith('storage.list:'))).toBe(true);
+    expect([...admin.storageObjects]).toEqual([mediaPath]);
   });
 
-  it('keeps the deletion barrier and reports removed data when media cleanup fails after E2EE', async () => {
+  it('keeps Auth and the deletion barrier when pending media cleanup blocks relationship closure', async () => {
     const admin = makeAdmin({
       recordRows: [{ id: 'record-a', couple_id: 'couple-a' }],
       storageObjectPaths: ['couple-a/record-a/photo.jpg'],
-      storageRemoveError: { message: 'storage timeout' },
+      closeRelationshipsError: {
+        code: 'P0001',
+        message: 'record_media_cleanup_pending',
+      },
     });
 
     const response = await post(admin);
@@ -804,9 +809,11 @@ describe('delete-account - the server-authoritative pending flag', () => {
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ dataRemoved: true });
     expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
-    expect(admin.calls).toContain('storage.remove');
+    expect(admin.calls).toContain('rpc:prepare_account_deletion_v2');
+    expect(admin.calls).toContain('rpc:close_account_relationship_generations_v2');
+    expect(admin.calls).not.toContain('storage.remove');
     expect(admin.calls).not.toContain('rpc:cancel_account_deletion_v2');
-    expect(admin.calls).not.toContain('rpc:prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
   });
 
   it('does not treat a zero-row fenced cancel as success', async () => {

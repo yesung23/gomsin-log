@@ -290,9 +290,9 @@ test('owner edit/delete controls are hit-testable and not intercepted by the bot
 });
 
 // ---------------------------------------------------------------------------
-// 6. A failed attachment upload must not destroy the user's work
+// 6. An unknown attachment commit must not create a duplicate record
 // ---------------------------------------------------------------------------
-test('a failed attachment upload keeps the file in the composer (D-05, in a browser)', async ({ browser }) => {
+test('an unknown attachment commit holds the saved record without retrying (D-05, in a browser)', async ({ browser }) => {
   const { context, page, errors } = await open(browser, {
     // A connected couple is protection-required until a real E2EE device/CSK
     // ceremony confirms the irreversible floor. This test targets the distinct
@@ -341,17 +341,19 @@ test('a failed attachment upload keeps the file in the composer (D-05, in a brow
   await page.getByRole('button', { name: '남기기', exact: true }).click();
 
   /*
-    The record text persisted, the file did not -- and the file is still here to
-    retry with. Before the fix this chip was destroyed before the warning showed.
-
-    V4 는 파일 이름 대신 `사진 N장` 으로 센다. 그래서 이름이 아니라 **세 가지**를 본다:
-    경고가 떴는가, 화면이 컴포저에 남아 있는가(홈으로 돌아가면 사본이 사라진 것이다),
-    그리고 글은 비었는데 사진은 그대로 세어지는가.
+    업로드 응답만 실패하면 서버가 실제로 반영했는지 브라우저는 알 수 없다. 여기서 같은
+    사진을 자동 재시도하면 중복 기록을 만들 수 있으므로 저장된 기록으로 이동하는 안전한
+    hold 상태를 보여준다. 정확한 단일-flight 계약은 단위 테스트가 mutation 횟수로 보강한다.
   */
-  await expect(page.getByText('올리지 못했어요', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+  const hold = page.getByRole('status').filter({ hasText: '기록은 저장했어요' });
+  await expect(hold).toContainText('기록은 저장했어요', { timeout: 15_000 });
+  await expect(hold).toContainText('사진 일부는 저장 여부를 확인하지 못했어요');
+  await expect(hold.getByRole('button', { name: '저장된 기록 보기' })).toBeVisible();
   await expect(page).toHaveURL(/\/compose$/);
-  await expect(picker).toBeVisible();
+  await expect(picker).toHaveCount(0);
   await expect(textarea).toHaveValue('');
+  await expect(textarea).toHaveJSProperty('readOnly', true);
+  await expect(page.getByRole('button', { name: '남기기', exact: true })).toBeDisabled();
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
   await context.close();

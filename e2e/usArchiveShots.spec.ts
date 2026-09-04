@@ -142,8 +142,8 @@ test('us pending space explains how to create a shared archive', async ({ browse
   const page = await context.newPage();
   await page.goto('/us');
 
-  await expect(page.getByText(/상대를 연결하면 둘만의 게시물을 만들 수 있어요/)).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('button', { name: '상대 연결하기' }).click();
+  await expect(page.getByText('상대를 연결하면 둘의 게시물이 보여요')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: '상대 연결' }).click();
   await expect(page).toHaveURL(/\/settings$/);
 
   await context.close();

@@ -18,9 +18,8 @@ test('empty Home keeps both story entries and one useful next action visible', a
 
   const currentNeed = page.getByRole('region', { name: '지금 가장 필요한 것' });
   await expect(currentNeed).toBeVisible();
-  await expect(currentNeed.getByRole('button')).toContainText('오늘 있었던 일을 가볍게 남겨볼까요');
+  await expect(currentNeed.getByRole('button')).toContainText('오늘 한 줄 남기기');
   await expect(page.getByRole('heading', { name: /의 최근 기록$/ })).toBeVisible();
-  await expect(page.getByText('오늘을 포함한 7일')).toBeVisible();
   await expect(page.getByText('최근 7일에 공유된 기록이 없어요')).toBeVisible();
 
   const overflow = await page.evaluate(() => (

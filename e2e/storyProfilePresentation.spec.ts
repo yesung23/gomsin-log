@@ -79,9 +79,12 @@ for (const width of [320, 390]) {
     await page.screenshot({ path: `${OUT}/large-story-${width}.png`, fullPage: true });
 
     await page.goto('/home');
-    const largeHomeCopy = page.getByText('스크롤 검증 기록 1', { exact: true });
+    // Home is partner-oriented: for this fixture long-0 belongs to the signed-in
+    // user's partner, while long-1 is the signed-in user's own record.
+    const largeHomeCopy = page.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장', { exact: true });
     await expect(largeHomeCopy).toBeVisible();
     expect(await largeHomeCopy.evaluate((node) => getComputedStyle(node).fontSize)).toBe('20px');
+    await expect(page.getByText('스크롤 검증 기록 1', { exact: true })).toHaveCount(0);
 
     await context.close();
   });

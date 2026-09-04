@@ -32,16 +32,26 @@ export async function handleAppleIapReconcile(
 ): Promise<Response> {
   const provided = request.headers.get('x-iap-scheduler-secret');
   if (request.method !== 'POST') return json({ error: 'E_METHOD_NOT_ALLOWED' }, 405);
-  if (!deps.schedulerSecret || !provided
-    || !(await timingSafeEqualSecret(provided, deps.schedulerSecret))) {
+  if (
+    !deps.schedulerSecret || !provided ||
+    !(await timingSafeEqualSecret(provided, deps.schedulerSecret))
+  ) {
     return json({ error: 'E_UNAUTHENTICATED' }, 401);
   }
 
+  let targets: AppleIapReconcileTarget[];
   try {
-    const targets = await deps.listTargets();
-    const seen = new Set<string>();
-    let transactions = 0;
-    for (const target of targets) {
+    targets = await deps.listTargets();
+  } catch {
+    return json({ error: 'E_IAP_RECONCILE_FAILED' }, 503);
+  }
+
+  let succeeded = 0;
+  let failed = 0;
+  let transactions = 0;
+  for (const target of targets) {
+    try {
+      const seen = new Set<string>();
       const history = await deps.transactionHistory(target);
       for (const signedJws of history) {
         if (!isCompactJws(signedJws) || seen.has(signedJws)) continue;
@@ -56,9 +66,10 @@ export async function handleAppleIapReconcile(
         });
         transactions += 1;
       }
+      succeeded += 1;
+    } catch {
+      failed += 1;
     }
-    return json({ originals: targets.length, transactions }, 200);
-  } catch {
-    return json({ error: 'E_IAP_RECONCILE_FAILED' }, 503);
   }
+  return json({ targets: targets.length, succeeded, failed, transactions }, 200);
 }

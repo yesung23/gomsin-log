@@ -2,9 +2,15 @@ export type AppleEnvironment = 'Sandbox' | 'Production' | 'Xcode';
 export type AppleTransactionType =
   | 'Auto-Renewable Subscription'
   | 'Non-Consumable'
-  | 'Consumable'
-  | 'Non-Renewing Subscription';
+  | 'Consumable';
 export type AppleTransactionEventKind = 'purchase' | 'refund' | 'revoke' | 'refund_reversed';
+export type AppleRevocationType = 'REFUND_FULL' | 'REFUND_PRORATED' | 'FAMILY_REVOKE';
+export type AppleConsumptionRequestReason =
+  | 'UNINTENDED_PURCHASE'
+  | 'FULFILLMENT_ISSUE'
+  | 'UNSATISFIED_WITH_PURCHASE'
+  | 'LEGAL'
+  | 'OTHER';
 
 export type VerifiedAppleTransaction = {
   transactionId: string;
@@ -19,6 +25,9 @@ export type VerifiedAppleTransaction = {
   expiresDate?: number | null;
   revocationDate?: number | null;
   revocationReason?: number | null;
+  quantity?: number;
+  revocationType?: AppleRevocationType | null;
+  revocationPercentage?: number | null;
   inAppOwnershipType?: string | null;
 };
 
@@ -28,7 +37,10 @@ export type VerifiedAppleNotification = {
   subtype?: string | null;
   signedDate: number;
   environment: AppleEnvironment;
-  data?: { signedTransactionInfo?: string | null } | null;
+  data?: {
+    signedTransactionInfo?: string | null;
+    consumptionRequestReason?: AppleConsumptionRequestReason | null;
+  } | null;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,7 +52,18 @@ const APPLE_TRANSACTION_TYPES = new Set<AppleTransactionType>([
   'Auto-Renewable Subscription',
   'Non-Consumable',
   'Consumable',
-  'Non-Renewing Subscription',
+]);
+const APPLE_REVOCATION_TYPES = new Set<AppleRevocationType>([
+  'REFUND_FULL',
+  'REFUND_PRORATED',
+  'FAMILY_REVOKE',
+]);
+const APPLE_CONSUMPTION_REQUEST_REASONS = new Set<AppleConsumptionRequestReason>([
+  'UNINTENDED_PURCHASE',
+  'FULFILLMENT_ISSUE',
+  'UNSATISFIED_WITH_PURCHASE',
+  'LEGAL',
+  'OTHER',
 ]);
 const ENTITLEMENT_TRANSACTION_NOTIFICATIONS = new Set([
   'SUBSCRIBED',
@@ -63,7 +86,8 @@ export function isUuid(value: unknown): value is string {
 }
 
 export function isCompactJws(value: unknown): value is string {
-  return typeof value === 'string' && value.length >= 12 && value.length <= 32_768 && JWS.test(value);
+  return typeof value === 'string' && value.length >= 12 && value.length <= 32_768 &&
+    JWS.test(value);
 }
 
 export function appleTransactionEventKind(
@@ -87,31 +111,63 @@ function isAppleUInt64(value: unknown): value is string {
 export function isVerifiedTransaction(value: unknown): value is VerifiedAppleTransaction {
   if (!value || typeof value !== 'object') return false;
   const item = value as Record<string, unknown>;
-  return isAppleUInt64(item.transactionId)
-    && isAppleUInt64(item.originalTransactionId)
-    && typeof item.productId === 'string' && PRODUCT_ID.test(item.productId)
-    && APPLE_TRANSACTION_TYPES.has(item.type as AppleTransactionType)
-    && (item.appAccountToken == null || isUuid(item.appAccountToken))
-    && typeof item.bundleId === 'string' && item.bundleId.length > 0 && item.bundleId.length <= 200
-    && (item.environment === 'Sandbox' || item.environment === 'Production' || item.environment === 'Xcode')
-    && Number.isSafeInteger(item.purchaseDate) && Number(item.purchaseDate) > 0
-    && Number.isSafeInteger(item.signedDate) && Number(item.signedDate) > 0
-    && (item.expiresDate == null || (Number.isSafeInteger(item.expiresDate) && Number(item.expiresDate) > 0))
-    && (item.revocationDate == null || (Number.isSafeInteger(item.revocationDate) && Number(item.revocationDate) > 0))
-    && (item.revocationReason == null || Number.isSafeInteger(item.revocationReason));
+  const quantity = item.quantity ?? 1;
+  const revocationType = item.revocationType ?? null;
+  const revocationPercentage = item.revocationPercentage ?? null;
+  const hasRevocation = item.revocationDate != null;
+  const validRevocation = !hasRevocation
+    ? revocationType == null && revocationPercentage == null
+    : revocationType == null
+    ? revocationPercentage == null
+    : APPLE_REVOCATION_TYPES.has(revocationType as AppleRevocationType) &&
+      (revocationPercentage == null
+        ? revocationType !== 'REFUND_PRORATED'
+        : Number.isInteger(revocationPercentage) &&
+          Number(revocationPercentage) >= 0 &&
+          Number(revocationPercentage) <= 100_000 &&
+          (revocationType === 'REFUND_PRORATED'
+            ? Number(revocationPercentage) > 0 && Number(revocationPercentage) < 100_000
+            : Number(revocationPercentage) === 100_000));
+  return isAppleUInt64(item.transactionId) &&
+    isAppleUInt64(item.originalTransactionId) &&
+    typeof item.productId === 'string' && PRODUCT_ID.test(item.productId) &&
+    APPLE_TRANSACTION_TYPES.has(item.type as AppleTransactionType) &&
+    (item.appAccountToken == null || isUuid(item.appAccountToken)) &&
+    typeof item.bundleId === 'string' && item.bundleId.length > 0 && item.bundleId.length <= 200 &&
+    (item.environment === 'Sandbox' || item.environment === 'Production' ||
+      item.environment === 'Xcode') &&
+    Number.isSafeInteger(item.purchaseDate) && Number(item.purchaseDate) > 0 &&
+    Number.isSafeInteger(item.signedDate) && Number(item.signedDate) > 0 &&
+    Number.isInteger(quantity) && Number(quantity) >= 1 && Number(quantity) <= 10 &&
+    (item.expiresDate == null ||
+      (Number.isSafeInteger(item.expiresDate) && Number(item.expiresDate) > 0)) &&
+    (item.revocationDate == null ||
+      (Number.isSafeInteger(item.revocationDate) && Number(item.revocationDate) > 0)) &&
+    (item.revocationReason == null || Number.isSafeInteger(item.revocationReason)) &&
+    validRevocation;
 }
 
 export function isVerifiedNotification(value: unknown): value is VerifiedAppleNotification {
   if (!value || typeof value !== 'object') return false;
   const item = value as Record<string, unknown>;
-  return isUuid(item.notificationUUID)
-    && typeof item.notificationType === 'string'
-    && NOTIFICATION_KIND.test(item.notificationType)
-    && (item.subtype == null || (typeof item.subtype === 'string' && NOTIFICATION_KIND.test(item.subtype)))
-    && Number.isSafeInteger(item.signedDate)
-    && Number(item.signedDate) > 0
-    && (item.environment === 'Sandbox' || item.environment === 'Production' || item.environment === 'Xcode')
-    && (item.data == null || typeof item.data === 'object');
+  const data = item.data && typeof item.data === 'object'
+    ? item.data as Record<string, unknown>
+    : null;
+  const reason = data?.consumptionRequestReason ?? null;
+  const validReason = item.notificationType === 'CONSUMPTION_REQUEST'
+    ? APPLE_CONSUMPTION_REQUEST_REASONS.has(reason as AppleConsumptionRequestReason)
+    : reason == null;
+  return isUuid(item.notificationUUID) &&
+    typeof item.notificationType === 'string' &&
+    NOTIFICATION_KIND.test(item.notificationType) &&
+    (item.subtype == null ||
+      (typeof item.subtype === 'string' && NOTIFICATION_KIND.test(item.subtype))) &&
+    Number.isSafeInteger(item.signedDate) &&
+    Number(item.signedDate) > 0 &&
+    (item.environment === 'Sandbox' || item.environment === 'Production' ||
+      item.environment === 'Xcode') &&
+    (item.data == null || typeof item.data === 'object') &&
+    validReason;
 }
 
 export function bearerToken(request: Request): string | null {
@@ -127,7 +183,10 @@ export async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-export async function readBoundedJson(request: Request, maxBytes = 40_000): Promise<unknown | null> {
+export async function readBoundedJson(
+  request: Request,
+  maxBytes = 40_000,
+): Promise<unknown | null> {
   const declaredLength = Number(request.headers.get('Content-Length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return null;
   if (!request.body) return null;

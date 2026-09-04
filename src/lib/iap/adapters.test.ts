@@ -60,4 +60,49 @@ describe('Apple IAP adapters', () => {
     await expect(port.preparePurchase('a', 'p', 'Production')).rejects.toThrow('E_IAP_BAD_RESPONSE');
     await expect(port.loadEntitlements('a', 'Production')).rejects.toThrow('E_IAP_BAD_RESPONSE');
   });
+
+  it('sends refund-data consent only through an exact reviewed notice boundary', async () => {
+    const invoke = vi.fn(async (_name: string, options: { body: Record<string, unknown> }) => ({
+      data: options.body.action === 'refund-consent-state'
+        ? { noticeMatches: true, decision: null }
+        : {
+          decision: 'granted',
+          noticeVersion: options.body.noticeVersion,
+          noticeSha256: options.body.noticeSha256,
+          duplicate: false,
+        },
+      error: null,
+    }));
+    const port = createAppleIapServerPort({ invoke }) as unknown as {
+      loadRefundDataConsent: (notice: { version: string; sha256: string }) => Promise<unknown>;
+      setRefundDataConsent: (input: {
+        decision: 'granted' | 'withdrawn';
+        notice: { version: string; sha256: string };
+        idempotencyKey: string;
+      }) => Promise<unknown>;
+    };
+    const notice = { version: 'reviewed-test-notice-v1', sha256: 'a'.repeat(64) };
+
+    await expect(port.loadRefundDataConsent(notice)).resolves.toEqual({
+      noticeMatches: true,
+      decision: null,
+    });
+    await expect(port.setRefundDataConsent({
+      decision: 'granted',
+      notice,
+      idempotencyKey: '79000000-0000-4000-8000-000000000901',
+    })).resolves.toEqual({
+      decision: 'granted',
+      notice,
+      duplicate: false,
+    });
+    expect(invoke).toHaveBeenNthCalledWith(1, 'apple-iap-sync', {
+      body: {
+        action: 'refund-consent-state',
+        noticeVersion: notice.version,
+        noticeSha256: notice.sha256,
+      },
+    });
+    expect(JSON.stringify(invoke.mock.calls)).not.toContain('accountId');
+  });
 });

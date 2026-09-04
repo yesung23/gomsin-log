@@ -21,3 +21,6 @@ verify_jwt = false
 
 [functions.apple-iap-reconcile]
 verify_jwt = false
+
+[functions.apple-iap-consumption]
+verify_jwt = false

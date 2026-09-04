@@ -1058,3 +1058,34 @@ supabase functions deploy delete-account
   publication catalog 사전 점검, staging의 실제 2-actor WebSocket(private CRUD 0건,
   shared CRUD 및 reconnect) 검증 전에는 적용하지 않습니다. migration 파일 존재와 로컬
   PostgreSQL PASS는 Production 적용 증거가 아닙니다.
+
+## 079 — Apple IAP V2 exact ledger·refund evidence expand (2026-09-05)
+
+- `079_apple_iap_refund_consumption.sql`은 077 원장을 삭제하거나 다시 쓰지 않는 additive
+  expand migration입니다. 정확한 consumable lot/allocation, versioned 선택 동의,
+  fulfillment evidence, transaction review fact, consumption queue와 V2 RPC를 추가합니다.
+- 데이터베이스 CHECK가 모든 catalog의 `sale_enabled = false`만 허용합니다. 079에서는 두
+  V1 service-role entrypoint를 유지하되 V1 consumable 입력은 `legacy_manual_review`로
+  격리하고 pooled grant를 만들지 않습니다.
+- `send_result_unknown`은 자동 재전송 대상이 아닙니다. 정확한 현재 attempt 번호, lease
+  hash, authorization hash, frozen body hash가 모두 일치하는 늦은 완료만 수렴합니다.
+- 동의 adapter는 승인된 notice version/hash가 DB active notice와 정확히 일치할 때만 열립니다.
+  이 migration에는 법적 문구, notice 값, 보관기간, cron secret 또는 sale activation이 없습니다.
+- 로컬 검증은 전용 PostgreSQL actor harness와 Deno/Vitest에서 수행합니다. 실제 명령과
+  결과는 Task 3 report/WORK_LOG에 기록하며, 원격 상태는 별도 확인 전 `UNVERIFIED`입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 원격 Supabase에 접근하거나
+  migration을 적용하지 않았습니다.
+
+## 081 — Apple IAP V1 external contract retirement (2026-09-05)
+
+- `081_retire_apple_iap_v1_entrypoints.sql`은 V2 Edge deploy/canary 이후에만 적용하는 contract
+  migration입니다. 두 V1 함수 자체를 drop하지 않고 그 두 signature의 `service_role`
+  execute만 회수합니다. V2 권한과 079 sale hold는 유지됩니다.
+- rollback은 forward-only입니다. 081 전에는 scheduler를 멈추고 호환 Edge를 되돌립니다.
+  081 후 V1 Edge 복원이 불가피하면 새 migration으로 두 V1 grant만 임시 복원하되 sale
+  hold와 legacy-consumable quarantine을 유지하며, 원장 이력을 drop/rewrite하지 않습니다.
+- 미래 082는 이 작업에 존재하지 않습니다. 법무·retention·원격 migration·V2 canary·cron
+  운영·실제 fulfillment·App Store/Sandbox/device 증거가 모두 별도 승인되기 전에는 sale
+  hold 제거를 만들거나 적용하지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 원격 Supabase에 접근하거나
+  migration을 적용하지 않았습니다.

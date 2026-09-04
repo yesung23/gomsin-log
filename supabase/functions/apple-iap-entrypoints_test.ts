@@ -47,6 +47,17 @@ Deno.test({
         expectedStatus: 401,
         expectedError: 'E_UNAUTHENTICATED',
       },
+      {
+        name: 'consumption',
+        url: new URL('./apple-iap-consumption/index.ts', import.meta.url),
+        env: { APPLE_IAP_SCHEDULER_SECRET: 'configured-scheduler-secret-32-bytes' },
+        request: {
+          method: 'POST',
+          headers: { 'x-iap-scheduler-secret': 'not-a-real-secret' },
+        },
+        expectedStatus: 401,
+        expectedError: 'E_UNAUTHENTICATED',
+      },
     ];
 
     for (const testCase of cases) {

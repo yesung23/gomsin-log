@@ -8,10 +8,7 @@ import {
 import { sha256Hex } from '../_shared/appleIapContract.ts';
 import { createAppleIapHistory } from '../_shared/appleIapHistory.ts';
 import { createAppleIapVerifier } from '../_shared/appleIapVerifier.ts';
-import {
-  handleAppleIapReconcile,
-  type AppleIapReconcileTarget,
-} from './handler.ts';
+import { type AppleIapReconcileTarget, handleAppleIapReconcile } from './handler.ts';
 
 Deno.serve(async (request) => {
   if (request.method !== 'POST') {
@@ -22,8 +19,10 @@ Deno.serve(async (request) => {
   }
   const schedulerSecret = parseSchedulerSecret(Deno.env.get('APPLE_IAP_SCHEDULER_SECRET'));
   const providedSecret = request.headers.get('x-iap-scheduler-secret');
-  if (schedulerSecret && (!providedSecret
-    || !(await timingSafeEqualSecret(providedSecret, schedulerSecret)))) {
+  if (
+    schedulerSecret && (!providedSecret ||
+      !(await timingSafeEqualSecret(providedSecret, schedulerSecret)))
+  ) {
     return new Response(JSON.stringify({ error: 'E_UNAUTHENTICATED' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -70,7 +69,7 @@ Deno.serve(async (request) => {
       if (transaction.environment !== environment || !transaction.appAccountToken) {
         throw new Error('E_IAP_RECONCILE_ACCOUNT_MISMATCH');
       }
-      const { error } = await admin.rpc('iap_apply_verified_transaction', {
+      const { error } = await admin.rpc('iap_apply_verified_transaction_v2', {
         p_user_id: userId,
         p_environment: transaction.environment,
         p_transaction_id: transaction.transactionId,
@@ -83,8 +82,13 @@ Deno.serve(async (request) => {
         p_signed_date_ms: transaction.signedDate,
         p_expires_date_ms: transaction.expiresDate ?? null,
         p_revocation_date_ms: transaction.revocationDate ?? null,
-        p_event_kind: transaction.revocationDate ? 'refund' : 'purchase',
+        p_event_kind: transaction.revocationDate
+          ? transaction.revocationType === 'FAMILY_REVOKE' ? 'revoke' : 'refund'
+          : 'purchase',
         p_payload_hash: jwsSha256,
+        p_quantity: transaction.quantity ?? 1,
+        p_revocation_type: transaction.revocationType ?? null,
+        p_revocation_percentage: transaction.revocationPercentage ?? null,
       });
       if (error) throw new Error('E_IAP_INGEST_FAILED');
     },

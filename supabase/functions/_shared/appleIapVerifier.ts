@@ -1,8 +1,5 @@
 import { Buffer } from 'node:buffer';
-import {
-  Environment,
-  SignedDataVerifier,
-} from 'npm:@apple/app-store-server-library@3.1.0';
+import { Environment, SignedDataVerifier } from 'npm:@apple/app-store-server-library@3.1.0';
 
 type Env = (key: string) => string | undefined;
 type AppleVerifierLike = {
@@ -38,6 +35,9 @@ export function normalizeTransaction(value: unknown): Record<string, unknown> {
     expiresDate: item.expiresDate ?? null,
     revocationDate: item.revocationDate ?? null,
     revocationReason: item.revocationReason ?? null,
+    quantity: item.quantity ?? 1,
+    revocationType: item.revocationType ?? null,
+    revocationPercentage: item.revocationPercentage ?? null,
     inAppOwnershipType: item.inAppOwnershipType ?? null,
   };
 }
@@ -53,6 +53,9 @@ export function normalizeNotification(value: unknown): Record<string, unknown> {
     environment: data.environment,
     data: item.data == null ? null : {
       signedTransactionInfo: data.signedTransactionInfo ?? null,
+      ...(data.consumptionRequestReason == null
+        ? {}
+        : { consumptionRequestReason: data.consumptionRequestReason }),
     },
   };
 }
@@ -65,8 +68,10 @@ function decodeRootCertificates(raw: string | undefined): Buffer[] {
   } catch {
     throw new Error('APPLE_IAP_ROOT_CA_CERTS_BASE64 must be JSON');
   }
-  if (!Array.isArray(values) || values.length < 1 || values.length > 8
-    || values.some((value) => typeof value !== 'string' || value.length < 4 || value.length > 16_384)) {
+  if (
+    !Array.isArray(values) || values.length < 1 || values.length > 8 ||
+    values.some((value) => typeof value !== 'string' || value.length < 4 || value.length > 16_384)
+  ) {
     throw new Error('APPLE_IAP_ROOT_CA_CERTS_BASE64 is invalid');
   }
   return values.map((value) => Buffer.from(value as string, 'base64'));
@@ -112,18 +117,22 @@ export function createAppleIapVerifier(
 
   return {
     async verifyTransaction(jws: string) {
-      return normalizeTransaction(await verifyWithAny(
-        verifiers,
-        'verifyAndDecodeTransaction',
-        jws,
-      ));
+      return normalizeTransaction(
+        await verifyWithAny(
+          verifiers,
+          'verifyAndDecodeTransaction',
+          jws,
+        ),
+      );
     },
     async verifyNotification(jws: string) {
-      return normalizeNotification(await verifyWithAny(
-        verifiers,
-        'verifyAndDecodeNotification',
-        jws,
-      ));
+      return normalizeNotification(
+        await verifyWithAny(
+          verifiers,
+          'verifyAndDecodeNotification',
+          jws,
+        ),
+      );
     },
   };
 }

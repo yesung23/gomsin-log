@@ -3,16 +3,23 @@ import { GomsinlogStoreKit } from '@gomsinlog/capacitor-storekit';
 
 import { supabase } from '@/lib/supabase';
 import { createAppleIapCoordinator } from './coordinator';
-import { createAppleIapServerPort, createStoreKitNativePort } from './adapters';
+import {
+  createAppleIapServerPort,
+  createStoreKitNativePort,
+  type ReviewedRefundDataNotice,
+} from './adapters';
 import { appleIapWebSaleFlag, canOpenAppleIapSale } from './saleGate';
 
 const client = supabase;
-const coordinator = client
+const serverPort = client
+  ? createAppleIapServerPort({
+    invoke: (name, options) => client.functions.invoke(name, options),
+  })
+  : null;
+const coordinator = serverPort
   ? createAppleIapCoordinator({
     native: createStoreKitNativePort(GomsinlogStoreKit),
-    server: createAppleIapServerPort({
-      invoke: (name, options) => client.functions.invoke(name, options),
-    }),
+    server: serverPort,
   })
   : null;
 let bindingGeneration = 0;
@@ -73,4 +80,20 @@ export function appleIapSnapshot() {
     entitlements: [],
     exportCredits: 0,
   };
+}
+
+export async function loadAppleIapRefundDataConsent(notice: ReviewedRefundDataNotice) {
+  if (!serverPort || !isIosNative()) {
+    return { noticeMatches: false, decision: null } as const;
+  }
+  return serverPort.loadRefundDataConsent(notice);
+}
+
+export async function setAppleIapRefundDataConsent(input: {
+  decision: 'granted' | 'withdrawn';
+  notice: ReviewedRefundDataNotice;
+  idempotencyKey: string;
+}) {
+  if (!serverPort || !isIosNative()) throw new Error('E_IAP_UNAVAILABLE');
+  return serverPort.setRefundDataConsent(input);
 }

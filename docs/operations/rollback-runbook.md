@@ -45,6 +45,10 @@ DB migration은 과거 파일을 고치거나 역방향 SQL로 지우지 않고,
 
 ### Edge Function 장애
 
+Apple IAP V2의 079 expand → Edge canary → 081 contract 순서와
+`send_result_unknown` 재전송 금지는
+[`apple-iap-rollout-runbook.md`](apple-iap-rollout-runbook.md)를 함께 따릅니다.
+
 1. 문제 함수를 일시 중지하거나 이전에 검증된 동일 계약 artifact로 되돌린다.
 2. service-role·JWT 검사를 제거하거나 클라이언트에 service-role key를 노출하지 않는다.
 3. 함수 수정 후 실제 인증 actor와 실패 응답을 확인한 뒤 재개한다.

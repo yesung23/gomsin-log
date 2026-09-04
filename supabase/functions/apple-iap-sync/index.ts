@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0';
-import { parseAdminSecretKey, createAdminClientFetch } from '../_shared/adminSecret.ts';
+import { createAdminClientFetch, parseAdminSecretKey } from '../_shared/adminSecret.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
 import { sha256Hex, type VerifiedAppleTransaction } from '../_shared/appleIapContract.ts';
 import { createAppleIapVerifier } from '../_shared/appleIapVerifier.ts';
@@ -57,18 +57,24 @@ Deno.serve(async (request) => {
   const secret = parseAdminSecretKey(Deno.env.get('SUPABASE_SECRET_KEYS'));
   let verifier: ReturnType<typeof createAppleIapVerifier>;
   if (!url || !secret) {
-    return withCors(new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    }), cors.headers);
+    return withCors(
+      new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      cors.headers,
+    );
   }
   try {
     verifier = createAppleIapVerifier();
   } catch {
-    return withCors(new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    }), cors.headers);
+    return withCors(
+      new Response(JSON.stringify({ error: 'E_IAP_NOT_CONFIGURED' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+      cors.headers,
+    );
   }
 
   const admin = createClient(url, secret, {
@@ -106,7 +112,7 @@ Deno.serve(async (request) => {
     ingestTransaction: async ({ userId, transaction, jwsSha256 }) => {
       const tx = transaction as VerifiedAppleTransaction;
       const tokenHash = await sha256Hex(tx.appAccountToken as string);
-      const { data, error } = await admin.rpc('iap_apply_verified_transaction', {
+      const { data, error } = await admin.rpc('iap_apply_verified_transaction_v2', {
         p_user_id: userId,
         p_environment: tx.environment,
         p_transaction_id: tx.transactionId,
@@ -119,8 +125,13 @@ Deno.serve(async (request) => {
         p_signed_date_ms: tx.signedDate,
         p_expires_date_ms: tx.expiresDate ?? null,
         p_revocation_date_ms: tx.revocationDate ?? null,
-        p_event_kind: tx.revocationDate ? 'refund' : 'purchase',
+        p_event_kind: tx.revocationDate
+          ? tx.revocationType === 'FAMILY_REVOKE' ? 'revoke' : 'refund'
+          : 'purchase',
         p_payload_hash: jwsSha256,
+        p_quantity: tx.quantity ?? 1,
+        p_revocation_type: tx.revocationType ?? null,
+        p_revocation_percentage: tx.revocationPercentage ?? null,
       });
       const row = Array.isArray(data) ? data[0] : null;
       if (error || !row || row.accepted !== true) throw new Error('E_IAP_INGEST_REJECTED');
@@ -133,6 +144,54 @@ Deno.serve(async (request) => {
       };
     },
     loadEntitlements: (_userId, environment) => loadState(environment),
+    loadRefundDataConsent: async ({ noticeVersion, noticeSha256 }) => {
+      const { data, error } = await userClient.rpc('iap_get_refund_data_consent_state', {
+        p_notice_version: noticeVersion,
+        p_notice_sha256: noticeSha256,
+      });
+      const row = Array.isArray(data) ? data[0] : null;
+      if (
+        error || !row || typeof row.notice_matches !== 'boolean' ||
+        (row.decision !== null &&
+          row.decision !== 'granted' &&
+          row.decision !== 'withdrawn')
+      ) {
+        throw new Error('E_IAP_CONSENT_STATE_FAILED');
+      }
+      return {
+        noticeMatches: row.notice_matches,
+        decision: row.decision,
+      };
+    },
+    setRefundDataConsent: async ({
+      decision,
+      noticeVersion,
+      noticeSha256,
+      idempotencyKey,
+    }) => {
+      const { data, error } = await userClient.rpc('iap_set_refund_data_consent', {
+        p_decision: decision,
+        p_notice_version: noticeVersion,
+        p_notice_sha256: noticeSha256,
+        p_idempotency_key: idempotencyKey,
+      });
+      const row = Array.isArray(data) ? data[0] : null;
+      if (
+        error || !row ||
+        (row.decision !== 'granted' && row.decision !== 'withdrawn') ||
+        typeof row.notice_version !== 'string' ||
+        typeof row.notice_sha256 !== 'string' ||
+        typeof row.duplicate !== 'boolean'
+      ) {
+        throw new Error('E_IAP_CONSENT_UPDATE_FAILED');
+      }
+      return {
+        decision: row.decision,
+        noticeVersion: row.notice_version,
+        noticeSha256: row.notice_sha256,
+        duplicate: row.duplicate,
+      };
+    },
   });
   return withCors(response, cors.headers);
 });

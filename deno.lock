@@ -22,6 +22,7 @@
     "npm:@testing-library/jest-dom@^6.9.1": "6.10.0_@testing-library+dom@10.4.1",
     "npm:@testing-library/react@^16.3.2": "16.3.3_@testing-library+dom@10.4.1_@types+react@19.2.18_@types+react-dom@19.2.7__@types+react@19.2.18_react@19.2.8_react-dom@19.2.8__react@19.2.8",
     "npm:@testing-library/user-event@^14.6.1": "14.6.7_@testing-library+dom@10.4.1",
+    "npm:@types/node-fetch@2.6.13": "2.6.13",
     "npm:@types/node@^26.1.1": "26.4.1",
     "npm:@types/react-dom@^19.2.0": "19.2.7_@types+react@19.2.18",
     "npm:@types/react@^19.2.0": "19.2.18",

@@ -4,7 +4,7 @@ import type { StoryCard } from '@/features/story/storyProjection';
 import type { BriefingLocale, PartnerBriefing } from '@/lib/partnerBriefing/contract';
 import { PartnerBriefingCard } from '@/components/widgets/PartnerBriefingCard';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
-import { PaperCard, Bookmark, FoldDivider } from '@/components/paper';
+import { Bookmark } from '@/components/paper';
 import { cn } from '@/lib/utils';
 import type {
   DailySummaryRefinementReason,
@@ -259,7 +259,7 @@ export function StoryViewer({
       aria-modal="true"
       aria-label={title}
       data-testid="story-viewer"
-      className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] outline-none"
+      className="paper-texture-layer fixed inset-0 z-50 flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)] outline-none"
     >
       <p className="sr-only" aria-live="polite">{announcement}</p>
 
@@ -269,18 +269,33 @@ export function StoryViewer({
         칸이 채워지는 애니메이션이 없다. 시간이 흐르지 않기 때문이고, 흐르는 것처럼
         보이면 사용자가 서두른다.
       */}
-      <div className={cn('flex gap-1 px-4 pt-3 transition-opacity', bare && 'opacity-0')}>
-        {items.map((progressItem, position) => (
-          <span
-            key={itemKey(progressItem)}
-            className={cn('h-0.5 flex-1 rounded-full', position <= index ? 'bg-coral-strong' : 'bg-border')}
-          />
-        ))}
+      <div
+        data-testid="story-position"
+        aria-hidden="true"
+        className={cn('flex gap-1.5 px-4 pt-3 transition-opacity', bare && 'opacity-0')}
+      >
+        {items.map((progressItem, position) => {
+          const state = position < index ? 'complete' : position === index ? 'current' : 'upcoming';
+          return (
+            <span
+              key={itemKey(progressItem)}
+              data-story-position-state={state}
+              className="h-[var(--stroke)] flex-1"
+              style={{
+                background: state === 'current'
+                  ? 'var(--ink-accent)'
+                  : state === 'complete'
+                    ? 'var(--ink)'
+                    : 'var(--ink-faint)',
+              }}
+            />
+          );
+        })}
       </div>
 
       <div className={cn('flex items-center justify-between gap-2 px-4 py-3 transition-opacity', bare && 'opacity-0')}>
         <div className="min-w-0">
-          <p className="text-emphasis text-foreground truncate">
+          <p className="truncate text-emphasis" style={{ color: 'var(--ink)' }}>
             {card?.kind === 'moment' ? formatStoryTime(card.record.time) : title}
           </p>
         </div>
@@ -288,11 +303,14 @@ export function StoryViewer({
           type="button"
           onClick={onClose}
           aria-label="스토리 닫기"
-          className="press-response -mr-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground"
+          className="press-response -mr-2 inline-flex min-h-11 min-w-11 items-center justify-center"
+          style={{ color: 'var(--ink-soft)' }}
         >
-          <X size={20} aria-hidden="true" />
+          <X size={20} className="pen-icon" aria-hidden="true" />
         </button>
       </div>
+
+      <div className={cn('ink-rule mx-4 transition-opacity', bare && 'opacity-0')} aria-hidden="true" />
 
       <div
         className="relative flex-1 overflow-y-auto px-4 pb-4"
@@ -339,9 +357,10 @@ export function StoryViewer({
           <>
             <MomentCard record={card.record} coupleId={coupleId} />
             <div
-              className={cn('mt-3 flex items-center gap-1 border-t border-border pt-2 transition-opacity', bare && 'opacity-0')}
+              className={cn('relative mt-3 flex items-center gap-1 pt-3 transition-opacity', bare && 'opacity-0')}
               onPointerDown={(event) => event.stopPropagation()}
             >
+              <span className="ink-rule absolute inset-x-0 top-0" aria-hidden="true" />
               {mode !== 'archive'
                 && mode !== 'highlight'
                 && !card.record.isPrivate
@@ -362,19 +381,21 @@ export function StoryViewer({
                   type="button"
                   onClick={() => onAddToHighlight(card.record.id)}
                   aria-label="하이라이트에 추가"
-                  className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+                  className="press-response ink-chip inline-flex min-h-11 items-center gap-1 px-3 text-label font-semibold"
+                  style={{ color: 'var(--ink)' }}
                 >
-                  <BookmarkPlus size={16} aria-hidden="true" />
+                  <BookmarkPlus size={16} className="pen-icon" aria-hidden="true" />
                   하이라이트
                 </button>
               ) : null}
                 <button
                   type="button"
                   onClick={() => onOpenRecord(card.record.id)}
-                  className="press-response inline-flex min-h-11 items-center gap-1 rounded-control px-3 text-label font-semibold text-foreground"
+                  className="press-response ink-chip inline-flex min-h-11 items-center gap-1 px-3 text-label font-semibold"
+                  style={{ color: 'var(--ink)' }}
                 >
                   원본 보기
-                  <ArrowUpRight size={15} aria-hidden="true" />
+                  <ArrowUpRight size={15} className="pen-icon" aria-hidden="true" />
                 </button>
             </div>
           </>
@@ -394,11 +415,12 @@ export function StoryViewer({
           onClick={previous}
           disabled={currentUnavailable || index <= 0}
           aria-label="이전 순간"
-          className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground disabled:opacity-30"
+          className="press-response inline-flex min-h-11 min-w-11 items-center justify-center disabled:opacity-30"
+          style={{ color: 'var(--ink-soft)' }}
         >
-          <ChevronLeft size={20} aria-hidden="true" />
+          <ChevronLeft size={20} className="pen-icon" aria-hidden="true" />
         </button>
-        <span className="text-caption text-muted-foreground" aria-hidden="true">
+        <span className="text-caption" style={{ color: 'var(--ink-soft)' }} aria-hidden="true">
           {currentUnavailable ? '–' : index + 1} / {total}
         </span>
         <button
@@ -406,9 +428,10 @@ export function StoryViewer({
           onClick={next}
           disabled={currentUnavailable || index < 0 || index >= total - 1}
           aria-label="다음 순간"
-          className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground disabled:opacity-30"
+          className="press-response inline-flex min-h-11 min-w-11 items-center justify-center disabled:opacity-30"
+          style={{ color: 'var(--ink-soft)' }}
         >
-          <ChevronRight size={20} aria-hidden="true" />
+          <ChevronRight size={20} className="pen-icon" aria-hidden="true" />
         </button>
       </div>
     </div>
@@ -433,6 +456,10 @@ const REFINEMENT_REASON_LABEL: Record<DailySummaryRefinementReason, string> = {
   rejected: '기기 AI 결과를 안전하게 확인하지 못했어요',
   native_error: '기기 AI가 응답하지 않았어요',
 };
+
+function StoryPaper({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn('ink-box px-6 py-8', className)}>{children}</div>;
+}
 
 function CoverCard({
   card,
@@ -468,7 +495,7 @@ function CoverCard({
         : reasonLabel;
 
   return (
-    <PaperCard className="mt-2">
+    <StoryPaper className="mt-2">
       <div className="flex min-h-11 items-center justify-between gap-3">
         <p className="text-caption text-muted-foreground">
           {card.rangeLabel} 기록 {total}개 · 시간순 정리됨
@@ -480,11 +507,12 @@ function CoverCard({
               onClick={onRefine}
               disabled={refinementStatus === 'running' || refinementStatus === 'applied'}
               aria-busy={refinementStatus === 'running'}
-              className="press-response inline-flex min-h-11 items-center gap-1.5 rounded-control px-3 text-caption font-semibold text-foreground disabled:opacity-60"
+              className="press-response ink-chip inline-flex min-h-11 items-center gap-1.5 px-3 text-caption font-semibold disabled:opacity-60"
+              style={{ color: 'var(--ink)' }}
             >
               {refinementStatus === 'running'
-                ? <LoaderCircle size={15} className="motion-safe:animate-spin motion-reduce:hidden" aria-hidden="true" />
-                : <Sparkles size={15} aria-hidden="true" />}
+                ? <LoaderCircle size={15} className="pen-icon motion-safe:animate-spin motion-reduce:hidden" aria-hidden="true" />
+                : <Sparkles size={15} className="pen-icon" aria-hidden="true" />}
               {refineLabel}
             </button>
           ) : null}
@@ -495,7 +523,7 @@ function CoverCard({
           ) : null}
         </div>
       </div>
-      <FoldDivider className="my-4" />
+      <div className="ink-rule my-4" aria-hidden="true" />
       <p className="mb-3 text-caption text-muted-foreground">
         말줄임표(…)는 생략된 문맥을 뜻해요. 줄을 누르면 완전한 원문을 볼 수 있어요.
       </p>
@@ -509,7 +537,7 @@ function CoverCard({
             >
               <span className="shrink-0 text-caption text-muted-foreground tabular-nums">{line.time}</span>
               {/* 사용자가 쓴 글이므로 손글씨다. 시간은 앱이 아는 사실이므로 인쇄체다. */}
-              <span className="hand-text record-copy text-foreground">{line.text}</span>
+              <span className="hand-text record-copy break-words text-foreground [overflow-wrap:anywhere]">{line.text}</span>
             </button>
           </li>
         ))}
@@ -520,13 +548,13 @@ function CoverCard({
             type="button"
             onClick={() => setExpanded((prev) => !prev)}
             aria-expanded={expanded}
-            className="press-response-row flex w-full min-h-11 items-center justify-center rounded-control text-caption text-muted-foreground"
+            className="press-response-row ink-chip flex w-full min-h-11 items-center justify-center text-caption text-muted-foreground"
           >
             {expanded ? '접기' : `${remainingCount}개 더 보기`}
           </button>
         </div>
       ) : null}
-    </PaperCard>
+    </StoryPaper>
   );
 }
 
@@ -549,12 +577,12 @@ function MomentCard({
   */
   if (attachments.length === 0) {
     return (
-      <PaperCard className="mt-2">
+      <StoryPaper className="mt-2">
         {/* 자르지 않는다. 요약을 보여주는 화면이 아니다. */}
-        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">
+        <p className="hand-text record-copy whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">
           {body || '순간을 남겼어요'}
         </p>
-      </PaperCard>
+      </StoryPaper>
     );
   }
 
@@ -562,7 +590,7 @@ function MomentCard({
     <div className="mt-2 space-y-3">
       <RecordMediaGallery attachments={attachments} recordId={record.id} coupleId={coupleId} fit="contain" />
       {body ? (
-        <p className="hand-text record-copy whitespace-pre-wrap break-keep text-foreground">{body}</p>
+        <p className="hand-text record-copy whitespace-pre-wrap break-words text-foreground [overflow-wrap:anywhere]">{body}</p>
       ) : null}
     </div>
   );
@@ -570,7 +598,7 @@ function MomentCard({
 
 function MissingCard({ headingRef }: { headingRef: RefObject<HTMLHeadingElement | null> }) {
   return (
-    <PaperCard className="mt-2 text-center">
+    <StoryPaper className="mt-2 text-center">
       {/*
         대체하지 않는다.
 
@@ -585,7 +613,7 @@ function MissingCard({ headingRef }: { headingRef: RefObject<HTMLHeadingElement 
       >
         이 기록은 더 이상 볼 수 없어요
       </h2>
-    </PaperCard>
+    </StoryPaper>
   );
 }
 
@@ -600,7 +628,7 @@ function StoryCurrentUnavailable({
 }) {
   return (
     <div data-testid="story-current-unavailable">
-      <PaperCard className="mt-2 text-center">
+      <StoryPaper className="mt-2 text-center">
         <h2
           ref={headingRef}
           tabIndex={-1}
@@ -612,12 +640,13 @@ function StoryCurrentUnavailable({
           <button
             type="button"
             onClick={onRestart}
-            className="press-response mt-5 inline-flex min-h-11 items-center justify-center rounded-control border border-border px-5 text-label font-semibold text-foreground"
+            className="press-response ink-chip mt-5 inline-flex min-h-11 items-center justify-center px-5 text-label font-semibold"
+            style={{ color: 'var(--ink)' }}
           >
             현재 목록 처음부터 보기
           </button>
         ) : null}
-      </PaperCard>
+      </StoryPaper>
     </div>
   );
 }
@@ -638,7 +667,7 @@ function ClosingCard({
   onClose: () => void;
 }): ReactNode {
   return (
-    <PaperCard className="mt-2 text-center">
+    <StoryPaper className="mt-2 text-center">
       <p className="text-body text-foreground">여기까지가 {title}이에요</p>
       {card.unreadableCount > 0 ? (
         /*
@@ -659,16 +688,17 @@ function ClosingCard({
           disabled={Boolean(disabledReason)}
           title={disabledReason}
           data-testid="story-acknowledge"
-          className="press-response mt-6 inline-flex min-h-11 items-center justify-center gap-2 rounded-control bg-coral-strong px-5 text-label font-semibold text-coral-strong-foreground disabled:opacity-60"
+          className="press-response ink-fill mt-6 inline-flex min-h-11 items-center justify-center gap-2 px-5 text-label font-semibold disabled:opacity-60"
         >
-          <Check size={16} aria-hidden="true" />
+          <Check size={16} className="pen-icon" aria-hidden="true" />
           다 읽었어요
         </button>
       ) : (
         <button
           type="button"
           onClick={onClose}
-          className="press-response mt-6 inline-flex min-h-11 items-center justify-center rounded-control border border-border px-5 text-label font-semibold text-foreground"
+          className="press-response ink-chip mt-6 inline-flex min-h-11 items-center justify-center px-5 text-label font-semibold"
+          style={{ color: 'var(--ink)' }}
         >
           닫기
         </button>
@@ -676,6 +706,6 @@ function ClosingCard({
       {disabledReason ? (
         <p className="mt-2 text-caption text-muted-foreground">{disabledReason}</p>
       ) : null}
-    </PaperCard>
+    </StoryPaper>
   );
 }

@@ -1,5 +1,6 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { reportBoundaryError } from '@/lib/sentry';
 
 interface Props {
@@ -29,35 +30,37 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div
-          className="min-h-[100dvh] bg-background text-foreground flex flex-col items-center justify-center px-6 text-center"
+          role="alert"
           aria-live="assertive"
+          className="paper-texture-layer flex min-h-[100dvh] items-center justify-center px-4 text-center pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]"
         >
-          <h1 className="text-title text-coral-strong mb-2">
-            문제가 발생했어요
-          </h1>
-          <p className="text-body text-muted-foreground mb-6">
-            앱을 다시 시작합니다
-          </p>
-          {/*
-            A plain <button> on purpose, unlike every other primary CTA in the app.
-
-            This is the boundary that catches a render crash. Whatever it draws has
-            already survived the failure below it, so the one control that gets the
-            user out should depend on as little as possible -- importing a component
-            here to gain a shared class list would put a second thing between the
-            user and a reload.
-
-            The geometry is copied from `Button` `md` rather than shared: 44px tall,
-            `rounded-control`, the measured `--coral-fill` pair. `press-response`
-            comes from the base layer, which is CSS and cannot throw.
-          */}
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            className="press-response min-h-11 px-5 rounded-control bg-coral-fill text-coral-fill-foreground text-label font-semibold"
-          >
-            새로고침
-          </button>
+          <div className="ink-box w-full max-w-sm px-6 py-8">
+            <AlertTriangle
+              size={26}
+              className="pen-icon mx-auto mb-4"
+              style={{ color: 'var(--ink-accent)' }}
+              aria-hidden="true"
+            />
+            <h1 className="mb-2 text-title" style={{ color: 'var(--ink)' }}>
+              문제가 발생했어요
+            </h1>
+            <p className="mb-6 text-body" style={{ color: 'var(--ink-soft)' }}>
+              앱을 다시 시작합니다
+            </p>
+            {/*
+              A plain <button> on purpose. The boundary has already survived a
+              render crash, so recovery depends only on this component, the icon
+              package already used by the shell, and base CSS.
+            */}
+            <button
+              type="button"
+              onClick={() => window.location.reload()}
+              className="press-response ink-fill inline-flex min-h-11 items-center justify-center gap-2 px-5 text-label font-semibold"
+            >
+              <RefreshCw size={16} className="pen-icon" aria-hidden="true" />
+              새로고침
+            </button>
+          </div>
         </div>
       );
     }

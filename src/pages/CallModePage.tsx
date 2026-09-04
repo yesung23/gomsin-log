@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, ChevronRight, X } from 'lucide-react';
+import { ArrowUpRight, Check, ChevronRight, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
@@ -31,6 +31,40 @@ function sameSettled(
     entry.recordId === right[index]?.recordId
     && sameIds(entry.activeMarkIds, right[index].activeMarkIds)
   ));
+}
+
+function CallStatePanel({
+  testId,
+  headingRef,
+  title,
+  children,
+  ariaLive,
+}: {
+  testId?: string;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+  title: string;
+  children?: ReactNode;
+  ariaLive?: 'polite';
+}) {
+  return (
+    <section
+      data-testid={testId}
+      aria-live={ariaLive}
+      className="flex flex-1 items-center justify-center px-4 py-6 text-center"
+    >
+      <div className="ink-box w-full max-w-sm space-y-3 px-6 py-8">
+        <h2
+          ref={headingRef}
+          tabIndex={-1}
+          className="break-words text-heading outline-none [overflow-wrap:anywhere]"
+          style={{ color: 'var(--ink)' }}
+        >
+          {title}
+        </h2>
+        {children}
+      </div>
+    </section>
+  );
 }
 
 /**
@@ -287,40 +321,37 @@ export function CallModePage() {
   };
 
   return (
-    <div className="min-h-dvh bg-background flex flex-col pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+    <div className="paper-texture-layer min-h-dvh flex flex-col overflow-y-auto pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
       {/*
         No MobileShell, so no tab bar. This screen is used one-handed while a
         phone is against an ear, and a row of navigation targets along the bottom
         edge is the wrong thing to have under a thumb that is aiming for
         이야기했어요.
       */}
-      <header className="flex items-center justify-between gap-2 px-4 pt-3 pb-2">
-        <h1 className="text-title text-foreground">통화하면서</h1>
+      <header className="flex shrink-0 items-center justify-between gap-2 px-4 pb-2 pt-3">
+        <h1 className="text-title" style={{ color: 'var(--ink)' }}>통화하면서</h1>
         <button
           type="button"
           onClick={leave}
           aria-label="통화 모드 끝내기"
-          className="press-response min-h-11 min-w-11 flex items-center justify-center rounded-full text-muted-foreground"
+          className="press-response flex min-h-11 min-w-11 items-center justify-center"
+          style={{ color: 'var(--ink-soft)' }}
         >
-          <X size={20} aria-hidden="true" />
+          <X size={20} className="pen-icon" aria-hidden="true" />
         </button>
       </header>
+
+      <div className="ink-rule mx-4 shrink-0" aria-hidden="true" />
 
       <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
 
       {coordinationUnavailable ? (
-        <section
-          data-testid="call-mode-unavailable"
-          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        <CallStatePanel
+          testId="call-mode-unavailable"
+          headingRef={contentHeadingRef}
+          title="이야기거리를 확인하고 있어요"
         >
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-heading text-foreground break-keep outline-none"
-          >
-            이야기거리를 확인하고 있어요
-          </h2>
-          <p className="text-body text-muted-foreground break-keep">
+          <p className="break-words text-body text-muted-foreground [overflow-wrap:anywhere]">
             {sharedSyncStatus === 'unavailable'
               ? '공유 정보를 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.'
               : '책갈피 목록을 아직 확인하지 못했어요. 확인되면 현재 목록을 다시 보여드려요.'}
@@ -328,55 +359,45 @@ export function CallModePage() {
           <button
             type="button"
             onClick={leave}
-            className="press-response mt-2 min-h-12 px-6 rounded-control bg-muted text-label font-bold text-foreground"
+            className="press-response ink-chip mt-2 inline-flex min-h-11 items-center justify-center px-6 text-label font-semibold"
+            style={{ color: 'var(--ink)' }}
           >
             홈으로
           </button>
-        </section>
+        </CallStatePanel>
       ) : done ? (
-        <section
-          data-testid="call-mode-done"
-          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        <CallStatePanel
+          testId="call-mode-done"
+          headingRef={contentHeadingRef}
+          title="이야기거리를 다 정리했어요"
         >
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-heading text-foreground break-keep outline-none"
-          >
-            이야기거리를 다 정리했어요
-          </h2>
-          <p className="text-body text-muted-foreground break-keep">
+          <p className="break-words text-body text-muted-foreground [overflow-wrap:anywhere]">
             남은 게 없어요. 통화는 계속하셔도 돼요.
           </p>
           <button
             type="button"
             onClick={leave}
-            className="press-response mt-2 min-h-12 px-6 rounded-control bg-muted text-label font-bold text-foreground"
+            className="press-response ink-chip mt-2 inline-flex min-h-11 items-center justify-center px-6 text-label font-semibold"
+            style={{ color: 'var(--ink)' }}
           >
             홈으로
           </button>
-        </section>
+        </CallStatePanel>
       ) : wrapped ? (
-        <section
-          data-testid="call-mode-wrapped"
-          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        <CallStatePanel
+          testId="call-mode-wrapped"
+          headingRef={contentHeadingRef}
+          title="건너뛴 이야기거리가 남았어요"
         >
           {/*
             Deliberately not a completion screen. Saying "다 봤어요" while topics
             are still open would be the app claiming something untrue about the
             conversation -- §3.2, the app states facts and does not interpret.
           */}
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-heading text-foreground break-keep outline-none"
-          >
-            건너뛴 이야기거리가 남았어요
-          </h2>
-          <p className="text-body text-muted-foreground break-keep">
-              아직 {session.skipped.length}개가 그대로 있어요.
+          <p className="break-words text-body text-muted-foreground [overflow-wrap:anywhere]">
+            아직 {session.skipped.length}개가 그대로 있어요.
           </p>
-          <div className="flex flex-col gap-2 w-full max-w-xs mt-2">
+          <div className="mt-2 flex w-full flex-col gap-2">
             <button
               type="button"
               onClick={() => setSession((previous) => ({
@@ -384,144 +405,135 @@ export function CallModePage() {
                 remaining: previous.skipped,
                 skipped: [],
               }))}
-              className="press-response min-h-12 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
+              className="press-response ink-fill min-h-12 px-5 text-label font-semibold"
             >
               처음부터 다시 보기
             </button>
             <button
               type="button"
               onClick={leave}
-              className="press-response min-h-12 rounded-control bg-muted text-label font-bold text-foreground"
+              className="press-response ink-chip min-h-11 px-5 text-label font-semibold"
+              style={{ color: 'var(--ink)' }}
             >
               끝내기
             </button>
           </div>
-        </section>
+        </CallStatePanel>
       ) : changedOnly ? (
-        <section
-          data-testid="call-mode-changed"
-          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        <CallStatePanel
+          testId="call-mode-changed"
+          headingRef={contentHeadingRef}
+          title="현재 볼 수 있는 이야기거리는 여기까지예요"
         >
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-heading text-foreground break-keep outline-none"
-          >
-            현재 볼 수 있는 이야기거리는 여기까지예요
-          </h2>
-          <p className="text-body text-muted-foreground break-keep">
+          <p className="break-words text-body text-muted-foreground [overflow-wrap:anywhere]">
             목록이 바뀐 항목은 이야기했다고 표시하지 않았어요.
           </p>
           <button
             type="button"
             onClick={leave}
-            className="press-response mt-2 min-h-12 px-6 rounded-control bg-muted text-label font-bold text-foreground"
+            className="press-response ink-chip mt-2 inline-flex min-h-11 items-center justify-center px-6 text-label font-semibold"
+            style={{ color: 'var(--ink)' }}
           >
             홈으로
           </button>
-        </section>
+        </CallStatePanel>
       ) : currentUnavailable ? (
-        <section
-          data-testid="call-mode-current-unavailable"
-          className="flex-1 flex flex-col items-center justify-center gap-3 px-6 text-center"
+        <CallStatePanel
+          testId="call-mode-current-unavailable"
+          headingRef={contentHeadingRef}
+          title="현재 보던 이야기거리를 더 이상 볼 수 없어요"
         >
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-heading text-foreground break-keep outline-none"
-          >
-            현재 보던 이야기거리를 더 이상 볼 수 없어요
-          </h2>
-          <p className="text-body text-muted-foreground break-keep">
+          <p className="break-words text-body text-muted-foreground [overflow-wrap:anywhere]">
             다른 기록으로 바꾸지 않았어요. 다음 이야기거리로 직접 넘어갈 수 있어요.
           </p>
-          <div className="mt-2 flex w-full max-w-xs flex-col gap-2">
+          <div className="mt-2 flex w-full flex-col gap-2">
             <button
               type="button"
               data-testid="call-mode-skip"
               onClick={skip}
-              className="press-response min-h-12 rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold"
+              className="press-response ink-fill min-h-12 px-5 text-label font-semibold"
             >
               다음 이야기거리
             </button>
             <button
               type="button"
               onClick={leave}
-              className="press-response min-h-12 rounded-control bg-muted text-label font-bold text-foreground"
+              className="press-response ink-chip min-h-11 px-5 text-label font-semibold"
+              style={{ color: 'var(--ink)' }}
             >
               끝내기
             </button>
           </div>
-        </section>
+        </CallStatePanel>
       ) : !current ? (
-        <section
-          aria-live="polite"
-          className="flex-1 flex items-center justify-center px-6 text-center"
-        >
-          <h2
-            ref={contentHeadingRef}
-            tabIndex={-1}
-            className="text-body text-muted-foreground outline-none"
-          >
-            이야기거리 목록을 맞추는 중이에요.
-          </h2>
-        </section>
+        <CallStatePanel
+          headingRef={contentHeadingRef}
+          title="이야기거리 목록을 맞추는 중이에요."
+          ariaLive="polite"
+        />
       ) : (
         <>
           <section
             data-testid="call-mode-topic"
             aria-busy={pending || undefined}
-            className="flex-1 flex flex-col justify-center gap-4 px-6 py-4"
+            className="flex flex-1 items-center justify-center px-4 py-6"
           >
-            {/*
-              Progress, not debt. `3 / 7` says where you are in a list you chose to
-              open; it is not a count of what is owed, and it disappears with the
-              last topic.
-            */}
-            <p className="text-caption text-muted-foreground tabular-nums">
-              {session.skipped.length + 1} / {session.remaining.length + session.skipped.length}
-            </p>
+            <div className="ink-box w-full max-w-sm px-5 py-7 text-left">
+              {/*
+                Progress, not debt. `3 / 7` says where you are in a list you chose to
+                open; it is not a count of what is owed, and it disappears with the
+                last topic.
+              */}
+              <p className="text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
+                {session.skipped.length + 1} / {session.remaining.length + session.skipped.length}
+              </p>
 
-            <h2
-              ref={contentHeadingRef}
-              tabIndex={-1}
-              className="text-heading text-foreground break-keep leading-relaxed outline-none"
-            >
-              {current.record.log
-                || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
-            </h2>
+              <h2
+                ref={contentHeadingRef}
+                tabIndex={-1}
+                className="mt-4 whitespace-pre-wrap break-words text-heading leading-relaxed outline-none [overflow-wrap:anywhere]"
+                style={{ color: 'var(--ink)' }}
+              >
+                {current.record.log
+                  || (current.record.attachments?.length ? '사진으로 남긴 순간' : '남긴 순간')}
+              </h2>
 
-            <p className="text-caption text-muted-foreground break-keep">
-              {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}
-            </p>
+              <p className="mt-3 break-words text-caption [overflow-wrap:anywhere]" style={{ color: 'var(--ink-soft)' }}>
+                {`${current.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${current.record.date}`}
+              </p>
 
-            {/*
-              Reading the exact original is still one tap away, but it leaves this
-              screen, so it is drawn as the quiet option. During a call the text
-              above is usually enough to remember what this was.
-            */}
-            <button
-              type="button"
-              onClick={() => {
-                setHighlightedRecordId(current.recordId);
-                navigate(`/record?record=${encodeURIComponent(current.recordId)}`);
-              }}
-              className="press-response-row self-start min-h-11 -mx-1 px-1 rounded-control text-caption text-coral"
-            >
-              원본 보기
-            </button>
+              <div className="ink-rule my-4" aria-hidden="true" />
+
+              {/*
+                Reading the exact original is still one tap away, but it leaves this
+                screen, so it is drawn as the quiet option. During a call the text
+                above is usually enough to remember what this was.
+              */}
+              <button
+                type="button"
+                onClick={() => {
+                  setHighlightedRecordId(current.recordId);
+                  navigate(`/record?record=${encodeURIComponent(current.recordId)}`);
+                }}
+                className="press-response-row ink-chip inline-flex min-h-11 items-center gap-1.5 px-3 text-caption font-semibold"
+                style={{ color: 'var(--ink)' }}
+              >
+                원본 보기
+                <ArrowUpRight size={15} className="pen-icon" aria-hidden="true" />
+              </button>
+            </div>
           </section>
 
-          <footer className="px-6 pb-8 pt-2 flex flex-col gap-2">
+          <footer className="flex w-full max-w-sm shrink-0 self-center flex-col gap-2 px-4 pb-8 pt-2">
             <button
               type="button"
               data-testid="call-mode-complete"
               onClick={() => void complete()}
               disabled={pending || isOffline}
               title={isOffline ? OFFLINE_READONLY_MESSAGE : undefined}
-              className="press-response min-h-14 w-full rounded-control bg-coral-strong text-coral-strong-foreground text-label font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              className="press-response ink-fill flex min-h-14 w-full items-center justify-center gap-2 px-5 text-label font-semibold disabled:opacity-50"
             >
-              <Check size={18} aria-hidden="true" />
+              <Check size={18} className="pen-icon" aria-hidden="true" />
               {pending ? '정리하는 중...' : '이야기했어요'}
             </button>
 
@@ -530,10 +542,11 @@ export function CallModePage() {
               data-testid="call-mode-skip"
               onClick={skip}
               disabled={pending}
-              className="press-response min-h-12 w-full rounded-control bg-muted text-label font-bold text-muted-foreground flex items-center justify-center gap-1 disabled:opacity-50"
+              className="press-response ink-chip flex min-h-12 w-full items-center justify-center gap-1 px-5 text-label font-semibold disabled:opacity-50"
+              style={{ color: 'var(--ink-soft)' }}
             >
               다음
-              <ChevronRight size={16} aria-hidden="true" />
+              <ChevronRight size={16} className="pen-icon" aria-hidden="true" />
             </button>
 
             {isOffline && (

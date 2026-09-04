@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
@@ -220,6 +220,53 @@ describe('what 통화 모드 must never do', () => {
     expect(screen.getByTestId('call-mode-wrapped')).toBeInTheDocument();
     expect(screen.queryByTestId('call-mode-done')).toBeNull();
     expect(screen.getByText(/아직 3개가 그대로 있어요/)).toBeInTheDocument();
+  });
+});
+
+describe('A paper-home 시각 언어', () => {
+  it('공책 표면, 손그림 패널, 잉크형 행동 위계로 이어진다', () => {
+    const { records, marks } = three();
+    const { container } = renderPage(records, marks);
+    const frame = container.firstElementChild;
+    const topic = screen.getByTestId('call-mode-topic');
+    const complete = screen.getByTestId('call-mode-complete');
+    const skip = screen.getByTestId('call-mode-skip');
+
+    expect(frame).toHaveClass('paper-texture-layer');
+    expect(frame).not.toHaveClass('bg-background');
+    expect(topic.querySelector('.ink-box')).toBeInTheDocument();
+    expect(topic.querySelector('.ink-rule')).toBeInTheDocument();
+    expect(screen.getByText('첫째')).toHaveClass('[overflow-wrap:anywhere]');
+    expect(complete).toHaveClass('ink-fill');
+    expect(complete).not.toHaveClass('bg-coral-strong');
+    expect(skip).toHaveClass('ink-chip');
+    expect(skip).not.toHaveClass('bg-muted');
+  });
+
+  it('끝내기와 정확한 원본 행동은 이름, 아이콘, 44px 표적을 함께 가진다', () => {
+    const { records, marks } = three();
+    renderPage(records, marks);
+
+    const leave = screen.getByRole('button', { name: '통화 모드 끝내기' });
+    const original = screen.getByRole('button', { name: '원본 보기' });
+
+    expect(leave).toHaveClass('min-h-11', 'min-w-11');
+    expect(leave).toHaveTextContent('');
+    expect(leave.querySelector('svg')).toHaveClass('pen-icon');
+    expect(leave.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(original).toHaveClass('min-h-11');
+    expect(original.querySelector('svg')).toHaveClass('pen-icon');
+    expect(original.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+  });
+
+  it('완료와 복구 상태도 같은 손그림 패널에서 설명과 출구를 유지한다', () => {
+    renderPage([record()], []);
+
+    const done = screen.getByTestId('call-mode-done');
+    expect(done.querySelector('.ink-box')).toBeInTheDocument();
+    expect(done).toHaveTextContent('이야기거리를 다 정리했어요');
+    expect(done).toHaveTextContent('남은 게 없어요. 통화는 계속하셔도 돼요.');
+    expect(within(done).getByRole('button', { name: '홈으로' })).toHaveClass('ink-chip', 'min-h-11');
   });
 });
 

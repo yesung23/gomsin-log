@@ -101,6 +101,43 @@ describe('스토리는 저절로 넘어가지 않는다', () => {
   });
 });
 
+describe('A paper-home 시각 언어', () => {
+  it('공책 표면 위에 손으로 그린 원본 패널과 잉크 위치 표시를 쓴다', () => {
+    const { container } = view();
+    const viewer = screen.getByTestId('story-viewer');
+    const storyPanel = screen.getByText('오늘 시험 끝났어').parentElement;
+    const position = screen.getByTestId('story-position');
+    const marks = position.querySelectorAll('[data-story-position-state]');
+
+    expect(viewer).toHaveClass('paper-texture-layer');
+    expect(viewer).not.toHaveClass('bg-background');
+    expect(storyPanel).toHaveClass('ink-box');
+    expect(storyPanel).not.toHaveClass('bg-card', 'rounded-surface');
+    expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('[overflow-wrap:anywhere]');
+    expect(position).toHaveAttribute('aria-hidden', 'true');
+    expect(marks).toHaveLength(3);
+    expect(marks[0]).toHaveAttribute('data-story-position-state', 'current');
+    expect(marks[0].getAttribute('style')).toContain('var(--ink-accent)');
+    expect(marks[1]).toHaveAttribute('data-story-position-state', 'upcoming');
+    expect(marks[1].getAttribute('style')).toContain('var(--ink-faint)');
+    expect(container.querySelector('.ink-rule')).toBeInTheDocument();
+  });
+
+  it('아이콘만 보이는 chrome은 이름과 44px 표적을 유지한다', () => {
+    view();
+
+    for (const name of ['스토리 닫기', '이전 순간', '다음 순간']) {
+      const action = screen.getByRole('button', { name });
+      const icon = action.querySelector('svg');
+      expect(action).toHaveClass('min-h-11', 'min-w-11');
+      expect(action).toHaveAccessibleName(name);
+      expect(action).toHaveTextContent('');
+      expect(icon).toHaveClass('pen-icon');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    }
+  });
+});
+
 describe('이동', () => {
   it('버튼으로 앞뒤로 간다', async () => {
     view();

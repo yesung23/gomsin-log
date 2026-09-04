@@ -131,6 +131,17 @@ describe('M-2: uploadRecordMedia classifies the Storage error it is holding', ()
     );
   });
 
+  it('does not persist the device source filename when no explicit display name was chosen', async () => {
+    mockUpload.mockResolvedValue({ error: null });
+
+    const result = await uploadRecordMedia(pngFile(), COUPLE_ID, RECORD_ID);
+
+    expect(result).not.toHaveProperty('error');
+    const { attachment } = result as { attachment: { name: string } };
+    expect(attachment.name).toBe('photo.jpg');
+    expect(attachment.name).not.toBe('photo.png');
+  });
+
   it('never uploads the original when privacy sanitization fails', async () => {
     mockSanitizePhoto.mockResolvedValueOnce({ error: '사진을 안전하게 처리하지 못했어요.' });
 

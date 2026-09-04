@@ -735,7 +735,10 @@ export async function uploadRecordMedia(
   return {
     attachment: {
       type: classified.type,
-      name: displayName || file.name || `${classified.type}.${classified.ext}`,
+      // The source basename can contain a person's name, location or date. The
+      // photo sanitizer has already replaced it with a neutral filename, so use
+      // that value unless the user deliberately supplied a display label.
+      name: displayName?.trim() || uploadFile.name || `${classified.type}.${uploadExtension}`,
       path,
     },
   };

@@ -497,8 +497,10 @@ describe('홈 포스트 읽기 순서', () => {
     view();
 
     const header = screen.getByTestId('home-sticky-header');
+    const brand = within(header).getByRole('heading', { name: '곰신로그', level: 1 });
     expect(header).toHaveClass('paper-texture-layer');
     expect(header).not.toHaveStyle({ background: 'var(--paper)' });
+    expect(brand).toHaveClass('hand-text', 'text-title', 'leading-none');
     const mark = within(header).getByRole('img', { name: '곰신로그 브랜드 마크' });
     expect(mark).toHaveAttribute('src', '/favicon.svg');
     expect(mark).toHaveAttribute('data-brand-mark', 'true');

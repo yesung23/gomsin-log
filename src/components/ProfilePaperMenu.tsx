@@ -23,6 +23,7 @@ interface ProfilePaperMenuProps {
   userId: string;
   triggerRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
+  onOpenMy: () => void;
   onOpenSettings: () => void;
 }
 
@@ -33,6 +34,7 @@ export function ProfilePaperMenu({
   userId,
   triggerRef,
   onClose,
+  onOpenMy,
   onOpenSettings,
 }: ProfilePaperMenuProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -132,7 +134,7 @@ export function ProfilePaperMenu({
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-paper-menu-title"
-        className="fixed bottom-0 left-0 right-0 z-[60] max-h-[85vh] overflow-y-auto rounded-t-2xl border border-border bg-card p-4 pb-6 shadow-2xl animate-in slide-in-from-bottom-full"
+        className="fixed bottom-0 left-0 right-0 z-[60] max-h-[85vh] overflow-y-auto rounded-t-2xl border border-border bg-card p-4 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-2xl animate-in slide-in-from-bottom-full"
       >
         <div {...handleProps} aria-hidden="true" className="-mt-1 mb-2 flex justify-center pb-1 pt-2 cursor-grab active:cursor-grabbing">
           <span aria-hidden="true" className="block h-1 w-9 rounded-full bg-border" />
@@ -192,9 +194,20 @@ export function ProfilePaperMenu({
           type="button"
           onClick={() => {
             onClose();
-            onOpenSettings();
+            onOpenMy();
           }}
           className="press-response-row mt-4 flex min-h-11 w-full items-center rounded-control border border-border px-3 text-left text-label font-semibold text-foreground"
+        >
+          내 정보
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            onClose();
+            onOpenSettings();
+          }}
+          className="press-response-row mt-2 flex min-h-11 w-full items-center rounded-control border border-border px-3 text-left text-label font-semibold text-foreground"
         >
           설정 및 계정 관리
         </button>

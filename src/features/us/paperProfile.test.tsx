@@ -125,6 +125,22 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
   });
 
+  it('게시물 만들기는 사진 추가 아이콘이고 자유 기록은 펜 아이콘으로 구분한다', () => {
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+
+    const post = screen.getByRole('button', { name: '게시물 만들기' });
+    const record = screen.getByRole('button', { name: '기록 남기기' });
+    expect(post.querySelector('.lucide-image-plus')).not.toBeNull();
+    expect(post.querySelector('.lucide-plus')).toBeNull();
+    expect(record.querySelector('.lucide-square-pen')).not.toBeNull();
+    expect(post).toHaveClass('h-11', 'w-11');
+    expect(record).toHaveClass('h-11', 'w-11');
+  });
+
   it('일반 커플은 내부 soldier 슬롯과 잔존 복무값을 우리 화면에 노출하지 않는다', () => {
     const base = baseState();
     storeState = {
@@ -271,6 +287,28 @@ describe('PaperProfile (우리 화면)', () => {
     fireEvent.click(screen.getByRole('button', { name: '설정 및 계정 관리' }));
 
     expect(mockNavigate).toHaveBeenCalledWith('/settings');
+    expect(screen.queryByRole('dialog', { name: '마이 메뉴' })).not.toBeInTheDocument();
+  });
+
+  it('마이 메뉴에서 내 정보로 이동하고 설정은 안전 여백 안의 마지막 동작으로 유지한다', () => {
+    render(
+      <MemoryRouter>
+        <PaperProfile />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+
+    const dialog = screen.getByRole('dialog', { name: '마이 메뉴' });
+    const myInfo = within(dialog).getByRole('button', { name: '내 정보' });
+    const settings = within(dialog).getByRole('button', { name: '설정 및 계정 관리' });
+    const actions = within(dialog).getAllByRole('button');
+
+    expect(myInfo).toHaveClass('min-h-11');
+    expect(dialog).toHaveClass('pb-[max(1.5rem,env(safe-area-inset-bottom,0px))]');
+    expect(actions.at(-1)).toBe(settings);
+
+    fireEvent.click(myInfo);
+    expect(mockNavigate).toHaveBeenCalledWith('/my');
     expect(screen.queryByRole('dialog', { name: '마이 메뉴' })).not.toBeInTheDocument();
   });
 

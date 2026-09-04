@@ -144,4 +144,23 @@ describe('마이 couple status line', () => {
     expect(screen.queryByText('복무 현황 · D-Day')).not.toBeInTheDocument();
     expect(screen.getByText('몽룡님과 연결됨')).toBeInTheDocument();
   });
+
+  it('군 커플 마이 화면은 구조용 이모지 대신 일관된 벡터 아이콘을 사용한다', () => {
+    role = 'soldier';
+    renderMy();
+
+    expect(document.body.textContent).not.toMatch(/🌸|🪖|🎖️|🏖️/u);
+
+    const avatar = screen.getByRole('button', { name: '내 사진 고르기' });
+    expect(avatar.querySelector('svg[viewBox="0 0 40 40"]')).not.toBeNull();
+
+    const service = screen.getByText('복무 현황 · D-Day').closest('button');
+    const schedule = screen.getByText('휴가·면회 일정').closest('button');
+    expect(service?.querySelector('.lucide-shield')).not.toBeNull();
+    expect(schedule?.querySelector('.lucide-calendar-days')).not.toBeNull();
+
+    for (const icon of document.querySelectorAll('svg')) {
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    }
+  });
 });

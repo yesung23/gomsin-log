@@ -350,9 +350,9 @@ export function PaperHome() {
         */}
         <div className="flex shrink-0 items-center gap-2">
           <BrandMark width={28} height={28} className="h-7 w-7" />
-          <span className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
+          <h1 className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
             곰신로그
-          </span>
+          </h1>
         </div>
 
         <div className="flex items-center gap-2">

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, MoreHorizontal, Plane, Plus, SquarePen, X } from 'lucide-react';
+import { CalendarDays, Grid3x3, Image as ImageIcon, ImagePlus, Lock, MoreHorizontal, Plane, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -605,7 +605,7 @@ export function SharedProfile() {
             onClick={(event) => openPostComposer(event.currentTarget)}
             className="press-response flex h-11 w-11 shrink-0 items-center justify-center"
           >
-            <Plus size={22} color="var(--ink)" aria-hidden="true" />
+            <ImagePlus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
         <div className="flex min-w-0 items-center justify-center gap-1.5" data-testid="profile-header-center">
@@ -788,6 +788,7 @@ export function SharedProfile() {
         userId={state.authenticatedUser?.id || profile.id || ''}
         triggerRef={paperMenuTriggerRef}
         onClose={() => setIsPaperMenuOpen(false)}
+        onOpenMy={() => navigate('/my')}
         onOpenSettings={() => navigate('/settings')}
       />
     </div>

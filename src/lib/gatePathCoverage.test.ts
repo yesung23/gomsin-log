@@ -990,9 +990,27 @@ describe('Whole-source server mutation inventory', () => {
 
   it('E2EE authority writes remain blocked from production/release activation', () => {
     const buildEnv = readFileSync(resolve(process.cwd(), 'build/buildEnv.ts'), 'utf8');
+    const buildPlugin = readFileSync(
+      resolve(process.cwd(), 'build/viteBuildEnvironmentPlugin.ts'),
+      'utf8',
+    );
     const viteConfig = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8');
     expect(buildEnv).toContain('E2EE_DEVICE_PROTECTION_RELEASE_HOLD');
     expect(buildEnv).toContain("env.VITE_E2EE_DEVICE_PROTECTION_ENABLED === 'true'");
-    expect(viteConfig).toContain('VITE_E2EE_DEVICE_PROTECTION_ENABLED:');
+    expect(buildPlugin).toContain('VITE_E2EE_DEVICE_PROTECTION_ENABLED:');
+    expect(viteConfig).toContain('createBuildEnvironmentValidationPlugin');
+  });
+
+  it('Apple IAP sales remain blocked from production/release activation', () => {
+    const buildEnv = readFileSync(resolve(process.cwd(), 'build/buildEnv.ts'), 'utf8');
+    const buildPlugin = readFileSync(
+      resolve(process.cwd(), 'build/viteBuildEnvironmentPlugin.ts'),
+      'utf8',
+    );
+    const viteConfig = readFileSync(resolve(process.cwd(), 'vite.config.ts'), 'utf8');
+    expect(buildEnv).toContain('APPLE_IAP_SALE_RELEASE_HOLD');
+    expect(buildEnv).toContain("env.VITE_APPLE_IAP_SALE_ENABLED === 'true'");
+    expect(buildPlugin).toContain('VITE_APPLE_IAP_SALE_ENABLED:');
+    expect(viteConfig).toContain('createBuildEnvironmentValidationPlugin');
   });
 });

@@ -72,6 +72,15 @@ describe('C5 - vendor chunk splitting', () => {
     expect(app).toMatch(/const HomePage = lazy\(\(\) =>\s*import\('@\/pages\/HomePage'\)/);
   });
 
+  it('loads the heavy home media gallery only for posts that actually contain media', () => {
+    const home = read('src/features/home/PaperHome.tsx');
+    expect(home).not.toContain("import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';");
+    expect(home).toMatch(/const loadRecordMediaGallery\s*=\s*\(\)\s*=>\s*import\('@\/components\/media\/RecordMediaGallery'\)/);
+    expect(home).toMatch(/hasMedia\s*\?\s*\([\s\S]*?<RetryableRecordMediaGallery/);
+    expect(home).toContain('lazy(loadRecordMediaGallery)');
+    expect(home).toContain('class MediaLoadBoundary');
+  });
+
   it('splits by import identity so the entry chunk clears the warning threshold', () => {
     expect(viteConfig).toContain('manualChunks');
     for (const entry of [
@@ -130,12 +139,16 @@ describe('C5 - vendor chunk splitting', () => {
       .toBeGreaterThan(viteConfig.indexOf('injectServiceWorkerManifest(),'));
   });
 
-  it('PRESERVATION: the service worker manifest still enumerates dist/assets recursively', () => {
-    // Verified rather than assumed: new chunks must be cached, or an offline
-    // activation would serve an index whose JS was never stored.
+  it('precache contains only the eager assets referenced by the built app shell', () => {
+    // Lazy routes and feature artwork are runtime-cached on first use. Pulling
+    // every emitted asset during service-worker install made a first visit fetch
+    // the whole application, including routes the person may never open.
     expect(viteConfig).toContain('function listFiles(directory: string, prefix = \'\')');
     expect(viteConfig).toContain('listFiles(resolve(directory, entry.name), relativePath)');
-    expect(viteConfig).toContain('const assetUrls = listFiles(assetsDirectory)');
+    expect(viteConfig).toContain("readFileSync(resolve(outputDirectory, 'index.html'), 'utf8')");
+    expect(viteConfig).toContain('extractAppShellAssetUrls');
+    expect(viteConfig).toContain('collectOfflineCriticalAssetUrls');
+    expect(viteConfig).not.toContain('const assetUrls = listFiles(assetsDirectory)');
     expect(viteConfig).toContain('Service worker build markers are missing.');
   });
 });

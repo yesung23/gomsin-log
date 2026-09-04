@@ -145,12 +145,13 @@ describe('the service worker precache stays an app shell', () => {
   const viteConfig = read('vite.config.ts');
   const serviceWorker = read('public/sw.js');
 
-  it('excludes fonts from the all-or-nothing install list', () => {
-    // 92 subset files / ~2.9 MB behind `cache.addAll()` would make a first visit
-    // a multi-megabyte download and fail installation on a flaky connection.
-    expect(viteConfig).toContain('paper-pair-v1');
-    expect(viteConfig).toMatch(/isPrecachedAsset[\s\S]*woff2?[\s\S]*paper-pair-v1/);
-    expect(viteConfig).toContain('.filter(isPrecachedAsset)');
+  it('derives the all-or-nothing install list from index.html plus first-screen closure', () => {
+    // This naturally excludes the 187 font subsets and non-critical lazy routes
+    // while preserving the entry and either possible first screen.
+    expect(viteConfig).toContain('extractAppShellAssetUrls');
+    expect(viteConfig).toContain('collectOfflineCriticalAssetUrls');
+    expect(viteConfig).toContain("readFileSync(resolve(outputDirectory, 'index.html'), 'utf8')");
+    expect(viteConfig).not.toContain('const assetUrls = listFiles(assetsDirectory)');
   });
 
   it('PRESERVATION: fonts are still runtime-cached, so offline keeps working', () => {
@@ -162,8 +163,9 @@ describe('the service worker precache stays an app shell', () => {
     expect(destinations).toContain("'font'");
   });
 
-  it('PRESERVATION: script, style and image chunks are still precached', () => {
-    expect(viteConfig).toContain('const assetUrls = listFiles(assetsDirectory)');
+  it('PRESERVATION: eager script and style assets are still precached', () => {
+    expect(viteConfig).toContain('...extractAppShellAssetUrls(indexHtml)');
+    expect(viteConfig).toContain('...offlineCriticalAssetUrls');
     expect(viteConfig).toContain('Service worker build markers are missing.');
     expect(serviceWorker).toContain('...BUILD_ASSETS,');
   });

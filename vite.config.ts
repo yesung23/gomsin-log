@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defineConfig, loadEnv, type Plugin, type Rollup } from 'vite';
@@ -7,9 +6,17 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'url';
 import {
   injectCspOrigins,
-  validateBuildEnvironment,
   type ValidatedBuildEnvironment,
 } from './build/buildEnv';
+import { createBuildEnvironmentValidationPlugin } from './build/viteBuildEnvironmentPlugin';
+import {
+  collectOfflineCriticalAssetUrls,
+  deriveServiceWorkerBuildId,
+  serializeServiceWorkerManifest,
+  serviceWorkerCloseBundleHook,
+  type ServiceWorkerBuildArtifact,
+  type ServiceWorkerOutputBundle,
+} from './build/serviceWorkerManifest';
 
 const SERVICE_WORKER_ASSET_MARKER = '/* __BUILD_ASSETS__ */';
 const SERVICE_WORKER_BUILD_ID = '__BUILD_ID__';
@@ -24,51 +31,23 @@ function listFiles(directory: string, prefix = ''): string[] {
 }
 
 /**
- * Refuse to produce a production artifact from an unusable configuration.
- *
- * A build with no Supabase URL/key used to succeed and emit a bundle that was
- * permanently stuck in demo mode. Scoped to `apply: 'build'` and production
- * mode, so `vite dev` is unaffected; `npm test` loads `vitest.config.ts` and
- * cannot be affected at all.
+ * Return only the hashed assets that the built HTML needs before React can run.
+ * Lazy routes, feature chunks, artwork and font subsets remain on-demand and are
+ * runtime-cached by `public/sw.js` after the browser actually requests them.
  */
-function validateBuildEnvironmentPlugin(
-  onValidated: (validated: ValidatedBuildEnvironment) => void,
-): Plugin {
-  return {
-    name: 'validate-build-environment',
-    apply: 'build',
-    config(_config, { mode }) {
-      const isExplicitRelease =
-        process.env.GOMSINLOG_RELEASE === 'true'
-        || process.env.GOMSINLOG_RELEASE === '1'
-        || process.env.npm_lifecycle_event === 'build:release';
-      if (mode !== 'production' && !isExplicitRelease) return;
-      // Vite loads `.env*` after resolving the config, so values from a local
-      // `.env` are not present in `process.env` here. Read them explicitly while
-      // still giving CI/Vercel environment variables precedence.
-      const fileEnv = loadEnv(mode, process.cwd(), 'VITE_');
-      const validated = validateBuildEnvironment({
-        VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL,
-        VITE_SUPABASE_PUBLISHABLE_KEY:
-          process.env.VITE_SUPABASE_PUBLISHABLE_KEY || fileEnv.VITE_SUPABASE_PUBLISHABLE_KEY,
-        VITE_SUPABASE_ANON_KEY:
-          process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY,
-        VITE_LEGAL_OPERATOR_NAME:
-          process.env.VITE_LEGAL_OPERATOR_NAME || fileEnv.VITE_LEGAL_OPERATOR_NAME,
-        VITE_PRIVACY_CONTACT_EMAIL:
-          process.env.VITE_PRIVACY_CONTACT_EMAIL || fileEnv.VITE_PRIVACY_CONTACT_EMAIL,
-        VITE_APPLE_LOGIN_ENABLED:
-          process.env.VITE_APPLE_LOGIN_ENABLED ?? fileEnv.VITE_APPLE_LOGIN_ENABLED,
-        VITE_E2EE_DEVICE_PROTECTION_ENABLED:
-          process.env.VITE_E2EE_DEVICE_PROTECTION_ENABLED
-          ?? fileEnv.VITE_E2EE_DEVICE_PROTECTION_ENABLED,
-        buildMode: mode,
-        deploymentTarget: process.env.VERCEL_ENV,
-        isRelease: isExplicitRelease,
-      });
-      onValidated(validated);
-    },
-  };
+function extractAppShellAssetUrls(indexHtml: string): string[] {
+  const urls = new Set<string>();
+  for (const match of indexHtml.matchAll(/\b(?:src|href)=["'](\/assets\/[^"']+)["']/g)) {
+    const url = match[1];
+    if (url.includes('..')) {
+      throw new Error(`Built index contains an unsafe app-shell asset URL: ${url}`);
+    }
+    urls.add(url);
+  }
+  if (urls.size === 0) {
+    throw new Error('Built index contains no app-shell assets to precache.');
+  }
+  return [...urls].sort();
 }
 
 /**
@@ -94,38 +73,28 @@ function emitCspHeaders(getValidated: () => ValidatedBuildEnvironment | null): P
 }
 
 /**
- * Inject the hashed Vite asset graph into the generated service worker.
+ * Inject the eager, hashed app shell into the generated service worker.
  * A waiting worker can then activate while offline without serving an index whose
- * JavaScript or CSS chunks were never cached. Fonts are the one deliberate
- * exclusion — see the comment on `isPrecachedAsset` below.
+ * entry JavaScript or CSS was never cached, while lazy screens stay truly lazy.
  */
 function injectServiceWorkerManifest(): Plugin {
+  let offlineCriticalAssetUrls: string[] = [];
   return {
     name: 'inject-service-worker-manifest',
     apply: 'build',
-    closeBundle() {
+    generateBundle(_options, bundle) {
+      offlineCriticalAssetUrls = collectOfflineCriticalAssetUrls(
+        bundle as ServiceWorkerOutputBundle,
+      );
+    },
+    closeBundle: serviceWorkerCloseBundleHook(() => {
       const outputDirectory = resolve(process.cwd(), 'dist');
       const assetsDirectory = resolve(outputDirectory, 'assets');
-      // Fonts are deliberately NOT precached. The self-hosted Pretendard dynamic
-      // subset is 92 files / ~2.9 MB, and `install` in sw.js uses
-      // `cache.addAll()`, which is all-or-nothing: precaching them would turn
-      // every first visit into a multi-megabyte download and make installation
-      // fail outright on a flaky connection. sw.js already runtime-caches any
-      // response whose request destination is 'font', so the handful of subsets a
-      // session actually rendered are available offline from then on, and the
-      // `unicode-range` metadata means a browser never asks for the rest.
-      const isPrecachedAsset = (file: string) =>
-        !/\.woff2?$/.test(file) && !/paper-pair-v1/i.test(file);
-      const assetUrls = listFiles(assetsDirectory)
-        .filter(isPrecachedAsset)
-        .sort()
-        .map((file) => `/assets/${file}`);
-      const buildHash = createHash('sha256');
-      for (const file of listFiles(outputDirectory).sort()) {
-        if (file === 'sw.js') continue;
-        buildHash.update(file);
-        buildHash.update(readFileSync(resolve(outputDirectory, file)));
-      }
+      const indexHtml = readFileSync(resolve(outputDirectory, 'index.html'), 'utf8');
+      const assetUrls = [...new Set([
+        ...extractAppShellAssetUrls(indexHtml),
+        ...offlineCriticalAssetUrls,
+      ])].sort();
       /*
        * A font that got inlined is a font that is downloaded on every load, which
        * silently undoes the `unicode-range` slicing. Nothing else in the pipeline
@@ -143,23 +112,34 @@ function injectServiceWorkerManifest(): Plugin {
           );
         }
       }
-      const buildId = buildHash.digest('hex').slice(0, 12);
       const serviceWorkerPath = resolve(outputDirectory, 'sw.js');
-      const serviceWorker = readFileSync(serviceWorkerPath, 'utf8');
+      const serviceWorkerTemplate = readFileSync(serviceWorkerPath);
+      const serviceWorker = serviceWorkerTemplate.toString('utf8');
       if (
         !serviceWorker.includes(SERVICE_WORKER_ASSET_MARKER)
         || !serviceWorker.includes(SERVICE_WORKER_BUILD_ID)
       ) {
         throw new Error('Service worker build markers are missing.');
       }
-      const manifest = assetUrls.map((url) => JSON.stringify(url)).join(',\n  ');
+      const artifacts: ServiceWorkerBuildArtifact[] = listFiles(outputDirectory)
+        .filter((file) => file !== 'sw.js')
+        .map((file) => ({
+          fileName: file,
+          contents: readFileSync(resolve(outputDirectory, file)),
+        }));
+      const buildId = deriveServiceWorkerBuildId({
+        artifacts,
+        serviceWorkerTemplate,
+        manifestAssetUrls: assetUrls,
+      });
+      const manifest = serializeServiceWorkerManifest(assetUrls);
       writeFileSync(
         serviceWorkerPath,
         serviceWorker
           .replace(SERVICE_WORKER_ASSET_MARKER, manifest)
           .replace(SERVICE_WORKER_BUILD_ID, buildId),
       );
-    },
+    }),
   };
 }
 
@@ -200,7 +180,10 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    validateBuildEnvironmentPlugin((validated) => { validatedBuildEnvironment = validated; }),
+    createBuildEnvironmentValidationPlugin({
+      loadModeEnvironment: loadEnv,
+      onValidated: (validated) => { validatedBuildEnvironment = validated; },
+    }),
     // Order matters: CSP substitution must happen before the service-worker
     // build id is derived from the contents of `dist`.
     emitCspHeaders(() => validatedBuildEnvironment),

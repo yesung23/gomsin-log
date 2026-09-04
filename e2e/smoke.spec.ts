@@ -7,6 +7,7 @@ const CREATOR: Scenario = {
   role: 'gomsin',
   coupleId: 'couple-1',
   partnerPresent: true,
+  partnerUserId: 'user-partner',
   partnerName: '몽룡',
 };
 

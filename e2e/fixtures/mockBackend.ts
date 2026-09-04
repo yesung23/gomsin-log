@@ -29,6 +29,10 @@ export type Scenario = {
   userId: string;
   displayName: string;
   role: 'gomsin' | 'soldier';
+  /** Product mode stored on the couple row. Legacy scenarios remain military. */
+  relationshipContext?: 'military' | 'general';
+  /** Optional, owner-only profile identity. It never controls authorization. */
+  genderIdentity?: 'woman' | 'man';
   coupleId: string | null;
   /** Whether `get_partner_profile` returns a partner (drives connected vs pending). */
   partnerPresent: boolean;
@@ -365,6 +369,7 @@ export async function installMockBackend(
           id: scenario.userId,
           display_name: scenario.displayName,
           role: scenario.role,
+          gender_identity: scenario.genderIdentity ?? null,
           avatar_path: null,
           onboarding_completed_at: '2026-01-02T00:00:00Z',
           military_info: {
@@ -420,6 +425,7 @@ export async function installMockBackend(
       return rows(route, [
         {
           id: scenario.coupleId,
+          relationship_context: scenario.relationshipContext ?? 'military',
           anniversary_date: scenario.anniversaryDate ?? '2025-01-01',
           created_at: '2026-01-01T00:00:00Z',
         },
@@ -688,6 +694,7 @@ export async function installMockBackend(
       // single-row function does through PostgREST's object accept header.
       return json(route, {
         couple_id: scenario.coupleId,
+        relationship_context: scenario.relationshipContext ?? 'military',
         role: scenario.role,
         member_status: scenario.coupleId ? 'active' : null,
         partner_present: scenario.partnerPresent,
@@ -697,7 +704,8 @@ export async function installMockBackend(
       });
     }
 
-    if (path === '/rest/v1/rpc/redeem_invitation') {
+    if (path === '/rest/v1/rpc/redeem_invitation'
+      || path === '/rest/v1/rpc/redeem_invitation_v2') {
       // `redeem_invitation` is `RETURNS JSONB` (015:100) and the client parser
       // rejects an array outright, so this must be a BARE object. Wrapping it in
       // an array makes the app say "migration 015 is required", which is correct
@@ -718,7 +726,8 @@ export async function installMockBackend(
       );
     }
 
-    if (path === '/rest/v1/rpc/create_couple_and_invitation') {
+    if (path === '/rest/v1/rpc/create_couple_and_invitation'
+      || path === '/rest/v1/rpc/create_couple_and_invitation_v2') {
       const failure = failureFor(scenario, 'create_couple_and_invitation');
       if (failure) return json(route, failure, failure.status);
       return json(route, scenario.createCoupleId ?? 'couple-created-by-e2e');

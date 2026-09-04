@@ -4468,7 +4468,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       undefined,
       () => recordFailure('deletion_pending'),
       async () => {
-
+    const reconcileAmbiguousDelete = async (reason: RecordMutationReason): Promise<boolean> => {
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) return false;
+      try {
+        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
+        // This read is already limited by authenticated record RLS. We only
+        // converge the caller's own locally-known row; the helper itself keeps
+        // collapsing missing, stale-couple, and non-owner targets to avoid an
+        // existence oracle for arbitrary record ids.
+        return !remote.records.some((candidate) => (
+          candidate.id === id && candidate.userId === workspace.userId
+        ));
+      } catch {
+        return false;
+      }
+    };
     try {
       const deleted = await deleteRecordFromDB(
         id,
@@ -4478,14 +4493,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       if (!deleted.ok) {
         if (deleted.reason === 'auth_expired') void handleAuthExpired();
-        return recordFailure(deleted.reason);
+        if (!(await reconcileAmbiguousDelete(deleted.reason))) {
+          return recordFailure(deleted.reason);
+        }
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       console.error('[gomsinlog] Failed to delete record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      return recordFailure(reason);
+      if (!(await reconcileAmbiguousDelete(reason))) return recordFailure(reason);
     }
 
     recordsRefreshSequenceRef.current += 1;

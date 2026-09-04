@@ -387,6 +387,81 @@ describe('deleteRecord with database-owned media cleanup', () => {
     expect(deleteRecordFromDB).toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');
   });
+
+  it.each(['offline', 'server', 'not_found'] as const)(
+    'converges an ambiguous %s delete to success only after an authorized read-back proves the row is absent',
+    async (reason) => {
+      const records: DailyRecord[] = [{
+        id: 'rec-1',
+        userId: 'user-1',
+        date: '2026-01-01',
+        time: '10:00',
+        authorRole: 'gomsin',
+        log: 'hello',
+        isPrivate: false,
+        createdAt: '2026-01-01T10:00:00.000Z',
+      }];
+      deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason });
+      fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [] });
+      await setup(records);
+
+      await act(async () => {
+        screen.getByTestId('delete-rec1').click();
+      });
+      await waitFor(() => expect(lastDeleteResult).toBe(true));
+
+      expect(fetchRecordsResultFromDB).toHaveBeenCalledWith('couple-1');
+      expect(screen.getByTestId('records').textContent).toBe('');
+    },
+  );
+
+  it('keeps the local record when an ambiguous delete read-back still contains it', async () => {
+    const record: DailyRecord = {
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      createdAt: '2026-01-01T10:00:00.000Z',
+    };
+    deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [record] });
+    await setup([record]);
+
+    await act(async () => {
+      screen.getByTestId('delete-rec1').click();
+    });
+    await waitFor(() => expect(lastDeleteResult).toBe(false));
+
+    expect(lastDeleteReason).toBe('offline');
+    expect(screen.getByTestId('records').textContent).toBe('rec-1');
+  });
+
+  it('keeps the local record when the authoritative delete read-back is unavailable', async () => {
+    const record: DailyRecord = {
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      createdAt: '2026-01-01T10:00:00.000Z',
+    };
+    deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: false, reason: 'server' });
+    await setup([record]);
+
+    await act(async () => {
+      screen.getByTestId('delete-rec1').click();
+    });
+    await waitFor(() => expect(lastDeleteResult).toBe(false));
+
+    expect(lastDeleteReason).toBe('not_found');
+    expect(screen.getByTestId('records').textContent).toBe('rec-1');
+  });
 });
 
 describe('updateRecord emotion clearing on text change', () => {

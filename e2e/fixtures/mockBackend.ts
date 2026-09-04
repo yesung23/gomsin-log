@@ -297,6 +297,10 @@ export async function installMockBackend(
 ): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const unrouted: string[] = [];
   const dailyRecordWrites: Array<Record<string, unknown>> = [];
+  let redeemedState: {
+    coupleId: string;
+    relationshipContext: 'military' | 'general';
+  } | null = null;
   let cycleConsent = {
     granted: false,
     revision: 0,
@@ -683,22 +687,26 @@ export async function installMockBackend(
     }
 
     if (path === '/rest/v1/rpc/get_my_active_couple_id') {
-      return json(route, scenario.coupleId);
+      return json(route, redeemedState?.coupleId ?? scenario.coupleId);
     }
 
     if (path === '/rest/v1/rpc/get_my_couple_state') {
       const failure = failureFor(scenario, 'get_my_couple_state');
       if (failure) return json(route, failure, failure.status);
+      const effectiveCoupleId = redeemedState?.coupleId ?? scenario.coupleId;
       // `parseRemoteCoupleState` rejects an array outright (coupleLifecycle.ts:47),
       // so this RPC must answer with a bare object the way a `RETURNS TABLE`
       // single-row function does through PostgREST's object accept header.
       return json(route, {
-        couple_id: scenario.coupleId,
-        relationship_context: scenario.relationshipContext ?? 'military',
-        role: scenario.role,
-        member_status: scenario.coupleId ? 'active' : null,
-        partner_present: scenario.partnerPresent,
-        invitation_active: scenario.invitationActive ?? !scenario.partnerPresent,
+        couple_id: effectiveCoupleId,
+        relationship_context:
+          redeemedState?.relationshipContext ?? scenario.relationshipContext ?? 'military',
+        role: redeemedState ? 'soldier' : scenario.role,
+        member_status: effectiveCoupleId ? 'active' : null,
+        partner_present: redeemedState ? true : scenario.partnerPresent,
+        invitation_active: redeemedState
+          ? false
+          : scenario.invitationActive ?? !scenario.partnerPresent,
         invitation_expires_at:
           scenario.invitationExpiresAt ?? new Date(Date.now() + 86_400_000).toISOString(),
       });
@@ -717,6 +725,14 @@ export async function installMockBackend(
       const verdict = scenario.redeemResult;
       if (!verdict) {
         return json(route, { ok: false, error_code: 'invalid_or_expired', couple_id: null });
+      }
+      if (verdict.ok) {
+        redeemedState = {
+          coupleId: verdict.coupleId,
+          // This is independent server state, not an echo of the caller's
+          // expectation. A wrong client expectation must still fail closed.
+          relationshipContext: scenario.relationshipContext ?? 'military',
+        };
       }
       return json(
         route,

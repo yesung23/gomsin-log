@@ -95,3 +95,40 @@ for (const width of [320, 390]) {
     await context.close();
   });
 }
+
+test('general-couple joiner verifies the authoritative context and skips military setup', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const { unrouted } = await installMockBackend(context, {
+    ...NO_SPACE,
+    newAccount: true,
+    relationshipContext: 'general',
+    redeemResult: { ok: true, coupleId: 'couple-general-joined' },
+  });
+  const page = await context.newPage();
+  const rpcRequests: Array<{ path: string; body: unknown }> = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.startsWith('/rest/v1/rpc/')) {
+      rpcRequests.push({ path: url.pathname, body: request.postDataJSON?.() });
+    }
+  });
+
+  await page.goto('/');
+  await page.getByRole('button', { name: /저는 곰신 커플이 아니에요/ }).click();
+  await page.getByRole('button', { name: '다음' }).click();
+  await page.getByLabel('내 닉네임 (2~12자)').fill('별빛');
+  await page.getByRole('button', { name: '다음' }).click();
+
+  await page.getByRole('button', { name: '초대 코드가 있어요' }).click();
+  await page.getByLabel('숫자 6자리 초대 코드').fill('778899');
+  await page.getByRole('button', { name: '다음' }).click();
+
+  await expect(page.getByRole('heading', { name: '언제 알려드리면 좋을까요?' })).toBeVisible();
+  await expect(page.getByText(/군화|입대|전역|군종/)).toHaveCount(0);
+  const redemptionCall = rpcRequests.find((call) => call.path.endsWith('/redeem_invitation_v2'));
+  expect(redemptionCall).toBeDefined();
+  expect(redemptionCall?.body).toMatchObject({ p_expected_relationship_context: 'general' });
+  expect(unrouted).toEqual([]);
+
+  await context.close();
+});

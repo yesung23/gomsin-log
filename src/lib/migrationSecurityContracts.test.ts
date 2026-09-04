@@ -139,7 +139,11 @@ describe('effective EXECUTE privileges after every migration has been applied', 
     it(`${signature} is the authenticated-only consent mutation boundary`, () => {
       const entry = latestDefinition.get(signature);
       expect(entry, `${signature}: missing consent RPC`).toBeDefined();
-      expect(entry!.file).toBe('070_cycle_consent_atomic_write_gate.sql');
+      expect(entry!.file).toBe(
+        signature.startsWith('public.grant_')
+          ? '076_account_deletion_write_fence.sql'
+          : '070_cycle_consent_atomic_write_gate.sql',
+      );
       expect(entry!.definition.security).toBe('DEFINER');
       expect(entry!.definition.volatility).toBe('VOLATILE');
       expect(entry!.definition.searchPath).toEqual(['pg_catalog', 'pg_temp']);

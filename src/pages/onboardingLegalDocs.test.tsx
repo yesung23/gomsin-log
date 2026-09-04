@@ -261,6 +261,17 @@ describe('reading a document does not change what the user has agreed to', () =>
 });
 
 describe('the document sheet is usable by everyone', () => {
+  it('gives both checkbox controls and each legal document action a 44px hit area', () => {
+    renderLanding();
+
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      expect(checkbox).toHaveClass('h-11', 'w-11');
+    }
+    for (const trigger of [termsTrigger(), privacyTrigger()]) {
+      expect(trigger).toHaveClass('min-h-11', 'min-w-11');
+    }
+  });
+
   it('is a labelled modal dialog naming the document it shows', async () => {
     const user = userEvent.setup();
     renderLanding();

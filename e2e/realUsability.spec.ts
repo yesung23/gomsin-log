@@ -26,6 +26,25 @@ async function bootedInto(page: Page, route: string) {
   await expect(page.locator('#root')).not.toBeEmpty();
 }
 
+const STARTER_ACCESSORY_LABELS: Record<string, string> = {
+  boots: '검정 부츠',
+  sneakers: '운동화',
+  letter: '하트 편지',
+  dogtag: '메탈 펜던트',
+  plane: '종이비행기',
+};
+
+async function readOwnedAccessories(page: Page): Promise<string[]> {
+  return page.evaluate((storageKey) => {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const stored = JSON.parse(raw) as { ownedAccessories?: unknown };
+    return Array.isArray(stored.ownedAccessories)
+      ? stored.ownedAccessories.filter((item): item is string => typeof item === 'string')
+      : [];
+  }, `gomsin.diary.shop.${CREATOR.userId}`);
+}
+
 test('a signed-in account with no space is offered a way to make one, not a dead end', async ({ browser }) => {
   const context = await browser.newContext();
   await installMockBackend(context, NO_SPACE);
@@ -194,7 +213,7 @@ for (const width of [320, 375]) {
 }
 
 for (const width of [320, 393]) {
-  test(`finite free Shop direct choice stays usable and persists at ${width}px`, async ({ browser }) => {
+  test(`finite free Shop reveal visibly rotates, avoids duplicates, and persists at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 852 } });
     const { unrouted } = await installMockBackend(context, CREATOR);
     const page = await context.newPage();
@@ -203,21 +222,71 @@ for (const width of [320, 393]) {
 
     await bootedInto(page, '/shop');
     await expect(page.getByRole('heading', { level: 2, name: '액세서리 컬렉션' })).toBeVisible();
-    await expect(page.getByText(/뽑기|회전|랜덤|오늘|마감|자정|기회/)).toHaveCount(0);
+    const shopCopy = await page.locator('main').innerText();
+    expect(shopCopy).not.toMatch(/오늘|매일|마감|자정|기회|코인|포인트|재화|₩|￦/);
+    await expect(page.getByRole('button', { name: /결제|구매|충전|구독|코인|포인트/ })).toHaveCount(0);
+    await expect(page.getByText('지금 상점은 모두 무료이며 결제 기능이 없어요.')).toBeVisible();
 
-    await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
+    const roulette = page.getByTestId('accessory-draw-roulette');
+    const wheel = page.getByTestId('accessory-roulette-wheel');
+    const revealResult = page.getByTestId('starter-reveal-result');
+    const drawButton = page.getByRole('button', { name: '무료 장식 하나 공개하기' });
+    await expect(roulette).toBeVisible();
+    await expect(drawButton).toBeEnabled();
     const accessoryGrid = page.locator('[aria-label="액세서리 목록"]');
-    const letterButton = page.getByRole('button', { name: '하트 편지 무료로 받기' });
-    const choiceBox = await letterButton.boundingBox();
-    expect(choiceBox?.height ?? 0, 'each direct choice keeps a 44px touch target').toBeGreaterThanOrEqual(44);
+    const drawBox = await drawButton.boundingBox();
+    expect(drawBox?.height ?? 0, 'the free reveal keeps a 44px touch target').toBeGreaterThanOrEqual(44);
     expect((await accessoryGrid.boundingBox())?.width ?? width + 1).toBeLessThanOrEqual(width - 32);
 
-    await letterButton.click();
+    await drawButton.click();
+    await expect(roulette).toHaveAttribute('aria-busy', 'true');
+    await expect(wheel).toHaveAttribute('data-reveal-motion', 'full');
+    await expect(revealResult).toHaveCount(0);
+
+    const firstPersisted = await readOwnedAccessories(page);
+    expect(firstPersisted).toHaveLength(1);
+    const firstId = firstPersisted[0];
+    expect(STARTER_ACCESSORY_LABELS[firstId]).toBeDefined();
+
+    const visibleMotion = await wheel.evaluate((element) => {
+      const style = window.getComputedStyle(element);
+      const bounds = element.getBoundingClientRect();
+      return {
+        animationName: style.animationName,
+        animationDurationSeconds: Number.parseFloat(style.animationDuration),
+        width: bounds.width,
+        height: bounds.height,
+      };
+    });
+    expect(visibleMotion.animationName).not.toBe('none');
+    expect(visibleMotion.animationDurationSeconds).toBeGreaterThan(0);
+    expect(visibleMotion.width).toBeGreaterThan(0);
+    expect(visibleMotion.height).toBeGreaterThan(0);
+    if (width === 393) {
+      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-reveal-rotating.png' });
+    }
+
+    await expect(revealResult).toHaveAttribute('data-accessory', firstId, { timeout: 3_000 });
+    const revealStatus = page
+      .locator('section[aria-labelledby="accessory-collection-title"]')
+      .getByRole('status');
+    await expect(revealStatus).toContainText(STARTER_ACCESSORY_LABELS[firstId]);
+    await expect(revealStatus).toContainText('무료로 받았어요.');
     await expect(
-      page.locator('section[aria-labelledby="accessory-collection-title"]').getByRole('status'),
-    ).toContainText('하트 편지를 무료로 받았어요.');
-    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: '검정 부츠 무료로 받기' })).toBeEnabled();
+      accessoryGrid.locator('[data-owned="true"]').filter({ hasText: STARTER_ACCESSORY_LABELS[firstId] }),
+    ).toBeVisible();
+    if (width === 393) {
+      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-reveal-result.png' });
+    }
+
+    await drawButton.click();
+    await expect(revealResult).toHaveCount(0);
+    const secondPersisted = await readOwnedAccessories(page);
+    expect(secondPersisted).toHaveLength(2);
+    expect(new Set(secondPersisted).size, 'each reveal must select an unowned item').toBe(2);
+    const secondId = secondPersisted.find((id) => id !== firstId);
+    if (!secondId) throw new Error('the second reveal did not persist a distinct accessory');
+    await expect(revealResult).toHaveAttribute('data-accessory', secondId, { timeout: 3_000 });
 
     await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
     await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
@@ -226,8 +295,12 @@ for (const width of [320, 393]) {
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
     await page.reload();
-    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: '검정 부츠 무료로 받기' })).toBeEnabled();
+    for (const id of secondPersisted) {
+      await expect(
+        accessoryGrid.locator('[data-owned="true"]').filter({ hasText: STARTER_ACCESSORY_LABELS[id] }),
+      ).toBeVisible();
+    }
+    await expect(drawButton).toBeEnabled();
     await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
@@ -237,6 +310,42 @@ for (const width of [320, 393]) {
     await context.close();
   });
 }
+
+test('the finite free Shop reveal replaces rotation with a short transition for reduced motion', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 852 },
+    reducedMotion: 'reduce',
+  });
+  await installMockBackend(context, CREATOR);
+  const page = await context.newPage();
+
+  await bootedInto(page, '/shop');
+  await expect.poll(() => page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
+
+  const wheel = page.getByTestId('accessory-roulette-wheel');
+  const drawButton = page.getByRole('button', { name: '무료 장식 하나 공개하기' });
+  await drawButton.click();
+
+  const reducedTransition = await wheel.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return {
+      mode: element.getAttribute('data-reveal-motion'),
+      rotates: element.classList.contains('starter-reveal-rotating'),
+      animationName: style.animationName,
+      transitionDurationSeconds: Number.parseFloat(style.transitionDuration),
+      resultIsVisible: element.parentElement?.querySelector('[data-testid="starter-reveal-result"]') !== null,
+    };
+  });
+  expect(reducedTransition.mode).toBe('reduced');
+  expect(reducedTransition.rotates).toBe(false);
+  expect(reducedTransition.animationName).toBe('none');
+  expect(reducedTransition.transitionDurationSeconds).toBeGreaterThan(0);
+  expect(reducedTransition.resultIsVisible).toBe(false);
+  expect(await readOwnedAccessories(page)).toHaveLength(1);
+
+  await expect(page.getByTestId('starter-reveal-result')).toBeVisible({ timeout: 1_000 });
+  await context.close();
+});
 
 test('the primary action on each core screen is present and enabled for a real couple', async ({ browser }) => {
   const context = await browser.newContext();

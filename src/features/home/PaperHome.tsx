@@ -1,6 +1,16 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bookmark as BookmarkIcon, Phone, Plus } from 'lucide-react';
+import { Bookmark as BookmarkIcon, ChevronRight, Phone, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
@@ -9,12 +19,12 @@ import { localToday } from '@/lib/cycle';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
 import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 import { Bookmark, InkCircle, PenFace } from '@/components/paper';
+import { BrandMark } from '@/components/BrandMark';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
-import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
 import { selectHomeFocus } from '@/features/home/homeFocus';
-import type { DailyRecord } from '@/types';
+import type { Attachment, DailyRecord } from '@/types';
 import {
   buildTalkAboutTopics,
   getTalkAboutActorState,
@@ -23,13 +33,107 @@ import {
 import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus';
 import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
+const loadRecordMediaGallery = () =>
+  import('@/components/media/RecordMediaGallery')
+    .then(({ RecordMediaGallery: Gallery }) => ({ default: Gallery }));
+
+function DeferredRecordMediaGallery({
+  attachments,
+  recordId,
+}: {
+  attachments: Attachment[];
+  recordId: string;
+}) {
+  // A new component type is created only after an explicit retry. React.lazy
+  // caches a rejected loader, so merely remounting one top-level lazy constant
+  // would make a retry button cosmetic.
+  const [Gallery] = useState(() => lazy(loadRecordMediaGallery));
+  return (
+    <Suspense
+      fallback={(
+        <div
+          role="status"
+          aria-label="사진을 불러오는 중"
+          className="aspect-[4/5] w-full animate-pulse motion-reduce:animate-none"
+          style={{ background: 'var(--paper-soft)', borderRadius: '10px 3px 12px 3px / 3px 12px 3px 10px' }}
+        />
+      )}
+    >
+      <Gallery attachments={attachments} recordId={recordId} />
+    </Suspense>
+  );
+}
+
+class MediaLoadBoundary extends Component<{
+  children: ReactNode;
+  onRetry: () => void;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    console.error('[gomsinlog] A record media module failed to load.');
+  }
+
+  private retry = () => {
+    this.setState({ failed: false });
+    this.props.onRetry();
+  };
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div
+        role="alert"
+        aria-label="사진을 불러오지 못했어요"
+        className="flex aspect-[4/5] w-full flex-col items-center justify-center gap-3 px-5 text-center"
+        style={{ background: 'var(--paper-soft)', borderRadius: '10px 3px 12px 3px / 3px 12px 3px 10px' }}
+      >
+        <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
+          사진을 불러오지 못했어요
+        </p>
+        <button
+          type="button"
+          onClick={this.retry}
+          className="press-response-row ink-chip min-h-11 px-4 text-caption font-semibold"
+          style={{ color: 'var(--ink)' }}
+        >
+          사진 다시 불러오기
+        </button>
+      </div>
+    );
+  }
+}
+
+function RetryableRecordMediaGallery({
+  attachments,
+  recordId,
+}: {
+  attachments: Attachment[];
+  recordId: string;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <MediaLoadBoundary onRetry={() => setAttempt((current) => current + 1)}>
+      <DeferredRecordMediaGallery
+        key={attempt}
+        attachments={attachments}
+        recordId={recordId}
+      />
+    </MediaLoadBoundary>
+  );
+}
+
 /**
  * 홈 — 노트에 그린 인스타그램.
  *
- *     헤더 56px        곰신로그 · 이야기할 것 · 통화
+ *     헤더 56px        곰신로그 · 책갈피 · 통화
  *     스토리 레일 106px 내 스토리(+) · 상대
  *     ─────────────
- *     포스트           사진/글 → 캡션 → 시간·원본·책갈피 44px
+ *     포스트           사진/글 → 캡션 → 시간·책갈피 44px
  *
  * 이 숫자들이 인스타를 인스타로 보이게 한다. 글자 크기는 임의 픽셀이 아니라 앱의 타입
  * 스케일을 쓴다 -- 둘이 거의 겹치기 때문이다(22 title · 17 heading · 15 body · 13 label ·
@@ -244,16 +348,19 @@ export function PaperHome() {
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과
           같은 자리이고, 사람이 쓴 글은 아니지만 **간판**이라 인쇄체로 두면 서식이 된다.
         */}
-        <span className="hand-text shrink-0 text-title leading-none" style={{ color: 'var(--ink)' }}>
-          곰신로그
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <BrandMark width={28} height={28} className="h-7 w-7" />
+          <span className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
+            곰신로그
+          </span>
+        </div>
 
         <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label="이야기할 것"
             onClick={() => navigate('/saved')}
-            className="press-response inline-flex min-h-11 items-center justify-center gap-1 px-2"
+            className="press-response inline-flex h-11 w-11 items-center justify-center"
           >
             <BookmarkIcon
               size={18}
@@ -262,9 +369,6 @@ export function PaperHome() {
               fill={hasMarks ? 'currentColor' : 'none'}
               aria-hidden="true"
             />
-            <span className="whitespace-nowrap text-label font-semibold" style={{ color: 'var(--ink)' }}>
-              이야기
-            </span>
           </button>
           {hasMarks ? (
             <button
@@ -327,7 +431,7 @@ export function PaperHome() {
             <button
               type="button"
               onClick={() => navigate('/story/partner')}
-              aria-label={`${partnerName}의 스토리`}
+              aria-label={`${partnerName}의 스토리${hasUnseen ? ', 새 기록 있음' : ''}`}
               className="press-response flex w-[72px] flex-col items-center gap-1"
             >
               {/*
@@ -343,11 +447,6 @@ export function PaperHome() {
               >
                 {partnerName}
               </span>
-              {hasUnseen ? (
-                <span className="text-caption font-semibold leading-none" style={{ color: 'var(--ink-accent)' }}>
-                  이어 보기
-                </span>
-              ) : null}
             </button>
           ) : (
             <div className="flex w-[72px] flex-col items-center gap-1" aria-hidden="true">
@@ -367,6 +466,7 @@ export function PaperHome() {
           <button
             type="button"
             onClick={() => navigate(focus.to)}
+            aria-label={`${focus.title}: ${focus.actionLabel}`}
             className="press-response flex min-h-[60px] w-full items-center gap-3 py-2 text-left"
           >
             <span
@@ -375,9 +475,12 @@ export function PaperHome() {
             >
               {focus.title}
             </span>
-            <span className="ml-auto shrink-0 text-label font-semibold" style={{ color: 'var(--ink-accent)' }}>
-              {focus.actionLabel}
-            </span>
+            <ChevronRight
+              size={19}
+              className="pen-icon ml-auto shrink-0"
+              color="var(--ink-accent)"
+              aria-hidden="true"
+            />
           </button>
           <div className="ink-rule" aria-hidden="true" />
         </section>
@@ -405,11 +508,8 @@ export function PaperHome() {
                 key={record.id}
                 record={record}
                 index={index}
-                mine={record.userId === profile.id}
-                myName={profile.myName || '나'}
                 partnerName={partnerName}
                 todayStr={todayStr}
-                onOpen={() => navigate(`/record?record=${encodeURIComponent(record.id)}`)}
                 talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
                 talkAboutBusy={pendingTalkAboutRecordId !== null}
                 talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
@@ -473,11 +573,8 @@ export function PaperHome() {
 function Post({
   record,
   index,
-  mine,
-  myName,
   partnerName,
   todayStr,
-  onOpen,
   talkAboutState,
   talkAboutBusy,
   talkAboutDisabled,
@@ -486,18 +583,14 @@ function Post({
 }: {
   record: DailyRecord;
   index: number;
-  mine: boolean;
-  myName: string;
   partnerName: string;
   todayStr: string;
-  onOpen: () => void;
   talkAboutState: TalkAboutActorState;
   talkAboutBusy: boolean;
   talkAboutDisabled: boolean;
   talkAboutDisabledReason?: string;
   onToggleTalkAbout: () => void;
 }) {
-  const author = mine ? myName : partnerName;
   const hasMedia = (record.attachments?.length ?? 0) > 0;
   const marked = talkAboutState === 'mine' || talkAboutState === 'both';
   const partnerMarked = talkAboutState === 'partner_only' || talkAboutState === 'both';
@@ -515,7 +608,10 @@ function Post({
       */}
       <div className="px-4">
         {hasMedia ? (
-          <RecordMediaGallery attachments={record.attachments ?? []} recordId={record.id} />
+          <RetryableRecordMediaGallery
+            attachments={record.attachments ?? []}
+            recordId={record.id}
+          />
         ) : record.contentUnavailable ? (
           <div
             className="flex items-center px-5 py-6"
@@ -557,7 +653,7 @@ function Post({
       ) : null}
 
       {/*
-        글 아래의 액션 줄. 시간은 초를 버리고 분까지만, 원본과 책갈피는 44px 표적이다.
+        글 아래의 액션 줄. 시간은 초를 버리고 분까지만, 책갈피는 44px 표적이다.
         **숫자가 없다.**
 
         좋아요 수·조회 수·본 사람은 §16의 비목표다. 세는 순간 두 사람 사이에 점수가
@@ -580,15 +676,6 @@ function Post({
         >
           {timeAgo(record, todayStr)}
         </p>
-        <button
-          type="button"
-          aria-label={`${author}의 기록 열기`}
-          onClick={onOpen}
-          className="press-response inline-flex min-h-11 items-center justify-center px-2 text-label font-semibold"
-          style={{ color: 'var(--ink)' }}
-        >
-          원문 보기
-        </button>
         <Bookmark
           marked={marked}
           partnerMarked={partnerMarked}
@@ -596,7 +683,6 @@ function Post({
           onToggle={onToggleTalkAbout}
           disabled={talkAboutDisabled}
           disabledReason={talkAboutDisabledReason}
-          visibleLabel="이야기"
         />
       </div>
     </article>

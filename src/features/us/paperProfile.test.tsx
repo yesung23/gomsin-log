@@ -118,7 +118,9 @@ describe('PaperProfile (우리 화면)', () => {
     for (const name of ['게시물 만들기', '기록 남기기', '마이 메뉴 열기']) {
       expect(screen.getByRole('button', { name })).toHaveClass('press-response');
     }
-    expect(screen.getByTestId('profile-sticky-header').className).toContain('sticky');
+    const header = screen.getByTestId('profile-sticky-header');
+    expect(header).toHaveClass('sticky', 'paper-texture-layer');
+    expect(header).not.toHaveStyle({ background: 'var(--paper)' });
     // The bottom navigation owns the Find tab; this component test does not mount the app shell.
     expect(screen.queryByRole('button', { name: '기록 찾기' })).not.toBeInTheDocument();
   });

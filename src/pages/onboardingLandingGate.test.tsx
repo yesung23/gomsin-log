@@ -147,6 +147,15 @@ describe('email sign-in is gone', () => {
 });
 
 describe('it says what the app is before asking for an account', () => {
+  it('uses the approved favicon mark on the same paper surface as the signed-in app', () => {
+    renderLanding();
+
+    const mark = screen.getByRole('img', { name: '곰신로그 브랜드 마크' });
+    expect(mark).toHaveAttribute('src', '/favicon.svg');
+    expect(mark).toHaveAttribute('data-brand-mark', 'true');
+    expect(mark.closest('[data-astryx-theme="gomsin"]')).toHaveClass('paper-texture-layer');
+  });
+
   it('names the problem rather than the category', () => {
     renderLanding();
     expect(screen.getByText('답장이 늦어도, 서로의 하루를 이어 둘만의 기억으로 남겨요.')).toBeInTheDocument();

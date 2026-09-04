@@ -24,8 +24,8 @@ test('Home contains long partner names and records on the smallest supported wid
   await expect(page.getByRole('region', { name: '지금 가장 필요한 것' })).toBeVisible();
   await expect(page.getByText(longRecord.log_text)).toBeVisible();
   await expect(page.getByRole('heading', { name: `${longPartnerName}의 최근 기록` })).toBeVisible();
-  await expect(page.getByRole('button', { name: `${longPartnerName}의 기록 열기` })).toContainText('원문 보기');
-  await expect(page.getByRole('button', { name: '이따 이야기하기' })).toContainText('이야기');
+  await expect(page.getByText('원문 보기')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '이따 이야기하기' })).toHaveText('');
 
   const overflow = await page.evaluate(() => (
     Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth)

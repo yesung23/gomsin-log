@@ -346,7 +346,7 @@ test("군화의 홈은 곰신과 같은 화면이고, 먼저 가리키는 링만
    * 이것이 꺼지면 군화의 홈은 아무 데도 가리키지 않는 화면이 된다.
    */
   const mine = page.getByRole('button', { name: '내 스토리' });
-  const theirs = page.getByRole('button', { name: '춘향의 스토리' });
+  const theirs = page.getByRole('button', { name: '춘향의 스토리, 새 기록 있음' });
   await expect(mine).toBeVisible();
   await expect(theirs).toBeVisible();
 

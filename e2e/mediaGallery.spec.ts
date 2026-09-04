@@ -153,7 +153,6 @@ test('홈 사진 포스트는 사진, 이름 없는 글, 분 단위 시간과 �
   const media = article.getByTestId('record-media-carousel');
   const body = article.getByText('오늘 본 노을', { exact: true });
   const time = article.getByText('오늘 18:40', { exact: true });
-  const original = article.getByRole('button', { name: '몽룡의 기록 열기' });
   const bookmark = article.getByRole('button', { name: '이따 이야기하기' });
 
   await expect(article).toBeVisible({ timeout: 20_000 });
@@ -163,21 +162,18 @@ test('홈 사진 포스트는 사진, 이름 없는 글, 분 단위 시간과 �
   const mediaBox = await media.boundingBox();
   const bodyBox = await body.boundingBox();
   const timeBox = await time.boundingBox();
-  const originalBox = await original.boundingBox();
   const bookmarkBox = await bookmark.boundingBox();
 
   expect(mediaBox).not.toBeNull();
   expect(bodyBox).not.toBeNull();
   expect(timeBox).not.toBeNull();
-  expect(originalBox).not.toBeNull();
   expect(bookmarkBox).not.toBeNull();
   expect(mediaBox!.y + mediaBox!.height).toBeLessThanOrEqual(bodyBox!.y);
   expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(bookmarkBox!.y + bookmarkBox!.height);
   expect(timeBox!.y).toBeGreaterThanOrEqual(bodyBox!.y + bodyBox!.height);
-  expect(originalBox!.width).toBeGreaterThanOrEqual(44);
-  expect(originalBox!.height).toBeGreaterThanOrEqual(44);
   expect(bookmarkBox!.width).toBeGreaterThanOrEqual(44);
   expect(bookmarkBox!.height).toBeGreaterThanOrEqual(44);
+  await expect(article.getByText('원문 보기')).toHaveCount(0);
   expect(await horizontalOverflow(page)).toBe(0);
 
   await page.screenshot({ path: './ui-audit-results/after/home-post-clean-390.png', fullPage: true });

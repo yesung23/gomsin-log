@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { installMockBackend, type Scenario } from './fixtures/mockBackend';
-import { CREATOR, PARTNER, NO_SPACE } from './scenarios';
+import { CREATOR, PARTNER, NO_SPACE, TODAY } from './scenarios';
 
 /**
  * Photograph the whole app from the real production bundle.
@@ -25,6 +25,13 @@ const TABS = [
 
 const IPHONE_16_PRO_VIEWPORT = { width: 402, height: 874 } as const;
 const SMALL_IPHONE_VIEWPORT = { width: 375, height: 667 } as const;
+
+function shiftCalendarDate(date: string, deltaDays: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + deltaDays);
+  return value.toISOString().slice(0, 10);
+}
 
 /**
  * A context with the backend mocked and a theme chosen, and only THEN a page.
@@ -213,3 +220,80 @@ for (const width of [320, 390] as const) {
     await page.context().close();
   });
 }
+
+test('Home and My share the approved paper brand while onboarding keeps legal targets operable', async ({ browser }) => {
+  const signedInPage = await boot(browser, CREATOR);
+
+  await signedInPage.goto('/home');
+  await ready(signedInPage);
+  const homeMark = signedInPage.getByRole('img', { name: '곰신로그 브랜드 마크' });
+  await expect(homeMark).toBeVisible();
+  await expect(homeMark).toHaveAttribute('src', '/favicon.svg');
+  await shot(signedInPage, 'brand-home');
+
+  await signedInPage.goto('/us');
+  await ready(signedInPage);
+  const profileHeader = signedInPage.getByTestId('profile-sticky-header');
+  await expect(profileHeader).toHaveClass(/paper-texture-layer/);
+  await expect(profileHeader).toHaveClass(/sticky/);
+  await shot(signedInPage, 'paper-us-header');
+  await signedInPage.context().close();
+
+  const onboardingContext = await browser.newContext({ viewport: SMALL_IPHONE_VIEWPORT });
+  await installMockBackend(onboardingContext, NO_SPACE);
+  await onboardingContext.addInitScript(() => window.localStorage.clear());
+  const onboardingPage = await onboardingContext.newPage();
+  await onboardingPage.goto('/');
+
+  const onboardingMark = onboardingPage.getByRole('img', { name: '곰신로그 브랜드 마크' });
+  await expect(onboardingMark).toBeVisible({ timeout: 20_000 });
+  await expect(onboardingMark).toHaveAttribute('src', '/favicon.svg');
+  const onboardingFrame = onboardingMark.locator('xpath=ancestor::*[@data-astryx-theme="gomsin"]');
+  await expect(onboardingFrame).toHaveClass(/paper-texture-layer/);
+
+  const targetSizes = await onboardingPage
+    .getByRole('checkbox')
+    .evaluateAll((controls) => controls.map((control) => {
+      const bounds = control.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    }));
+  expect(targetSizes).toHaveLength(2);
+  for (const target of targetSizes) {
+    expect(target.width, 'each legal checkbox must keep a 44px-wide target').toBeGreaterThanOrEqual(44);
+    expect(target.height, 'each legal checkbox must keep a 44px-tall target').toBeGreaterThanOrEqual(44);
+  }
+
+  for (const documentName of ['서비스 이용약관', '개인정보 처리방침']) {
+    const documentAction = onboardingPage.getByRole('button', { name: documentName });
+    const bounds = await documentAction.boundingBox();
+    expect(bounds?.width ?? 0, `${documentName} must keep a 44px-wide target`).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height ?? 0, `${documentName} must keep a 44px-tall target`).toBeGreaterThanOrEqual(44);
+  }
+
+  const overflow = await onboardingPage.evaluate(() => (
+    document.documentElement.scrollWidth - document.documentElement.clientWidth
+  ));
+  expect(overflow, 'onboarding must not overflow after expanding legal targets').toBeLessThanOrEqual(1);
+  await shot(onboardingPage, 'paper-onboarding-legal-targets');
+  await onboardingContext.close();
+});
+
+test('the living garden is visually captured with the planted shared tree and exact companions', async ({ browser }) => {
+  const gardenPage = await boot(browser, {
+    ...CREATOR,
+    anniversaryDate: shiftCalendarDate(TODAY, -99),
+  });
+
+  await gardenPage.goto('/diary/garden');
+  await expect(gardenPage.getByTestId('garden-scene')).toBeVisible({ timeout: 20_000 });
+  if (await gardenPage.getByRole('button', { name: '나무 심기' }).count()) {
+    await gardenPage.getByRole('button', { name: '나무 심기' }).click();
+  }
+
+  await expect(gardenPage.getByTestId('garden-tree-stage-3')).toBeVisible();
+  await expect(gardenPage.getByTestId('garden-exact-character-peach')).toBeVisible();
+  await expect(gardenPage.getByTestId('garden-exact-character-sage')).toBeVisible();
+  await expect(gardenPage.getByText(/함께한 \d+일/)).toHaveCount(0);
+  await shot(gardenPage, 'living-garden');
+  await gardenPage.context().close();
+});

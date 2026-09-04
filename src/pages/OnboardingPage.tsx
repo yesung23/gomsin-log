@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { BrandMark } from '@/components/BrandMark';
 import { PenFace } from '@/components/paper/InkCircle';
 import { Button } from '@/components/ui/Button';
 import {
@@ -49,6 +50,41 @@ function isAbortError(error: unknown): boolean {
 
 function buildInviteShareText(code: string): string {
   return `[곰신로그] 초대 코드: ${code}\n'초대 코드가 있어요'에 코드를 입력해 주세요.`;
+}
+
+function ConsentCheckboxControl({
+  id,
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  id?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        aria-label={ariaLabel}
+        className="peer absolute inset-0 z-10 h-11 w-11 cursor-pointer opacity-0"
+      />
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none flex h-5 w-5 items-center justify-center rounded-[4px] border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-coral-strong peer-focus-visible:ring-offset-2 ${
+          checked
+            ? 'border-coral-strong bg-coral-strong text-white'
+            : 'border-border bg-background text-transparent'
+        }`}
+      >
+        <Check size={14} strokeWidth={3} />
+      </span>
+    </span>
+  );
 }
 
 function OnboardingWithRouter() {
@@ -975,7 +1011,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       */}
       <div
         data-astryx-theme="gomsin"
-        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        className="paper-texture-layer relative w-full max-w-[430px] min-h-screen min-h-[100dvh] shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
       >
         
         {/*
@@ -1048,10 +1084,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 themselves in is the asymmetry: one person can reply now and the
                 other cannot, so the day gets lost between them. That is the line
                 that belongs at the top.
-              */}
+                */}
               <div className="text-center space-y-3">
                 <div className="flex justify-center mb-3">
-                  <CoupleAvatar size={84} />
+                  <BrandMark width={84} height={84} className="h-[84px] w-[84px]" />
                 </div>
                 <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
                 <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
@@ -1108,8 +1144,11 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   claims it will do something it will not.
                 */}
                 <div className="rounded-control border border-border bg-muted/40 p-3 space-y-2">
-                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
-                    <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-1 accent-coral" />
+                  <label className="flex min-h-11 items-center gap-2 text-caption text-foreground leading-relaxed">
+                    <ConsentCheckboxControl
+                      checked={ageConfirmed}
+                      onChange={setAgeConfirmed}
+                    />
                     <span><strong>[필수]</strong> 만 14세 이상입니다.</span>
                   </label>
                   {/*
@@ -1134,39 +1173,37 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     sentence; three separate label fragments would otherwise announce as
                     "[필수] 및 을 확인하고 동의합니다."
                   */}
-                  <div className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
-                    <input
+                  <div className="flex min-h-11 items-start gap-2 text-caption text-foreground leading-relaxed">
+                    <ConsentCheckboxControl
                       id="legal-consent-checkbox"
-                      type="checkbox"
                       checked={legalAccepted}
-                      onChange={(event) => setLegalAccepted(event.target.checked)}
-                      aria-label={`[필수] ${LEGAL_DOC_TITLES.terms} 및 ${LEGAL_DOC_TITLES.privacy}을 확인하고 동의합니다.`}
-                      className="mt-1 accent-coral"
+                      onChange={setLegalAccepted}
+                      ariaLabel={`[필수] ${LEGAL_DOC_TITLES.terms} 및 ${LEGAL_DOC_TITLES.privacy}을 확인하고 동의합니다.`}
                     />
-                    <span>
-                      <label htmlFor="legal-consent-checkbox"><strong>[필수]</strong>{' '}</label>
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center">
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center"><strong>[필수]</strong>{' '}</label>
                       <button
                         type="button"
                         onClick={(event) => {
                           legalTriggerRef.current = event.currentTarget;
                           setOpenLegalDoc('terms');
                         }}
-                        className="underline underline-offset-2"
+                        className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-1 underline underline-offset-2"
                       >
                         {LEGAL_DOC_TITLES.terms}
                       </button>
-                      <label htmlFor="legal-consent-checkbox">{' 및 '}</label>
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center">{' 및 '}</label>
                       <button
                         type="button"
                         onClick={(event) => {
                           legalTriggerRef.current = event.currentTarget;
                           setOpenLegalDoc('privacy');
                         }}
-                        className="underline underline-offset-2"
+                        className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-1 underline underline-offset-2"
                       >
                         {LEGAL_DOC_TITLES.privacy}
                       </button>
-                      <label htmlFor="legal-consent-checkbox">을 확인하고 동의합니다.</label>
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center">을 확인하고 동의합니다.</label>
                     </span>
                   </div>
                 </div>

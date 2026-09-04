@@ -14,7 +14,7 @@ test('empty Home keeps both story entries and one useful next action visible', a
 
   await expect(page.getByRole('button', { name: '내 스토리' })).toBeVisible();
   await expect(page.getByRole('button', { name: /의 스토리$/ })).toBeVisible();
-  await expect(page.getByRole('button', { name: '이야기할 것' })).toContainText('이야기');
+  await expect(page.getByRole('button', { name: '이야기할 것' })).toHaveText('');
 
   const currentNeed = page.getByRole('region', { name: '지금 가장 필요한 것' });
   await expect(currentNeed).toBeVisible();

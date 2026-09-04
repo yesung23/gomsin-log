@@ -25,6 +25,7 @@ const markTalkAbout = vi.fn();
 const unmarkTalkAbout = vi.fn();
 const acknowledgePartnerDay = vi.fn();
 let online = true;
+let mediaShouldThrow = false;
 
 vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
@@ -76,9 +77,10 @@ vi.mock('@/components/CoupleStatusBanner', () => ({
 }));
 
 vi.mock('@/components/media/RecordMediaGallery', () => ({
-  RecordMediaGallery: ({ recordId }: { recordId: string }) => (
-    <div data-testid={`media-${recordId}`} />
-  ),
+  RecordMediaGallery: ({ recordId }: { recordId: string }) => {
+    if (mediaShouldThrow) throw new Error('simulated gallery chunk failure');
+    return <div data-testid={`media-${recordId}`} />;
+  },
 }));
 
 function view() {
@@ -100,6 +102,7 @@ beforeEach(() => {
   sharedSyncStatus = 'live';
   talkAboutMarks = [];
   online = true;
+  mediaShouldThrow = false;
   markTalkAbout.mockResolvedValue({ ok: true });
   unmarkTalkAbout.mockResolvedValue({ ok: true });
   records = [{
@@ -188,29 +191,31 @@ describe('Home 출시 상태 표현', () => {
     },
   );
 
-  it('남은 상대 스토리는 숫자 압박 없이 이어 보기라고 보인다', () => {
+  it('남은 상대 스토리는 추가 문구 없이 링으로만 구분한다', () => {
     partnerSurface = [records[0]];
 
     view();
 
-    const story = screen.getByRole('button', { name: '예성의 스토리' });
-    expect(within(story).getByText('이어 보기')).toBeInTheDocument();
+    const story = screen.getByRole('button', { name: '예성의 스토리, 새 기록 있음' });
+    expect(within(story).queryByText('이어 보기')).not.toBeInTheDocument();
+    expect(story.querySelector('[data-ring="new"]')).not.toBeNull();
     expect(story).not.toHaveTextContent(/\d/);
   });
 
-  it('지금 필요한 것은 설명 문단 없이 한 제목과 한 행동으로 보인다', () => {
+  it('지금 필요한 것은 한 제목과 진행 아이콘만 보인다', () => {
     partnerSurface = [records[0]];
 
     view();
 
     const focus = screen.getByRole('region', { name: '지금 가장 필요한 것' });
     expect(within(focus).getByText('예성의 오늘')).toBeInTheDocument();
-    expect(within(focus).getByText('이어 보기')).toBeInTheDocument();
+    expect(within(focus).queryByText('이어 보기')).not.toBeInTheDocument();
+    expect(within(focus).getByRole('button', { name: '예성의 오늘: 이어 보기' })).toBeInTheDocument();
     expect(within(focus).queryByText('상대의 오늘')).not.toBeInTheDocument();
     expect(within(focus).queryByText(/하루를 이어서 볼 수/)).not.toBeInTheDocument();
   });
 
-  it('원문 보기라는 보이는 행동으로 정확히 인코딩된 기록을 연다', () => {
+  it('홈 피드는 이미 원본이므로 중복된 원문 보기 행동을 두지 않는다', () => {
     records = [{
       ...records[0],
       id: 'partner/current?part=1',
@@ -218,10 +223,9 @@ describe('Home 출시 상태 표현', () => {
 
     view();
 
-    const open = screen.getByRole('button', { name: '예성의 기록 열기' });
-    expect(open).toHaveTextContent('원문 보기');
-    fireEvent.click(open);
-    expect(navigate).toHaveBeenCalledWith('/record?record=partner%2Fcurrent%3Fpart%3D1');
+    expect(screen.getByText('오늘 하루도 함께해줘서 고마워')).toBeInTheDocument();
+    expect(screen.queryByText('원문 보기')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '예성의 기록 열기' })).not.toBeInTheDocument();
   });
 
   it('헤더의 종이 결 위에 보이는 이야기와 사용할 수 있는 통화 행동을 둔다', () => {
@@ -238,7 +242,7 @@ describe('Home 출시 상태 표현', () => {
 
     const header = screen.getByTestId('home-sticky-header');
     expect(header).toHaveClass('paper-texture-layer');
-    expect(within(header).getByRole('button', { name: '이야기할 것' })).toHaveTextContent('이야기');
+    expect(within(header).getByRole('button', { name: '이야기할 것' })).not.toHaveTextContent('이야기');
     expect(within(header).getByRole('button', { name: '통화 모드' })).toBeInTheDocument();
   });
 
@@ -279,12 +283,12 @@ describe('Home 출시 상태 표현', () => {
 
     view();
 
-    const open = screen.getByRole('button', { name: `${partnerName}의 기록 열기` });
-    const actions = open.parentElement;
+    const bookmark = screen.getByRole('button', { name: '이따 이야기하기' });
+    const actions = bookmark.parentElement;
     expect(actions).toHaveClass('min-h-11', 'flex-wrap', 'gap-y-2');
     expect(actions).not.toHaveClass('h-11');
     expect(actions).not.toHaveStyle({ background: 'var(--paper)' });
-    expect(open).toHaveClass('min-h-11');
+    expect(bookmark).toHaveClass('min-h-11');
   });
 
   it('Home의 탐색과 이야기 표시가 PartnerDay 확인을 대신하지 않는다', () => {
@@ -292,8 +296,7 @@ describe('Home 출시 상태 표현', () => {
 
     view();
 
-    fireEvent.click(screen.getByRole('button', { name: '예성의 스토리' }));
-    fireEvent.click(screen.getByRole('button', { name: '예성의 기록 열기' }));
+    fireEvent.click(screen.getByRole('button', { name: '예성의 스토리, 새 기록 있음' }));
     fireEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
 
     expect(acknowledgePartnerDay).not.toHaveBeenCalled();
@@ -301,7 +304,7 @@ describe('Home 출시 상태 표현', () => {
 });
 
 describe('홈의 상대방 전용 7일 피드', () => {
-  it('상대방의 오늘 surface에도 있는 공유 기록을 표시하고 정확한 원본을 연다', () => {
+  it('상대방의 오늘 surface에도 있는 공유 원본 기록을 홈에 그대로 표시한다', () => {
     records = [{
       id: 'partner-current',
       userId: 'partner',
@@ -317,8 +320,7 @@ describe('홈의 상대방 전용 7일 피드', () => {
     view();
 
     expect(screen.getByText('스토리에도 있는 상대 기록')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: '예성의 기록 열기' }));
-    expect(navigate).toHaveBeenCalledWith('/record?record=partner-current');
+    expect(screen.queryByText('원문 보기')).not.toBeInTheDocument();
   });
 
   it('내 기록과 현재 상대가 아닌 작성자의 공유 기록을 표시하지 않는다', () => {
@@ -469,7 +471,7 @@ describe('홈의 지난 오늘 개인정보 경계', () => {
 });
 
 describe('홈 포스트 읽기 순서', () => {
-  it('사진 다음에 이름 없는 글, 그 아래 분 단위 시간과 책갈피를 표시한다', () => {
+  it('사진 다음에 이름 없는 글, 그 아래 분 단위 시간과 책갈피를 표시한다', async () => {
     view();
 
     const body = screen.getByText('오늘 하루도 함께해줘서 고마워');
@@ -477,7 +479,7 @@ describe('홈 포스트 읽기 순서', () => {
     expect(article).not.toBeNull();
 
     const post = within(article!);
-    const media = post.getByTestId('media-record-1');
+    const media = await post.findByTestId('media-record-1');
     const bookmark = post.getByRole('button', { name: '이따 이야기하기' });
     const time = post.getByText('오늘 01:23');
 
@@ -488,6 +490,7 @@ describe('홈 포스트 읽기 순서', () => {
     expect(media.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(body.compareDocumentPosition(bookmark) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(body.compareDocumentPosition(time) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bookmark).not.toHaveTextContent('이야기');
   });
 
   it('고정 로고와 액션 행도 선택한 종이 레이어를 이어 쓴다', () => {
@@ -496,6 +499,28 @@ describe('홈 포스트 읽기 순서', () => {
     const header = screen.getByTestId('home-sticky-header');
     expect(header).toHaveClass('paper-texture-layer');
     expect(header).not.toHaveStyle({ background: 'var(--paper)' });
+    const mark = within(header).getByRole('img', { name: '곰신로그 브랜드 마크' });
+    expect(mark).toHaveAttribute('src', '/favicon.svg');
+    expect(mark).toHaveAttribute('data-brand-mark', 'true');
+  });
+
+  it('사진 모듈 로드 실패를 포스트 안에서 복구하고 나머지 홈은 유지한다', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mediaShouldThrow = true;
+    view();
+
+    expect(await screen.findByRole('alert', { name: '사진을 불러오지 못했어요' }))
+      .toBeInTheDocument();
+    expect(screen.getByText('오늘 하루도 함께해줘서 고마워')).toBeInTheDocument();
+    expect(screen.getByTestId('home-sticky-header')).toBeInTheDocument();
+
+    mediaShouldThrow = false;
+    fireEvent.click(screen.getByRole('button', { name: '사진 다시 불러오기' }));
+
+    expect(await screen.findByTestId('media-record-1')).toBeInTheDocument();
+    expect(screen.queryByRole('alert', { name: '사진을 불러오지 못했어요' }))
+      .not.toBeInTheDocument();
+    consoleError.mockRestore();
   });
 });
 

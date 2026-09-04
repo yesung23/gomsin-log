@@ -585,7 +585,7 @@ export function SharedProfile() {
 
   return (
     <div className="min-h-full pb-8">
-      <header data-testid="profile-sticky-header" className="sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ background: 'var(--paper)' }}>
+      <header data-testid="profile-sticky-header" className="paper-texture-layer sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4">
         {/*
           왼쪽 끝이 게시물 만들기다.
 

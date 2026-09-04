@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
-const MIGRATION = join(ROOT, 'supabase/migrations/073_apple_iap_server_ledger.sql');
+const MIGRATION = join(ROOT, 'supabase/migrations/077_apple_iap_server_ledger.sql');
 const keep = process.argv.includes('--keep');
 const env = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const A = '00000000-0000-4000-8000-00000000000a';

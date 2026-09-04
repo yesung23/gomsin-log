@@ -1,4 +1,4 @@
--- 073_apple_iap_server_ledger.sql
+-- 077_apple_iap_server_ledger.sql
 --
 -- Apple IAP server-authoritative ledger foundation.
 --

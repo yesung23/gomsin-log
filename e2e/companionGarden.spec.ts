@@ -729,3 +729,100 @@ test('reduced-motion stops autonomous wandering and repeated squirm while preser
   expect(unrouted).toEqual([]);
   await context.close();
 });
+
+test('first-frame portrait composition centers the tree and companions above lower third across all phone viewports while landscape remains grounded', async ({ browser }) => {
+  const portraitViewports = [
+    { width: 320, height: 568 },
+    { width: 375, height: 812 },
+    { width: 390, height: 844 },
+    { width: 402, height: 874 },
+  ] as const;
+
+  for (const viewport of portraitViewports) {
+    const context = await browser.newContext({ viewport, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+    const unrouted = await openGarden(context, page);
+
+    const scene = page.getByTestId('garden-scene');
+    const sceneBox = await scene.boundingBox();
+    expect(sceneBox).not.toBeNull();
+    if (!sceneBox) throw new Error('Scene box unavailable');
+
+    const tree = page.getByTestId('garden-tree-stage-3');
+    await expect(tree).toBeVisible();
+    const treeBox = await tree.boundingBox();
+    expect(treeBox).not.toBeNull();
+    if (!treeBox) throw new Error('Tree box unavailable');
+
+    const peach = page.getByTestId('garden-companion-peach');
+    const sage = page.getByTestId('garden-companion-sage');
+    await expect(peach).toBeVisible();
+    await expect(sage).toBeVisible();
+
+    const peachDataY = Number(await peach.getAttribute('data-y'));
+    const sageDataY = Number(await sage.getAttribute('data-y'));
+    expect(peachDataY).toBeCloseTo(68, 0);
+    expect(sageDataY).toBeCloseTo(65, 0);
+
+    const peachBox = await peach.boundingBox();
+    const sageBox = await sage.boundingBox();
+    expect(peachBox).not.toBeNull();
+    expect(sageBox).not.toBeNull();
+    if (!peachBox || !sageBox) throw new Error('Companion box unavailable');
+
+    // Contained in scene
+    expect(peachBox.x).toBeGreaterThanOrEqual(sceneBox.x - 1);
+    expect(peachBox.x + peachBox.width).toBeLessThanOrEqual(sceneBox.x + sceneBox.width + 1);
+    expect(peachBox.y).toBeGreaterThanOrEqual(sceneBox.y - 1);
+    expect(peachBox.y + peachBox.height).toBeLessThanOrEqual(sceneBox.y + sceneBox.height + 1);
+
+    expect(sageBox.x).toBeGreaterThanOrEqual(sceneBox.x - 1);
+    expect(sageBox.x + sageBox.width).toBeLessThanOrEqual(sceneBox.x + sceneBox.width + 1);
+    expect(sageBox.y).toBeGreaterThanOrEqual(sceneBox.y - 1);
+    expect(sageBox.y + sageBox.height).toBeLessThanOrEqual(sceneBox.y + sceneBox.height + 1);
+
+    // Visual center: tree bottom must be lifted well above the bottom 25%
+    const treeBottomDistance = (sceneBox.y + sceneBox.height) - (treeBox.y + treeBox.height);
+    const treeBottomPercent = (treeBottomDistance / sceneBox.height) * 100;
+    expect(treeBottomPercent).toBeGreaterThanOrEqual(25);
+
+    // Companions bottom must be lifted above bottom 20%
+    const peachBottomDistance = (sceneBox.y + sceneBox.height) - (peachBox.y + peachBox.height);
+    expect((peachBottomDistance / sceneBox.height) * 100).toBeGreaterThanOrEqual(20);
+
+    // 4px pair gap maintained
+    const sample = await companionMotionSample(page);
+    expect(sample.gapPx).toBeGreaterThanOrEqual(MIN_MEASURED_PAIR_GAP_PX);
+
+    // No horizontal overflow
+    const hasHScroll = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(hasHScroll).toBe(false);
+
+    expect(pageErrors).toEqual([]);
+    expect(unrouted).toEqual([]);
+    await context.close();
+  }
+
+  // Short landscape check (812x375)
+  {
+    const context = await browser.newContext({ viewport: { width: 812, height: 375 }, reducedMotion: 'reduce' });
+    const page = await context.newPage();
+    const unrouted = await openGarden(context, page);
+
+    const peach = page.getByTestId('garden-companion-peach');
+    const sage = page.getByTestId('garden-companion-sage');
+    expect(Number(await peach.getAttribute('data-y'))).toBeCloseTo(78, 0);
+    expect(Number(await sage.getAttribute('data-y'))).toBeCloseTo(74, 0);
+
+    const sample = await companionMotionSample(page);
+    expect(sample.gapPx).toBeGreaterThanOrEqual(MIN_MEASURED_PAIR_GAP_PX);
+
+    const hasHScroll = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+    expect(hasHScroll).toBe(false);
+
+    expect(unrouted).toEqual([]);
+    await context.close();
+  }
+});

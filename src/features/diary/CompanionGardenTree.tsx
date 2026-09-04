@@ -25,9 +25,9 @@ export function CompanionGardenTree({
 }) {
   const height = getCompanionGardenTreeHeightPx(togetherDays);
   return (
-    <div
-      className="garden-tree pointer-events-none absolute bottom-[21%] left-0 z-[1] flex w-full justify-center landscape:bottom-[2%]"
-      style={{ height: `min(76vw, ${height}px)` }}
+   <div
+      className="garden-tree pointer-events-none absolute bottom-[33%] left-0 z-[1] flex w-full justify-center landscape:bottom-[2%]"
+     style={{ height: `min(76vw, ${height}px)` }}
       data-testid={`garden-tree-stage-${level}`}
       data-tree-asset-version="display-v1"
       data-tree-height={height}

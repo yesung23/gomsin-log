@@ -90,6 +90,15 @@ const INITIAL_MOTION: MotionMap = {
   sage: { x: 74, y: 74, moving: false, motionState: 'idle', moveCount: 0, transitionMs: 0 },
 };
 
+const PORTRAIT_INITIAL_MOTION: MotionMap = {
+  peach: { x: 26, y: 68, moving: false, motionState: 'idle', moveCount: 0, transitionMs: 0 },
+  sage: { x: 74, y: 65, moving: false, motionState: 'idle', moveCount: 0, transitionMs: 0 },
+};
+
+function isShortLandscapeScene(scene: GardenSceneSize): boolean {
+  return scene.width > scene.height && scene.height <= 500;
+}
+
 const FALLBACK_SCENE_SIZE: GardenSceneSize = { width: 320, height: 600 };
 const DEFAULT_PAIR_FOOTPRINTS: GardenPairFootprints = {
   peach: DEFAULT_GARDEN_FOOTPRINT,
@@ -526,6 +535,7 @@ export function CompanionGardenView({
   const schedulerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const schedulerGenerationRef = useRef(0);
   const geometryReadyRef = useRef(false);
+  const initialSeedDoneRef = useRef(false);
   const cadenceRef = useRef<{
     lastMover: GardenCompanionId | null;
     consecutiveMoves: number;
@@ -603,9 +613,17 @@ export function CompanionGardenView({
     if (!sceneClientBox) return markGeometryUnavailable();
     const { left: sceneLeft, top: sceneTop, size: measuredScene } = sceneClientBox;
     const measuredFootprints = { ...footprintsRef.current };
+    let sourcePoints: MotionMap = motionRef.current;
+    if (!initialSeedDoneRef.current) {
+      initialSeedDoneRef.current = true;
+      sourcePoints = isShortLandscapeScene(measuredScene)
+        ? INITIAL_MOTION
+        : PORTRAIT_INITIAL_MOTION;
+      motionRef.current = sourcePoints;
+    }
     const renderedPoints: Record<GardenCompanionId, GardenPoint> = {
-      peach: motionRef.current.peach,
-      sage: motionRef.current.sage,
+      peach: sourcePoints.peach,
+      sage: sourcePoints.sage,
     };
 
     for (const id of ['peach', 'sage'] as const) {

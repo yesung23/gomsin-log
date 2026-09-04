@@ -1046,7 +1046,7 @@ describe('interactive companion garden characters', () => {
     };
     expect(stagedPeach.x).toBeGreaterThan(50);
     expect(stagedPeach.x).toBeLessThan(58);
-    expect(stagedPeach.y).toBe(62);
+    expect(stagedPeach.y).toBe(52);
 
     // Reviewer path: the state target has already been clipped for the larger
     // sprite, but CSS is still rendered lower on the way from its prior point.
@@ -1603,9 +1603,43 @@ describe('autonomous companion wandering', () => {
       Number(peach.getAttribute('data-move-count')) + Number(sage.getAttribute('data-move-count')),
     ).toBe(movesBefore);
 
-    fireEvent.click(peach, { detail: 0 });
-    const beforeMove = Number(peach.getAttribute('data-x'));
-    fireEvent.click(screen.getByRole('button', { name: '살구 친구 왼쪽으로 이동' }));
-    expect(Number(peach.getAttribute('data-x'))).toBeLessThan(beforeMove);
+   fireEvent.click(peach, { detail: 0 });
+   const beforeMove = Number(peach.getAttribute('data-x'));
+   fireEvent.click(screen.getByRole('button', { name: '살구 친구 왼쪽으로 이동' }));
+   expect(Number(peach.getAttribute('data-x'))).toBeLessThan(beforeMove);
+ });
+
+  it('seeds lifted portrait initial coordinates on first valid portrait scene and preserves short landscape seeds', () => {
+    // Portrait scene: 375x812
+    gardenLayout.scene = rect(0, 0, 375, 814);
+    const view = render(<ControlledGarden />);
+    const peach = screen.getByTestId('garden-companion-peach');
+    const sage = screen.getByTestId('garden-companion-sage');
+
+    expect(Number(peach.getAttribute('data-x'))).toBeCloseTo(26, 1);
+    expect(Number(peach.getAttribute('data-y'))).toBeCloseTo(68, 1);
+    expect(Number(sage.getAttribute('data-x'))).toBeCloseTo(74, 1);
+    expect(Number(sage.getAttribute('data-y'))).toBeCloseTo(65, 1);
+
+    view.unmount();
+
+    // Short landscape scene: 812x375
+    gardenLayout.scene = rect(0, 0, 812, 377);
+    render(<ControlledGarden />);
+    const peachLand = screen.getByTestId('garden-companion-peach');
+    const sageLand = screen.getByTestId('garden-companion-sage');
+
+    expect(Number(peachLand.getAttribute('data-x'))).toBeCloseTo(26, 1);
+    expect(Number(peachLand.getAttribute('data-y'))).toBeCloseTo(78, 1);
+    expect(Number(sageLand.getAttribute('data-x'))).toBeCloseTo(74, 1);
+    expect(Number(sageLand.getAttribute('data-y'))).toBeCloseTo(74, 1);
+  });
+
+  it('renders the lifted tree bottom anchor for portrait scenes', () => {
+    render(<ControlledGarden />);
+    const tree = screen.getByTestId('garden-tree-stage-3');
+    expect(tree).toHaveClass('bottom-[33%]');
+    expect(tree).toHaveClass('landscape:bottom-[2%]');
+    expect(tree).not.toHaveClass('bottom-[21%]');
   });
 });

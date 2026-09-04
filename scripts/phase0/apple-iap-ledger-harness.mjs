@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Focused PostgreSQL actor proof for migrations 077 and 079.
+ * Focused PostgreSQL actor proof for migrations 077, 079, 081, and 082.
  *
  * This is intentionally independent from the older all-chain harness: it
  * creates the Supabase auth/role contract needed by this private schema, then
@@ -20,6 +20,7 @@ const ROOT = resolve(import.meta.dirname, '../..');
 const MIGRATION = join(ROOT, 'supabase/migrations/077_apple_iap_server_ledger.sql');
 const REFUND_MIGRATION = join(ROOT, 'supabase/migrations/079_apple_iap_refund_consumption.sql');
 const CONTRACT_MIGRATION = join(ROOT, 'supabase/migrations/081_retire_apple_iap_v1_entrypoints.sql');
+const FORWARD_FIX_MIGRATION = join(ROOT, 'supabase/migrations/082_apple_iap_refund_reconciliation_forward_fix.sql');
 const keep = process.argv.includes('--keep');
 const env = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const A = '00000000-0000-4000-8000-00000000000a';
@@ -57,6 +58,10 @@ if (!existsSync(REFUND_MIGRATION)) {
 }
 if (!existsSync(CONTRACT_MIGRATION)) {
   console.error('BLOCKED — migration 081 is not present.');
+  process.exit(2);
+}
+if (!existsSync(FORWARD_FIX_MIGRATION)) {
+  console.error('BLOCKED — migration 082 is not present.');
   process.exit(2);
 }
 if (!['initdb', 'pg_ctl', 'psql'].every(have)) {
@@ -790,8 +795,8 @@ try {
   if (scalar(`SELECT count(*)::text FROM pg_attribute AS attribute
       WHERE attribute.attrelid = 'iap_private.apple_consumption_requests'::regclass
         AND attribute.attname = 'consumption_request_reason'
-        AND NOT attribute.attisdropped`, 'consumption reason is not retained') !== '0') {
-    throw new Error('consumption request reason was retained without an approved policy');
+        AND NOT attribute.attisdropped`, '079 consumption reason evidence') !== '1') {
+    throw new Error('migration 079 history was rewritten instead of preserved');
   }
   expectOk(admin(`
     INSERT INTO auth.users (id) VALUES (${q(E)}::uuid), (${q(F)}::uuid);
@@ -936,26 +941,9 @@ try {
     ) AS x`,
   );
 
-  const deletedConsumptionId = '79000000-0000-4000-8000-000000000090';
-  const deletedConsumption = jsonResult(expectOk(processConsumption({
-    notificationId: deletedConsumptionId,
-    notificationHash: sha('deleted-account-consumption-request'),
-    token: TOKEN_D,
-    tx: '8190',
-    original: '8190',
-    product: 'paper.paid',
-    purchase: 9_000,
-    signed: 9_100,
-  }), 'deleted-account consumption request'), 'deleted-account consumption request');
-  if (deletedConsumption.consumption_status !== 'skipped_account_deleted') {
-    throw new Error('deleted-account consumption request was not retained as a terminal no-send decision');
-  }
-  if (actorScalar('service_role', null,
-    'SELECT count(*)::text FROM public.iap_claim_consumption_request()',
-    'deleted-account consumption remains unclaimable') !== '0') {
-    throw new Error('deleted-account consumption request became sendable');
-  }
-
+  // Exercise the mixed-version window before the contract migration retires
+  // service-role access to V1. This also proves the forward fix never needs to
+  // rewrite 079 to preserve its compatibility behavior.
   const legacyConsumable = jsonResult(expectOk(callApply({
     user: F,
     token: TOKEN_F,
@@ -984,6 +972,95 @@ try {
       WHERE environment = 'Production' AND source_transaction_id = '8791'`,
   'legacy V1 consumable exact lot') !== '0') {
     throw new Error('legacy V1 consumable was guessed into an exact credit lot');
+  }
+
+  // Seed a real pre-082 manual-review event so the upgrade path proves that
+  // historical uncertainty becomes an explicit, non-destructive review fact.
+  expectOk(callApplyV2({
+    tx: '8788',
+    purchase: 8_788,
+    signed: 8_789,
+    event: 'refund',
+    revoke: 8_789,
+    revocationType: 'REFUND_FULL',
+    revocationPercentage: 100_000,
+    hash: sha('pre-082-manual-review-8788'),
+  }), 'pre-082 manual-review event fixture');
+  const legacyReasonNotificationId = '79000000-0000-4000-8000-000000000091';
+  expectOk(processConsumption({
+    notificationId: legacyReasonNotificationId,
+    notificationHash: sha('pre-082-consumption-reason'),
+    tx: '8789',
+    purchase: 8_789,
+    signed: 8_790,
+    reason: 'FULFILLMENT_ISSUE',
+  }), 'pre-082 consumption-reason fixture');
+  if (scalar(`SELECT consumption_request_reason
+      FROM iap_private.apple_consumption_requests
+      WHERE notification_uuid = ${q(legacyReasonNotificationId)}::uuid`,
+  'pre-082 consumption reason value') !== 'FULFILLMENT_ISSUE') {
+    throw new Error('migration 079 did not preserve its verified reason evidence');
+  }
+
+  // Fresh and upgrade chains use the real numeric order. 081 retires the V1
+  // external contract; 082 then hardens the surviving V2 contract.
+  expectOk(psql(['-f', CONTRACT_MIGRATION]), 'apply migration 081 contract');
+  expectOk(psql(['-f', FORWARD_FIX_MIGRATION]), 'apply migration 082 forward fix');
+  if (scalar(`SELECT count(*)::text FROM pg_attribute AS attribute
+      WHERE attribute.attrelid = 'iap_private.apple_consumption_requests'::regclass
+        AND attribute.attname = 'consumption_request_reason'
+        AND NOT attribute.attisdropped`, '082 retained consumption reason evidence') !== '1') {
+    throw new Error('migration 082 destructively removed verified notification evidence');
+  }
+  if (scalar(`SELECT attnotnull::text FROM pg_attribute AS attribute
+      WHERE attribute.attrelid = 'iap_private.apple_consumption_requests'::regclass
+        AND attribute.attname = 'consumption_request_reason'
+        AND NOT attribute.attisdropped`, '082 optional consumption reason') !== 'false') {
+    throw new Error('migration 082 did not minimize new refund-reason collection');
+  }
+  if (scalar(`SELECT consumption_request_reason
+      FROM iap_private.apple_consumption_requests
+      WHERE notification_uuid = ${q(legacyReasonNotificationId)}::uuid`,
+  '082 preserved historical consumption reason') !== 'FULFILLMENT_ISSUE') {
+    throw new Error('migration 082 changed historical consumption reason evidence');
+  }
+  if (scalar(`SELECT review_reason_code FROM iap_private.apple_transaction_events
+      WHERE environment = 'Production' AND transaction_id = '8788'`,
+  '082 legacy review classification') !== 'LEGACY_REVIEW_UNSPECIFIED') {
+    throw new Error('migration 082 guessed or discarded a historical manual-review reason');
+  }
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transaction_review_facts AS review
+      JOIN iap_private.apple_transaction_events AS event ON event.event_id = review.event_id
+      WHERE event.environment = 'Production' AND event.transaction_id = '8788'
+        AND review.reason_code = 'LEGACY_REVIEW_UNSPECIFIED'`,
+  '082 legacy review fact backfill') !== '1') {
+    throw new Error('migration 082 did not preserve the legacy event as one auditable review fact');
+  }
+
+  const deletedConsumptionId = '79000000-0000-4000-8000-000000000090';
+  const deletedConsumption = jsonResult(expectOk(processConsumption({
+    notificationId: deletedConsumptionId,
+    notificationHash: sha('deleted-account-consumption-request'),
+    token: TOKEN_D,
+    tx: '8190',
+    original: '8190',
+    product: 'paper.paid',
+    purchase: 9_000,
+    signed: 9_100,
+  }), 'deleted-account consumption request'), 'deleted-account consumption request');
+  if (deletedConsumption.consumption_status !== 'skipped_account_deleted') {
+    throw new Error('deleted-account consumption request was not retained as a terminal no-send decision');
+  }
+  if (scalar(`SELECT (consumption_request_reason IS NULL)::text
+      FROM iap_private.apple_consumption_requests
+      WHERE notification_uuid = ${q(deletedConsumptionId)}::uuid`,
+  'post-082 consumption reason minimization') !== 'true') {
+    throw new Error('a post-082 consumption request persisted an unnecessary refund reason');
+  }
+  if (actorScalar('service_role', null,
+    'SELECT count(*)::text FROM public.iap_claim_consumption_request()',
+    'deleted-account consumption remains unclaimable') !== '0') {
+    throw new Error('deleted-account consumption request became sendable');
   }
 
   const legacyCommittedReservationId = scalar(`INSERT INTO iap_private.export_credit_reservations (
@@ -2013,6 +2090,15 @@ try {
   }
   checks += 1;
 
+  expectOk(callApplyV2({
+    user: B,
+    token: otherAccountToken,
+    tx: '8980',
+    product: 'paper.paid',
+    purchase: 60_500,
+    signed: 60_500,
+  }), 'reconciliation conflicting-owner fixture');
+
   expectFail(asActor('anon', null,
     'SELECT * FROM public.iap_claim_reconciliation_targets(1)'),
   'anon reconciliation claim');
@@ -2022,15 +2108,15 @@ try {
   expectFail(asActor('service_role', null,
     'SELECT * FROM public.iap_claim_reconciliation_targets(3)'),
   'oversized reconciliation claim');
-  const reconciliationPairCount = scalar(`SELECT count(*)::text FROM (
-      SELECT DISTINCT transaction.billing_account_id, transaction.environment
+  const reconciliationAnchorCount = scalar(`SELECT count(*)::text FROM (
+      SELECT DISTINCT transaction.environment, transaction.original_transaction_id
       FROM iap_private.apple_transactions AS transaction
       WHERE transaction.environment IN ('Sandbox', 'Production')
-    ) AS pair`, 'Apple customer/environment reconciliation pairs');
+    ) AS anchor`, 'Apple reconciliation anchor chains');
   if (scalar(`SELECT count(*)::text
       FROM iap_private.apple_reconciliation_checkpoints`,
-  'trigger-seeded reconciliation checkpoints') !== reconciliationPairCount) {
-    throw new Error('reconciliation checkpoints were not seeded once per Apple customer/environment');
+  'trigger-seeded reconciliation checkpoints') !== reconciliationAnchorCount) {
+    throw new Error('reconciliation checkpoints were not seeded once per original transaction chain');
   }
   if (scalar(`SELECT count(*)::text FROM (
       SELECT transaction.billing_account_id, transaction.environment
@@ -2043,126 +2129,242 @@ try {
   }
   const claimableReconciliationCount = Number(scalar(`SELECT count(*)::text
       FROM iap_private.apple_reconciliation_checkpoints AS checkpoint
-      JOIN iap_private.apple_account_bindings AS binding
-        ON binding.billing_account_id = checkpoint.billing_account_id
-      WHERE binding.user_id IS NOT NULL
-        AND binding.deleted_at IS NULL
-        AND NOT iap_private.is_account_deletion_pending(binding.user_id)
-        AND checkpoint.next_attempt_at <= clock_timestamp()`,
+      WHERE checkpoint.next_attempt_at <= clock_timestamp()`,
   'claimable reconciliation checkpoint count'));
-  const reconciliationBatchA = jsonResult(expectOk(asActor('service_role', null, `SELECT COALESCE(
-      json_agg(target ORDER BY target.checkpoint_id), '[]'::json
-    )::text
-    FROM public.iap_claim_reconciliation_targets(2) AS target`),
-  'first bounded reconciliation claim'), 'first bounded reconciliation claim');
-  const reconciliationBatchB = jsonResult(expectOk(asActor('service_role', null, `SELECT COALESCE(
-      json_agg(target ORDER BY target.checkpoint_id), '[]'::json
-    )::text
-    FROM public.iap_claim_reconciliation_targets(2) AS target`),
-  'second bounded reconciliation claim'), 'second bounded reconciliation claim');
-  if (reconciliationBatchA.length !== Math.min(2, claimableReconciliationCount)
-      || reconciliationBatchB.length !== Math.min(2, Math.max(0, claimableReconciliationCount - 2))
-      || reconciliationBatchA.some((first) =>
-        reconciliationBatchB.some((second) => second.checkpoint_id === first.checkpoint_id))) {
-    throw new Error('bounded reconciliation claims did not rotate past active leases');
+  const completedReconciliation = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(target)
+    FROM public.iap_claim_reconciliation_targets(1) AS target`,
+  'first single reconciliation claim'), 'first single reconciliation claim');
+  const failedReconciliation = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(target)
+    FROM public.iap_claim_reconciliation_targets(1) AS target`,
+  'second single reconciliation claim'), 'second single reconciliation claim');
+  const emptyReconciliation = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(target)
+    FROM public.iap_claim_reconciliation_targets(1) AS target`,
+  'third single reconciliation claim'), 'third single reconciliation claim');
+  if (claimableReconciliationCount < 3
+      || completedReconciliation.checkpoint_id === failedReconciliation.checkpoint_id
+      || completedReconciliation.checkpoint_id === emptyReconciliation.checkpoint_id
+      || failedReconciliation.checkpoint_id === emptyReconciliation.checkpoint_id
+      || 'user_id' in completedReconciliation
+      || 'app_account_token_hash' in completedReconciliation) {
+    throw new Error('single-anchor claims leaked app-account identity or reused an active lease');
   }
-  const completedReconciliation = reconciliationBatchA[0];
-  const failedReconciliation = reconciliationBatchA[1];
-  expectFail(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
-      ${q(completedReconciliation.checkpoint_id)}::uuid,
-      '20000000-0000-4000-8000-000000000099'::uuid, TRUE, NULL,
-      'revision-page-1', TRUE
-    )`), 'wrong reconciliation lease completion');
-  expectFail(asActor('authenticated', E, `SELECT *
-    FROM public.iap_record_reconciliation_review(
-      ${q(completedReconciliation.checkpoint_id)}::uuid,
-      ${q(completedReconciliation.lease_token)}::uuid,
-      ${q(completedReconciliation.environment)}, '8999', '8999',
-      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
-      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
-      'TOKEN_BINDING_MISSING'
-    )`), 'authenticated reconciliation review write');
-  expectFail(asActor('service_role', null, `SELECT *
-    FROM public.iap_record_reconciliation_review(
+  expectFail(asActor('service_role', null, `SELECT public.iap_fail_reconciliation_target(
       ${q(completedReconciliation.checkpoint_id)}::uuid,
       '20000000-0000-4000-8000-000000000099'::uuid,
-      ${q(completedReconciliation.environment)}, '8999', '8999',
-      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
-      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
-      'TOKEN_BINDING_MISSING'
-    )`), 'wrong-lease reconciliation review write');
-  const reconciliationReview = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(review)
-    FROM public.iap_record_reconciliation_review(
+      'RECONCILIATION_TARGET_FAILED'
+    )`), 'wrong reconciliation lease completion');
+  if (scalar(`SELECT count(*)::text
+      FROM iap_private.apple_account_bindings AS binding
+      WHERE binding.app_account_token_hash IN (${q(tokenHash(otherAccountToken))}, ${q(tokenHash(TOKEN_E))})
+        AND binding.deleted_at IS NULL`, 'active mixed-account reconciliation bindings') !== '2') {
+    throw new Error('reconciliation fixture lacks two distinct active app-account tokens');
+  }
+  if (scalar(`SELECT count(*)::text
+      FROM iap_private.apple_account_bindings AS binding
+      WHERE binding.app_account_token_hash = ${q(tokenHash(TOKEN_F))}
+        AND binding.deleted_at IS NOT NULL`, 'deleted reconciliation binding') !== '1') {
+    throw new Error('reconciliation fixture lacks a durable deleted-token binding');
+  }
+  const reconciliationPage = [
+    {
+      transactionId: '8997', originalTransactionId: '8997',
+      productId: 'paper.paid', productType: 'Non-Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: tokenHash(TOKEN_E),
+      purchaseDateMs: 61_000, signedDateMs: 61_000,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-active-8997'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+    {
+      transactionId: '8994', originalTransactionId: '8994',
+      productId: 'paper.paid', productType: 'Non-Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: tokenHash(otherAccountToken),
+      purchaseDateMs: 61_500, signedDateMs: 61_500,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-second-active-8994'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+    {
+      transactionId: '8993', originalTransactionId: '8993',
+      productId: 'paper.paid', productType: 'Non-Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: tokenHash(TOKEN_F),
+      purchaseDateMs: 61_750, signedDateMs: 61_750,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-deleted-8993'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+    {
+      transactionId: '8992', originalTransactionId: '8980',
+      productId: 'export.3', productType: 'Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: tokenHash(TOKEN_E),
+      purchaseDateMs: 64_000, signedDateMs: 64_000,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-owner-conflict-8992'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+    {
+      transactionId: '8998', originalTransactionId: '8998',
+      productId: 'paper.paid', productType: 'Non-Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: sha('unknown-account-token'),
+      purchaseDateMs: 62_000, signedDateMs: 62_000,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-unknown-8998'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+    {
+      transactionId: '8999', originalTransactionId: '8999',
+      productId: 'paper.paid', productType: 'Non-Consumable',
+      bundleId: 'app.gomsinlog', appAccountTokenHash: null,
+      purchaseDateMs: 63_000, signedDateMs: 63_000,
+      expiresDateMs: null, revocationDateMs: null, eventKind: 'purchase',
+      jwsSha256: sha('reconciliation-tokenless-8999'), quantity: 1,
+      revocationType: null, revocationPercentage: null,
+    },
+  ];
+  expectFail(asActor('authenticated', E, `SELECT *
+    FROM public.iap_settle_reconciliation_page(
       ${q(completedReconciliation.checkpoint_id)}::uuid,
       ${q(completedReconciliation.lease_token)}::uuid,
-      ${q(completedReconciliation.environment)}, '8999', '8999',
-      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
-      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
-      'TOKEN_BINDING_MISSING'
-    ) AS review`, 'record tokenless reconciliation review'), 'record tokenless reconciliation review');
-  if (reconciliationReview.duplicate !== false) {
-    throw new Error('first reconciliation review was not recorded as new');
-  }
-  const reconciliationReviewReplay = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(review)
-    FROM public.iap_record_reconciliation_review(
-      ${q(completedReconciliation.checkpoint_id)}::uuid,
-      ${q(completedReconciliation.lease_token)}::uuid,
-      ${q(completedReconciliation.environment)}, '8999', '8999',
-      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
-      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-8999'))},
-      'TOKEN_BINDING_MISSING'
-    ) AS review`, 'replay tokenless reconciliation review'), 'replay tokenless reconciliation review');
-  if (reconciliationReviewReplay.review_id !== reconciliationReview.review_id
-      || reconciliationReviewReplay.duplicate !== true) {
-    throw new Error('reconciliation review replay was not idempotent');
-  }
+      ${q(completedReconciliation.environment)}, NULL,
+      'revision-page-1', TRUE, ${q(JSON.stringify(reconciliationPage))}::jsonb
+    )`), 'authenticated reconciliation page settlement');
   expectFail(asActor('service_role', null, `SELECT *
-    FROM public.iap_record_reconciliation_review(
+    FROM public.iap_settle_reconciliation_page(
+      ${q(completedReconciliation.checkpoint_id)}::uuid,
+      '20000000-0000-4000-8000-000000000099'::uuid,
+      ${q(completedReconciliation.environment)}, NULL,
+      'revision-page-1', TRUE, ${q(JSON.stringify(reconciliationPage))}::jsonb
+    )`), 'wrong-lease reconciliation page settlement');
+  const reconciliationSettlement = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(result)
+    FROM public.iap_settle_reconciliation_page(
       ${q(completedReconciliation.checkpoint_id)}::uuid,
       ${q(completedReconciliation.lease_token)}::uuid,
-      ${q(completedReconciliation.environment)}, '8999', '8999',
-      'paper.paid', 'Non-Consumable', 'app.gomsinlog',
-      'purchase', 62000::bigint, ${q(sha('reconciliation-tokenless-collision'))},
-      'TOKEN_BINDING_MISSING'
-    )`), 'reconciliation review payload collision');
-  if (actorScalar('service_role', null, `SELECT count(*)::text
-      FROM public.iap_list_operational_alerts()
-      WHERE alert_id = ${q(reconciliationReview.review_id)}::uuid
-        AND source = 'transaction_review'
-        AND error_code = 'TOKEN_BINDING_MISSING'`,
-  'reconciliation review operational alert') !== '1') {
-    throw new Error('reconciliation review was not visible to operators');
+      ${q(completedReconciliation.environment)}, NULL,
+      'revision-page-1', TRUE, ${q(JSON.stringify(reconciliationPage))}::jsonb
+    ) AS result`, 'atomic reconciliation page settlement'), 'atomic reconciliation page settlement');
+  if (reconciliationSettlement.applied_count !== 2
+      || reconciliationSettlement.reviewed_count !== 4) {
+    throw new Error(`reconciliation page was not fully applied or durably reviewed (${JSON.stringify(reconciliationSettlement)})`);
   }
-  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+  const reconciledOwners = scalar(`SELECT string_agg(
+        transaction.transaction_id || ':' || binding.app_account_token_hash,
+        ',' ORDER BY transaction.transaction_id)
+      FROM iap_private.apple_transactions AS transaction
+      JOIN iap_private.apple_account_bindings AS binding
+        ON binding.billing_account_id = transaction.billing_account_id
+      WHERE transaction.environment = ${q(completedReconciliation.environment)}
+        AND transaction.transaction_id IN ('8994', '8997')`,
+  'mixed-account reconciled transaction owners');
+  if (reconciledOwners !== `8994:${tokenHash(otherAccountToken)},8997:${tokenHash(TOKEN_E)}`) {
+    throw new Error('reconciliation attributed mixed Apple history to the anchor instead of each token owner');
+  }
+  if (scalar(`SELECT count(*)::text
+      FROM iap_private.apple_transaction_review_facts AS review
+      WHERE review.reconciliation_checkpoint_id = ${q(completedReconciliation.checkpoint_id)}::uuid
+        AND review.transaction_id IN ('8992', '8993', '8998', '8999')
+        AND review.purchase_date_ms IS NOT NULL
+        AND review.quantity = 1`, 'complete reconciliation review evidence') !== '4') {
+    throw new Error('reconciliation review facts omitted deterministic recovery metadata');
+  }
+  if (scalar(`SELECT string_agg(review.transaction_id || ':' || review.reason_code, ','
+        ORDER BY review.transaction_id)
+      FROM iap_private.apple_transaction_review_facts AS review
+      WHERE review.reconciliation_checkpoint_id = ${q(completedReconciliation.checkpoint_id)}::uuid
+        AND review.transaction_id IN ('8992', '8993', '8998', '8999')`,
+  'reconciliation review reason isolation') !==
+      '8992:IDENTITY_AMBIGUOUS,8993:ACCOUNT_DELETED,8998:TOKEN_BINDING_UNKNOWN,8999:TOKEN_BINDING_MISSING') {
+    throw new Error('reconciliation did not isolate conflicting, deleted, unknown, and missing tokens distinctly');
+  }
+  const settledTransactionCount = scalar(`SELECT count(*)::text
+      FROM iap_private.apple_transactions
+      WHERE environment = ${q(completedReconciliation.environment)}
+        AND transaction_id IN ('8994', '8997')`,
+  'settled transaction count before response-loss replay');
+  const settledReviewCount = scalar(`SELECT count(*)::text
+      FROM iap_private.apple_transaction_review_facts
+      WHERE reconciliation_checkpoint_id = ${q(completedReconciliation.checkpoint_id)}::uuid
+        AND transaction_id IN ('8992', '8993', '8998', '8999')`,
+  'settled review count before response-loss replay');
+  const responseLossReplay = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(result)
+    FROM public.iap_settle_reconciliation_page(
       ${q(completedReconciliation.checkpoint_id)}::uuid,
-      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
-      'revision-page-1', TRUE
-    )`), 'successful reconciliation completion');
-  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
-      ${q(completedReconciliation.checkpoint_id)}::uuid,
-      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
-      'revision-page-1', TRUE
-    )`), 'idempotent reconciliation completion replay');
-  expectFail(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
-      ${q(completedReconciliation.checkpoint_id)}::uuid,
-      ${q(completedReconciliation.lease_token)}::uuid, TRUE, NULL,
-      'revision-conflict', TRUE
-    )`), 'reconciliation completion replay collision');
+      ${q(completedReconciliation.lease_token)}::uuid,
+      ${q(completedReconciliation.environment)}, NULL,
+      'revision-page-1', TRUE, ${q(JSON.stringify(reconciliationPage))}::jsonb
+    ) AS result`, 'settlement response-loss replay'), 'settlement response-loss replay');
+  if (responseLossReplay.applied_count !== 2 || responseLossReplay.reviewed_count !== 4
+      || scalar(`SELECT count(*)::text FROM iap_private.apple_transactions
+          WHERE environment = ${q(completedReconciliation.environment)}
+            AND transaction_id IN ('8994', '8997')`,
+      'settled transaction count after response-loss replay') !== settledTransactionCount
+      || scalar(`SELECT count(*)::text FROM iap_private.apple_transaction_review_facts
+          WHERE reconciliation_checkpoint_id = ${q(completedReconciliation.checkpoint_id)}::uuid
+            AND transaction_id IN ('8992', '8993', '8998', '8999')`,
+      'settled review count after response-loss replay') !== settledReviewCount) {
+    throw new Error('reconciliation response-loss replay duplicated or lost page effects');
+  }
   expectOk(admin(`UPDATE iap_private.apple_reconciliation_checkpoints
       SET next_revision = 'revision-prior'
       WHERE checkpoint_id = ${q(failedReconciliation.checkpoint_id)}::uuid`),
   'seed prior reconciliation cursor');
-  expectOk(asActor('service_role', null, `SELECT public.iap_complete_reconciliation_target(
+  expectFail(asActor('service_role', null, `SELECT *
+    FROM public.iap_settle_reconciliation_page(
       ${q(failedReconciliation.checkpoint_id)}::uuid,
-      ${q(failedReconciliation.lease_token)}::uuid, FALSE,
-      'RECONCILIATION_TARGET_FAILED', NULL, NULL
+      ${q(failedReconciliation.lease_token)}::uuid,
+      ${q(failedReconciliation.environment)}, 'revision-stale',
+      'revision-never-committed', FALSE, '[]'::jsonb
+    )`), 'stale expected reconciliation revision');
+  const invalidReconciliationPage = [
+    {
+      ...reconciliationPage[0],
+      transactionId: '8996', originalTransactionId: '8996',
+      jwsSha256: sha('reconciliation-rollback-8996'),
+    },
+    {
+      ...reconciliationPage[0],
+      transactionId: '8995', originalTransactionId: '8995',
+      productId: 'not.in.reviewed.catalog',
+      jwsSha256: sha('reconciliation-invalid-8995'),
+    },
+  ];
+  expectFail(asActor('service_role', null, `SELECT *
+    FROM public.iap_settle_reconciliation_page(
+      ${q(failedReconciliation.checkpoint_id)}::uuid,
+      ${q(failedReconciliation.lease_token)}::uuid,
+      ${q(failedReconciliation.environment)}, 'revision-prior',
+      'revision-never-committed', FALSE,
+      ${q(JSON.stringify(invalidReconciliationPage))}::jsonb
+    )`), 'atomic reconciliation page rollback');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_transactions
+      WHERE environment = ${q(failedReconciliation.environment)}
+        AND transaction_id = '8996'`, 'rolled-back reconciliation transaction') !== '0') {
+    throw new Error('a partial reconciliation page escaped its failed transaction');
+  }
+  expectOk(asActor('service_role', null, `SELECT public.iap_fail_reconciliation_target(
+      ${q(failedReconciliation.checkpoint_id)}::uuid,
+      ${q(failedReconciliation.lease_token)}::uuid,
+      'RECONCILIATION_TARGET_FAILED'
     )`), 'failed reconciliation completion');
+  const emptyExpectedRevision = emptyReconciliation.next_revision === null
+    ? 'NULL'
+    : q(emptyReconciliation.next_revision);
+  const emptySettlement = jsonResult(actorScalar('service_role', null, `SELECT row_to_json(result)
+    FROM public.iap_settle_reconciliation_page(
+      ${q(emptyReconciliation.checkpoint_id)}::uuid,
+      ${q(emptyReconciliation.lease_token)}::uuid,
+      ${q(emptyReconciliation.environment)}, ${emptyExpectedRevision},
+      'revision-empty-page', FALSE, '[]'::jsonb
+    ) AS result`, 'empty reconciliation page settlement'), 'empty reconciliation page settlement');
+  if (emptySettlement.applied_count !== 0 || emptySettlement.reviewed_count !== 0) {
+    throw new Error('empty reconciliation page did not settle atomically');
+  }
   if (scalar(`SELECT count(*)::text FROM iap_private.apple_reconciliation_checkpoints
       WHERE checkpoint_id IN (
         ${q(completedReconciliation.checkpoint_id)}::uuid,
-        ${q(failedReconciliation.checkpoint_id)}::uuid
+        ${q(failedReconciliation.checkpoint_id)}::uuid,
+        ${q(emptyReconciliation.checkpoint_id)}::uuid
       ) AND lease_token IS NULL AND lease_expires_at IS NULL`,
-  'completed reconciliation leases cleared') !== '2') {
+  'completed reconciliation leases cleared') !== '3') {
     throw new Error('reconciliation completion left a live lease');
   }
   if (scalar(`SELECT last_error_code FROM iap_private.apple_reconciliation_checkpoints
@@ -2179,6 +2381,11 @@ try {
       WHERE checkpoint_id = ${q(failedReconciliation.checkpoint_id)}::uuid`,
   'failed reconciliation cursor preservation') !== 'revision-prior') {
     throw new Error('failed reconciliation advanced or erased its prior revision cursor');
+  }
+  if (scalar(`SELECT next_revision FROM iap_private.apple_reconciliation_checkpoints
+      WHERE checkpoint_id = ${q(emptyReconciliation.checkpoint_id)}::uuid`,
+  'empty reconciliation cursor') !== 'revision-empty-page') {
+    throw new Error('empty reconciliation page did not advance its cursor atomically');
   }
 
   const deleteReservation = jsonResult(actorScalar('authenticated', E, `SELECT row_to_json(x)
@@ -2208,11 +2415,11 @@ try {
           'iap_refresh_consumption_request', 'iap_claim_consumption_request',
           'iap_authorize_consumption_send', 'iap_complete_consumption_request',
           'iap_export_credit_commit_after_fulfillment',
-          'iap_claim_reconciliation_targets', 'iap_complete_reconciliation_target',
-          'iap_record_reconciliation_review'
+          'iap_claim_reconciliation_targets', 'iap_fail_reconciliation_target',
+          'iap_record_reconciliation_review', 'iap_settle_reconciliation_page'
         )
         AND p.prosecdef
-        AND p.proconfig @> ARRAY['search_path=public, pg_temp']`, 'new IAP definer search paths') !== '8') {
+        AND p.proconfig @> ARRAY['search_path=public, pg_temp']`, 'new IAP definer search paths') !== '9') {
     throw new Error('new IAP SECURITY DEFINER functions lack a fixed search_path');
   }
   if (scalar(`SELECT
@@ -2223,15 +2430,16 @@ try {
       || '|' || has_function_privilege('service_role', 'public.iap_export_credit_commit_after_fulfillment(uuid,text,text,boolean)', 'EXECUTE')::text
       || '|' || has_function_privilege('authenticated', 'public.iap_claim_reconciliation_targets(integer)', 'EXECUTE')::text
       || '|' || has_function_privilege('service_role', 'public.iap_claim_reconciliation_targets(integer)', 'EXECUTE')::text
-      || '|' || has_function_privilege('service_role', 'public.iap_complete_reconciliation_target(uuid,uuid,boolean,text,text,boolean)', 'EXECUTE')::text
-      || '|' || has_function_privilege('authenticated', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text)', 'EXECUTE')::text
-      || '|' || has_function_privilege('service_role', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text)', 'EXECUTE')::text`, 'IAP function privilege matrix') !== 'false|false|true|false|true|false|true|true|false|true') {
+      || '|' || has_function_privilege('service_role', 'public.iap_fail_reconciliation_target(uuid,uuid,text)', 'EXECUTE')::text
+      || '|' || has_function_privilege('authenticated', 'public.iap_settle_reconciliation_page(uuid,uuid,text,text,text,boolean,jsonb)', 'EXECUTE')::text
+      || '|' || has_function_privilege('service_role', 'public.iap_settle_reconciliation_page(uuid,uuid,text,text,text,boolean,jsonb)', 'EXECUTE')::text
+      || '|' || has_function_privilege('authenticated', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text,bigint,bigint,bigint,integer,text,integer,text)', 'EXECUTE')::text
+      || '|' || has_function_privilege('service_role', 'public.iap_record_reconciliation_review(uuid,uuid,text,text,text,text,text,text,text,bigint,text,text,bigint,bigint,bigint,integer,text,integer,text)', 'EXECUTE')::text`, 'IAP function privilege matrix') !== 'false|false|true|false|true|false|true|true|false|true|false|true') {
     throw new Error('IAP send authorization or fulfillment commit grants are unsafe');
   }
 
-  // Contract is intentionally last: every preceding assertion models the V2
-  // deploy/canary window while both service-role versions remain callable.
-  expectOk(psql(['-f', CONTRACT_MIGRATION]), 'apply migration 081 contract');
+  // Re-check the contract after every V2 assertion. 081 and 082 were applied
+  // above in numeric order; no test gets to hide an accidental V1 re-grant.
   const contractPrivileges = scalar(`SELECT
     has_function_privilege(
       'service_role',

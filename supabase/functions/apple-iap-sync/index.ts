@@ -1,7 +1,7 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.111.0';
 import { createAdminClientFetch, parseAdminSecretKey } from '../_shared/adminSecret.ts';
 import { parseAllowedOrigins, resolveCors } from '../delete-account/_shared/cors.ts';
-import { sha256Hex, type VerifiedAppleTransaction } from '../_shared/appleIapContract.ts';
+import { hashAppAccountToken, type VerifiedAppleTransaction } from '../_shared/appleIapContract.ts';
 import { createAppleIapVerifier } from '../_shared/appleIapVerifier.ts';
 import { handleAppleIapSync } from './handler.ts';
 
@@ -111,7 +111,7 @@ Deno.serve(async (request) => {
     verifyTransaction: verifier.verifyTransaction,
     ingestTransaction: async ({ userId, transaction, jwsSha256 }) => {
       const tx = transaction as VerifiedAppleTransaction;
-      const tokenHash = await sha256Hex(tx.appAccountToken as string);
+      const tokenHash = await hashAppAccountToken(tx.appAccountToken as string);
       const { data, error } = await admin.rpc('iap_apply_verified_transaction_v2', {
         p_user_id: userId,
         p_environment: tx.environment,

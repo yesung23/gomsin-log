@@ -66,20 +66,8 @@ CREATE TABLE iap_private.apple_transaction_events (
   signed_at TIMESTAMPTZ NOT NULL,
   payload_hash TEXT NOT NULL CHECK (iap_private.is_sha256_hex(payload_hash)),
   resolution_status TEXT NOT NULL CHECK (resolution_status IN ('automatic', 'manual_review', 'stale')),
-  review_reason_code TEXT CHECK (review_reason_code IS NULL OR review_reason_code IN (
-    'EXACT_LOT_UNAVAILABLE', 'REFUND_BEFORE_PURCHASE',
-    'REVOCATION_METADATA_INCOMPLETE', 'REVERSAL_WITHOUT_REFUND',
-    'REVERSAL_ADJUSTMENT_MISSING'
-  )),
   notification_uuid UUID REFERENCES iap_private.apple_notifications(notification_uuid),
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-  CHECK (review_reason_code IS NULL OR (
-    resolution_status = 'manual_review'
-    AND event_kind IN ('refund', 'revoke', 'refund_reversed')
-  )),
-  CHECK (resolution_status <> 'manual_review'
-    OR event_kind = 'purchase'
-    OR review_reason_code IS NOT NULL),
   UNIQUE (environment, transaction_id, signed_at),
   FOREIGN KEY (billing_account_id, environment, transaction_id)
     REFERENCES iap_private.apple_transactions(billing_account_id, environment, transaction_id)
@@ -90,10 +78,8 @@ CREATE INDEX iap_transaction_events_latest
 
 CREATE TABLE iap_private.apple_transaction_review_facts (
   review_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  notification_uuid UUID UNIQUE
+  notification_uuid UUID NOT NULL UNIQUE
     REFERENCES iap_private.apple_notifications(notification_uuid),
-  event_id UUID UNIQUE REFERENCES iap_private.apple_transaction_events(event_id),
-  reconciliation_checkpoint_id UUID,
   environment TEXT NOT NULL CHECK (environment IN ('Sandbox', 'Production', 'Xcode')),
   transaction_id TEXT NOT NULL CHECK (iap_private.is_uint64_text(transaction_id)),
   original_transaction_id TEXT NOT NULL
@@ -103,19 +89,13 @@ CREATE TABLE iap_private.apple_transaction_review_facts (
     'Non-Consumable', 'Consumable', 'Auto-Renewable Subscription'
   )),
   bundle_id TEXT NOT NULL CHECK (bundle_id ~ '^[A-Za-z0-9][A-Za-z0-9.-]{0,199}$'),
-  event_kind TEXT NOT NULL CHECK (
-    event_kind IN ('purchase', 'refund', 'revoke', 'refund_reversed')
-  ),
+  event_kind TEXT NOT NULL CHECK (event_kind IN ('refund', 'revoke', 'refund_reversed')),
   transaction_signed_at TIMESTAMPTZ NOT NULL,
   transaction_payload_hash TEXT NOT NULL CHECK (
     iap_private.is_sha256_hex(transaction_payload_hash)
   ),
   reason_code TEXT NOT NULL CHECK (reason_code IN (
-    'IDENTITY_UNRESOLVED', 'IDENTITY_AMBIGUOUS', 'ACCOUNT_DELETED',
-    'TOKEN_BINDING_UNKNOWN', 'TOKEN_BINDING_MISSING',
-    'TOKEN_BINDING_MISMATCH', 'EXACT_LOT_UNAVAILABLE',
-    'REFUND_BEFORE_PURCHASE', 'REVOCATION_METADATA_INCOMPLETE',
-    'REVERSAL_WITHOUT_REFUND', 'REVERSAL_ADJUSTMENT_MISSING'
+    'IDENTITY_UNRESOLVED', 'IDENTITY_AMBIGUOUS', 'ACCOUNT_DELETED'
   )),
   review_status TEXT NOT NULL DEFAULT 'pending' CHECK (
     review_status IN ('pending', 'acknowledged')
@@ -123,404 +103,11 @@ CREATE TABLE iap_private.apple_transaction_review_facts (
   resolution_code TEXT CHECK (resolution_code IS NULL OR resolution_code IN (
     'NO_AUTOMATIC_ACTION', 'APPLE_RECONCILIATION_REQUIRED'
   )),
-  reviewed_by_actor_id UUID,
-  review_operation_id UUID UNIQUE,
   reviewed_at TIMESTAMPTZ,
   recorded_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-  CHECK (
-    notification_uuid IS NOT NULL OR event_id IS NOT NULL
-      OR reconciliation_checkpoint_id IS NOT NULL
-  ),
   CHECK ((review_status = 'pending') =
-    (resolution_code IS NULL
-      AND reviewed_by_actor_id IS NULL
-      AND review_operation_id IS NULL
-      AND reviewed_at IS NULL))
+    (resolution_code IS NULL AND reviewed_at IS NULL))
 );
-
-CREATE FUNCTION iap_private.create_transaction_review_fact()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  IF NEW.review_reason_code IS NULL THEN
-    RETURN NEW;
-  END IF;
-
-  INSERT INTO iap_private.apple_transaction_review_facts (
-    notification_uuid, event_id, environment, transaction_id,
-    original_transaction_id, product_id, product_type, bundle_id,
-    event_kind, transaction_signed_at, transaction_payload_hash, reason_code
-  )
-  SELECT NEW.notification_uuid, NEW.event_id, NEW.environment, NEW.transaction_id,
-    NEW.original_transaction_id, NEW.product_id,
-    CASE transaction.product_type
-      WHEN 'non_consumable' THEN 'Non-Consumable'
-      WHEN 'consumable' THEN 'Consumable'
-      WHEN 'subscription' THEN 'Auto-Renewable Subscription'
-    END,
-    transaction.bundle_id, NEW.event_kind, NEW.signed_at, NEW.payload_hash,
-    NEW.review_reason_code
-  FROM iap_private.apple_transactions AS transaction
-  WHERE transaction.billing_account_id = NEW.billing_account_id
-    AND transaction.environment = NEW.environment
-    AND transaction.transaction_id = NEW.transaction_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Verified Apple event review fact lacks transaction identity';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER iap_create_transaction_review_fact
-AFTER INSERT ON iap_private.apple_transaction_events
-FOR EACH ROW EXECUTE FUNCTION iap_private.create_transaction_review_fact();
-
-CREATE TABLE iap_private.apple_reconciliation_checkpoints (
-  checkpoint_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  billing_account_id UUID NOT NULL
-    REFERENCES iap_private.apple_account_bindings(billing_account_id),
-  environment TEXT NOT NULL CHECK (environment IN ('Sandbox', 'Production')),
-  anchor_transaction_id TEXT NOT NULL
-    CHECK (iap_private.is_uint64_text(anchor_transaction_id)),
-  next_revision TEXT CHECK (
-    next_revision IS NULL OR char_length(next_revision) BETWEEN 1 AND 4096
-  ),
-  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-  last_claimed_at TIMESTAMPTZ,
-  lease_token UUID,
-  lease_expires_at TIMESTAMPTZ,
-  last_succeeded_at TIMESTAMPTZ,
-  last_failed_at TIMESTAMPTZ,
-  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
-  last_error_code TEXT CHECK (
-    last_error_code IS NULL OR last_error_code ~ '^[A-Z0-9_]{1,64}$'
-  ),
-  last_completion_lease_token UUID,
-  last_completion_succeeded BOOLEAN,
-  last_completion_revision TEXT CHECK (
-    last_completion_revision IS NULL
-      OR char_length(last_completion_revision) BETWEEN 1 AND 4096
-  ),
-  last_completion_has_more BOOLEAN,
-  last_completion_error_code TEXT CHECK (
-    last_completion_error_code IS NULL
-      OR last_completion_error_code ~ '^[A-Z0-9_]{1,64}$'
-  ),
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
-  CONSTRAINT iap_reconciliation_checkpoint_identity
-    UNIQUE (billing_account_id, environment),
-  FOREIGN KEY (billing_account_id, environment, anchor_transaction_id)
-    REFERENCES iap_private.apple_transactions(
-      billing_account_id, environment, transaction_id
-    ),
-  CHECK ((lease_token IS NULL) = (lease_expires_at IS NULL)),
-  CHECK (
-    (last_completion_lease_token IS NULL
-      AND last_completion_succeeded IS NULL
-      AND last_completion_revision IS NULL
-      AND last_completion_has_more IS NULL
-      AND last_completion_error_code IS NULL)
-    OR
-    (last_completion_lease_token IS NOT NULL
-      AND last_completion_succeeded IS NOT NULL
-      AND (
-        (last_completion_succeeded
-          AND last_completion_revision IS NOT NULL
-          AND last_completion_has_more IS NOT NULL
-          AND last_completion_error_code IS NULL)
-        OR
-        (NOT last_completion_succeeded
-          AND last_completion_revision IS NULL
-          AND last_completion_has_more IS NULL
-          AND last_completion_error_code IS NOT NULL)
-      ))
-  )
-);
-
-CREATE INDEX iap_reconciliation_checkpoint_claim
-  ON iap_private.apple_reconciliation_checkpoints (
-    next_attempt_at, last_claimed_at, environment, checkpoint_id
-  );
-
--- Apple transaction history is customer/app-wide, not scoped to one original
--- transaction chain. Keep exactly one durable cursor per billing account and
--- environment, anchored by any verified transaction Apple accepts.
-INSERT INTO iap_private.apple_reconciliation_checkpoints (
-  billing_account_id, environment, anchor_transaction_id
-)
-SELECT DISTINCT ON (transaction.billing_account_id, transaction.environment)
-  transaction.billing_account_id, transaction.environment,
-  transaction.transaction_id
-FROM iap_private.apple_transactions AS transaction
-WHERE transaction.environment IN ('Sandbox', 'Production')
-ORDER BY transaction.billing_account_id, transaction.environment,
-  transaction.purchase_at, transaction.transaction_id
-ON CONFLICT ON CONSTRAINT iap_reconciliation_checkpoint_identity DO NOTHING;
-
-CREATE FUNCTION iap_private.enqueue_apple_reconciliation_checkpoint()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  IF NEW.environment NOT IN ('Sandbox', 'Production') THEN
-    RETURN NEW;
-  END IF;
-  INSERT INTO iap_private.apple_reconciliation_checkpoints (
-    billing_account_id, environment, anchor_transaction_id
-  ) VALUES (
-    NEW.billing_account_id, NEW.environment, NEW.transaction_id
-  )
-  ON CONFLICT ON CONSTRAINT iap_reconciliation_checkpoint_identity DO NOTHING;
-  RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER iap_enqueue_apple_reconciliation_checkpoint
-AFTER INSERT ON iap_private.apple_transactions
-FOR EACH ROW EXECUTE FUNCTION iap_private.enqueue_apple_reconciliation_checkpoint();
-
-ALTER TABLE iap_private.apple_transaction_review_facts
-  ADD CONSTRAINT apple_transaction_review_reconciliation_checkpoint_fkey
-  FOREIGN KEY (reconciliation_checkpoint_id)
-  REFERENCES iap_private.apple_reconciliation_checkpoints(checkpoint_id);
-
-CREATE UNIQUE INDEX iap_reconciliation_review_fact_identity
-  ON iap_private.apple_transaction_review_facts (
-    reconciliation_checkpoint_id, environment, transaction_id,
-    transaction_signed_at
-  ) WHERE reconciliation_checkpoint_id IS NOT NULL;
-
-CREATE FUNCTION public.iap_claim_reconciliation_targets(p_limit INTEGER DEFAULT 2)
-RETURNS TABLE (
-  checkpoint_id UUID,
-  user_id UUID,
-  environment TEXT,
-  anchor_transaction_id TEXT,
-  next_revision TEXT,
-  app_account_token_hash TEXT,
-  lease_token UUID
-)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-BEGIN
-  PERFORM iap_private.require_service_role();
-  IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 2 THEN
-    RAISE EXCEPTION 'Invalid reconciliation claim limit';
-  END IF;
-
-  RETURN QUERY
-  WITH candidates AS MATERIALIZED (
-    SELECT checkpoint.checkpoint_id, binding.user_id,
-      binding.app_account_token_hash
-    FROM iap_private.apple_reconciliation_checkpoints AS checkpoint
-    JOIN iap_private.apple_account_bindings AS binding
-      ON binding.billing_account_id = checkpoint.billing_account_id
-    WHERE binding.user_id IS NOT NULL
-      AND binding.deleted_at IS NULL
-      AND NOT iap_private.is_account_deletion_pending(binding.user_id)
-      AND checkpoint.next_attempt_at <= clock_timestamp()
-      AND (checkpoint.lease_token IS NULL
-        OR checkpoint.lease_expires_at <= clock_timestamp())
-    ORDER BY checkpoint.next_attempt_at,
-      checkpoint.last_claimed_at NULLS FIRST, checkpoint.environment,
-      checkpoint.checkpoint_id
-    FOR UPDATE OF checkpoint SKIP LOCKED
-    LIMIT p_limit
-  ), claimed AS (
-    UPDATE iap_private.apple_reconciliation_checkpoints AS checkpoint
-    SET lease_token = gen_random_uuid(),
-        lease_expires_at = clock_timestamp() + INTERVAL '5 minutes',
-        last_claimed_at = clock_timestamp(),
-        attempt_count = checkpoint.attempt_count + 1,
-        last_error_code = NULL,
-        updated_at = clock_timestamp()
-    FROM candidates AS candidate
-    WHERE checkpoint.checkpoint_id = candidate.checkpoint_id
-    RETURNING checkpoint.checkpoint_id, candidate.user_id,
-      checkpoint.environment, checkpoint.anchor_transaction_id,
-      checkpoint.next_revision, candidate.app_account_token_hash,
-      checkpoint.lease_token
-  )
-  SELECT claimed.checkpoint_id, claimed.user_id, claimed.environment,
-    claimed.anchor_transaction_id, claimed.next_revision,
-    claimed.app_account_token_hash, claimed.lease_token
-  FROM claimed;
-END;
-$$;
-
-CREATE FUNCTION public.iap_complete_reconciliation_target(
-  p_checkpoint_id UUID,
-  p_lease_token UUID,
-  p_succeeded BOOLEAN,
-  p_error_code TEXT DEFAULT NULL,
-  p_next_revision TEXT DEFAULT NULL,
-  p_has_more BOOLEAN DEFAULT NULL
-)
-RETURNS VOID
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_checkpoint iap_private.apple_reconciliation_checkpoints%ROWTYPE;
-BEGIN
-  PERFORM iap_private.require_service_role();
-  IF p_checkpoint_id IS NULL OR p_lease_token IS NULL OR p_succeeded IS NULL
-     OR (p_succeeded AND (
-       p_error_code IS NOT NULL
-       OR p_next_revision IS NULL
-       OR char_length(p_next_revision) NOT BETWEEN 1 AND 4096
-       OR p_has_more IS NULL
-     ))
-     OR (NOT p_succeeded AND (
-       p_error_code IS NULL OR p_error_code !~ '^[A-Z0-9_]{1,64}$'
-       OR p_next_revision IS NOT NULL OR p_has_more IS NOT NULL
-     )) THEN
-    RAISE EXCEPTION 'Invalid reconciliation completion';
-  END IF;
-
-  SELECT checkpoint.* INTO v_checkpoint
-  FROM iap_private.apple_reconciliation_checkpoints AS checkpoint
-  WHERE checkpoint.checkpoint_id = p_checkpoint_id
-  FOR UPDATE;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'Reconciliation checkpoint is unavailable';
-  END IF;
-  IF v_checkpoint.lease_token IS DISTINCT FROM p_lease_token THEN
-    IF v_checkpoint.last_completion_lease_token IS NOT DISTINCT FROM p_lease_token
-       AND v_checkpoint.last_completion_succeeded IS NOT DISTINCT FROM p_succeeded
-       AND v_checkpoint.last_completion_revision IS NOT DISTINCT FROM p_next_revision
-       AND v_checkpoint.last_completion_has_more IS NOT DISTINCT FROM p_has_more
-       AND v_checkpoint.last_completion_error_code IS NOT DISTINCT FROM p_error_code THEN
-      RETURN;
-    END IF;
-    RAISE EXCEPTION 'Reconciliation lease is invalid';
-  END IF;
-
-  UPDATE iap_private.apple_reconciliation_checkpoints AS checkpoint
-  SET lease_token = NULL,
-      lease_expires_at = NULL,
-      next_revision = CASE WHEN p_succeeded
-        THEN p_next_revision ELSE checkpoint.next_revision END,
-      next_attempt_at = CASE
-        WHEN p_succeeded AND p_has_more THEN clock_timestamp()
-        WHEN p_succeeded THEN clock_timestamp() + INTERVAL '15 minutes'
-        ELSE clock_timestamp() + INTERVAL '5 minutes'
-      END,
-      last_succeeded_at = CASE WHEN p_succeeded
-        THEN clock_timestamp() ELSE checkpoint.last_succeeded_at END,
-      last_failed_at = CASE WHEN p_succeeded
-        THEN checkpoint.last_failed_at ELSE clock_timestamp() END,
-      last_error_code = CASE WHEN p_succeeded THEN NULL ELSE p_error_code END,
-      last_completion_lease_token = p_lease_token,
-      last_completion_succeeded = p_succeeded,
-      last_completion_revision = p_next_revision,
-      last_completion_has_more = p_has_more,
-      last_completion_error_code = p_error_code,
-      updated_at = clock_timestamp()
-  WHERE checkpoint.checkpoint_id = p_checkpoint_id
-    AND checkpoint.lease_token = p_lease_token;
-END;
-$$;
-
-CREATE FUNCTION public.iap_record_reconciliation_review(
-  p_checkpoint_id UUID,
-  p_lease_token UUID,
-  p_environment TEXT,
-  p_transaction_id TEXT,
-  p_original_transaction_id TEXT,
-  p_product_id TEXT,
-  p_product_type TEXT,
-  p_bundle_id TEXT,
-  p_event_kind TEXT,
-  p_transaction_signed_date_ms BIGINT,
-  p_transaction_payload_hash TEXT,
-  p_reason_code TEXT
-)
-RETURNS TABLE (review_id UUID, duplicate BOOLEAN)
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_temp
-AS $$
-DECLARE
-  v_checkpoint iap_private.apple_reconciliation_checkpoints%ROWTYPE;
-  v_existing iap_private.apple_transaction_review_facts%ROWTYPE;
-  v_inserted iap_private.apple_transaction_review_facts%ROWTYPE;
-  v_signed_at TIMESTAMPTZ;
-BEGIN
-  PERFORM iap_private.require_service_role();
-  IF p_checkpoint_id IS NULL OR p_lease_token IS NULL
-     OR p_environment NOT IN ('Sandbox', 'Production')
-     OR NOT iap_private.is_uint64_text(p_transaction_id)
-     OR NOT iap_private.is_uint64_text(p_original_transaction_id)
-     OR p_product_id IS NULL
-       OR p_product_id !~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'
-     OR p_product_type NOT IN (
-       'Non-Consumable', 'Consumable', 'Auto-Renewable Subscription'
-     )
-     OR p_bundle_id IS NULL
-       OR p_bundle_id !~ '^[A-Za-z0-9][A-Za-z0-9.-]{0,199}$'
-     OR p_event_kind NOT IN ('purchase', 'refund', 'revoke', 'refund_reversed')
-     OR p_transaction_signed_date_ms IS NULL
-       OR p_transaction_signed_date_ms <= 0
-     OR NOT iap_private.is_sha256_hex(p_transaction_payload_hash)
-     OR p_reason_code NOT IN (
-       'TOKEN_BINDING_MISSING', 'TOKEN_BINDING_MISMATCH'
-     ) THEN
-    RAISE EXCEPTION 'Invalid reconciliation review fact';
-  END IF;
-  v_signed_at := to_timestamp(p_transaction_signed_date_ms / 1000.0);
-
-  SELECT checkpoint.* INTO v_checkpoint
-  FROM iap_private.apple_reconciliation_checkpoints AS checkpoint
-  WHERE checkpoint.checkpoint_id = p_checkpoint_id
-  FOR UPDATE;
-  IF NOT FOUND
-     OR v_checkpoint.lease_token IS DISTINCT FROM p_lease_token
-     OR v_checkpoint.environment IS DISTINCT FROM p_environment THEN
-    RAISE EXCEPTION 'Reconciliation review lease is invalid';
-  END IF;
-
-  SELECT review.* INTO v_existing
-  FROM iap_private.apple_transaction_review_facts AS review
-  WHERE review.reconciliation_checkpoint_id = p_checkpoint_id
-    AND review.environment = p_environment
-    AND review.transaction_id = p_transaction_id
-    AND review.transaction_signed_at = v_signed_at;
-  IF FOUND THEN
-    IF v_existing.original_transaction_id IS DISTINCT FROM p_original_transaction_id
-       OR v_existing.product_id IS DISTINCT FROM p_product_id
-       OR v_existing.product_type IS DISTINCT FROM p_product_type
-       OR v_existing.bundle_id IS DISTINCT FROM p_bundle_id
-       OR v_existing.event_kind IS DISTINCT FROM p_event_kind
-       OR v_existing.transaction_payload_hash
-         IS DISTINCT FROM p_transaction_payload_hash
-       OR v_existing.reason_code IS DISTINCT FROM p_reason_code THEN
-      RAISE EXCEPTION 'Reconciliation review fact conflicts';
-    END IF;
-    RETURN QUERY SELECT v_existing.review_id, TRUE;
-    RETURN;
-  END IF;
-
-  INSERT INTO iap_private.apple_transaction_review_facts (
-    reconciliation_checkpoint_id, environment, transaction_id,
-    original_transaction_id, product_id, product_type, bundle_id,
-    event_kind, transaction_signed_at, transaction_payload_hash, reason_code
-  ) VALUES (
-    p_checkpoint_id, p_environment, p_transaction_id,
-    p_original_transaction_id, p_product_id, p_product_type, p_bundle_id,
-    p_event_kind, v_signed_at, p_transaction_payload_hash, p_reason_code
-  ) RETURNING * INTO v_inserted;
-  RETURN QUERY SELECT v_inserted.review_id, FALSE;
-END;
-$$;
 
 CREATE TABLE iap_private.export_credit_lots (
   billing_account_id UUID NOT NULL REFERENCES iap_private.apple_account_bindings(billing_account_id),
@@ -657,6 +244,9 @@ CREATE TABLE iap_private.apple_consumption_requests (
   product_id TEXT NOT NULL CHECK (product_id ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'),
   product_type TEXT NOT NULL CHECK (product_type IN ('consumable', 'non_consumable', 'subscription')),
   bundle_id TEXT NOT NULL CHECK (bundle_id ~ '^[A-Za-z0-9][A-Za-z0-9.-]{0,199}$'),
+  consumption_request_reason TEXT NOT NULL CHECK (consumption_request_reason IN (
+    'UNINTENDED_PURCHASE', 'FULFILLMENT_ISSUE', 'UNSATISFIED_WITH_PURCHASE', 'LEGAL', 'OTHER'
+  )),
   consent_event_id UUID REFERENCES iap_private.refund_data_consent_events(consent_event_id),
   notice_version TEXT,
   notice_sha256 TEXT CHECK (notice_sha256 IS NULL OR iap_private.is_sha256_hex(notice_sha256)),
@@ -672,8 +262,7 @@ CREATE TABLE iap_private.apple_consumption_requests (
   status TEXT NOT NULL CHECK (status IN (
     'pending_evidence', 'queued', 'in_flight', 'send_started',
     'retryable_failed', 'accepted', 'terminal_failed', 'send_result_unknown',
-    'skipped_no_consent', 'skipped_withdrawn', 'skipped_account_deleted',
-    'manual_review', 'cancelled', 'expired'
+    'skipped_no_consent', 'skipped_withdrawn', 'manual_review', 'cancelled', 'expired'
   )),
   received_at TIMESTAMPTZ NOT NULL,
   deadline_at TIMESTAMPTZ NOT NULL,
@@ -765,27 +354,16 @@ BEGIN
       CASE
         WHEN request.deadline_at <= clock_timestamp() THEN 'overdue'
         WHEN request.deadline_at <= clock_timestamp() + INTERVAL '1 hour' THEN 'lt_1h'
-        WHEN request.deadline_at <= clock_timestamp() + INTERVAL '2 hours' THEN 'lt_2h'
         WHEN request.deadline_at <= clock_timestamp() + INTERVAL '6 hours' THEN 'lt_6h'
         ELSE 'gte_6h'
       END::TEXT AS deadline_bucket,
       request.attempts AS attempt_no,
-      CASE
-        WHEN request.status IN ('pending_evidence', 'queued')
-          THEN 'APPLE_DEADLINE_IMMINENT'
-        WHEN request.status = 'retryable_failed'
-          THEN COALESCE(request.last_error_code, 'APPLE_DEADLINE_IMMINENT')
-        ELSE COALESCE(request.last_error_code, 'REVIEW_REQUIRED')
-      END AS error_code,
+      COALESCE(request.last_error_code, 'REVIEW_REQUIRED') AS error_code,
       COALESCE(request.warning_at, request.updated_at) AS sort_at
     FROM iap_private.apple_consumption_requests AS request
     WHERE request.status IN (
-        'manual_review', 'send_result_unknown', 'terminal_failed', 'expired'
-      )
-      OR (
-        request.status IN ('pending_evidence', 'queued', 'retryable_failed')
-        AND request.deadline_at <= clock_timestamp() + INTERVAL '2 hours'
-      )
+      'manual_review', 'send_result_unknown', 'terminal_failed', 'expired'
+    )
     UNION ALL
     SELECT review.review_id,
       'transaction_review'::TEXT,
@@ -805,16 +383,12 @@ $$;
 
 CREATE FUNCTION public.iap_acknowledge_transaction_review(
   p_review_id UUID,
-  p_resolution_code TEXT,
-  p_operator_actor_id UUID,
-  p_operation_id UUID
+  p_resolution_code TEXT
 )
 RETURNS TABLE (
   review_id UUID,
   status TEXT,
   resolution_code TEXT,
-  operator_actor_id UUID,
-  operation_id UUID,
   duplicate BOOLEAN
 )
 LANGUAGE plpgsql
@@ -825,8 +399,7 @@ DECLARE
   v_review iap_private.apple_transaction_review_facts%ROWTYPE;
 BEGIN
   PERFORM iap_private.require_service_role();
-  IF p_review_id IS NULL OR p_operator_actor_id IS NULL OR p_operation_id IS NULL
-     OR p_resolution_code NOT IN (
+  IF p_review_id IS NULL OR p_resolution_code NOT IN (
     'NO_AUTOMATIC_ACTION', 'APPLE_RECONCILIATION_REQUIRED'
   ) THEN
     RAISE EXCEPTION 'Invalid transaction review acknowledgement';
@@ -840,25 +413,21 @@ BEGIN
     RAISE EXCEPTION 'Transaction review does not exist';
   END IF;
   IF v_review.review_status = 'acknowledged' THEN
-    IF v_review.resolution_code IS DISTINCT FROM p_resolution_code
-       OR v_review.reviewed_by_actor_id IS DISTINCT FROM p_operator_actor_id
-       OR v_review.review_operation_id IS DISTINCT FROM p_operation_id THEN
+    IF v_review.resolution_code IS DISTINCT FROM p_resolution_code THEN
       RAISE EXCEPTION 'Transaction review acknowledgement conflicts';
     END IF;
     RETURN QUERY SELECT p_review_id, 'acknowledged'::TEXT,
-      p_resolution_code, p_operator_actor_id, p_operation_id, TRUE;
+      p_resolution_code, TRUE;
     RETURN;
   END IF;
 
   UPDATE iap_private.apple_transaction_review_facts AS review
   SET review_status = 'acknowledged',
       resolution_code = p_resolution_code,
-      reviewed_by_actor_id = p_operator_actor_id,
-      review_operation_id = p_operation_id,
       reviewed_at = clock_timestamp()
   WHERE review.review_id = p_review_id;
   RETURN QUERY SELECT p_review_id, 'acknowledged'::TEXT,
-    p_resolution_code, p_operator_actor_id, p_operation_id, FALSE;
+    p_resolution_code, FALSE;
 END;
 $$;
 
@@ -943,7 +512,6 @@ REVOKE ALL ON FUNCTION iap_private.suppress_v1_consumable_pooled_grant()
 
 ALTER TABLE iap_private.apple_transaction_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE iap_private.apple_transaction_review_facts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE iap_private.apple_reconciliation_checkpoints ENABLE ROW LEVEL SECURITY;
 ALTER TABLE iap_private.export_credit_lots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE iap_private.export_credit_allocations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE iap_private.export_credit_lot_adjustments ENABLE ROW LEVEL SECURITY;
@@ -1819,9 +1387,6 @@ BEGIN
     AND reservation.idempotency_key = p_idempotency_key
   FOR UPDATE;
   IF FOUND THEN
-    IF v_reservation.amount IS DISTINCT FROM p_amount THEN
-      RAISE EXCEPTION 'Export reservation idempotency conflict';
-    END IF;
     SELECT COALESCE(sum(allocation.milliunits), 0)::BIGINT INTO v_allocated
     FROM iap_private.export_credit_allocations AS allocation
     WHERE allocation.reservation_id = v_reservation.reservation_id;
@@ -2297,7 +1862,6 @@ DECLARE
   v_is_stale BOOLEAN := FALSE;
   v_event_id UUID;
   v_resolution TEXT := 'automatic';
-  v_review_reason TEXT;
   v_credit_units BIGINT;
   v_gross_milliunits BIGINT;
   v_percentage INTEGER;
@@ -2517,15 +2081,12 @@ BEGIN
       billing_account_id, environment, transaction_id, original_transaction_id,
       product_id, event_kind, quantity, revocation_type,
       revocation_percentage, signed_at, payload_hash, resolution_status,
-      review_reason_code, notification_uuid
+      notification_uuid
     ) VALUES (
       v_binding.billing_account_id, p_environment, p_transaction_id,
       p_original_transaction_id, p_product_id, v_effective_event_kind,
       p_quantity, p_revocation_type, p_revocation_percentage,
-      v_signed_at, p_payload_hash, 'manual_review',
-      CASE WHEN v_effective_event_kind IN ('refund', 'revoke', 'refund_reversed')
-        THEN 'EXACT_LOT_UNAVAILABLE' ELSE NULL END,
-      p_notification_uuid
+      v_signed_at, p_payload_hash, 'manual_review', p_notification_uuid
     );
     RETURN QUERY SELECT TRUE, FALSE, FALSE, p_environment, p_transaction_id,
       FALSE, iap_private.credit_balance(v_binding.billing_account_id, p_environment),
@@ -2564,12 +2125,6 @@ BEGIN
   IF NOT v_had_existing THEN
     v_resolution := CASE WHEN v_effective_event_kind = 'purchase'
       THEN 'automatic' ELSE 'manual_review' END;
-    v_review_reason := CASE v_effective_event_kind
-      WHEN 'refund' THEN 'REFUND_BEFORE_PURCHASE'
-      WHEN 'revoke' THEN 'REFUND_BEFORE_PURCHASE'
-      WHEN 'refund_reversed' THEN 'REVERSAL_WITHOUT_REFUND'
-      ELSE NULL
-    END;
     INSERT INTO iap_private.apple_transactions (
       environment, transaction_id, original_transaction_id, billing_account_id,
       product_id, product_type, bundle_id, app_account_token_hash,
@@ -2600,13 +2155,12 @@ BEGIN
       billing_account_id, environment, transaction_id, original_transaction_id,
       product_id, event_kind, quantity, revocation_type,
       revocation_percentage, signed_at, payload_hash, resolution_status,
-      review_reason_code, notification_uuid
+      notification_uuid
     ) VALUES (
       v_binding.billing_account_id, p_environment, p_transaction_id,
       p_original_transaction_id, p_product_id, v_effective_event_kind,
       p_quantity, p_revocation_type, p_revocation_percentage,
-      v_signed_at, p_payload_hash, v_resolution, v_review_reason,
-      p_notification_uuid
+      v_signed_at, p_payload_hash, v_resolution, p_notification_uuid
     ) RETURNING event_id INTO v_event_id;
     RETURN QUERY SELECT TRUE, FALSE, FALSE, p_environment, p_transaction_id,
       FALSE, iap_private.credit_balance(v_binding.billing_account_id, p_environment),
@@ -2630,7 +2184,6 @@ BEGIN
   IF v_effective_event_kind IN ('refund', 'revoke') THEN
     IF p_revocation_type IS NULL THEN
       v_resolution := 'manual_review';
-      v_review_reason := 'REVOCATION_METADATA_INCOMPLETE';
     ELSE
       v_percentage := COALESCE(p_revocation_percentage, 100000);
       v_desired_target := CEIL(
@@ -2675,7 +2228,6 @@ BEGIN
   ELSIF v_effective_event_kind = 'refund_reversed' THEN
     IF v_existing.last_event_kind <> 'refund' THEN
       v_resolution := 'manual_review';
-      v_review_reason := 'REVERSAL_WITHOUT_REFUND';
     ELSE
       SELECT adjustment.reclaimed_before_milliunits,
         adjustment.reclaimed_after_milliunits
@@ -2689,7 +2241,6 @@ BEGIN
         AND event.event_kind = 'refund';
       IF NOT FOUND THEN
         v_resolution := 'manual_review';
-        v_review_reason := 'REVERSAL_ADJUSTMENT_MISSING';
       ELSE
         v_after := v_previous_adjustment.reclaimed_before_milliunits;
         IF v_after > v_before THEN
@@ -2725,13 +2276,12 @@ BEGIN
     billing_account_id, environment, transaction_id, original_transaction_id,
     product_id, event_kind, quantity, revocation_type,
     revocation_percentage, signed_at, payload_hash, resolution_status,
-    review_reason_code, notification_uuid
+    notification_uuid
   ) VALUES (
     v_binding.billing_account_id, p_environment, p_transaction_id,
     p_original_transaction_id, p_product_id, v_effective_event_kind,
     p_quantity, p_revocation_type, p_revocation_percentage,
-    v_signed_at, p_payload_hash, v_resolution, v_review_reason,
-    p_notification_uuid
+    v_signed_at, p_payload_hash, v_resolution, p_notification_uuid
   ) RETURNING event_id INTO v_event_id;
 
   IF v_resolution = 'automatic'
@@ -2827,7 +2377,6 @@ DECLARE
   v_candidate_billing_account_id UUID;
   v_resolved_user_id UUID;
   v_review_reason TEXT;
-  v_binding_found BOOLEAN;
 BEGIN
   PERFORM iap_private.require_service_role();
   PERFORM set_config('iap.atomic_notification', 'on', true);
@@ -2973,9 +2522,7 @@ BEGIN
       SELECT binding.* INTO v_binding
       FROM iap_private.apple_account_bindings AS binding
       WHERE binding.app_account_token_hash = p_app_account_token_hash;
-      IF FOUND AND (v_binding.user_id IS NULL OR v_binding.deleted_at IS NOT NULL) THEN
-        v_status := 'skipped_account_deleted';
-      ELSIF FOUND THEN
+      IF FOUND AND v_binding.user_id IS NOT NULL AND v_binding.deleted_at IS NULL THEN
         PERFORM pg_catalog.pg_advisory_xact_lock(
           pg_catalog.hashtextextended(v_binding.user_id::TEXT, 15013)
         );
@@ -2984,10 +2531,8 @@ BEGIN
         WHERE binding.app_account_token_hash = p_app_account_token_hash
           AND binding.user_id IS NOT NULL
         FOR UPDATE;
-        IF NOT FOUND OR v_binding.deleted_at IS NOT NULL
-           OR iap_private.is_account_deletion_pending(v_binding.user_id) THEN
-          v_status := 'skipped_account_deleted';
-        ELSE
+        IF FOUND AND v_binding.deleted_at IS NULL
+           AND NOT iap_private.is_account_deletion_pending(v_binding.user_id) THEN
           SELECT catalog.* INTO v_catalog
           FROM iap_private.apple_product_catalog AS catalog
           WHERE catalog.environment = p_environment
@@ -3025,6 +2570,7 @@ BEGIN
     INSERT INTO iap_private.apple_consumption_requests (
       notification_uuid, billing_account_id, environment, transaction_id,
       original_transaction_id, product_id, product_type, bundle_id,
+      consumption_request_reason,
       consent_event_id, notice_version, notice_sha256,
       delivery_status, sample_content_provided, consumption_percentage,
       request_body_hash, status, received_at, deadline_at, next_attempt_at
@@ -3033,6 +2579,7 @@ BEGIN
       v_binding.billing_account_id,
       p_environment, p_transaction_id, p_transaction_original_transaction_id,
       p_product_id, COALESCE(v_product_type, 'consumable'), p_bundle_id,
+      p_consumption_request_reason,
       CASE WHEN v_status = 'pending_evidence' THEN v_consent.consent_event_id ELSE NULL END,
       CASE WHEN v_status = 'pending_evidence' THEN v_consent.notice_version ELSE NULL END,
       CASE WHEN v_status = 'pending_evidence' THEN v_consent.notice_sha256 ELSE NULL END,
@@ -3148,10 +2695,8 @@ BEGIN
     SELECT binding.* INTO v_binding
     FROM iap_private.apple_account_bindings AS binding
     WHERE binding.app_account_token_hash = p_app_account_token_hash;
-    v_binding_found := FOUND;
-    IF (NOT v_binding_found
-         OR v_binding.user_id IS NULL
-         OR v_binding.deleted_at IS NOT NULL)
+    IF FOUND
+       AND (v_binding.user_id IS NULL OR v_binding.deleted_at IS NOT NULL)
        AND p_event_kind IN ('refund', 'revoke', 'refund_reversed') THEN
       INSERT INTO iap_private.apple_transaction_review_facts (
         notification_uuid, environment, transaction_id,
@@ -3162,14 +2707,10 @@ BEGIN
         p_transaction_original_transaction_id, p_product_id, p_product_type,
         p_bundle_id, p_event_kind,
         to_timestamp(p_transaction_signed_date_ms / 1000.0),
-        p_transaction_payload_hash,
-        CASE WHEN v_binding_found THEN 'ACCOUNT_DELETED'
-          ELSE 'TOKEN_BINDING_UNKNOWN' END
+        p_transaction_payload_hash, 'ACCOUNT_DELETED'
       );
     END IF;
-    IF NOT v_binding_found
-       OR v_binding.user_id IS NULL
-       OR v_binding.deleted_at IS NOT NULL THEN
+    IF NOT FOUND OR v_binding.user_id IS NULL OR v_binding.deleted_at IS NOT NULL THEN
       UPDATE iap_private.apple_notifications AS notification
       SET status = 'processed', processed_at = clock_timestamp(),
           attempts = notification.attempts + 1
@@ -3744,28 +3285,10 @@ GRANT EXECUTE ON FUNCTION public.iap_complete_consumption_request(
 REVOKE ALL ON FUNCTION public.iap_list_operational_alerts()
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_list_operational_alerts() TO service_role;
-REVOKE ALL ON FUNCTION public.iap_acknowledge_transaction_review(UUID, TEXT, UUID, UUID)
+REVOKE ALL ON FUNCTION public.iap_acknowledge_transaction_review(UUID, TEXT)
   FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_acknowledge_transaction_review(UUID, TEXT, UUID, UUID)
+GRANT EXECUTE ON FUNCTION public.iap_acknowledge_transaction_review(UUID, TEXT)
   TO service_role;
-REVOKE ALL ON FUNCTION public.iap_claim_reconciliation_targets(INTEGER)
-  FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_claim_reconciliation_targets(INTEGER)
-  TO service_role;
-REVOKE ALL ON FUNCTION public.iap_complete_reconciliation_target(
-  UUID, UUID, BOOLEAN, TEXT, TEXT, BOOLEAN
-)
-  FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_complete_reconciliation_target(
-  UUID, UUID, BOOLEAN, TEXT, TEXT, BOOLEAN
-)
-  TO service_role;
-REVOKE ALL ON FUNCTION public.iap_record_reconciliation_review(
-  UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT
-) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_record_reconciliation_review(
-  UUID, UUID, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, BIGINT, TEXT, TEXT
-) TO service_role;
 REVOKE ALL ON FUNCTION public.iap_prepare_account_deletion_v2(UUID, UUID)
   FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_prepare_account_deletion_v2(UUID, UUID)
@@ -3788,10 +3311,6 @@ REVOKE ALL ON FUNCTION public.iap_export_credit_release(UUID)
 GRANT EXECUTE ON FUNCTION public.iap_export_credit_release(UUID) TO authenticated;
 
 REVOKE ALL ON FUNCTION iap_private.sha256_text(TEXT)
-  FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION iap_private.create_transaction_review_fact()
-  FROM PUBLIC, anon, authenticated, service_role;
-REVOKE ALL ON FUNCTION iap_private.enqueue_apple_reconciliation_checkpoint()
   FROM PUBLIC, anon, authenticated, service_role;
 REVOKE ALL ON FUNCTION iap_private.current_refund_data_consent(UUID)
   FROM PUBLIC, anon, authenticated, service_role;

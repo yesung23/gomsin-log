@@ -183,6 +183,11 @@ export async function sha256Hex(value: string): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/** Apple appAccountToken is a UUID, whose hexadecimal letters are case-insensitive. */
+export function hashAppAccountToken(value: string): Promise<string> {
+  return sha256Hex(value.toLowerCase());
+}
+
 export async function readBoundedJson(
   request: Request,
   maxBytes = 40_000,

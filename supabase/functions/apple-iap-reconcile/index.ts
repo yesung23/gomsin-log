@@ -5,7 +5,6 @@ import {
   parseSchedulerSecret,
   timingSafeEqualSecret,
 } from '../_shared/adminSecret.ts';
-import { sha256Hex } from '../_shared/appleIapContract.ts';
 import { createAppleIapHistory } from '../_shared/appleIapHistory.ts';
 import { createAppleIapVerifier } from '../_shared/appleIapVerifier.ts';
 import {
@@ -14,7 +13,10 @@ import {
   MAX_RECONCILIATION_TARGETS,
 } from './handler.ts';
 
+const SUPABASE_ADMIN_REQUEST_TIMEOUT_MS = 10_000;
+
 Deno.serve(async (request) => {
+  const invocationStartedAtMs = performance.now();
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'E_METHOD_NOT_ALLOWED' }), {
       status: 405,
@@ -53,11 +55,13 @@ Deno.serve(async (request) => {
   }
   const admin = createClient(url, secret, {
     auth: { autoRefreshToken: false, persistSession: false },
-    global: { fetch: createAdminClientFetch(url, secret) },
+    global: { fetch: createAdminClientFetch(url, secret, SUPABASE_ADMIN_REQUEST_TIMEOUT_MS) },
   });
 
   return handleAppleIapReconcile(request, {
     schedulerSecret,
+    invocationStartedAtMs,
+    monotonicNow: () => performance.now(),
     listTargets: async () => {
       const { data, error } = await admin.rpc('iap_claim_reconciliation_targets', {
         p_limit: MAX_RECONCILIATION_TARGETS,
@@ -66,86 +70,47 @@ Deno.serve(async (request) => {
       return data.map((row) => ({
         checkpointId: String(row.checkpoint_id),
         leaseToken: String(row.lease_token),
-        userId: String(row.user_id),
         environment: row.environment,
         anchorTransactionId: String(row.anchor_transaction_id),
         revision: row.next_revision === null ? null : String(row.next_revision),
-        appAccountTokenHash: String(row.app_account_token_hash),
       })) as AppleIapReconcileTarget[];
     },
     transactionHistory,
     verifyTransaction: verifier.verifyTransaction,
-    ingestTransaction: async ({ userId, environment, transaction, jwsSha256 }) => {
-      if (transaction.environment !== environment || !transaction.appAccountToken) {
-        throw new Error('E_IAP_RECONCILE_ACCOUNT_MISMATCH');
-      }
-      const { error } = await admin.rpc('iap_apply_verified_transaction_v2', {
-        p_user_id: userId,
-        p_environment: transaction.environment,
-        p_transaction_id: transaction.transactionId,
-        p_original_transaction_id: transaction.originalTransactionId,
-        p_product_id: transaction.productId,
-        p_product_type: transaction.type,
-        p_bundle_id: transaction.bundleId,
-        p_app_account_token_hash: await sha256Hex(transaction.appAccountToken.toLowerCase()),
-        p_purchase_date_ms: transaction.purchaseDate,
-        p_signed_date_ms: transaction.signedDate,
-        p_expires_date_ms: transaction.expiresDate ?? null,
-        p_revocation_date_ms: transaction.revocationDate ?? null,
-        p_event_kind: transaction.revocationDate
-          ? transaction.revocationType === 'FAMILY_REVOKE' ? 'revoke' : 'refund'
-          : 'purchase',
-        p_payload_hash: jwsSha256,
-        p_quantity: transaction.quantity ?? 1,
-        p_revocation_type: transaction.revocationType ?? null,
-        p_revocation_percentage: transaction.revocationPercentage ?? null,
-      });
-      if (error) throw new Error('E_IAP_INGEST_FAILED');
-    },
-    recordReview: async ({
+    settlePage: async ({
       checkpointId,
       leaseToken,
       environment,
-      transaction,
-      jwsSha256,
-      reasonCode,
+      expectedRevision,
+      nextRevision,
+      hasMore,
+      transactions,
     }) => {
-      if (transaction.environment !== environment) {
-        throw new Error('E_IAP_RECONCILE_ENVIRONMENT_MISMATCH');
-      }
-      const { error } = await admin.rpc('iap_record_reconciliation_review', {
+      const { data, error } = await admin.rpc('iap_settle_reconciliation_page', {
         p_checkpoint_id: checkpointId,
         p_lease_token: leaseToken,
         p_environment: environment,
-        p_transaction_id: transaction.transactionId,
-        p_original_transaction_id: transaction.originalTransactionId,
-        p_product_id: transaction.productId,
-        p_product_type: transaction.type,
-        p_bundle_id: transaction.bundleId,
-        p_event_kind: transaction.revocationDate
-          ? transaction.revocationType === 'FAMILY_REVOKE' ? 'revoke' : 'refund'
-          : 'purchase',
-        p_transaction_signed_date_ms: transaction.signedDate,
-        p_transaction_payload_hash: jwsSha256,
-        p_reason_code: reasonCode,
-      });
-      if (error) throw new Error('E_IAP_RECONCILE_REVIEW_FAILED');
-    },
-    completeTarget: async ({
-      checkpointId,
-      leaseToken,
-      succeeded,
-      errorCode,
-      nextRevision,
-      hasMore,
-    }) => {
-      const { error } = await admin.rpc('iap_complete_reconciliation_target', {
-        p_checkpoint_id: checkpointId,
-        p_lease_token: leaseToken,
-        p_succeeded: succeeded,
-        p_error_code: errorCode,
+        p_expected_revision: expectedRevision,
         p_next_revision: nextRevision,
         p_has_more: hasMore,
+        p_transactions: transactions,
+      });
+      const row = Array.isArray(data) ? data[0] : null;
+      if (error || !row) throw new Error('E_IAP_RECONCILE_SETTLE_FAILED');
+      return {
+        applied: Number(row.applied_count),
+        reviewed: Number(row.reviewed_count),
+      };
+    },
+    failTarget: async ({
+      checkpointId,
+      leaseToken,
+      errorCode,
+    }) => {
+      const { error } = await admin.rpc('iap_fail_reconciliation_target', {
+        p_checkpoint_id: checkpointId,
+        p_lease_token: leaseToken,
+        p_error_code: errorCode,
       });
       if (error) throw new Error('E_IAP_RECONCILE_COMPLETE_FAILED');
     },

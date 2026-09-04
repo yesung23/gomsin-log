@@ -4,6 +4,9 @@ import {
   type AppleIapReconcileDeps,
   type AppleIapReconcileTarget,
   handleAppleIapReconcile,
+  MAX_RECONCILIATION_TARGETS,
+  RECONCILIATION_FINALIZATION_RESERVE_MS,
+  RECONCILIATION_RUNTIME_BUDGET_MS,
 } from './handler.ts';
 import { JWS_A, transactionFixture } from '../_shared/appleIapTestFixtures.ts';
 import { createAppleIapHistory, fetchAppleHistoryWithTimeout } from '../_shared/appleIapHistory.ts';
@@ -15,37 +18,44 @@ const request = (secret = 'scheduler-secret') =>
   });
 
 function deps() {
-  const ingested: Array<Record<string, unknown>> = [];
-  const reviewed: Array<Record<string, unknown>> = [];
+  const settled: Array<Record<string, unknown>> = [];
   const completed: Array<Record<string, unknown>> = [];
+  const historyTimeouts: number[] = [];
   return {
-    ingested,
-    reviewed,
+    settled,
     completed,
+    historyTimeouts,
     value: {
       schedulerSecret: 'scheduler-secret',
+      invocationStartedAtMs: 0,
+      monotonicNow: () => 1_000,
       listTargets: async () => [{
         checkpointId: '10000000-0000-4000-8000-000000000001',
         leaseToken: '20000000-0000-4000-8000-000000000001',
-        userId: '00000000-0000-4000-8000-00000000000a',
         environment: 'Sandbox' as const,
         anchorTransactionId: '2000000000000001',
         revision: null,
-        appAccountTokenHash: 'cf6fef2e19aeb9ede73fe6d30895826ff08249c1bf087c2db252a54f008e8d80',
       }],
-      transactionHistory: async (_target: AppleIapReconcileTarget) => ({
-        signedTransactions: [JWS_A, JWS_A],
-        nextRevision: 'revision-1',
-        hasMore: false,
-      }),
+      transactionHistory: async (_target: AppleIapReconcileTarget, timeoutMs: number) => {
+        historyTimeouts.push(timeoutMs);
+        return {
+          signedTransactions: [JWS_A, JWS_A],
+          nextRevision: 'revision-1',
+          hasMore: false,
+        };
+      },
       verifyTransaction: async () => transactionFixture(),
-      ingestTransaction: async (input: Record<string, unknown>) => {
-        ingested.push(input);
+      settlePage: async (input: Record<string, unknown>) => {
+        settled.push(input);
+        const transactions = input.transactions as Array<{ appAccountTokenHash: string | null }>;
+        return {
+          applied: transactions.filter((transaction) => transaction.appAccountTokenHash !== null)
+            .length,
+          reviewed: transactions.filter((transaction) => transaction.appAccountTokenHash === null)
+            .length,
+        };
       },
-      recordReview: async (input: Record<string, unknown>) => {
-        reviewed.push(input);
-      },
-      completeTarget: async (input: Record<string, unknown>) => {
+      failTarget: async (input: Record<string, unknown>) => {
         completed.push(input);
       },
     } as AppleIapReconcileDeps,
@@ -64,7 +74,7 @@ Deno.test('apple-iap-reconcile: rejects missing or wrong scheduler secret before
   assert.equal(reads, 0);
 });
 
-Deno.test('apple-iap-reconcile: deduplicates JWS pages and reuses verified idempotent ingest', async () => {
+Deno.test('apple-iap-reconcile: deduplicates JWS pages and settles one ordered page atomically', async () => {
   const fixture = deps();
   const response = await handleAppleIapReconcile(request(), fixture.value);
   const body = await response.json();
@@ -76,88 +86,56 @@ Deno.test('apple-iap-reconcile: deduplicates JWS pages and reuses verified idemp
     transactions: 1,
     reviews: 0,
   });
-  assert.equal(fixture.ingested.length, 1);
-  assert.equal(fixture.ingested[0].userId, '00000000-0000-4000-8000-00000000000a');
-  assert.equal(fixture.ingested[0].environment, 'Sandbox');
-  assert.match(String(fixture.ingested[0].jwsSha256), /^[a-f0-9]{64}$/);
-  assert.deepEqual(fixture.completed, [{
-    checkpointId: '10000000-0000-4000-8000-000000000001',
-    leaseToken: '20000000-0000-4000-8000-000000000001',
-    succeeded: true,
-    errorCode: null,
-    nextRevision: 'revision-1',
-    hasMore: false,
-  }]);
+  assert.equal(fixture.settled.length, 1);
+  assert.equal(fixture.settled[0].environment, 'Sandbox');
+  const transactions = fixture.settled[0].transactions as Array<Record<string, unknown>>;
+  assert.equal(transactions.length, 1);
+  assert.match(String(transactions[0].jwsSha256), /^[a-f0-9]{64}$/);
+  assert.match(String(transactions[0].appAccountTokenHash), /^[a-f0-9]{64}$/);
+  assert.equal(fixture.historyTimeouts.length, 1);
+  assert.ok(fixture.historyTimeouts[0] > 0 && fixture.historyTimeouts[0] <= 30_000);
+  assert.equal(fixture.settled[0].expectedRevision, null);
+  assert.equal(fixture.settled[0].nextRevision, 'revision-1');
+  assert.equal(fixture.settled[0].hasMore, false);
+  assert.deepEqual(fixture.completed, []);
 });
 
-Deno.test('apple-iap-reconcile: one target failure does not block later targets', async () => {
+Deno.test('apple-iap-reconcile: rejects more than one Apple-customer anchor per invocation', async () => {
   const fixture = deps();
   fixture.value.listTargets = async () => [{
     checkpointId: '10000000-0000-4000-8000-000000000001',
     leaseToken: '20000000-0000-4000-8000-000000000001',
-    userId: '00000000-0000-4000-8000-00000000000a',
     environment: 'Sandbox' as const,
     anchorTransactionId: '2000000000000001',
     revision: null,
-    appAccountTokenHash: 'cf6fef2e19aeb9ede73fe6d30895826ff08249c1bf087c2db252a54f008e8d80',
   }, {
     checkpointId: '10000000-0000-4000-8000-000000000002',
     leaseToken: '20000000-0000-4000-8000-000000000002',
-    userId: '00000000-0000-4000-8000-00000000000b',
     environment: 'Sandbox' as const,
     anchorTransactionId: '2000000000000002',
     revision: 'revision-prior',
-    appAccountTokenHash: 'cf6fef2e19aeb9ede73fe6d30895826ff08249c1bf087c2db252a54f008e8d80',
   }];
-  fixture.value.transactionHistory = async (target) => {
-    if (target.anchorTransactionId === '2000000000000001') {
-      throw new Error('Apple unavailable');
-    }
-    return {
-      signedTransactions: [JWS_A],
-      nextRevision: 'revision-next',
-      hasMore: true,
-    };
+  let historyCalls = 0;
+  fixture.value.transactionHistory = async () => {
+    historyCalls += 1;
+    return { signedTransactions: [], nextRevision: 'revision-next', hasMore: true };
   };
   const response = await handleAppleIapReconcile(request(), fixture.value);
   assert.equal(response.status, 503);
-  assert.deepEqual(await response.json(), {
-    targets: 2,
-    succeeded: 1,
-    failed: 1,
-    transactions: 1,
-    reviews: 0,
-  });
-  assert.equal(fixture.ingested.length, 1);
-  assert.equal(fixture.ingested[0].userId, '00000000-0000-4000-8000-00000000000b');
-  assert.deepEqual(fixture.completed, [{
-    checkpointId: '10000000-0000-4000-8000-000000000001',
-    leaseToken: '20000000-0000-4000-8000-000000000001',
-    succeeded: false,
-    errorCode: 'RECONCILIATION_TARGET_FAILED',
-    nextRevision: null,
-    hasMore: null,
-  }, {
-    checkpointId: '10000000-0000-4000-8000-000000000002',
-    leaseToken: '20000000-0000-4000-8000-000000000002',
-    succeeded: true,
-    errorCode: null,
-    nextRevision: 'revision-next',
-    hasMore: true,
-  }]);
+  assert.equal(historyCalls, 0);
+  assert.equal(fixture.settled.length, 0);
+  assert.equal(fixture.completed.length, 0);
 });
 
 Deno.test('apple-iap-reconcile: rejects an oversized target batch before Apple calls', async () => {
   const fixture = deps();
   fixture.value.listTargets = async () =>
-    Array.from({ length: 3 }, (_, index) => ({
+    Array.from({ length: MAX_RECONCILIATION_TARGETS + 1 }, (_, index) => ({
       checkpointId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       leaseToken: `20000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-      userId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
       environment: 'Sandbox' as const,
       anchorTransactionId: String(2_000_000_000_000_001n + BigInt(index)),
       revision: null,
-      appAccountTokenHash: 'cf6fef2e19aeb9ede73fe6d30895826ff08249c1bf087c2db252a54f008e8d80',
     }));
   let historyCalls = 0;
   fixture.value.transactionHistory = async () => {
@@ -170,7 +148,7 @@ Deno.test('apple-iap-reconcile: rejects an oversized target batch before Apple c
   assert.equal(historyCalls, 0);
 });
 
-Deno.test('apple-iap-reconcile: quarantines missing and mismatched account tokens without stalling the page', async () => {
+Deno.test('apple-iap-reconcile: delegates each transaction token to the database instead of comparing it to the anchor account', async () => {
   const fixture = deps();
   fixture.value.transactionHistory = async () => ({
     signedTransactions: [
@@ -201,15 +179,16 @@ Deno.test('apple-iap-reconcile: quarantines missing and mismatched account token
     targets: 1,
     succeeded: 1,
     failed: 0,
-    transactions: 1,
-    reviews: 2,
+    transactions: 2,
+    reviews: 1,
   });
-  assert.equal(fixture.ingested.length, 1);
-  assert.deepEqual(
-    fixture.reviewed.map((review) => review.reasonCode),
-    ['TOKEN_BINDING_MISSING', 'TOKEN_BINDING_MISMATCH'],
-  );
-  assert.equal(fixture.completed[0].nextRevision, 'revision-reviewed');
+  const transactions = fixture.settled[0].transactions as Array<Record<string, unknown>>;
+  assert.equal(transactions.length, 3);
+  assert.equal(transactions[0].appAccountTokenHash, null);
+  assert.match(String(transactions[1].appAccountTokenHash), /^[a-f0-9]{64}$/);
+  assert.match(String(transactions[2].appAccountTokenHash), /^[a-f0-9]{64}$/);
+  assert.notEqual(transactions[1].appAccountTokenHash, transactions[2].appAccountTokenHash);
+  assert.equal(fixture.settled[0].nextRevision, 'revision-reviewed');
 });
 
 Deno.test('apple-iap-reconcile: target-list failure remains retryable', async () => {
@@ -219,7 +198,99 @@ Deno.test('apple-iap-reconcile: target-list failure remains retryable', async ()
   };
   const response = await handleAppleIapReconcile(request(), fixture.value);
   assert.equal(response.status, 503);
-  assert.equal(fixture.ingested.length, 0);
+  assert.equal(fixture.settled.length, 0);
+});
+
+Deno.test('apple-iap-reconcile: does not claim an anchor after the ingress runtime budget is exhausted', async () => {
+  const fixture = deps();
+  let claims = 0;
+  fixture.value.monotonicNow = () => RECONCILIATION_RUNTIME_BUDGET_MS;
+  fixture.value.listTargets = async () => {
+    claims += 1;
+    return [];
+  };
+
+  const response = await handleAppleIapReconcile(request(), fixture.value);
+
+  assert.equal(response.status, 503);
+  assert.equal(claims, 0);
+  assert.equal(fixture.settled.length, 0);
+  assert.equal(fixture.completed.length, 0);
+});
+
+Deno.test('apple-iap-reconcile: does not start Apple history when the invocation reserve is exhausted', async () => {
+  const fixture = deps();
+  let elapsed = 0;
+  let historyCalls = 0;
+  fixture.value.monotonicNow = () => elapsed;
+  const originalList = fixture.value.listTargets;
+  fixture.value.listTargets = async () => {
+    const targets = await originalList();
+    elapsed = RECONCILIATION_RUNTIME_BUDGET_MS -
+      RECONCILIATION_FINALIZATION_RESERVE_MS;
+    return targets;
+  };
+  fixture.value.transactionHistory = async () => {
+    historyCalls += 1;
+    return { signedTransactions: [], nextRevision: 'must-not-run', hasMore: false };
+  };
+
+  const response = await handleAppleIapReconcile(request(), fixture.value);
+  assert.equal(response.status, 503);
+  assert.equal(historyCalls, 0);
+  assert.equal(fixture.settled.length, 0);
+  assert.deepEqual(fixture.completed, []);
+});
+
+Deno.test('apple-iap-reconcile: never advances revision unless the whole verified page is durably settled', async () => {
+  const fixture = deps();
+  let elapsed = 0;
+  fixture.value.monotonicNow = () => elapsed;
+  fixture.value.transactionHistory = async () => {
+    elapsed = RECONCILIATION_RUNTIME_BUDGET_MS -
+      RECONCILIATION_FINALIZATION_RESERVE_MS;
+    return {
+      signedTransactions: [JWS_A],
+      nextRevision: 'revision-must-retry',
+      hasMore: true,
+    };
+  };
+
+  const response = await handleAppleIapReconcile(request(), fixture.value);
+  assert.equal(response.status, 503);
+  assert.equal(fixture.settled.length, 0);
+  assert.deepEqual(fixture.completed, []);
+});
+
+Deno.test('apple-iap-reconcile: settles an empty page atomically with its next revision', async () => {
+  const fixture = deps();
+  fixture.value.transactionHistory = async () => ({
+    signedTransactions: [],
+    nextRevision: 'revision-empty',
+    hasMore: false,
+  });
+
+  const response = await handleAppleIapReconcile(request(), fixture.value);
+  assert.equal(response.status, 200);
+  assert.equal(fixture.settled.length, 1);
+  assert.deepEqual(fixture.settled[0].transactions, []);
+  assert.equal(fixture.settled[0].nextRevision, 'revision-empty');
+  assert.deepEqual(fixture.completed, []);
+});
+
+Deno.test('apple-iap-reconcile: settlement failure releases the lease without a revision advance', async () => {
+  const fixture = deps();
+  fixture.value.settlePage = async () => {
+    throw new Error('database rollback');
+  };
+
+  const response = await handleAppleIapReconcile(request(), fixture.value);
+  assert.equal(response.status, 503);
+  assert.deepEqual(fixture.completed, [{
+    checkpointId: '10000000-0000-4000-8000-000000000001',
+    leaseToken: '20000000-0000-4000-8000-000000000001',
+    errorCode: 'RECONCILIATION_TARGET_FAILED',
+  }]);
 });
 
 type HistoryClient = {
@@ -243,17 +314,32 @@ const createHistoryWithFactory = createAppleIapHistory as unknown as (
   factory: (...args: unknown[]) => HistoryClient,
 ) => (
   target: Pick<AppleIapReconcileTarget, 'environment' | 'anchorTransactionId' | 'revision'>,
+  timeoutMs?: number,
 ) => Promise<{ signedTransactions: string[]; nextRevision: string; hasMore: boolean }>;
 
-Deno.test('apple-iap-history: configures a real aborting timeout for both Apple environments', () => {
+Deno.test('apple-iap-history: applies the handler runtime timeout to each Apple request', async () => {
   const clientTimeouts: unknown[] = [];
-  createHistoryWithFactory(historyEnv, (...args) => {
+  const history = createHistoryWithFactory(historyEnv, (...args) => {
     clientTimeouts.push(args[5]);
     return {
-      getTransactionHistory: async () => ({ signedTransactions: [], hasMore: false }),
+      getTransactionHistory: async () => ({
+        signedTransactions: [],
+        hasMore: false,
+        revision: 'revision',
+      }),
     };
   });
-  assert.deepEqual(clientTimeouts, [30_000, 30_000]);
+  await history({
+    environment: 'Production',
+    anchorTransactionId: '2000000000000001',
+    revision: null,
+  }, 7_000);
+  await history({
+    environment: 'Sandbox',
+    anchorTransactionId: '2000000000000002',
+    revision: null,
+  }, 9_000);
+  assert.deepEqual(clientTimeouts, [7_000, 9_000]);
 });
 
 Deno.test('apple-iap-history: timeout aborts the underlying fetch', async () => {
@@ -306,7 +392,7 @@ Deno.test('apple-iap-history: fetches exactly one page and forwards the stored r
     environment: 'Sandbox',
     anchorTransactionId: '2000000000000001',
     revision: 'revision-prior',
-  });
+  }, 12_345);
   assert.deepEqual(result, {
     signedTransactions: [JWS_A],
     nextRevision: 'revision-next',
@@ -315,6 +401,30 @@ Deno.test('apple-iap-history: fetches exactly one page and forwards the stored r
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], '2000000000000001');
   assert.equal(calls[0][1], 'revision-prior');
+});
+
+Deno.test('apple-iap-history: rejects an invalid runtime-derived timeout before Apple I/O', async () => {
+  let clients = 0;
+  const history = createHistoryWithFactory(historyEnv, () => {
+    clients += 1;
+    return {
+      getTransactionHistory: async () => ({
+        signedTransactions: [],
+        hasMore: false,
+        revision: 'revision',
+      }),
+    };
+  });
+
+  await assert.rejects(
+    () => history({
+      environment: 'Production',
+      anchorTransactionId: '2000000000000001',
+      revision: null,
+    }, 30_001),
+    /timeout/,
+  );
+  assert.equal(clients, 0);
 });
 
 Deno.test('apple-iap-history: rejects a response batch above the transaction bound', async () => {

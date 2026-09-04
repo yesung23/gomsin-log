@@ -35,7 +35,7 @@ type AppleHistoryClientFactory = (
   timeoutMs: number,
 ) => AppleHistoryClientLike;
 
-const HISTORY_TIMEOUT_MS = 30_000;
+const MAX_HISTORY_TIMEOUT_MS = 30_000;
 const MAX_HISTORY_TRANSACTIONS_PER_PAGE = 20;
 
 export async function fetchAppleHistoryWithTimeout(
@@ -108,27 +108,27 @@ export function createAppleIapHistory(
   if (!privateKey || !keyId || !issuerId || bundleId !== 'app.gomsinlog') {
     throw new Error('Apple Server API credentials are not configured');
   }
-  const clients = {
-    Production: factory(
+  return async (
+    target: AppleIapHistoryTarget,
+    timeoutMs = MAX_HISTORY_TIMEOUT_MS,
+  ) => {
+    if (
+      !Number.isInteger(timeoutMs) || timeoutMs < 1 ||
+      timeoutMs > MAX_HISTORY_TIMEOUT_MS
+    ) {
+      throw new Error('Apple history timeout is invalid');
+    }
+    const environment = target.environment === 'Production'
+      ? Environment.PRODUCTION
+      : Environment.SANDBOX;
+    const client = factory(
       privateKey,
       keyId,
       issuerId,
       bundleId,
-      Environment.PRODUCTION,
-      HISTORY_TIMEOUT_MS,
-    ),
-    Sandbox: factory(
-      privateKey,
-      keyId,
-      issuerId,
-      bundleId,
-      Environment.SANDBOX,
-      HISTORY_TIMEOUT_MS,
-    ),
-  };
-
-  return async (target: AppleIapHistoryTarget) => {
-    const client = clients[target.environment];
+      environment,
+      timeoutMs,
+    );
     const response = await client.getTransactionHistory(
       target.anchorTransactionId,
       target.revision,

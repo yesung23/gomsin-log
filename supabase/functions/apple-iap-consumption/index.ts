@@ -9,7 +9,10 @@ import { isUuid } from '../_shared/appleIapContract.ts';
 import { createAppleIapConsumptionSender } from '../_shared/appleIapServerApi.ts';
 import { type AppleIapConsumptionJob, handleAppleIapConsumption } from './handler.ts';
 
+const SUPABASE_ADMIN_REQUEST_TIMEOUT_MS = 10_000;
+
 Deno.serve(async (request) => {
+  const invocationStartedAtMs = performance.now();
   if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'E_METHOD_NOT_ALLOWED' }), {
       status: 405,
@@ -77,7 +80,7 @@ Deno.serve(async (request) => {
 
   const admin = createClient(url, secret, {
     auth: { autoRefreshToken: false, persistSession: false },
-    global: { fetch: createAdminClientFetch(url, secret) },
+    global: { fetch: createAdminClientFetch(url, secret, SUPABASE_ADMIN_REQUEST_TIMEOUT_MS) },
   });
 
   return handleAppleIapConsumption(request, {
@@ -85,6 +88,8 @@ Deno.serve(async (request) => {
     operatorSecret,
     operatorActorId: isUuid(operatorActorId) ? operatorActorId : null,
     now: Date.now,
+    invocationStartedAtMs,
+    monotonicNow: () => performance.now(),
     claimNext: async () => {
       const { data, error } = await admin.rpc('iap_claim_consumption_request');
       const row = Array.isArray(data) ? data[0] : null;

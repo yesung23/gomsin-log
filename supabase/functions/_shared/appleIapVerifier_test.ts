@@ -6,6 +6,7 @@ import {
 } from './appleIapVerifier.ts';
 import {
   appleTransactionEventKind,
+  hashAppAccountToken,
   isVerifiedNotification,
   isVerifiedTransaction,
 } from './appleIapContract.ts';
@@ -22,6 +23,12 @@ Deno.test('Apple contract accepts only canonical UInt64 transaction ids and boun
   assert.equal(isVerifiedNotification(notificationFixture()), true);
   assert.equal(isVerifiedNotification(notificationFixture({ notificationType: 'REFUND!' })), false);
   assert.equal(isVerifiedNotification(notificationFixture({ subtype: '' })), false);
+});
+
+Deno.test('Apple account-token hashing is stable across UUID letter casing', async () => {
+  const lower = 'abcdefab-cdef-4abc-8def-abcdefabcdef';
+  const upper = lower.toUpperCase();
+  assert.equal(await hashAppAccountToken(lower), await hashAppAccountToken(upper));
 });
 
 Deno.test('Apple Edge contract rejects non-renewing subscriptions until the DB catalog supports them', () => {

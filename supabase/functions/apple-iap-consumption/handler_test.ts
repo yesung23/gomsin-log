@@ -3,7 +3,9 @@ import {
   type AppleIapConsumptionDeps,
   type AppleIapConsumptionJob,
   type AppleIapSendAuthorization,
+  CONSUMPTION_RUNTIME_BUDGET_MS,
   handleAppleIapConsumption,
+  MIN_APPLE_SEND_WINDOW_MS,
 } from './handler.ts';
 
 const RECEIVED_AT = Date.parse('2026-09-04T00:00:00.000Z');
@@ -77,6 +79,8 @@ function deps(jobs: AppleIapConsumptionJob[] = [job()]) {
     operatorSecret: 'operator-secret',
     operatorActorId: OPERATOR_ACTOR_ID,
     now: () => RECEIVED_AT + 60_000,
+    invocationStartedAtMs: 0,
+    monotonicNow: () => 0,
     claimNext: async () => queue.shift() ?? null,
     authorizeSend: async () =>
       authorization({
@@ -106,6 +110,16 @@ function deps(jobs: AppleIapConsumptionJob[] = [job()]) {
   return { value, sent, completed };
 }
 
+function injectMonotonicClock(
+  value: AppleIapConsumptionDeps,
+  readings: readonly number[],
+): void {
+  let index = 0;
+  Object.assign(value, {
+    monotonicNow: () => readings[Math.min(index++, readings.length - 1)],
+  });
+}
+
 Deno.test('apple-iap-consumption: rejects the wrong scheduler secret before claiming work', async () => {
   const fixture = deps();
   let claims = 0;
@@ -116,6 +130,134 @@ Deno.test('apple-iap-consumption: rejects the wrong scheduler secret before clai
   const response = await handleAppleIapConsumption(request('wrong'), fixture.value);
   assert.equal(response.status, 401);
   assert.equal(claims, 0);
+});
+
+Deno.test('apple-iap-consumption: claims at most one queue job per invocation', async () => {
+  const fixture = deps([]);
+  const queue = [
+    job(),
+    job({
+      requestId: '30000000-0000-4000-8000-000000000002',
+      leaseToken: '40000000-0000-4000-8000-000000000002',
+    }),
+  ];
+  let claims = 0;
+  fixture.value.claimNext = async () => {
+    claims += 1;
+    return queue.shift() ?? null;
+  };
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 200);
+  assert.equal(claims, 1);
+  assert.equal(fixture.sent.length, 1);
+  assert.equal(fixture.completed.length, 1);
+  assert.equal(queue.length, 1);
+});
+
+Deno.test('apple-iap-consumption: caps Apple I/O to monotonic runtime remaining after the completion reserve', async () => {
+  const fixture = deps();
+  injectMonotonicClock(fixture.value, [10_000, 10_000, 10_000]);
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 200);
+  assert.equal(fixture.sent.length, 1);
+  assert.equal(fixture.sent[0].timeoutMs, 100_000);
+  assert.equal(fixture.completed[0].outcome, 'accepted');
+});
+
+Deno.test('apple-iap-consumption: retries without Apple I/O when authorization consumes the safe runtime', async () => {
+  const fixture = deps();
+  injectMonotonicClock(fixture.value, [0, 0, CONSUMPTION_RUNTIME_BUDGET_MS - 4_999]);
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 200);
+  assert.equal(fixture.sent.length, 0);
+  assert.deepEqual(fixture.completed, [{
+    requestId: '30000000-0000-4000-8000-000000000001',
+    leaseToken: '40000000-0000-4000-8000-000000000001',
+    sendAuthorizationToken: SEND_AUTHORIZATION_TOKEN,
+    attemptNo: 1,
+    requestBodyHash: 'a'.repeat(64),
+    outcome: 'retryable_failed',
+    errorCode: 'INVOCATION_BUDGET_EXHAUSTED',
+    retryAfterSeconds: null,
+  }]);
+  assert.deepEqual(await response.json(), {
+    claimed: 1,
+    sent: 0,
+    retryable: 1,
+    terminal: 0,
+    expired: 0,
+    unknown: 0,
+    warnings: 0,
+  });
+});
+
+Deno.test('apple-iap-consumption: starts Apple I/O only when the full minimum network window remains', async () => {
+  const fixture = deps();
+  injectMonotonicClock(fixture.value, [
+    0,
+    0,
+    CONSUMPTION_RUNTIME_BUDGET_MS - 15_000 - MIN_APPLE_SEND_WINDOW_MS,
+  ]);
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 200);
+  assert.equal(fixture.sent.length, 1);
+  assert.equal(fixture.sent[0].timeoutMs, MIN_APPLE_SEND_WINDOW_MS);
+  assert.equal(fixture.completed[0].outcome, 'accepted');
+});
+
+Deno.test('apple-iap-consumption: does not claim work after the invocation start budget is exhausted', async () => {
+  const fixture = deps();
+  let claims = 0;
+  fixture.value.monotonicNow = () => CONSUMPTION_RUNTIME_BUDGET_MS;
+  fixture.value.claimNext = async () => {
+    claims += 1;
+    return job();
+  };
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 503);
+  assert.equal(claims, 0);
+  assert.equal(fixture.sent.length, 0);
+  assert.equal(fixture.completed.length, 0);
+  assert.deepEqual(await response.json(), { error: 'E_IAP_CONSUMPTION_RUNTIME_EXHAUSTED' });
+});
+
+Deno.test('apple-iap-consumption: releases a claimed job without authorization when its safe runtime is gone', async () => {
+  const fixture = deps();
+  let authorizations = 0;
+  injectMonotonicClock(fixture.value, [
+    0,
+    CONSUMPTION_RUNTIME_BUDGET_MS - 15_000 - MIN_APPLE_SEND_WINDOW_MS + 1,
+  ]);
+  fixture.value.authorizeSend = async () => {
+    authorizations += 1;
+    return authorization();
+  };
+
+  const response = await handleAppleIapConsumption(request(), fixture.value);
+
+  assert.equal(response.status, 200);
+  assert.equal(authorizations, 0);
+  assert.equal(fixture.sent.length, 0);
+  assert.deepEqual(fixture.completed, [{
+    requestId: '30000000-0000-4000-8000-000000000001',
+    leaseToken: '40000000-0000-4000-8000-000000000001',
+    sendAuthorizationToken: null,
+    attemptNo: 1,
+    requestBodyHash: null,
+    outcome: 'retryable_failed',
+    errorCode: 'INVOCATION_BUDGET_EXHAUSTED',
+    retryAfterSeconds: null,
+  }]);
 });
 
 Deno.test('apple-iap-consumption: real Deno ingress drains zero-byte and whitespace POST bodies', async () => {
@@ -169,7 +311,7 @@ Deno.test('apple-iap-consumption: sends one minimal immutable V2 payload and nev
   assert.deepEqual(fixture.sent, [{
     environment: 'Production',
     transactionId: '2000000000000001',
-    timeoutMs: 120_000,
+    timeoutMs: 100_000,
     request: {
       customerConsented: true,
       deliveryStatus: 'DELIVERED',
@@ -300,7 +442,12 @@ Deno.test('apple-iap-consumption: persists a bounded Apple Retry-After hint with
 Deno.test('apple-iap-consumption: a short worker lease retries instead of expiring before the 12-hour deadline', async () => {
   const now = RECEIVED_AT + 60_000;
   const fixture = deps([job({ leaseExpiresAtMs: now + 4_000 })]);
+  let authorizations = 0;
   fixture.value.now = () => now;
+  fixture.value.authorizeSend = async () => {
+    authorizations += 1;
+    return authorization();
+  };
   const response = await handleAppleIapConsumption(request(), fixture.value);
   assert.deepEqual(await response.json(), {
     claimed: 1,
@@ -312,6 +459,7 @@ Deno.test('apple-iap-consumption: a short worker lease retries instead of expiri
     warnings: 0,
   });
   assert.equal(fixture.sent.length, 0);
+  assert.equal(authorizations, 0);
   assert.equal(fixture.completed[0].sendAuthorizationToken, null);
   assert.equal(fixture.completed[0].outcome, 'retryable_failed');
   assert.equal(fixture.completed[0].errorCode, 'APPLE_SEND_WINDOW_EXHAUSTED');

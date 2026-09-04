@@ -1,6 +1,6 @@
 import {
   appleTransactionEventKind,
-  sha256Hex,
+  hashAppAccountToken,
   type VerifiedAppleNotification,
   type VerifiedAppleTransaction,
 } from '../_shared/appleIapContract.ts';
@@ -48,7 +48,7 @@ export async function buildVerifiedNotificationRpcArgs(
     p_product_type: referenced?.type ?? null,
     p_bundle_id: referenced?.bundleId ?? null,
     p_app_account_token_hash: referenced?.appAccountToken
-      ? await sha256Hex(referenced.appAccountToken)
+      ? await hashAppAccountToken(referenced.appAccountToken)
       : null,
     p_purchase_date_ms: referenced?.purchaseDate ?? null,
     p_transaction_signed_date_ms: referenced?.signedDate ?? null,

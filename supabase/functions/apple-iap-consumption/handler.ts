@@ -3,6 +3,12 @@ import { json } from '../_shared/appleIapContract.ts';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export const MAX_CONSUMPTION_JOBS_PER_INVOCATION = 1;
+export const CONSUMPTION_RUNTIME_BUDGET_MS = 125_000;
+export const CONSUMPTION_FINALIZATION_RESERVE_MS = 15_000;
+export const MIN_APPLE_SEND_WINDOW_MS = 5_000;
+const MAX_APPLE_SEND_TIMEOUT_MS = 100_000;
+
 export type AppleIapOperationalAlert = {
   alertId: string;
   source: 'consumption' | 'transaction_review';
@@ -95,6 +101,8 @@ export type AppleIapConsumptionDeps = {
   operatorSecret: string | null;
   operatorActorId: string | null;
   now: () => number;
+  invocationStartedAtMs: number;
+  monotonicNow: () => number;
   claimNext: () => Promise<AppleIapConsumptionJob | null>;
   authorizeSend: (input: {
     requestId: string;
@@ -110,6 +118,22 @@ export type AppleIapConsumptionDeps = {
     operationId: string;
   }) => Promise<AppleIapReviewAcknowledgement>;
 };
+
+function remainingRuntimeMs(
+  deps: Pick<AppleIapConsumptionDeps, 'invocationStartedAtMs' | 'monotonicNow'>,
+  reserveMs: number,
+): number {
+  const current = deps.monotonicNow();
+  const elapsed = current - deps.invocationStartedAtMs;
+  if (
+    !Number.isFinite(deps.invocationStartedAtMs) || deps.invocationStartedAtMs < 0 ||
+    !Number.isFinite(current) || current < 0 ||
+    !Number.isFinite(elapsed) || elapsed < 0
+  ) {
+    return 0;
+  }
+  return Math.max(0, CONSUMPTION_RUNTIME_BUDGET_MS - elapsed - reserveMs);
+}
 
 async function readActionBoundary(
   request: Request,
@@ -372,7 +396,13 @@ export async function handleAppleIapConsumption(
     warnings: 0,
   };
   try {
-    for (let index = 0; index < 25; index += 1) {
+    for (let index = 0; index < MAX_CONSUMPTION_JOBS_PER_INVOCATION; index += 1) {
+      if (
+        remainingRuntimeMs(deps, CONSUMPTION_FINALIZATION_RESERVE_MS) <
+          MIN_APPLE_SEND_WINDOW_MS
+      ) {
+        return json({ error: 'E_IAP_CONSUMPTION_RUNTIME_EXHAUSTED' }, 503);
+      }
       const job = await deps.claimNext();
       if (!job) break;
       counts.claimed += 1;
@@ -392,8 +422,8 @@ export async function handleAppleIapConsumption(
         continue;
       }
       const sendWindowMs = Math.min(job.deadlineAtMs, job.leaseExpiresAtMs) -
-        now - 5_000;
-      if (sendWindowMs <= 0) {
+        now - CONSUMPTION_FINALIZATION_RESERVE_MS;
+      if (sendWindowMs < MIN_APPLE_SEND_WINDOW_MS) {
         await deps.complete({
           requestId: job.requestId,
           leaseToken: job.leaseToken,
@@ -402,6 +432,23 @@ export async function handleAppleIapConsumption(
           requestBodyHash: null,
           outcome: 'retryable_failed',
           errorCode: 'APPLE_SEND_WINDOW_EXHAUSTED',
+          retryAfterSeconds: null,
+        });
+        counts.retryable += 1;
+        continue;
+      }
+      if (
+        remainingRuntimeMs(deps, CONSUMPTION_FINALIZATION_RESERVE_MS) <
+          MIN_APPLE_SEND_WINDOW_MS
+      ) {
+        await deps.complete({
+          requestId: job.requestId,
+          leaseToken: job.leaseToken,
+          sendAuthorizationToken: null,
+          attemptNo: job.attemptNo,
+          requestBodyHash: null,
+          outcome: 'retryable_failed',
+          errorCode: 'INVOCATION_BUDGET_EXHAUSTED',
           retryAfterSeconds: null,
         });
         counts.retryable += 1;
@@ -459,9 +506,28 @@ export async function handleAppleIapConsumption(
         continue;
       }
 
+      const runtimeSendWindowMs = remainingRuntimeMs(
+        deps,
+        CONSUMPTION_FINALIZATION_RESERVE_MS,
+      );
+      if (runtimeSendWindowMs < MIN_APPLE_SEND_WINDOW_MS) {
+        await deps.complete({
+          requestId: job.requestId,
+          leaseToken: job.leaseToken,
+          sendAuthorizationToken: authorization.sendAuthorizationToken,
+          attemptNo: authorization.attemptNo,
+          requestBodyHash: authorization.requestBodyHash,
+          outcome: 'retryable_failed',
+          errorCode: 'INVOCATION_BUDGET_EXHAUSTED',
+          retryAfterSeconds: null,
+        });
+        counts.retryable += 1;
+        continue;
+      }
+
       const authorizedSendWindowMs = Math.min(job.deadlineAtMs, job.leaseExpiresAtMs) -
-        authorizedNow - 5_000;
-      if (authorizedSendWindowMs <= 0) {
+        authorizedNow - CONSUMPTION_FINALIZATION_RESERVE_MS;
+      if (authorizedSendWindowMs < MIN_APPLE_SEND_WINDOW_MS) {
         await deps.complete({
           requestId: job.requestId,
           leaseToken: job.leaseToken,
@@ -476,11 +542,31 @@ export async function handleAppleIapConsumption(
         continue;
       }
 
+      const appleTimeoutMs = Math.floor(Math.min(
+        MAX_APPLE_SEND_TIMEOUT_MS,
+        authorizedSendWindowMs,
+        runtimeSendWindowMs,
+      ));
+      if (appleTimeoutMs < MIN_APPLE_SEND_WINDOW_MS) {
+        await deps.complete({
+          requestId: job.requestId,
+          leaseToken: job.leaseToken,
+          sendAuthorizationToken: authorization.sendAuthorizationToken,
+          attemptNo: authorization.attemptNo,
+          requestBodyHash: authorization.requestBodyHash,
+          outcome: 'retryable_failed',
+          errorCode: 'INVOCATION_BUDGET_EXHAUSTED',
+          retryAfterSeconds: null,
+        });
+        counts.retryable += 1;
+        continue;
+      }
+
       try {
         await deps.sendConsumptionInformation({
           environment: authorization.environment,
           transactionId: authorization.transactionId,
-          timeoutMs: Math.min(120_000, authorizedSendWindowMs),
+          timeoutMs: appleTimeoutMs,
           request: appleRequest,
         });
         await deps.complete({

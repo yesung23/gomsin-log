@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { purgeDiaryLocalStateForUser } from './diaryLocalState';
 
 beforeEach(() => localStorage.clear());
@@ -13,7 +13,7 @@ describe('purgeDiaryLocalStateForUser', () => {
     localStorage.setItem('gomsin.diary.page.u2.2026-09-01', '{}');
     localStorage.setItem('unrelated', 'keep');
 
-    purgeDiaryLocalStateForUser('u1');
+    expect(purgeDiaryLocalStateForUser('u1')).toBe(true);
 
     expect(localStorage.getItem('gomsin.diary.page.u1.2026-09-01')).toBeNull();
     expect(localStorage.getItem('gomsin.diary.paper.u1')).toBeNull();
@@ -22,6 +22,33 @@ describe('purgeDiaryLocalStateForUser', () => {
     expect(localStorage.getItem('gomsin.display.paper.u1')).toBeNull();
     expect(localStorage.getItem('gomsin.diary.page.u2.2026-09-01')).toBe('{}');
     expect(localStorage.getItem('unrelated')).toBe('keep');
+  });
+
+  it('does not purge another account whose id only shares the same prefix', () => {
+    localStorage.setItem('gomsin.diary.paper.u1', 'grid');
+    localStorage.setItem('gomsin.diary.page.u1.2026-09-01', '{}');
+    localStorage.setItem('gomsin.diary.paper.u10', 'plain');
+    localStorage.setItem('gomsin.diary.page.u10.2026-09-01', '{"owner":"u10"}');
+
+    expect(purgeDiaryLocalStateForUser('u1')).toBe(true);
+
+    expect(localStorage.getItem('gomsin.diary.paper.u1')).toBeNull();
+    expect(localStorage.getItem('gomsin.diary.page.u1.2026-09-01')).toBeNull();
+    expect(localStorage.getItem('gomsin.diary.paper.u10')).toBe('plain');
+    expect(localStorage.getItem('gomsin.diary.page.u10.2026-09-01')).toBe('{"owner":"u10"}');
+  });
+
+  it('returns false when removal does not survive an exact read-back', () => {
+    const values = new Map([['gomsin.diary.paper.u1', 'grid']]);
+    const storage = {
+      get length() { return values.size; },
+      key: (index: number) => Array.from(values.keys())[index] ?? null,
+      getItem: (key: string) => values.get(key) ?? null,
+      removeItem: vi.fn(),
+    };
+
+    expect(purgeDiaryLocalStateForUser('u1', storage)).toBe(false);
+    expect(values.get('gomsin.diary.paper.u1')).toBe('grid');
   });
 
   it('does nothing without a user id', () => {

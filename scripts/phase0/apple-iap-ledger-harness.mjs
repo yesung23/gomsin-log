@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Focused PostgreSQL actor proof for migration 073.
+ * Focused PostgreSQL actor proof for migration 077.
  *
  * This is intentionally independent from the older all-chain harness: it
  * creates the Supabase auth/role contract needed by this private schema, then
@@ -22,8 +22,15 @@ const keep = process.argv.includes('--keep');
 const env = { ...process.env, LC_ALL: 'C', LANG: 'C', LC_MESSAGES: 'C' };
 const A = '00000000-0000-4000-8000-00000000000a';
 const B = '00000000-0000-4000-8000-00000000000b';
+const C = '00000000-0000-4000-8000-00000000000c';
+const D = '00000000-0000-4000-8000-00000000000d';
 const TOKEN_A = '10000000-0000-4000-8000-00000000000a';
 const TOKEN_B = '10000000-0000-4000-8000-00000000000b';
+const TOKEN_D = '10000000-0000-4000-8000-00000000000d';
+const ATTEMPT_A = '30000000-0000-4000-8000-00000000000a';
+const ATTEMPT_B = '30000000-0000-4000-8000-00000000000b';
+const ATTEMPT_C = '30000000-0000-4000-8000-00000000000c';
+const ATTEMPT_D = '30000000-0000-4000-8000-00000000000d';
 let boundToken = TOKEN_A;
 let checks = 0;
 
@@ -32,7 +39,7 @@ function have(binary) {
 }
 
 if (!existsSync(MIGRATION)) {
-  console.error('BLOCKED — migration 073 is not present.');
+  console.error('BLOCKED — migration 077 is not present.');
   process.exit(2);
 }
 if (!['initdb', 'pg_ctl', 'psql'].every(have)) {
@@ -61,6 +68,17 @@ function psql(args, input) {
 }
 function admin(sql) {
   return psql(['-At', '-c', sql]);
+}
+function adminAsync(sql) {
+  const args = ['-h', socketDir, '-U', 'postgres', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-X', '-q', '-At', '-c', sql];
+  return new Promise((resolvePromise) => {
+    const child = spawn('psql', args, { env });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.stderr.on('data', (chunk) => { stderr += chunk; });
+    child.on('close', (status) => resolvePromise({ status, stdout, stderr }));
+  });
 }
 function asActor(role, userId, sql, { setRoleClaim = true } = {}) {
   const args = ['-At', '-c', `SET ROLE ${role}`];
@@ -110,6 +128,19 @@ function actorScalar(role, userId, sql, label) {
 function jsonResult(text, label) {
   try { return JSON.parse(text); } catch { throw new Error(`${label}: invalid JSON result ${text}`); }
 }
+async function waitForGrantedAdvisoryLock(label) {
+  const deadline = Date.now() + 3_000;
+  while (Date.now() < deadline) {
+    const result = admin("SELECT count(*)::text FROM pg_locks WHERE locktype = 'advisory' AND granted");
+    if (result.status !== 0) throw new Error(`${label}: ${(result.stderr ?? '').trim()}`);
+    if (Number((result.stdout ?? '').trim()) > 0) {
+      checks += 1;
+      return;
+    }
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`${label}: timed out waiting for the deletion lock`);
+}
 function appleType(product) {
   if (product === 'export.3' || product === 'app.gomsinlog.book.export.credit.1') return 'Consumable';
   if (product === 'app.gomsinlog.plus.monthly' || product === 'app.gomsinlog.plus.annual') return 'Auto-Renewable Subscription';
@@ -140,6 +171,8 @@ try {
     );
     CREATE TABLE public.account_deletion_requests (
       user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+      attempt_id uuid NOT NULL,
+      phase text NOT NULL,
       expected_record_ids uuid[] NOT NULL DEFAULT '{}',
       requested_at timestamptz NOT NULL DEFAULT now()
     );
@@ -152,8 +185,41 @@ try {
     GRANT USAGE ON SCHEMA auth TO anon, authenticated, service_role;
     GRANT EXECUTE ON FUNCTION auth.uid() TO anon, authenticated, service_role;
     GRANT EXECUTE ON FUNCTION auth.role() TO anon, authenticated, service_role;
+    CREATE FUNCTION public.lock_account_deletion_attempt_v2(
+      p_user_id uuid,
+      p_attempt_id uuid
+    ) RETURNS text
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = public, pg_temp
+    AS $stub$
+    DECLARE
+      v_phase text;
+    BEGIN
+      IF auth.role() IS DISTINCT FROM 'service_role' THEN
+        RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Service role required';
+      END IF;
+      IF p_user_id IS NULL OR p_attempt_id IS NULL THEN
+        RAISE EXCEPTION 'Invalid account deletion payload' USING ERRCODE = '22004';
+      END IF;
+      PERFORM pg_catalog.pg_advisory_xact_lock(
+        pg_catalog.hashtextextended(p_user_id::text, 15013)
+      );
+      SELECT deletion.phase INTO v_phase
+      FROM public.account_deletion_requests AS deletion
+      WHERE deletion.user_id = p_user_id
+        AND deletion.attempt_id = p_attempt_id
+      FOR UPDATE;
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'stale_account_deletion_attempt' USING ERRCODE = '42501';
+      END IF;
+      RETURN v_phase;
+    END;
+    $stub$;
+    REVOKE ALL ON FUNCTION public.lock_account_deletion_attempt_v2(uuid, uuid)
+      FROM PUBLIC, anon, authenticated, service_role;
   `), 'Supabase auth stub');
-  expectOk(psql(['-f', MIGRATION]), 'apply migration 073');
+  expectOk(psql(['-f', MIGRATION]), 'apply migration 077');
   if (scalar("SELECT count(*)::text FROM iap_private.apple_product_catalog WHERE sale_enabled", 'seeded sale state') !== '0') {
     throw new Error('a seeded Apple IAP product is unexpectedly sale-enabled');
   }
@@ -163,7 +229,8 @@ try {
 
   // Fixture writes happen as the database owner, never through a client role.
   expectOk(admin(`
-    INSERT INTO auth.users (id) VALUES (${q(A)}::uuid), (${q(B)}::uuid);
+    INSERT INTO auth.users (id) VALUES
+      (${q(A)}::uuid), (${q(B)}::uuid), (${q(C)}::uuid), (${q(D)}::uuid);
     INSERT INTO iap_private.apple_product_catalog
       (environment, product_id, product_key, product_type, bundle_id, entitlement_key, credit_amount)
     VALUES
@@ -183,7 +250,9 @@ try {
     WHERE (environment, product_id) IN
       (('Production', 'paper.paid'), ('Production', 'export.3'), ('Xcode', 'paper.paid'));
     INSERT INTO iap_private.apple_account_bindings (user_id, app_account_token, app_account_token_hash)
-    VALUES (${q(A)}::uuid, ${q(TOKEN_A)}::uuid, ${q(tokenHash(TOKEN_A))});
+    VALUES
+      (${q(A)}::uuid, ${q(TOKEN_A)}::uuid, ${q(tokenHash(TOKEN_A))}),
+      (${q(D)}::uuid, ${q(TOKEN_D)}::uuid, ${q(tokenHash(TOKEN_D))});
   `), 'catalog fixture');
 
   const saleDefault = scalar("SELECT sale_enabled::text FROM iap_private.apple_product_catalog WHERE environment = 'Production' AND product_id = 'paper.off'", 'sale default');
@@ -209,9 +278,69 @@ try {
   if (emptyState.export_credits !== 0 || emptyState.entitlement_key !== null) throw new Error('an unbound account did not receive an empty IAP state');
   const otherAccountToken = jsonResult(actorScalar('authenticated', B, `SELECT row_to_json(x) FROM public.iap_prepare_purchase('paper.paid', 'Production') AS x`, 'other account prepare'), 'other account prepare').account_token;
   if (otherAccountToken === boundToken) throw new Error('different account received the same server token');
-  expectOk(admin(`INSERT INTO public.account_deletion_requests (user_id) VALUES (${q(B)}::uuid)`), 'other account deletion marker');
+  expectOk(admin(`INSERT INTO public.account_deletion_requests (user_id, attempt_id, phase)
+    VALUES (${q(B)}::uuid, ${q(ATTEMPT_B)}::uuid, 'media_cleanup')`), 'other account deletion marker');
   expectFail(asActor('authenticated', B, `SELECT * FROM public.iap_prepare_purchase('paper.paid', 'Production')`), 'pending-deletion purchase prepare');
   expectOk(admin(`DELETE FROM public.account_deletion_requests WHERE user_id = ${q(B)}::uuid`), 'clear other account deletion marker');
+
+  // A deletion transaction owns the same per-user fence before its marker is
+  // visible. Purchase preparation must wait, observe the committed marker, and
+  // fail without creating an account binding.
+  const purchaseDeletionRace = adminAsync(`
+    BEGIN;
+    SELECT pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(${q(C)}::text, 15013)
+    );
+    SELECT pg_sleep(0.5);
+    INSERT INTO public.account_deletion_requests (user_id, attempt_id, phase)
+    VALUES (${q(C)}::uuid, ${q(ATTEMPT_C)}::uuid, 'media_cleanup');
+    COMMIT;
+  `);
+  await waitForGrantedAdvisoryLock('purchase/deletion race lock');
+  const purchaseDuringDeletion = asActorAsync(
+    'authenticated',
+    C,
+    `SELECT * FROM public.iap_prepare_purchase('paper.paid', 'Production')`,
+  );
+  const [purchaseDeletionResult, purchaseRaceResult] = await Promise.all([
+    purchaseDeletionRace,
+    purchaseDuringDeletion,
+  ]);
+  expectOk(purchaseDeletionResult, 'commit purchase/deletion race marker');
+  expectFail(purchaseRaceResult, 'purchase waits for concurrent deletion');
+  if (scalar(`SELECT count(*)::text FROM iap_private.apple_account_bindings WHERE user_id = ${q(C)}::uuid`, 'purchase/deletion race binding result') !== '0') {
+    throw new Error('purchase created a binding after concurrent deletion started');
+  }
+
+  // The verified server path uses the same fence. Without it this transaction
+  // would grant D before the not-yet-visible deletion marker commits.
+  const applyDeletionRace = adminAsync(`
+    BEGIN;
+    SELECT pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(${q(D)}::text, 15013)
+    );
+    SELECT pg_sleep(0.5);
+    INSERT INTO public.account_deletion_requests (user_id, attempt_id, phase)
+    VALUES (${q(D)}::uuid, ${q(ATTEMPT_D)}::uuid, 'media_cleanup');
+    COMMIT;
+  `);
+  await waitForGrantedAdvisoryLock('verified-apply/deletion race lock');
+  const applyDuringDeletion = asActorAsync('service_role', null, `
+    SELECT * FROM public.iap_apply_verified_transaction(
+      ${q(D)}::uuid, 'Production', '8001', '8001', 'paper.paid',
+      'Non-Consumable', 'app.gomsinlog', ${q(tokenHash(TOKEN_D))},
+      8000, 8000, NULL, NULL, 'purchase', ${q(sha('deletion-race-8001'))}
+    )
+  `);
+  const [applyDeletionResult, applyRaceResult] = await Promise.all([
+    applyDeletionRace,
+    applyDuringDeletion,
+  ]);
+  expectOk(applyDeletionResult, 'commit verified-apply/deletion race marker');
+  expectFail(applyRaceResult, 'verified apply waits for concurrent deletion');
+  if (scalar("SELECT count(*)::text FROM iap_private.apple_transactions WHERE environment = 'Production' AND transaction_id = '8001'", 'verified-apply/deletion race result') !== '0') {
+    throw new Error('verified apply granted a transaction after concurrent deletion started');
+  }
   const billingAccountId = scalar(`SELECT billing_account_id::text FROM iap_private.apple_account_bindings WHERE user_id = ${q(A)}::uuid`, 'billing account binding');
   if (!/^[0-9a-f-]{36}$/.test(billingAccountId)) throw new Error('billing account binding did not receive an arbitrary UUID primary key');
   expectOk(asActor('authenticated', A, `SELECT * FROM public.iap_get_state('Production')`), 'authenticated state RPC');
@@ -319,12 +448,17 @@ try {
 
   const before = scalar(`SELECT (SELECT count(*) FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid) || '|' || (SELECT count(*) FROM iap_private.apple_notifications) || '|' || (SELECT count(*) FROM iap_private.export_credit_ledger WHERE billing_account_id = ${q(billingAccountId)}::uuid)`, 'deletion evidence before');
   const creditBeforeDeletion = Number(scalar(`SELECT iap_private.credit_balance(${q(billingAccountId)}::uuid, 'Production')::text`, 'credit balance before deletion release'));
-  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'authenticated account deletion prep');
-  expectFail(asActor('anon', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'anon account deletion prep');
-  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'missing-marker account deletion prep');
-  expectOk(admin(`INSERT INTO public.account_deletion_requests (user_id) VALUES (${q(A)}::uuid)`), 'account deletion marker');
-  expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'service account deletion prep');
-  expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion(${q(A)}::uuid)`), 'idempotent account deletion prep');
+  expectFail(asActor('authenticated', A, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'authenticated account deletion prep');
+  expectFail(asActor('anon', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'anon account deletion prep');
+  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'missing-marker account deletion prep');
+  expectOk(admin(`INSERT INTO public.account_deletion_requests (user_id, attempt_id, phase)
+    VALUES (${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid, 'relationships_closed')`), 'account deletion marker');
+  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'premature account deletion prep');
+  expectFail(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, '30000000-0000-4000-8000-000000000099'::uuid)`), 'stale-attempt account deletion prep');
+  expectOk(admin(`UPDATE public.account_deletion_requests SET phase = 'solo_cleanup_complete'
+    WHERE user_id = ${q(A)}::uuid AND attempt_id = ${q(ATTEMPT_A)}::uuid`), 'complete relational deletion phase');
+  expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'service account deletion prep');
+  expectOk(asActor('service_role', null, `SELECT * FROM public.iap_prepare_account_deletion_v2(${q(A)}::uuid, ${q(ATTEMPT_A)}::uuid)`), 'idempotent account deletion prep');
   const after = scalar(`SELECT (SELECT count(*) FROM iap_private.apple_transactions WHERE billing_account_id = ${q(billingAccountId)}::uuid) || '|' || (SELECT count(*) FROM iap_private.apple_notifications) || '|' || (SELECT count(*) FROM iap_private.export_credit_ledger WHERE billing_account_id = ${q(billingAccountId)}::uuid)`, 'deletion evidence after');
   const [beforeTransactions, beforeNotifications, beforeCreditEntries] = before.split('|').map(Number);
   const [afterTransactions, afterNotifications, afterCreditEntries] = after.split('|').map(Number);
@@ -352,10 +486,10 @@ try {
   if (scalar("SELECT count(*)::text FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'iap_private' AND c.relname IN ('apple_transactions','entitlements','export_credit_ledger','export_credit_reservations') AND a.attname = 'user_id' AND NOT a.attisdropped", 'retained raw user id proof') !== '0') throw new Error('retained IAP ledger still has a raw user_id column');
   if (scalar("SELECT count(*)::text FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'iap_private' AND c.relname IN ('apple_transactions','entitlements','export_credit_ledger','export_credit_reservations') AND a.attname = 'billing_account_id' AND NOT a.attisdropped", 'billing account linkage proof') !== '4') throw new Error('retained IAP ledgers are not all billing-account linked');
   if (scalar("SELECT count(*)::text FROM pg_constraint WHERE conrelid = 'iap_private.apple_account_bindings'::regclass AND confrelid = 'auth.users'::regclass AND confdeltype = 'n'", 'auth user FK policy') !== '1') throw new Error('billing binding is missing ON DELETE SET NULL auth user FK');
-  if (scalar("SELECT pg_get_function_result(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'iap_prepare_account_deletion'", 'account deletion return contract').includes('user_id')) throw new Error('account deletion prep still returns raw user_id');
+  if (scalar("SELECT pg_get_function_result(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'iap_prepare_account_deletion_v2'", 'account deletion return contract').includes('user_id')) throw new Error('account deletion prep still returns raw user_id');
   if (scalar("SELECT pg_get_function_identity_arguments(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'iap_prepare_purchase'", 'server-token RPC signature') !== 'p_product_id text, p_environment text') throw new Error('prepare RPC still accepts client token/bundle inputs');
   if (scalar("SELECT pg_get_function_identity_arguments(p.oid) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname = 'iap_list_reconciliation_targets'", 'reconciliation target signature') !== '') throw new Error('reconciliation target RPC unexpectedly accepts client-selected inputs');
-  if (scalar("SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('iap_prepare_purchase','iap_get_state','iap_claim_notification','iap_apply_verified_transaction','iap_process_verified_notification','iap_export_credit_reserve','iap_export_credit_commit','iap_export_credit_release','iap_prepare_account_deletion','iap_list_reconciliation_targets') AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public, pg_temp']", 'definer/search_path contract') !== '10') throw new Error('typed RPC security-definer/search_path contract incomplete');
+  if (scalar("SELECT count(*)::text FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND p.proname IN ('iap_prepare_purchase','iap_get_state','iap_claim_notification','iap_apply_verified_transaction','iap_process_verified_notification','iap_export_credit_reserve','iap_export_credit_commit','iap_export_credit_release','iap_prepare_account_deletion_v2','iap_list_reconciliation_targets') AND p.prosecdef AND p.proconfig @> ARRAY['search_path=public, pg_temp']", 'definer/search_path contract') !== '10') throw new Error('typed RPC security-definer/search_path contract incomplete');
 
   console.log(`PASS — Apple IAP ledger PostgreSQL actor harness: ${checks} assertions`);
   console.log('UNVERIFIED — remote Supabase catalog/migration state, Edge deployment, Apple verification keys, Sandbox/Production servers, and device/App Store behavior.');

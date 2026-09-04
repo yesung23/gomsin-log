@@ -301,15 +301,21 @@ BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated';
   END IF;
+  IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode')
+     OR p_product_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid IAP purchase request';
+  END IF;
+
+  -- Serialize every account-bound IAP authority decision with the canonical
+  -- account-deletion fence before consulting Auth, deletion, or binding state.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_uid::TEXT, 15013)
+  );
   IF NOT EXISTS (SELECT 1 FROM auth.users AS account WHERE account.id = v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account is unavailable';
   END IF;
   IF iap_private.is_account_deletion_pending(v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
-  END IF;
-  IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode')
-     OR p_product_id IS NULL THEN
-    RAISE EXCEPTION 'Invalid IAP purchase request';
   END IF;
 
   SELECT c.* INTO v_catalog
@@ -364,11 +370,15 @@ BEGIN
   IF v_uid IS NULL THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM auth.users AS account WHERE account.id = v_uid) THEN
-    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account is unavailable';
-  END IF;
   IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode') THEN
     RAISE EXCEPTION 'Invalid IAP environment';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_uid::TEXT, 15013)
+  );
+  IF NOT EXISTS (SELECT 1 FROM auth.users AS account WHERE account.id = v_uid) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account is unavailable';
   END IF;
   IF iap_private.is_account_deletion_pending(v_uid) THEN
     RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
@@ -574,6 +584,14 @@ BEGIN
      OR NOT iap_private.is_sha256_hex(p_payload_hash) THEN
     RAISE EXCEPTION 'Invalid verified Apple transaction';
   END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(p_user_id::TEXT, 15013)
+  );
+  IF iap_private.is_account_deletion_pending(p_user_id) THEN
+    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
+  END IF;
+
   v_signed_at := to_timestamp(p_signed_date_ms / 1000.0);
   v_purchase_at := to_timestamp(p_purchase_date_ms / 1000.0);
   v_expires_at := CASE WHEN p_expires_date_ms IS NULL THEN NULL ELSE to_timestamp(p_expires_date_ms / 1000.0) END;
@@ -606,10 +624,6 @@ BEGIN
   IF NOT FOUND OR v_binding.deleted_at IS NOT NULL
      OR v_binding.app_account_token_hash IS DISTINCT FROM p_app_account_token_hash THEN
     RAISE EXCEPTION 'Apple account binding mismatch';
-  END IF;
-
-  IF iap_private.is_account_deletion_pending(p_user_id) THEN
-    RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending';
   END IF;
 
   PERFORM pg_catalog.pg_advisory_xact_lock(
@@ -971,10 +985,13 @@ DECLARE
   v_balance BIGINT;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
-  IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   IF p_environment NOT IN ('Sandbox', 'Production', 'Xcode') OR p_amount IS NULL OR p_amount <= 0 OR p_idempotency_key IS NULL THEN
     RAISE EXCEPTION 'Invalid export credit reservation';
   END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_uid::TEXT, 15013)
+  );
+  IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   SELECT b.* INTO v_binding FROM iap_private.apple_account_bindings AS b
   WHERE b.user_id = v_uid FOR UPDATE;
   IF NOT FOUND OR v_binding.deleted_at IS NOT NULL THEN RAISE EXCEPTION 'IAP account binding is unavailable'; END IF;
@@ -1022,6 +1039,10 @@ DECLARE
   v_reservation iap_private.export_credit_reservations%ROWTYPE;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
+  IF p_reservation_id IS NULL THEN RAISE EXCEPTION 'Invalid export credit reservation'; END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_uid::TEXT, 15013)
+  );
   IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   SELECT b.billing_account_id INTO v_billing_account_id
   FROM iap_private.apple_account_bindings AS b
@@ -1068,6 +1089,10 @@ DECLARE
   v_reservation iap_private.export_credit_reservations%ROWTYPE;
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Not authenticated'; END IF;
+  IF p_reservation_id IS NULL THEN RAISE EXCEPTION 'Invalid export credit reservation'; END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_uid::TEXT, 15013)
+  );
   IF iap_private.is_account_deletion_pending(v_uid) THEN RAISE EXCEPTION USING ERRCODE = '42501', MESSAGE = 'Account deletion is pending'; END IF;
   SELECT b.billing_account_id INTO v_billing_account_id
   FROM iap_private.apple_account_bindings AS b
@@ -1101,7 +1126,10 @@ $$;
 -- transaction/notification/credit evidence. The Auth user reference, raw
 -- appAccountToken, and active entitlement access are tombstoned; no retained
 -- IAP row stores the raw auth user id.
-CREATE FUNCTION public.iap_prepare_account_deletion(p_user_id UUID)
+CREATE FUNCTION public.iap_prepare_account_deletion_v2(
+  p_user_id UUID,
+  p_attempt_id UUID
+)
 RETURNS TABLE (
   prepared BOOLEAN,
   entitlements_revoked BIGINT,
@@ -1118,14 +1146,18 @@ DECLARE
   v_billing_account_id UUID;
   v_entitlements BIGINT := 0;
   v_reservations BIGINT := 0;
+  v_phase TEXT;
 BEGIN
   PERFORM iap_private.require_service_role();
-  IF p_user_id IS NULL THEN RAISE EXCEPTION 'Invalid account deletion user'; END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM public.account_deletion_requests AS deletion
-    WHERE deletion.user_id = p_user_id
-  ) THEN
-    RAISE EXCEPTION 'Account deletion marker is missing';
+  IF p_user_id IS NULL OR p_attempt_id IS NULL THEN
+    RAISE EXCEPTION 'Invalid account deletion payload' USING ERRCODE = '22004';
+  END IF;
+
+  -- This helper acquires the canonical namespace-15013 user/relationship
+  -- locks and proves the invocation still owns the exact deletion attempt.
+  v_phase := public.lock_account_deletion_attempt_v2(p_user_id, p_attempt_id);
+  IF v_phase IS DISTINCT FROM 'solo_cleanup_complete' THEN
+    RAISE EXCEPTION 'illegal_account_deletion_phase' USING ERRCODE = '55000';
   END IF;
 
   SELECT b.billing_account_id INTO v_billing_account_id
@@ -1216,8 +1248,8 @@ REVOKE ALL ON FUNCTION public.iap_export_credit_commit(UUID) FROM PUBLIC, anon, 
 GRANT EXECUTE ON FUNCTION public.iap_export_credit_commit(UUID) TO authenticated;
 REVOKE ALL ON FUNCTION public.iap_export_credit_release(UUID) FROM PUBLIC, anon, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_export_credit_release(UUID) TO authenticated;
-REVOKE ALL ON FUNCTION public.iap_prepare_account_deletion(UUID) FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.iap_prepare_account_deletion(UUID) TO service_role;
+REVOKE ALL ON FUNCTION public.iap_prepare_account_deletion_v2(UUID, UUID) FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.iap_prepare_account_deletion_v2(UUID, UUID) TO service_role;
 REVOKE ALL ON FUNCTION public.iap_list_reconciliation_targets() FROM PUBLIC, anon, authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.iap_list_reconciliation_targets() TO service_role;
 

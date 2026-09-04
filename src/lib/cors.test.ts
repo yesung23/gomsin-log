@@ -23,6 +23,7 @@ function makeRequest(method: string, origin: string | null, authorization?: stri
 /** Minimal admin double: records the sequence and fails nothing by default. */
 function makeAdmin(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
+  let activeAttemptId: unknown = null;
   const admin = {
     calls,
     auth: {
@@ -55,9 +56,19 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
     }),
     rpc: vi.fn(async (name: string, args?: Record<string, unknown>) => {
       calls.push(`rpc:${name}`);
+      if (name === 'begin_account_deletion_v2') {
+        activeAttemptId = args?.p_attempt_id;
+      }
       return {
         data: name === 'begin_account_deletion_v2'
           ? { ok: true, attempt_id: args?.p_attempt_id, phase: 'media_cleanup' }
+          : name === 'inspect_account_deletion_fence_v2'
+            ? {
+              ok: true,
+              pending: true,
+              attempt_id: activeAttemptId,
+              phase: 'media_cleanup',
+            }
           : name === 'e2ee_prepare_account_deletion_v2'
             ? { ok: true, phase: 'e2ee_prepared', preparation: { partner_remains: false } }
             : name === 'prepare_account_deletion_v2'
@@ -318,6 +329,8 @@ describe('C2 - the delete-account function applies the table end to end', () => 
       'auth.getUser',
       'from:daily_records.select',
       'rpc:begin_account_deletion_v2',
+      'auth.getUser',
+      'rpc:inspect_account_deletion_fence_v2',
       // E2EE key-material cleanup runs before the relational preparation, so a
       // refusal there stops the deletion before anything is destroyed.
       'rpc:e2ee_prepare_account_deletion_v2',

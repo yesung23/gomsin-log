@@ -49,7 +49,11 @@ const mockSupabase = {
     return chainable;
   }),
   removeChannel: vi.fn(),
-  rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  rpc: vi.fn(async (name: string) => (
+    name === 'is_my_account_deletion_pending'
+      ? { data: false, error: null }
+      : { data: null, error: null }
+  )),
   from: () => ({
     update: (payload: Record<string, unknown>) => {
       mockSupabase.lastProfileUpdatePayload = payload;
@@ -447,7 +451,11 @@ describe('StoreProvider auth lifecycle', () => {
     deleteRecordFromDB.mockReset().mockResolvedValue({ ok: true });
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
-    mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
+    mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
+      name === 'is_my_account_deletion_pending'
+        ? { data: false, error: null }
+        : { data: null, error: null }
+    ));
     // The shared setup's `vi.restoreAllMocks()` strips implementations, and the
     // store now asks the server whether a deletion is pending before it syncs.
     // The default answer is an authoritative "not pending".
@@ -2371,18 +2379,21 @@ describe('StoreProvider auth lifecycle', () => {
     render(<StoreProvider><Probe /></StoreProvider>);
     await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
     await act(async () => emitAuth('SIGNED_IN', 'user-a'));
-    await waitFor(() => expect(mockSupabase.rpc).toHaveBeenCalledTimes(1));
+    const partnerPollCount = () => mockSupabase.rpc.mock.calls.filter(
+      ([name]) => name === 'get_partner_profile',
+    ).length;
+    await waitFor(() => expect(partnerPollCount()).toBe(1));
     expect(mockSupabase.channel).not.toHaveBeenCalled();
 
     await act(async () => {
       screen.getByText('disconnect').click();
     });
     await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
-    const callsAfterDisconnect = mockSupabase.rpc.mock.calls.length;
+    const callsAfterDisconnect = partnerPollCount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(120_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterDisconnect);
+    expect(partnerPollCount()).toBe(callsAfterDisconnect);
   });
 
   it('replaces the active couple channel when the authenticated account changes', async () => {
@@ -3016,7 +3027,11 @@ describe('StoreProvider auth lifecycle', () => {
     const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
 
     // Set up mocks for the HTTP recovery path BEFORE triggering the error
-    mockSupabase.rpc.mockReset().mockResolvedValue({ data: 'couple-1', error: null });
+    mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
+      name === 'is_my_account_deletion_pending'
+        ? { data: false, error: null }
+        : { data: 'couple-1', error: null }
+    ));
     fetchRecordsResultFromDB.mockResolvedValue({
       ok: true,
       records: [{ id: 'rec-recovered', date: '2026-07-31', time: '12:00', userId: 'user-a', log: 'recovered', isPrivate: false, createdAt: 'x' }],
@@ -3036,51 +3051,54 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('delayed'));
     expect(screen.getByTestId('records')).toHaveTextContent('rec-recovered');
 
-    const callsAfterFirstRecovery = mockSupabase.rpc.mock.calls.length;
+    const recoveryReadCount = () => mockSupabase.rpc.mock.calls.filter(
+      ([name]) => name === 'get_my_active_couple_id',
+    ).length;
+    const callsAfterFirstRecovery = recoveryReadCount();
     await act(async () => {
       // The next poll must back off to 4 seconds. The old implementation reset
       // after every successful HTTP read and hit all shared endpoints every 2s.
       await vi.advanceTimersByTimeAsync(2_500);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(7_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 2);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 2);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 3);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(29_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 3);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 4);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 4);
 
     // The cap remains 30 seconds for subsequent recovery polls.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 5);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 5);
   });
 
   it('does not blank the timeline on foreground return', async () => {

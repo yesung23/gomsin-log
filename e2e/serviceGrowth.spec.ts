@@ -118,7 +118,7 @@ test('찾기는 작은 iPhone과 reduced motion에서 검색과 복무 정보를
     await expect(service).toBeVisible();
     await expect(input).toHaveAttribute('aria-describedby', 'record-search-help');
     await expect(input).toHaveAttribute('aria-controls', 'record-search-results');
-    await expect(page.locator('#record-search-help')).toContainText('이 기기 안에서만 찾아요');
+    await expect(page.locator('#record-search-help')).toContainText('기기 안에서만 검색해요');
     await expect(page.locator('#record-search-results')).toBeAttached();
     await expect(field).toHaveCSS('background-color', 'rgb(252, 251, 247)');
     await expect(service.getByRole('progressbar', { name: '개인 복무 진행률' })).toBeVisible();

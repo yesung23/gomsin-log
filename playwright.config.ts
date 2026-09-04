@@ -80,6 +80,7 @@ export default defineConfig({
       VITE_SUPABASE_URL: 'https://example.supabase.co',
       VITE_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_public_key_not_a_secret',
       VITE_PARTNER_BRIEFING_ENABLED: partnerBriefingSuite ? 'true' : 'false',
+      VITE_GENERAL_COUPLE_ONBOARDING_ENABLED: 'true',
     },
   },
 });

@@ -677,9 +677,20 @@ BEGIN
     -- the credits actually reclaimed by that refund are restored.
     IF p_event_kind = 'purchase'
        AND p_revocation_date_ms IS NULL
-       AND v_existing.last_event_kind IN ('refund', 'refund_reversed')
-       AND v_signed_at >= v_existing.signed_at THEN
-      v_effective_event_kind := 'refund_reversed';
+       AND p_notification_uuid IS NULL THEN
+      IF v_existing.status = 'refunded'
+         AND v_existing.last_event_kind = 'refund'
+         AND v_existing.revocation_at IS NOT NULL
+         AND v_signed_at > v_existing.signed_at THEN
+        v_effective_event_kind := 'refund_reversed';
+      ELSIF v_existing.last_event_kind = 'refund_reversed'
+         AND v_signed_at = v_existing.signed_at
+         AND v_existing.payload_hash = p_payload_hash THEN
+        -- Replay alias for the same sync/reconciliation JWS. The caller can
+        -- only express current non-revocation as `purchase`, while the ledger
+        -- intentionally persisted the inferred transition as refund_reversed.
+        v_effective_event_kind := 'refund_reversed';
+      END IF;
     END IF;
     IF v_signed_at < v_existing.signed_at THEN
       v_stale := TRUE;

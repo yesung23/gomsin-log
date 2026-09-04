@@ -1640,6 +1640,34 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
   });
 
+  it('purges local data immediately and finishes sign-out when push revocation never settles', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { authRepository } = await import('@/lib/supabase');
+    vi.mocked(authRepository.signOut).mockClear();
+    mockSupabase.rpc.mockImplementation((name: string) => (
+      name === 'revoke_my_push_tokens'
+        ? new Promise(() => {})
+        : Promise.resolve({ data: null, error: null })
+    ));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => { emitAuth('SIGNED_IN', 'user-a'); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-a'));
+
+    await act(async () => {
+      screen.getByText('signout').click();
+      await Promise.resolve();
+    });
+
+    // Local records and identity do not wait on a network hygiene call.
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(authRepository.signOut).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(authRepository.signOut).toHaveBeenCalledOnce();
+  });
+
   it('clears the couple id and shared state, then tears down realtime after disconnect', async () => {
     fetchFullStateFromDB.mockResolvedValue(
       serverState({

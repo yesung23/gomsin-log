@@ -279,6 +279,8 @@ import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
+/** Push-token cleanup is best effort and must never hold the logout UI hostage. */
+const PUSH_TOKEN_REVOKE_TIMEOUT_MS = 2_000;
 
 class DevicePreferencesRepository {
   isConfigured(): boolean {
@@ -4114,23 +4116,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     /*
-      Release the push tokens FIRST, while the session still authenticates.
+      START releasing push tokens first, while the session still authenticates.
 
       The order is not arbitrary and not interchangeable with the two lines
       below: `revoke_my_push_tokens()` reads `auth.uid()`, so after the session is
       gone it has no actor and refuses. Doing this after `authRepository.signOut()`
       would look identical and silently never work.
 
-      Awaited, but its result is ignored. Refusing to sign someone out because a
-      notification cleanup failed would be the wrong trade in every direction, and
-      the outcome §14.3 actually forbids -- a departed account receiving a device's
-      notifications -- is prevented by migration 048's handover DELETE regardless
-      of whether this call succeeds.
+      Local content is purged as soon as the authenticated RPC has been dispatched,
+      then the network cleanup gets a short bounded window before Auth sign-out.
+      A hung network can therefore delay neither privacy on this device nor logout
+      indefinitely. Migration 048's handover DELETE remains the durable boundary.
     */
-    await revokeOwnPushTokens();
-    // Purge locally first: even if the network call fails, this device must not
-    // keep the previous account's records readable.
+    const pushRevocation = revokeOwnPushTokens();
+    // Purge immediately: even if the RPC hangs, this device must not keep the
+    // previous account's records readable.
     purgeLocalAccountData();
+    await withTimeout(pushRevocation, PUSH_TOKEN_REVOKE_TIMEOUT_MS, { ok: false });
     try {
       await authRepository.signOut();
     } catch {

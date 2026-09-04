@@ -478,7 +478,7 @@ export function CallModePage() {
             aria-busy={pending || undefined}
             className="flex flex-1 items-center justify-center px-4 py-6"
           >
-            <div className="ink-box w-full max-w-sm px-5 py-7 text-left">
+            <div className="ink-box w-full max-w-sm px-5 py-6 text-left">
               {/*
                 Progress, not debt. `3 / 7` says where you are in a list you chose to
                 open; it is not a count of what is owed, and it disappears with the

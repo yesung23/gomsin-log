@@ -74,9 +74,8 @@ describe('PaperHome immediate press feedback', () => {
       screen.getByRole('button', { name: '이야기할 것' }),
       screen.getByRole('button', { name: '내 스토리' }),
       screen.getByRole('button', { name: '기록 남기기' }),
-      screen.getByRole('button', { name: '예성의 스토리' }),
+      screen.getByRole('button', { name: '예성의 스토리, 새 기록 있음' }),
       within(currentNeed).getByRole('button'),
-      screen.getByRole('button', { name: '예성의 기록 열기' }),
       screen.getByRole('button', { name: '이따 이야기하기' }),
     ];
 

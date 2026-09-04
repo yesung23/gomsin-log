@@ -411,7 +411,7 @@ export function PaperHome() {
             aria-label="기록 남기기"
             onClick={() => navigate('/compose')}
             /*
-              눈에 보이는 것은 22px 이지만 **누르는 곳은 46px** 이다.
+              눈에 보이는 것은 22px 이지만 **버튼 자체는 44px** 이다.
 
               인스타의 `+` 배지도 이만큼 작게 그려진다 -- 작게 보이는 것이 이 배지의
               일이다. 하지만 그리는 크기와 닿는 크기는 다른 값이어야 한다(DESIGN_V2
@@ -419,10 +419,15 @@ export function PaperHome() {
               문이므로, 22px 그대로 두면 앱에서 가장 중요한 동작이 가장 놓치기 쉬운
               표적이 된다.
             */
-            className="press-response absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full before:absolute before:-inset-3 before:content-['']"
-            style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
+            className="press-response absolute left-[35px] top-[31px] z-10 flex h-11 w-11 items-center justify-center"
           >
-            <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />
+            <span
+              data-compose-badge-art
+              className="flex h-[22px] w-[22px] items-center justify-center rounded-full"
+              style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
+            >
+              <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />
+            </span>
           </button>
         </div>
 

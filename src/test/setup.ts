@@ -1,6 +1,8 @@
-import { afterEach, vi } from 'vitest';
+import * as jestDomMatchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
-import '@testing-library/jest-dom/vitest';
+import { afterEach, expect, vi } from 'vitest';
+
+expect.extend(jestDomMatchers);
 
 /*
  * Node 26 ships an experimental built-in `localStorage` whose getter throws or

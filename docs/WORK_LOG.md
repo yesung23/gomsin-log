@@ -9,6 +9,49 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — 최신 승인 복무 EXP 여정
+
+- PLAN POSITION: RC Task5의 최신 사용자 우선 작업. 이전 e35ff9d; This Gate 복무 기능 local/독립 DELTA.
+- DIRECTION CHECK: 최신 요청/V5 §1–3, V4_AS_BUILT§3.4/V4_BACKLOG, BUSINESS 무료연결·관계점수금지,
+  ENGINEERING§0/RC6단계, CURRENT_STATE, 직전 summary/photo/EXP 제거 WORK_LOG 확인.
+  conflict YES: 과거 EXP 제거 ↔ 최신 명시적 재도입. 최신 승인으로 V5 범위 한정 개정; 관계점수/출석/결제EXP는 아님.
+- OWNERSHIP: parent 단일 writer; Sol Max Aristotle 계산 탐색/Huygens 독립 DELTA. Branch
+  `codex/rc-v5-final-fixes`, basee35ff9d, implementation361cfc7. PR 없음. Hegel 사진8WIP 반환·보존.
+- CHANGED: service feature5파일/Search2/ServicePage1/browser2 및 문서. 실제 읽기전용 partner
+  경로와 editor 유지, 시간 기반EXP/reduced/중지/예상등급/날짜모순 guard.
+- EXPLICITLY NOT CHANGED: DB/migration/crypto/auth/건강동의/기록/사진 WIP/Now/Book/Production.
+- VERIFICATION: parent102Vitest/typecheck/scopedlint/build PASS, source browser4PASS.
+  built browser3PASS/1FAIL(다크 제어 아이콘 대비) → ead5000 좁은 색 transition 수정,
+  source대비1PASS/rebuildPASS/built4PASS. 기존photoWIP포함build이며 clean전체RC검사 아님.
+  추가 provenance caller test10PASS/1FAIL(옛문구) → a35acd7 새문구 검사로11PASS/scopedlintPASS.
+- REVIEW IMPACT: DELTA. 기존 계급 계산 read-only H2/M1에 guard/중립투영/실제now호출로 대응;
+  최종 기능검토 H1(구형 Object.hasOwn)/M1(reduced 입대 대기 갱신) → c6cddd8 수정,
+  parent2FAIL재현후57PASS/typecheck/lint/rebuild/built4PASS. 최종독립 exactc6cddd8 **C/H/M/L0 PASS**,
+  reviewer21tests/diff-check PASS. 전체 앱·실기기·hosted gate PASS 아님. 이후 docs-only는 A영역, runtime불변.
+- BLOCKERS/STOPPED AT: **복무 local gate 종결**. 기존 사진Store미검증/summaryM1/실기기/IAP/전체RC남음.
+- NEXT ACTION: parent 사진 SliceA 정확한 중단점 재개. 근거 없는 mastermerge 금지.
+- PRODUCTION: NOT APPLIED. 기능 commit만 revert 가능, schema/data rollback 불필요.
+- 상세: [복무 여정](../control-tower/reports/codex/2026-09-05_service-journey_codex.md).
+
+## 2026-09-05 — Summary source binding·Photo CI·실제 화면 점검
+
+- PLAN POSITION: Task1 local 독립종결 / Task2 backend독립종결·CI연결 / Task3관찰된HIGH종결·M1 OPEN / Task5실제화면.
+- DIRECTION CHECK: 최신 요청, V5§4/5/7/8, BUSINESS§9/free기본사진·보안, ENGINEERING6단계,
+  CURRENT_STATE/직전WORK_LOG/rollback 확인. NO conflict. 실제SQL과 충돌한 runbook의 미래082표기만 교정.
+- OWNERSHIP: Kepler→명시적중단후 parent인수, 독립Russell Sol Max; branch `codex/rc-v5-final-fixes`,
+  old0d20a9c, summary **d01793a**, CI/immutable browser **e35ff9d**. PR/remote변경없음.
+- CHANGED: summary16파일/PG하네스·package·CI3파일, 현재사실/보고서. source-fulltext검증·수동요청·
+  전체20제한과 PG상속환경분리. DB schema/crypto/auth/ack/Now/Book/실사용자데이터는 변경하지 않음.
+- VERIFICATION: parent258PASS 후최종65+23PASS/scopedlint/typecheck/Swift PASS; 새PG환경오염RED→187+520PASS;
+  YAML검사PASS; 별도outDir실험FAIL 후표준buildPASS. immutablebrowser17/18+2/2+11/11, 실패를 숨기지 않음.
+- REVIEW IMPACT: media+090 exactfb880ed독립 C/H/M/L0 PASS. summary exactd01793a독립 C0/H0/M1/L0 FAIL.
+  M1은 거대한결합문자의 절단prefix 후보누락; 상세반례/실제검사/미검증은 report한곳에 보존.
+- BLOCKERS/STOPPED AT: summary M1·옛errorE2E기대·photo client·실기기·hosted·IAP실제제공·전체RC남음.
+- NEXT ACTION: Hegel Sol High가 photo SliceA단일writer. 반환 뒤 parent는 M1/E2E좁은교정과검증,
+  이후photo표시SliceB. AI·판매활성화/merge전 품질·권한·실기기·외부gate필요.
+- PRODUCTION: NOT APPLIED. 로컬summary/CI개별revert가능; hostedphoto pair발생후에는contract보존forwardfix.
+- 상세: [Summary/CI/browser closure](../control-tower/reports/codex/2026-09-05_1625_summary-ci-closure_codex.md).
+
 ## 2026-09-05 — Photo090 backend 로컬 구현·parent 검증
 
 - PLAN POSITION: Task2 backend local gate PASS / 독립 검토·client 미완료. 다음 Task3 HIGH 구현 병렬.

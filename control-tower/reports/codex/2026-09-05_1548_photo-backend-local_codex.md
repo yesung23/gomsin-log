@@ -1,7 +1,7 @@
 ---
 agent: codex
 date: 2026-09-05
-status: local-pass-review-pending
+status: local-independent-pass-client-pending
 tags: [control-tower, media, migration, local-only]
 ---
 
@@ -11,7 +11,7 @@ tags: [control-tower, media, migration, local-only]
 
 `codex/rc-v5-final-fixes` / code checkpoint **fb880ed85a20dde96a3774300be8503eaac1bb04**.
 사진 두 크기 저장을 위한 backend가 로컬 구현·검증됐다. 앱의 실제 생성/목록 표시는 아직 미연결이며
-독립 보안 검토와 Production 적용은 완료하지 않았다. 전체 RC는 HOLD다.
+독립 Sol Max 보안 검토는 아래 후속 확인대로 PASS이며 Production 적용은 하지 않았다. 전체 RC는 HOLD다.
 
 ## Findings
 
@@ -68,7 +68,7 @@ TypeScript/build/실제 browser는 앱 source를 바꾸지 않은 이번 SQL sli
 ## Risks / Current Score
 
 Product/UX/Design: 이 좁은 backend gate에서 전제품 점수를 새로 만들지 않음.
-Engineering: 해당 로컬 검사 PASS. Security: independent cleanup+090 review **PENDING**.
+Engineering: 해당 로컬 검사 PASS. Security: independent cleanup+090 review **PASS, C/H/M/L 0**.
 Release readiness: **HOLD**. 온디바이스 HIGH2 수정도 별도 진행 중이다.
 
 Remote/Production **NOT APPLIED**. 실제 catalog/고객2계정/기기/청구는 UNVERIFIED.
@@ -87,3 +87,19 @@ Remote/Production **NOT APPLIED**. 실제 catalog/고객2계정/기기/청구는
 미배포 코드이므로 개별 local commit revert 가능하다. 실제 pair가 저장된 뒤에는 wrapper·binding·physical64
 계약을 제거하거나 낮추지 않는다. optional client 경로를 끄고 데이터를 보존한 forward fix가 필요하다.
 이번 작업은 master merge·배포·Supabase·Apple 변경을 수행하지 않았다.
+
+## 후속 독립 검토 — exact fb880ed
+
+Russell / Sol Max는 구현에 참여하지 않고 cleanup086–088 +090 +계정 삭제 연결을 읽기 전용 검토했다.
+reviewed `fb880ed85a20dde96a3774300be8503eaac1bb04`; 문서 HEAD `0d20a9c`에서 대상 blob은 동일하다.
+parent도 해당 source 동일성을 확인했다. 결과 **C0/H0/M0/L0, PASS**.
+
+- 기존 cleanup PG518, 083–088 Vitest62, 새090 PG187, 090+구버전 PG520, security contracts209 PASS.
+- Edge 최초 loopback 제한 실행은 25PASS/8 NotCapable FAIL; 선언된 `--allow-net` 재실행33PASS.
+  실제 HTTP 대상은 localhost였으며 hosted 기능 실행이 아니다.
+- active couple/private/cipher0/deletion/anon/former partner, pair publication·삭제/재시도와
+  account deletion의 DB barrier 이후 Auth 삭제, 상대 소유 파일 보존을 확인했다.
+- 등록 metadata 이력 보존은 private history이며 읽기 권한이나 cleanup authority가 아님을 확인했다.
+- summary WIP, 실제 client renditions, Storage 전송/서명 URL/hosted/실기기는 검토 범위가 아니다.
+
+이는 새 app 통합의 독립 리뷰를 대체하지 않는다. 해당 client diff에 대한 fresh DELTA가 필요하다.

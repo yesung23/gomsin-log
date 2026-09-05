@@ -33,16 +33,17 @@ Spec: 최신 사용자 승인 + `../PRODUCT_V5_MASTER_DECISION.md`.
 | Verifier | GPT-5.6 Sol / high | 실제 호출 경로·diff·테스트, UI/기능 재설계 금지 |
 | Independent Reviewer | GPT-5.6 Sol / max | 구현자와 분리한 security/regression 판정. 교차 상태/미해결 중대 결함은 Astra max |
 
-현재 이미 배정된 Astra Max auth reviewer와 photo backend worker는 문맥을 유지해 마무리한다.
-새 배정부터 위 규칙을 적용한다. 모델을 낮춘다는 이유로 부정 권한 테스트나 독립 리뷰를 생략하지 않는다.
+초기 Astra auth/backend 배정은 반환/종료됐고, photo090의 parent 검증과 Sol Max 독립 리뷰도 완료했다.
+현재 요약 구현은 Sol High다. 모델을 낮춘다는 이유로 부정 권한 테스트나 독립 리뷰를 생략하지 않는다.
 Flash 장애 시 같은 일을 여러 모델에 중복 발송하지 않고, 한 작업의 소유권을 반환받아 Sol로 이전한다.
 
 ## Task 1 — Auth 및 기존 미디어 무결성 종결
 
-- 담당: 독립 Reviewer, 수정 필요 시 원 구현자. 현재 Astra Max가 리뷰 중이며 parent가 판정.
+- 담당: 독립 Reviewer, 수정 필요 시 원 구현자. 아래 로컬 검토는 종료됐고 parent가 증거를 확인했다.
 - 기준: Apple fix `d08519f`, media hook `47f5d07`, cleanup 후속 `a8113b7`/`85be85b`.
-- 현재 배정: Apple 저장 후 늦은 SIGNED_IN HIGH 수정의 DELTA + media hook 좁은 검토.
-- 다음 검토 범위: 086–088 cleanup 누적 변경과 실제 계정 삭제 연결. 기존 IAP 완료 영역을 불필요하게 재검토하지 않는다.
+- 완료: Apple 저장 후 늦은 SIGNED_IN HIGH DELTA + media hook 좁은 검토 PASS;
+  086–088 cleanup 누적/계정 삭제 연결도 exact `fb880ed`에서 Sol Max PASS. 실제 provider/실기기는 미검증.
+  기존 IAP 완료 영역을 불필요하게 재검토하지 않는다.
 - 허용 수정: 리뷰가 지정한 auth/session/store 또는 media cleanup 정확한 파일만 새 Worker brief에 열거한다.
 - 금지: provider/서명/Production, 다른 기능 UI, 암호 프로토콜, 광범위 리팩터링.
 - 완료 조건: 재현 실패가 수정 후 통과, Google/Apple 정상 로그인·refresh·로그아웃, stale UI 재등장 없음;
@@ -51,7 +52,8 @@ Flash 장애 시 같은 일을 여러 모델에 중복 발송하지 않고, 한 
 
 ## Task 2 — 사진 저장 비용과 책용 원본 식별
 
-- 담당: Architect→통합 Worker, 별도 Reviewer. 현재 backend는 Astra Max, 후속 앱 통합은 Sol High가 기본.
+- 담당: Architect→통합 Worker, 별도 Reviewer. backend는 `fb880ed`에서 parent/독립 PASS,
+  후속 앱 통합은 Sol High가 기본이다. 전용PG CI 연결도 통합 gate에 포함한다.
 - Backend 허용: 신규 `090_record_photo_renditions.sql`, 전용 local PostgreSQL harness만 우선.
 - Client 허용: API 확정 뒤 imageSanitization/records/record upload use case/useMediaAttachment,
   실제 gallery/grid 소비자와 직접 테스트. 정확한 파일 목록은 배정 전에 확인한다.
@@ -91,6 +93,11 @@ Flash 장애 시 같은 일을 여러 모델에 중복 발송하지 않고, 한 
 - 판매는 실제 제공 가치·법적 notice·상품 승인·소비 증빙이 연결될 때까지 OFF. 환불 거절을 보장하지 않는다.
 
 ## Task 5 — 앱 전체 UX·접근성·복구 검증
+
+- 최신 요청 우선 작업(2026-09-05): 복무 EXP 여정. parent 단일 writer, Sol Max 읽기 전용
+  계산 위험 점검/최종 DELTA. 새 `ServiceJourney`와 찾기/복무 상세만 변경하며 UI 전면 재설계는 아님.
+  기존 photo SliceA는 Hegel이 8개 WIP 파일을 보존하고 반환했다. Store 통합 후 검증은 아직
+  하지 않았으므로 이 기능 완료 뒤 정확한 중단점에서 재개한다. 같은 파일의 동시 writer 없음.
 
 - 담당: Sol High Verifier + parent 실제 화면 확인. 좁고 명확한 수정은 Flash High Worker에 배정.
 - 범위: Home/Search/Diary/Schedule/Us/My/Story/Call/정원/Shop/온보딩/설정의 실제 경로.

@@ -8,9 +8,10 @@ or Production purchase is proven by this document.
 
 - New sales remain closed in the repository and database. Migration 079 adds
   `apple_product_catalog_sale_hold`, which permits only `sale_enabled = false`.
-- Do not create or apply a sale-activation migration in this rollout. A future
-  082 may be considered only as a separate approved change after every external
-  gate below has evidence.
+- Do not create or apply a sale-activation migration in this rollout. It requires
+  a separate approved change with a new, unused migration identifier after every
+  external gate below has evidence. `082_apple_iap_refund_reconciliation_forward_fix.sql`
+  already exists for reconciliation; it is not a sale-activation slot.
 - Do not activate the consumption scheduler until an approved refund-data
   notice version/hash and the scheduler secret are configured and verified.
 - Apple consumption information is evidence Apple may consider. It does not

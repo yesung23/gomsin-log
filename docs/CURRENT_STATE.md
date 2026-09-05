@@ -28,8 +28,17 @@
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
 - Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
-  `codex/rc-v5-final-fixes`, application checkpoint `fb880ed`. 이 문서 이후에도
+  `codex/rc-v5-final-fixes`, service checkpoint `c6cddd8` (구현 `361cfc7`, 이전 application/CI `e35ff9d`). 이 문서 이후에도
   작업은 진행 중이므로 실행 전 live HEAD/status를 확인한다. master/Production에 통합됐다는 뜻은 아니다.
+- 최신 요청의 시간 기반 복무 EXP 여정이 찾기/복무 상세에 연결됐다. 예상 계급·Lv.1–200,
+  1초=1EXP, 중립 사회복무/기타, 날짜 모순 차단, 일시정지/동작 줄이기/화면 밖 중지를 포함한다.
+  관련 102 Vitest, typecheck/scoped lint/build PASS. source-entry browser4 PASS.
+  built browser3PASS/1FAIL(테마 전환 시 아이콘 대비) → 좁은 CSS 수정 후4PASS.
+  독립 검토 H1(구형 WebView 함수)/M1(입대 대기 수동 갱신 없음)을 c6cddd8에서 수정하고,
+  parent 재현RED2건→57tests/typecheck/scopedlint/rebuild/built4 PASS.
+  최종 독립 exactc6cddd8 DELTA는 C/H/M/L0 PASS, reviewer21tests PASS다. 복무 local gate만 종결했다.
+  독립 DELTA 결과는 [복무 여정 리포트](../control-tower/reports/codex/2026-09-05_service-journey_codex.md) 참조.
+  Production/실기기 확인은 별도이며 현재 NOT APPLIED / UNVERIFIED다.
 - My에서 새로 선택한 사진을 본인·파트너 Home story ring에 표시하는 실제 경로가 로컬에 구현됐다
   (`c59f874`, `b6408e3`, `4b78ab7`). migration 089의 private 256px/64KiB JPEG,
   버전 조건부 교체·삭제, 현재 커플·삭제 상태 확인, 메모리 전용 클라이언트 조회를 사용한다.
@@ -49,8 +58,11 @@
   합성 브라우저 실측과 비용 계산기는 [media-economics](operations/media-economics.md)에 있다.
   `fb880ed`에 사진 pair 예약·metadata·구버전 호환 backend090이 로컬 구현됐다. 전체001..090
   187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS.
-  **클라이언트 thumbnail 생성/표시, 인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현**이다.
-  backend090 독립 리뷰도 진행 중이며 remote NOT APPLIED다.
+  **클라이언트 thumbnail 생성/업로드 SliceA는 8개 파일의 미완료 WIP**로 보존됐다. Store 통합 후
+  검증은 미실행이며 최신 복무 UI 요청 동안 parent에게 소유권을 반환했다. 표시 SliceB,
+  인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현이다.
+  backend090 독립 Sol Max 리뷰는 exact `fb880ed`에서 **C/H/M/L 0, PASS**다.
+  001..090187/기존회귀520/보안형태209를 독립 재실행했다. remote NOT APPLIED다.
 - 유료 가치는 권리가 확인된 정원/종이 상품, 책 제작, 지속 가치가 실제 제공되는 선택형 Plus다.
   무료 기록·정상 사진·보안을 유료로 막지 않는다. 6종 IAP catalog와 서버 원장은 코드에 있지만
   판매 OFF, 실제 승인·가격·Sandbox·소비 증빙 caller·운영 통합은 별도 gate다.
@@ -59,21 +71,31 @@
   독립 검토자는 인증 86+추가 경합2, 미디어17+추가 경합1을 직접 검증했고 C/H/M/L finding0이다.
   `02522ca`와 같은 production source의 `npm run build` PASS(placeholder Supabase 환경, 2581 modules).
   505KB chunk 경고가 남는다. 과거 전체 5683 PASS는 `fddb857`의 증거이며 최신 전체 suite를 대신하지 않는다.
-- 기록 미디어 삭제 086–088의 로컬 actor/재시도 검증 후 변경 `a8113b7`, `85be85b`는
-  누적 exact-commit 독립 보안 리뷰가 여전히 필요하다. 새 사진 variant가 이 계약을 우회하면 안 된다.
+- 기록 미디어 삭제 086–088의 변경 `a8113b7`, `85be85b`는 `fb880ed`에서 누적 독립 Sol Max
+  보안 리뷰 PASS다. 기존PG518, 083–088 tests62, Edge33을 독립 확인했다. Edge 첫 실행의
+  권한 제한8FAIL은 선언된 권한 재실행33PASS와 구분한다. 새 client가 이 계약을 우회하면 안 된다.
 - 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
   실제 원격 migration catalog, 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
-- 온디바이스 Sol Max 설계 검토는 `1f7777f`와 동일한 scoped source에서 **HIGH 2건 / 활성화 HOLD**다.
-  연속 원문 발췌라도 뒤의 부정·인용·정정을 생략하면 뜻을 뒤집을 수 있고, 120자 이후 원문은
-  검증·결과 무효화에서 빠진다. parent도 별도 합성 반례 4건의 잘못된 허용을 재현했다.
-  총 기록 20개 제한과 긴 후보 20개 제한의 구현 차이, Story 테스트의 native mock 수집 오류도 있다.
-  수정 전이므로 기존 203 focused PASS를 의미 보존 완료로 해석하지 않는다.
+- 온디바이스 `d01793a`는 관찰된 HIGH2 반례를 수정했고 독립 Sol Max에서 해당 반례 종결을 확인했다.
+  전체 원문 보존/결과 무효화, 총20 상한, 완전한 마지막 문장 발췌, 원문 편집 뒤 새 수동 요청,
+  Story test 수집을 고쳤다. 독립258PASS와 추가 부정 재현에서 **C0/H0/M1/L0, DELTA FAIL**다.
+  M1: 거대한 결합문자 때문에 절단 prefix가40이하가 되면 후보 필터를 빠져나가 나머지만 요약한다.
+  전체기록 절단 검사를 후보 필터 이전에 적용하는 수정이 남았다. 일반 의미 동등성/활성화는 여전히 HOLD.
   iOS15 target의 Swift 소스 typecheck는 PASS이고 연결된 지원 iPhone/개발자 모드는 확인했지만
   실기기 모델 실행은 아직 UNVERIFIED다. Mac availability는 Apple Intelligence OFF였다.
-  [구체적인 반례·수정 범위](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md).
+  [초기 반례](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md),
+  [현재 수정·검토·CI/브라우저 결과](../control-tower/reports/codex/2026-09-05_1625_summary-ci-closure_codex.md).
+- `e35ff9d`의 표준 production build는 placeholder 환경으로 PASS. 사용자4174 dev와 분리해 immutable
+ 4177 mock preview를 만들었다. 실제 브라우저는 17/18 +별도2/2 +UI capture11/11 통과다.
+  실패1건은 malformed DB fixture가 render crash 이전 sync 보호에서 차단되는데 옛 검사가
+  ErrorBoundary를 기대한 차이다. 검사를 실제 복구 흐름에 맞추는 수정이 남았으며 PASS로 세지 않는다.
+  작은5탭 가로넘침, 정원13흐름, 기본원본펼침/이동, 설정키보드, 실제 dark 캡처를 확인했다.
+  스크린샷 수집은 기능 전체/VoiceOver/실기기/전체접근성 통과 증거가 아니다.
 - 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
   auth reviewer와 photo backend writer/요약 Architect는 종료했다. parent가090검증을 인수해 고정했고,
-  현재 Sol High 요약 Worker와 Sol Max 누적 media/090 독립 Reviewer가 병렬 진행 중이다.
+  parent가 요약 patch를 인수·검증했으며 Sol Max summary Reviewer는 위 M1 반환 후 종료했다.
+  Hegel Sol High는 최신 복무 UI 요청으로 photo upload SliceA의 8개 WIP를 보존하고 parent에게
+  소유권을 반환했다. Store 통합 직후 검증은 미실행이며, parent가 복무 local gate 후 재개한다.
   신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
   상세 근거는
   [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).

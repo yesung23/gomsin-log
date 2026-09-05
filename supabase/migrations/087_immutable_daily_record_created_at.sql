@@ -33,6 +33,9 @@ BEGIN
         AND tgtype = 19
         AND tgenabled = 'O'
         AND NOT tgisinternal
+        AND tgattr = ''::int2vector
+        AND tgqual IS NULL
+        AND tgnargs = 0
     )
   THEN
     RAISE EXCEPTION 'migration_087_requires_exact_085_identity_trigger'

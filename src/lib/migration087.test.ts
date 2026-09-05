@@ -220,6 +220,9 @@ describe('migration 087 immutable daily record created_at contract', () => {
     expect(migration).toMatch(/tgtype\s*=\s*19/i);
     expect(migration).toMatch(/tgenabled\s*=\s*'O'/i);
     expect(migration).toMatch(/NOT\s+tgisinternal/i);
+    expect(migration).toMatch(/tgattr\s*=\s*''::int2vector/i);
+    expect(migration).toMatch(/tgqual\s+IS\s+NULL/i);
+    expect(migration).toMatch(/tgnargs\s*=\s*0/i);
     expect(migration).toMatch(/attname\s*=\s*'created_at'/i);
     expect(migration).toMatch(/atttypid\s*=\s*'timestamp with time zone'::regtype/i);
     expect(migration).toMatch(/attnotnull/i);
@@ -273,20 +276,20 @@ describePostgres.sequential('migration 087 PostgreSQL upgrade and actor behavior
   let triggerOidBefore = '';
   let functionOidBefore = '';
 
-  const psqlArgs = () => [
+  const psqlArgs = (database = 'postgres') => [
     '-X', '-qAt', '-v', 'ON_ERROR_STOP=1',
     '-h', socketDirectory,
     '-p', String(port),
     '-U', 'postgres',
-    '-d', 'postgres',
+    '-d', database,
   ];
-  const sql = (source: string): CommandResult => command(
+  const sql = (source: string, database = 'postgres'): CommandResult => command(
     join(PG_BIN!, 'psql'),
-    psqlArgs(),
+    psqlArgs(database),
     source,
   );
-  const expectSql = (source: string, label = 'SQL'): string => {
-    const result = sql(source);
+  const expectSql = (source: string, label = 'SQL', database = 'postgres'): string => {
+    const result = sql(source, database);
     expect(result.status, `${label}: ${result.stderr}`).toBe(0);
     return result.stdout.trim();
   };
@@ -546,6 +549,127 @@ WHERE tgrelid = 'public.daily_records'::regclass
   AND tgname = 'aab_085_daily_record_identity_immutable';
 `)).toBe('t');
   });
+
+  it.each([
+    [
+      'UPDATE OF identity columns',
+      'gomsinlog_087_update_of',
+      `CREATE TRIGGER aab_085_daily_record_identity_immutable
+  BEFORE UPDATE OF id, user_id, couple_id ON public.daily_records
+  FOR EACH ROW
+  EXECUTE FUNCTION public.enforce_daily_record_identity_immutable();`,
+    ],
+    [
+      'WHEN predicate',
+      'gomsinlog_087_when',
+      `CREATE TRIGGER aab_085_daily_record_identity_immutable
+  BEFORE UPDATE ON public.daily_records
+  FOR EACH ROW
+  WHEN (OLD.id IS DISTINCT FROM NEW.id)
+  EXECUTE FUNCTION public.enforce_daily_record_identity_immutable();`,
+    ],
+  ])(
+    'rejects the same 085 function behind a restricted %s trigger without damaging the normal binding',
+    (_label, database, restrictedTrigger) => {
+      expectSql(`CREATE DATABASE ${database};`, `create ${database}`);
+
+      try {
+        expectSql(PRE_087_SCHEMA, `pre-087 schema in ${database}`, database);
+        const objectOidsBefore = expectSql(`
+SELECT concat_ws(
+  '|',
+  identity_trigger.oid::TEXT,
+  identity_trigger.tgfoid::TEXT,
+  media_trigger.oid::TEXT
+)
+FROM pg_trigger AS identity_trigger
+JOIN pg_trigger AS media_trigger
+  ON media_trigger.tgrelid = identity_trigger.tgrelid
+ AND media_trigger.tgname = 'zzz_084_commit_record_media_mutation'
+WHERE identity_trigger.tgrelid = 'public.daily_records'::regclass
+  AND identity_trigger.tgname = 'aab_085_daily_record_identity_immutable';
+`, 'pre-087 object OIDs', database);
+        expect(expectSql(`
+SELECT concat_ws(
+  '|',
+  pg_typeof(tgattr)::TEXT,
+  quote_literal(tgattr::TEXT),
+  pg_typeof(tgqual)::TEXT,
+  (tgqual IS NULL)::TEXT,
+  pg_typeof(tgnargs)::TEXT,
+  tgnargs::TEXT
+)
+FROM pg_trigger
+WHERE tgrelid = 'public.daily_records'::regclass
+  AND tgname = 'aab_085_daily_record_identity_immutable';
+`, 'normal trigger catalog contract', database)).toBe(
+          "int2vector|''|pg_node_tree|true|smallint|0",
+        );
+
+        const result = sql(`
+\\set VERBOSITY verbose
+BEGIN;
+DROP TRIGGER aab_085_daily_record_identity_immutable ON public.daily_records;
+${restrictedTrigger}
+${migration}
+`, database);
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('55000');
+        expect(result.stderr).toContain('migration_087_requires_exact_085_identity_trigger');
+
+        expect(expectSql(`
+SELECT concat_ws(
+  '|',
+  identity_trigger.oid::TEXT,
+  identity_trigger.tgfoid::TEXT,
+  media_trigger.oid::TEXT
+)
+FROM pg_trigger AS identity_trigger
+JOIN pg_trigger AS media_trigger
+  ON media_trigger.tgrelid = identity_trigger.tgrelid
+ AND media_trigger.tgname = 'zzz_084_commit_record_media_mutation'
+WHERE identity_trigger.tgrelid = 'public.daily_records'::regclass
+  AND identity_trigger.tgname = 'aab_085_daily_record_identity_immutable'
+  AND identity_trigger.tgfoid = to_regprocedure(
+    'public.enforce_daily_record_identity_immutable()'
+  );
+`, 'object OIDs after failed preflight', database)).toBe(objectOidsBefore);
+
+        expectSql(migration, 'migration 087 after normal trigger restoration', database);
+        expect(expectSql(`
+SELECT concat_ws(
+  '|',
+  identity_trigger.oid::TEXT,
+  identity_trigger.tgfoid::TEXT,
+  media_trigger.oid::TEXT
+)
+FROM pg_trigger AS identity_trigger
+JOIN pg_trigger AS media_trigger
+  ON media_trigger.tgrelid = identity_trigger.tgrelid
+ AND media_trigger.tgname = 'zzz_084_commit_record_media_mutation'
+WHERE identity_trigger.tgrelid = 'public.daily_records'::regclass
+  AND identity_trigger.tgname = 'aab_085_daily_record_identity_immutable'
+  AND identity_trigger.tgfoid = to_regprocedure(
+    'public.enforce_daily_record_identity_immutable()'
+  );
+`, 'object OIDs after normal migration', database)).toBe(objectOidsBefore);
+        expect(expectSql(`
+SELECT string_agg(tgname, ',' ORDER BY tgname)
+FROM pg_trigger
+WHERE tgrelid = 'public.daily_records'::regclass
+  AND tgname IN (
+    'aab_085_daily_record_identity_immutable',
+    'zzz_084_commit_record_media_mutation'
+  );
+`, 'trigger execution order', database)).toBe(
+          'aab_085_daily_record_identity_immutable,zzz_084_commit_record_media_mutation',
+        );
+      } finally {
+        const dropped = sql(`DROP DATABASE IF EXISTS ${database} WITH (FORCE);`);
+        expect(dropped.status, dropped.stderr).toBe(0);
+      }
+    },
+  );
 
   it('refuses to freeze an already-invalid timestamp into the immutable cursor contract', () => {
     expectSql(`

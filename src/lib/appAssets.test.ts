@@ -104,19 +104,23 @@ describe('the approved toggle-heart source', () => {
     expect(marks[0].contains(backgrounds[0])).toBe(false);
   });
 
-  it('keeps the approved bright-olive-and-cherry-pink heart and three -50 degree horn toggles', () => {
-    expect(faviconDocument.querySelector('path[data-brand-half="military"][fill="#7B8F69"]')?.getAttribute('d'))
+  it('keeps the approved military-green-and-deep-pink heart with three slightly lowered horn toggles', () => {
+    expect(faviconDocument.querySelector('path[data-brand-half="military"][fill="#66704A"]')?.getAttribute('d'))
       .toBe('M512 300C452 220 350 205 274 250C185 302 155 405 188 507C227 626 336 728 512 848V300Z');
-    expect(faviconDocument.querySelector('path[data-brand-half="rose"][fill="#EE7898"]')?.getAttribute('d'))
+    expect(faviconDocument.querySelector('path[data-brand-half="rose"][fill="#D94F7A"]')?.getAttribute('d'))
       .toBe('M512 300C572 220 674 205 750 250C839 302 869 405 836 507C797 626 688 728 512 848V300Z');
     expect(
       Array.from(faviconDocument.querySelectorAll('path[transform^="rotate(-50 "]'))
         .map((path) => path.getAttribute('transform')),
     ).toEqual([
-      'rotate(-50 512 370)',
-      'rotate(-50 512 510)',
-      'rotate(-50 512 650)',
+      'rotate(-50 512 378)',
+      'rotate(-50 512 518)',
+      'rotate(-50 512 658)',
     ]);
+    expect(
+      Array.from(faviconDocument.querySelectorAll('ellipse[transform^="rotate(-50 "]'))
+        .map((ellipse) => ellipse.getAttribute('cy')),
+    ).toEqual(['383', '523', '663']);
   });
 
   it('keeps the small-size mark quiet without literal boot or blossom emblems', () => {

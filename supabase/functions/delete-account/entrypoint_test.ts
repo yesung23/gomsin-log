@@ -199,6 +199,7 @@ Deno.test({
           createAdmin: () => {
             throw new Error('createAdmin must not be reached for these cases');
           },
+          prepareAppleCredentialDeletion: async () => ({ status: 'not_required' }),
         });
         const directBody = await direct.text();
 
@@ -336,6 +337,7 @@ Deno.test('account deletion rejects stale cleanup contract 3 before any flag or 
         SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
       } as Record<string, string>)[key],
       createAdmin: () => admin,
+      prepareAppleCredentialDeletion: async () => ({ status: 'not_required' }),
     },
   );
 
@@ -452,6 +454,7 @@ Deno.test('account deletion relies on the database cleanup barrier and never del
         SUPABASE_SECRET_KEYS: JSON.stringify({ default: 'sb_secret_test_key' }),
       } as Record<string, string>)[key],
       createAdmin: () => admin,
+      prepareAppleCredentialDeletion: async () => ({ status: 'not_required' }),
     },
   );
 

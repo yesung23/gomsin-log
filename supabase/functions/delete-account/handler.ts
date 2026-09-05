@@ -1,5 +1,6 @@
 import { parseAllowedOrigins, resolveCors } from './_shared/cors.ts';
 import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
+import type { AppleDeletionRevocationResult } from '../_shared/appleAuthCredentials.ts';
 
 /**
  * Account deletion is deliberately split across service boundaries:
@@ -179,6 +180,7 @@ async function inspectDeletionFence(admin: Admin, userId: string): Promise<Fence
 function deletionRecoveryResponse(
   corsHeaders: Record<string, string>,
   dataRemoved = false,
+  appleRevocation: AppleDeletionRevocationResult | null = null,
 ) {
   return jsonResponse(
     {
@@ -187,15 +189,36 @@ function deletionRecoveryResponse(
       deletionCancelled: false,
       recoveryRequired: true,
       warnings: [],
+      ...appleRevocationMetadata(appleRevocation),
     },
     500,
     corsHeaders,
   );
 }
 
+function appleRevocationMetadata(
+  result: AppleDeletionRevocationResult | null,
+): Record<string, unknown> {
+  if (!result) return {};
+  if (result.status === 'manual_required') {
+    return {
+      appleCredentialRevocation: {
+        ...result,
+        guidanceCode: 'APPLE_ACCOUNT_ACCESS_REVOCATION_REQUIRED',
+      },
+    };
+  }
+  return { appleCredentialRevocation: result };
+}
+
 export type HandlerDeps = {
   env: (key: string) => string | undefined;
   createAdmin: (url: string, adminSecretKey: string) => Admin;
+  prepareAppleCredentialDeletion: (input: {
+    admin: Admin;
+    user: unknown;
+    attemptId: string;
+  }) => Promise<AppleDeletionRevocationResult>;
 };
 
 export async function handleDeleteAccountRequest(
@@ -321,6 +344,7 @@ export async function handleDeleteAccountRequest(
   let destructiveDatabasePreparationMayHaveCommitted = false;
   let soloCouplesDeleted = 0;
   let currentPhase: AccountDeletionPhase | null = null;
+  let appleRevocation: AppleDeletionRevocationResult | null = null;
 
   try {
     // Read-only preflight. These exact IDs are passed to the transactional RPC,
@@ -393,6 +417,35 @@ export async function handleDeleteAccountRequest(
       );
     }
 
+    // Apple token revocation is a pre-destruction provider boundary. A
+    // transient/configuration failure leaves the deletion fence and Auth flag
+    // intact for retry, but must not cross into E2EE or relational deletion.
+    // When no usable token exists, TN3194 requires deletion to continue with
+    // explicit manual-revocation guidance instead of permanently blocking it.
+    try {
+      appleRevocation = await deps.prepareAppleCredentialDeletion({
+        admin,
+        user,
+        attemptId,
+      });
+    } catch {
+      appleRevocation = { status: 'retry_required', reason: 'provider_unavailable' };
+    }
+    if (appleRevocation.status === 'retry_required') {
+      return jsonResponse(
+        {
+          error: 'Account deletion is temporarily unavailable while Apple access revocation is retried.',
+          dataRemoved: false,
+          deletionCancelled: false,
+          recoveryRequired: true,
+          warnings: [],
+          ...appleRevocationMetadata(appleRevocation),
+        },
+        503,
+        cors.headers,
+      );
+    }
+
     // E2EE key material comes before irreversible relational cleanup. Its
     // structured orphan refusal is the only safe cancellation point: no record
     // or relational data has been removed yet.
@@ -444,6 +497,7 @@ export async function handleDeleteAccountRequest(
             deletionCancelled: false,
             recoveryRequired: true,
             warnings: [],
+            ...appleRevocationMetadata(appleRevocation),
           },
           500,
           cors.headers,
@@ -452,7 +506,7 @@ export async function handleDeleteAccountRequest(
       if (cancelError || cancelled !== true) {
         const kind = cancelError ? safeDeleteErrorKind(cancelError) : 'service';
         console.error('[delete-account] Exact orphan refusal could not clear its fence', { kind });
-        return deletionRecoveryResponse(cors.headers);
+        return deletionRecoveryResponse(cors.headers, false, appleRevocation);
       }
 
       deletionMarkerStarted = false;
@@ -466,7 +520,7 @@ export async function handleDeleteAccountRequest(
         || currentAppMetadata[ACCOUNT_DELETION_ATTEMPT_FIELD] !== attemptId
       ) {
         console.error('[delete-account] Cancelled attempt no longer owns Auth metadata');
-        return deletionRecoveryResponse(cors.headers);
+        return deletionRecoveryResponse(cors.headers, false, appleRevocation);
       }
 
       const restoredAppMetadata = { ...currentAppMetadata };
@@ -487,7 +541,7 @@ export async function handleDeleteAccountRequest(
           '[delete-account] Exact orphan refusal was cancelled but its Auth flag could not be cleared',
           { kind },
         );
-        return deletionRecoveryResponse(cors.headers);
+        return deletionRecoveryResponse(cors.headers, false, appleRevocation);
       }
 
       // Reconcile after the cross-service clear. A new DB attempt means the
@@ -511,10 +565,18 @@ export async function handleDeleteAccountRequest(
           console.error(
             '[delete-account] Could not restore pending deletion metadata after cancellation cleanup',
           );
-          return deletionRecoveryResponse(cors.headers, newerAttemptMayHaveRemovedData);
+          return deletionRecoveryResponse(
+            cors.headers,
+            newerAttemptMayHaveRemovedData,
+            appleRevocation,
+          );
         }
         console.error('[delete-account] A pending fence remained after Auth cancellation cleanup');
-        return deletionRecoveryResponse(cors.headers, newerAttemptMayHaveRemovedData);
+        return deletionRecoveryResponse(
+          cors.headers,
+          newerAttemptMayHaveRemovedData,
+          appleRevocation,
+        );
       }
 
       return jsonResponse(
@@ -524,6 +586,7 @@ export async function handleDeleteAccountRequest(
           deletionCancelled: true,
           recoveryRequired: false,
           warnings: [],
+          ...appleRevocationMetadata(appleRevocation),
         },
         500,
         cors.headers,
@@ -687,7 +750,11 @@ export async function handleDeleteAccountRequest(
       soloCouplesDeleted,
     });
 
-    return jsonResponse({ success: true, warnings: [] }, 200, cors.headers);
+    return jsonResponse({
+      success: true,
+      warnings: [],
+      ...appleRevocationMetadata(appleRevocation),
+    }, 200, cors.headers);
   } catch (error) {
     // Never infer rollback from an RPC error code. The only cancellation after
     // E2EE dispatch is handled above from the wrapper's exact structured orphan
@@ -709,6 +776,7 @@ export async function handleDeleteAccountRequest(
         // so the caller does not present this as a clean no-op failure.
         dataRemoved: destructiveDatabasePreparationMayHaveCommitted,
         warnings: [],
+        ...appleRevocationMetadata(appleRevocation),
       },
       500,
       cors.headers,

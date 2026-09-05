@@ -31,6 +31,7 @@
     "npm:eslint-plugin-react-refresh@~0.4.20": "0.4.26_eslint@9.39.5",
     "npm:eslint@^9.32.0": "9.39.5",
     "npm:globals@^15.15.0": "15.15.0",
+    "npm:jose@6.2.3": "6.2.3",
     "npm:jsdom@^26.1.0": "26.1.0",
     "npm:lucide-react@0.575": "0.575.0_react@19.2.8",
     "npm:node-fetch@2.7.0": "2.7.0",
@@ -2223,6 +2224,9 @@
     "jiti@2.7.0": {
       "integrity": "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==",
       "bin": true
+    },
+    "jose@6.2.3": {
+      "integrity": "sha512-YYVDInQKFJfR/xa3ojUTl8c2KoTwiL1R5Wg9YCydwH0x0B9grbzlg5HC7mMjCtUJjbQ/YnGEZIhI5tCgfTb4Hw=="
     },
     "js-tokens@4.0.0": {
       "integrity": "sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ=="

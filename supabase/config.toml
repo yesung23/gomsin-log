@@ -4,6 +4,9 @@ verify_jwt = false
 [functions.delete-account]
 verify_jwt = true
 
+[functions.apple-auth-credentials]
+verify_jwt = true
+
 [functions.record-media-cleanup]
 verify_jwt = false
 

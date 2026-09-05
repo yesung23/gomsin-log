@@ -118,6 +118,7 @@ function makeDeps(admin: unknown, env: Record<string, string | undefined> = {}) 
       ...env,
     })[key],
     createAdmin: () => admin,
+    prepareAppleCredentialDeletion: async () => ({ status: 'not_required' as const }),
   };
 }
 
@@ -323,7 +324,11 @@ describe('C2 - the delete-account function applies the table end to end', () => 
       makeDeps(admin),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, warnings: [] });
+    expect(await response.json()).toEqual({
+      success: true,
+      warnings: [],
+      appleCredentialRevocation: { status: 'not_required' },
+    });
     // CORS does not reorder or remove any deletion step. The exact list,
     // including the pending-flag write and sole-couple cleanup, is pinned by
     // `deleteAccountFunction.test.ts`.

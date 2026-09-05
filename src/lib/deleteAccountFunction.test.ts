@@ -326,13 +326,23 @@ function makeAdmin(options: AdminOptions = {}) {
   return admin;
 }
 
-function post(admin: unknown) {
+function post(
+  admin: unknown,
+  appleResult: Record<string, unknown> = { status: 'not_required' },
+) {
   return handleDeleteAccountRequest(
     new Request('https://edge.example/delete-account', {
       method: 'POST',
       headers: { Origin: 'https://gomsinlog.app', Authorization: 'Bearer token' },
     }),
-    { env: (key: string) => ENV[key], createAdmin: () => admin },
+    {
+      env: (key: string) => ENV[key],
+      createAdmin: () => admin,
+      prepareAppleCredentialDeletion: async () => {
+        (admin as { calls: string[] }).calls.push('apple:prepare_deletion');
+        return appleResult as any;
+      },
+    },
   );
 }
 
@@ -403,7 +413,110 @@ describe('delete-account - the server-authoritative pending flag', () => {
       .toBe(pendingWrites[0].account_deletion_attempt_id);
     expect(secondPendingAt).toBeGreaterThan(beginAt);
     expect(inspectAt).toBeGreaterThan(secondPendingAt);
+    expect(admin.calls.indexOf('apple:prepare_deletion')).toBeGreaterThan(inspectAt);
     expect(e2eeAt).toBeGreaterThan(inspectAt);
+    expect(e2eeAt).toBeGreaterThan(admin.calls.indexOf('apple:prepare_deletion'));
+  });
+
+  it.each([
+    ['provider_unavailable', 'provider_unavailable'],
+    ['configuration_recovery', 'configuration_recovery'],
+    ['operator_review_required', 'operator_review_required'],
+  ] as const)('stops before E2EE when Apple revocation requires retry: %s', async (_label, reason) => {
+    const admin = makeAdmin();
+    const response = await post(admin, { status: 'retry_required', reason });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      dataRemoved: false,
+      recoveryRequired: true,
+      appleCredentialRevocation: { status: 'retry_required', reason },
+    });
+    expect(admin.calls).toContain('apple:prepare_deletion');
+    expect(admin.calls).not.toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).not.toContain('auth.admin.deleteUser');
+  });
+
+  it('continues deletion with stable manual guidance when no usable Apple token exists', async () => {
+    const admin = makeAdmin();
+    const response = await post(admin, { status: 'manual_required', reason: 'no_credential' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      appleCredentialRevocation: {
+        status: 'manual_required',
+        reason: 'no_credential',
+        guidanceCode: 'APPLE_ACCOUNT_ACCESS_REVOCATION_REQUIRED',
+      },
+    });
+    expect(admin.calls).toContain('rpc:e2ee_prepare_account_deletion_v2');
+    expect(admin.calls).toContain('auth.admin.deleteUser');
+  });
+
+  it('returns explicit not-required Apple metadata instead of making a current result look legacy-unverified', async () => {
+    const admin = makeAdmin();
+    const response = await post(admin, { status: 'not_required' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      appleCredentialRevocation: { status: 'not_required' },
+    });
+  });
+
+  it('continues with guidance when no-token provider identity evidence is incomplete', async () => {
+    const admin = makeAdmin();
+    const response = await post(admin, {
+      status: 'manual_required',
+      reason: 'provider_identity_unverified',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      appleCredentialRevocation: {
+        status: 'manual_required',
+        reason: 'provider_identity_unverified',
+        guidanceCode: 'APPLE_ACCOUNT_ACCESS_REVOCATION_REQUIRED',
+      },
+    });
+  });
+
+  it.each([
+    ['cancel rejects', { cancelReject: new Error('cancel transport') }],
+    ['cancel returns error', { cancelError: { code: 'XX000' } }],
+    ['cancel returns false', { cancelData: false }],
+    ['Auth clear returns error', { clearFlagError: { code: 'service' } }],
+    ['Auth clear rejects', { clearFlagReject: new Error('auth transport') }],
+    ['post-clear inspection rejects', { inspectRejectOnCall: 2 }],
+  ] as const)('preserves Apple guidance on every post-Apple cancellation error: %s', async (_label, failure) => {
+    const admin = makeAdmin({
+      ...failure,
+      e2eePrepareData: {
+        ok: false,
+        rollback_confirmed: true,
+        refusal_code: 'e2ee_would_orphan_partner',
+        phase: 'media_cleanup',
+      },
+    });
+    const response = await post(admin, {
+      status: 'manual_required',
+      reason: 'exchange_uncertain',
+    });
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({
+      appleCredentialRevocation: {
+        status: 'manual_required',
+        reason: 'exchange_uncertain',
+        guidanceCode: 'APPLE_ACCOUNT_ACCESS_REVOCATION_REQUIRED',
+      },
+    });
+  });
+
+  it('reports confirmed Apple revocation without exposing credential material', async () => {
+    const admin = makeAdmin();
+    const response = await post(admin, { status: 'revoked' });
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.appleCredentialRevocation).toEqual({ status: 'revoked' });
+    expect(JSON.stringify(body)).not.toContain('token');
   });
 
   it('starts no irreversible phase when the post-begin Auth reassertion fails', async () => {
@@ -603,13 +716,21 @@ describe('delete-account - the server-authoritative pending flag', () => {
       },
     });
 
-    const response = await post(admin);
+    const response = await post(admin, {
+      status: 'manual_required',
+      reason: 'exchange_uncertain',
+    });
 
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({
       dataRemoved: false,
       recoveryRequired: true,
       deletionCancelled: false,
+      appleCredentialRevocation: {
+        status: 'manual_required',
+        reason: 'exchange_uncertain',
+        guidanceCode: 'APPLE_ACCOUNT_ACCESS_REVOCATION_REQUIRED',
+      },
     });
     expect(admin.calls).not.toContain('storage.remove');
     expect(admin.calls).not.toContain('auth.admin.deleteUser');
@@ -1043,6 +1164,7 @@ describe('delete-account - the server-authoritative pending flag', () => {
       'auth.getUser',
       'auth.admin.updateUserById',
       'rpc:inspect_account_deletion_fence_v2',
+      'apple:prepare_deletion',
       'rpc:e2ee_prepare_account_deletion_v2',
       'rpc:prepare_account_deletion_v2',
       'rpc:close_account_relationship_generations_v2',
@@ -1156,6 +1278,7 @@ describe('delete-account - server configuration failure fails closed', () => {
       {
         env: (key: string) => ({ ...ENV, ...envOverrides })[key],
         createAdmin: () => admin,
+        prepareAppleCredentialDeletion: async () => ({ status: 'not_required' }),
       },
     );
   };

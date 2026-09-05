@@ -6,7 +6,14 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const nativeAuthorization = vi.hoisted(() => vi.fn());
 const pushRevocation = vi.hoisted(() => vi.fn());
+const hydrateAccount = vi.hoisted(() => vi.fn(async (_userId: string) => ({
+  ok: true, state: { setupComplete: false, records: [] },
+})));
 const sdkHarness = vi.hoisted(() => ({ serial: 0, storageKey: '' }));
+vi.mock('@/lib/sync', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/lib/sync')>(),
+  fetchFullStateResultFromDB: hydrateAccount,
+}));
 vi.mock('@/lib/pushTokens', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/lib/pushTokens')>(),
   revokeOwnPushTokens: () => pushRevocation(),
@@ -71,11 +78,14 @@ let tokenReply: () => Promise<Response>;
 let logoutReply: () => Promise<Response>;
 let logoutStarted: ReturnType<typeof deferred<void>>;
 let pkceVerifier: string;
+let onSessionWritten: ((userId: string) => void) | undefined;
 
 beforeEach(async () => {
   vi.resetModules();
   nativeAuthorization.mockReset().mockResolvedValue(authorization);
   pushRevocation.mockReset().mockResolvedValue({ ok: true });
+  hydrateAccount.mockClear();
+  onSessionWritten = undefined;
   events = [];
   writtenUsers = [];
   tokenStarted = deferred<void>();
@@ -93,6 +103,13 @@ beforeEach(async () => {
       return tokenReply();
     }
     if (url.searchParams.get('grant_type') === 'password') return Response.json(sessionResponse('B'));
+    if (url.searchParams.get('grant_type') === 'refresh_token') {
+      const stored = JSON.parse(localStorage.getItem(sdkHarness.storageKey)!);
+      return Response.json({
+        ...sessionResponse(stored.user.id), access_token: `refreshed-${stored.user.id}-fixture`,
+        user: { ...stored.user, email: 'refreshed@example.test' },
+      });
+    }
     if (url.searchParams.get('grant_type') === 'pkce') {
       const body = JSON.parse(init!.body as string);
       expect(body.auth_code).toBe('google-code-fixture');
@@ -103,6 +120,11 @@ beforeEach(async () => {
       logoutStarted.resolve();
       return logoutReply();
     }
+    if (url.pathname === '/auth/v1/user') {
+      const stored = JSON.parse(localStorage.getItem(sdkHarness.storageKey)!);
+      return Response.json(stored.user);
+    }
+    if (url.pathname === '/rest/v1/rpc/is_my_account_deletion_pending') return Response.json(false);
     throw new Error('Unexpected test transport route.');
   });
   const storagePrototype = Object.getPrototypeOf(localStorage) as Storage;
@@ -110,6 +132,7 @@ beforeEach(async () => {
   vi.spyOn(storagePrototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
     if (key === sdkHarness.storageKey) writtenUsers.push(JSON.parse(value).user.id);
     setItem.call(this, key, value);
+    if (key === sdkHarness.storageKey) onSessionWritten?.(JSON.parse(value).user.id);
   });
   const module = await import('./supabase');
   client = module.supabase!;
@@ -163,7 +186,117 @@ async function signInGoogleB() {
   expect(url.searchParams.get('code_challenge_method')).toBe('s256');
 }
 
+async function mountAuthStore() {
+  const { StoreProvider } = await import('./store');
+  const { useStore } = await import('./useStore');
+  let current!: ReturnType<typeof useStore>;
+  const renderedUsers: Array<string | null> = [];
+  function Probe() {
+    current = useStore();
+    renderedUsers.push(current.state.authenticatedUser?.id ?? null);
+    return null;
+  }
+  const view = render(createElement(StoreProvider, null, createElement(Probe)));
+  await waitFor(() => expect(current.isReady).toBe(true));
+  return { current: () => current, renderedUsers, unmount: () => view.unmount() };
+}
+
 describe('Apple attempt ownership with the installed Supabase SDK', () => {
+  it.each(['Store', 'remounted Store', 'refresh during Store', 'SDK'] as const)(
+    'does not rehydrate A when %s logout begins between SDK storage and SIGNED_IN notification', async (entry) => {
+    let store = await mountAuthStore();
+    const push = deferred<{ ok: boolean }>();
+    pushRevocation.mockReturnValueOnce(push.promise);
+    const logout = deferred<Response>();
+    if (entry === 'SDK') logoutReply = () => logout.promise;
+    let leaving!: Promise<void>;
+    onSessionWritten = (userId) => {
+      if (userId !== 'A') return;
+      onSessionWritten = undefined;
+      // Real SDK storage has committed; its awaited continuation has not notified.
+      queueMicrotask(() => {
+        leaving = entry === 'SDK'
+          ? client.auth.signOut().then(() => {}) : store.current().signOut();
+      });
+    };
+    try {
+      await act(async () => {
+        expect(await repository.signInWithApple()).toEqual({ cancelled: true });
+      });
+      expect(writtenUsers).toEqual(['A']);
+      expect(events).toContain('SIGNED_IN:A'); // The actual SDK still emits it.
+      expect(events).not.toContain('SIGNED_OUT:-'); // Push cleanup is still held.
+      if (entry === 'refresh during Store') {
+        await act(async () => { expect((await client.auth.refreshSession()).error).toBeNull(); });
+        expect(events).toContain('TOKEN_REFRESHED:A');
+      }
+      if (entry === 'remounted Store') {
+        store.unmount();
+        store = await mountAuthStore(); // Real INITIAL_SESSION after the attempt settled.
+      }
+      expect(store.current().state.authenticatedUser).toBeNull();
+      expect(store.renderedUsers).not.toContain('A');
+      expect(hydrateAccount).not.toHaveBeenCalledWith('A');
+    } finally {
+      await act(async () => {
+        push.resolve({ ok: true });
+        logout.resolve(new Response(null, { status: 204 }));
+        await leaving;
+      });
+      store.unmount();
+    }
+  });
+
+  it('hydrates a legitimate Apple SIGNED_IN, refreshes it, and restores it on Store remount', async () => {
+    let store = await mountAuthStore();
+    try {
+      // First reject a committed response; a fresh explicit login must be able
+      // to reclaim the same account, even if the server returns the same token.
+      let leaving!: Promise<void>;
+      onSessionWritten = () => {
+        onSessionWritten = undefined;
+        queueMicrotask(() => { leaving = store.current().signOut(); });
+      };
+      await act(async () => {
+        expect(await repository.signInWithApple()).toEqual({ cancelled: true });
+        await leaving;
+      });
+      expect(store.current().state.authenticatedUser).toBeNull();
+      expect(hydrateAccount).not.toHaveBeenCalled();
+      await act(async () => { expect(await repository.signInWithApple()).toEqual({}); });
+      await waitFor(() => expect(store.current().state.authenticatedUser?.id).toBe('A'));
+      expect(hydrateAccount).toHaveBeenCalledTimes(1);
+      await act(async () => { expect((await client.auth.refreshSession()).error).toBeNull(); });
+      await waitFor(() => expect(store.current().state.authenticatedUser?.email).toBe('refreshed@example.test'));
+      expect(hydrateAccount).toHaveBeenCalledTimes(1);
+      expect(events).toContain('TOKEN_REFRESHED:A');
+      store.unmount();
+      store = await mountAuthStore();
+      expect(store.current().state.authenticatedUser?.id).toBe('A');
+      expect(store.current().state.authenticatedUser?.email).toBe('refreshed@example.test');
+    } finally { store.unmount(); }
+  });
+
+  it('keeps actual Store on Google B and permits its refresh when the old Apple response completes', async () => {
+    const store = await mountAuthStore();
+    const release = holdTokenResponse('body');
+    let released = false;
+    const pending = repository.signInWithApple();
+    await tokenStarted.promise;
+    try {
+      await act(async () => { await signInGoogleB(); });
+      await waitFor(() => expect(store.current().state.authenticatedUser?.id).toBe('B'));
+      await act(async () => { release(); released = true; expect(await pending).toEqual({ cancelled: true }); });
+      expect(store.current().state.authenticatedUser?.id).toBe('B');
+      expect(store.renderedUsers).not.toContain('A');
+      expect(hydrateAccount).not.toHaveBeenCalledWith('A');
+      await act(async () => { expect((await client.auth.refreshSession()).error).toBeNull(); });
+      expect(store.current().state.authenticatedUser?.id).toBe('B');
+      expect(store.current().state.authenticatedUser?.email).toBe('refreshed@example.test');
+      expect(events).not.toContain('SIGNED_OUT:-');
+    } finally { if (!released) release(); await pending; store.unmount(); }
+  });
+
   it('cannot start a token exchange after sign-out invalidates a pending native authorization', async () => {
     const native = deferred<typeof authorization>();
     nativeAuthorization.mockReturnValueOnce(native.promise);
@@ -272,15 +405,23 @@ describe('Apple attempt ownership with the installed Supabase SDK', () => {
   });
 
   it('does not treat signing out other devices as a local logout', async () => {
-    await signInGoogleB();
+    const store = await mountAuthStore();
+    await act(async () => { await signInGoogleB(); });
+    await waitFor(() => expect(store.current().state.authenticatedUser?.id).toBe('B'));
     const release = holdTokenResponse('body');
     const pending = repository.signInWithApple();
     await tokenStarted.promise;
-    expect((await client.auth.signOut({ scope: 'others' })).error).toBeNull();
-    release();
-    expect(await pending).toEqual({});
-    expect((await client.auth.getSession()).data.session?.user.id).toBe('A');
-    expect(events).not.toContain('SIGNED_OUT:-');
+    try {
+      await act(async () => {
+        expect((await client.auth.signOut({ scope: 'others' })).error).toBeNull();
+        expect(store.current().state.authenticatedUser?.id).toBe('B');
+        release();
+        expect(await pending).toEqual({});
+      });
+      await waitFor(() => expect(store.current().state.authenticatedUser?.id).toBe('A'));
+      expect((await client.auth.getSession()).data.session?.user.id).toBe('A');
+      expect(events).not.toContain('SIGNED_OUT:-');
+    } finally { store.unmount(); }
   });
 
   it('rejects a pending native result after Google has established B', async () => {
@@ -296,6 +437,26 @@ describe('Apple attempt ownership with the installed Supabase SDK', () => {
 });
 
 describe('the synchronous SDK storage commit boundary', () => {
+  it('does not let a rejected A notification rewind B ownership or cancel the next attempt on B refresh', async () => {
+    const { createAuthSessionGuard, authSessionStorage } = await import('./authSessionGuard');
+    const guard = createAuthSessionGuard();
+    const storage = guard.wrapStorage(authSessionStorage());
+    const attempt = guard.beginAppleAttempt();
+    attempt.bindSessionResponse(sessionResponse('A'));
+    storage.setItem('notification-order', JSON.stringify(sessionResponse('A')));
+    storage.setItem('notification-order', JSON.stringify(sessionResponse('B')));
+    expect(attempt.signal.aborted).toBe(true);
+    guard.observeSession('SIGNED_IN', sessionResponse('A'));
+    expect(guard.canConsumeSession(sessionResponse('A'))).toBe(false);
+    expect(guard.canConsumeSession(sessionResponse('B'))).toBe(true);
+    expect(JSON.parse(storage.getItem('notification-order')!).user.id).toBe('B');
+    attempt.finish();
+    const next = guard.beginAppleAttempt();
+    guard.observeSession('TOKEN_REFRESHED', sessionResponse('B'));
+    expect(next.signal.aborted).toBe(false);
+    next.finish();
+  });
+
   it.each(['logout', 'B commit'] as const)('rejects A after JSON was consumed but before storage, following %s', async (change) => {
     const { createAuthSessionGuard, authSessionStorage, AppleAttemptInvalidatedError } = await import('./authSessionGuard');
     const { createAppleTokenTimeoutFetch } = await import('./appleAuth');

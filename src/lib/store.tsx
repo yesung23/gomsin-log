@@ -1645,6 +1645,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let disposed = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // SDK persistence and notification are separated by an await. Reject a
+      // cancelled Apple session before granting identity or hydration authority.
+      if (!appleSessionGuard.canConsumeSession(session)) {
+        if (event !== 'INITIAL_SESSION') return;
+        session = null; // Resolve a remount as signed out, not an endless splash.
+      }
       if (event === 'INITIAL_SESSION') {
         const resolution: InitialAuthResolution = session?.user ? 'authenticated' : 'signed_out';
         initialAuthResolutionRef.current = resolution;

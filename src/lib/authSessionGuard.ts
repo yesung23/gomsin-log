@@ -28,6 +28,9 @@ export type AppleSessionAttempt = {
 export function createAuthSessionGuard() {
   let currentUserId: string | null = null;
   let signingOut = 0;
+  // Keep one rejected response in memory after the attempt settles: the SDK may
+  // still expose it through INITIAL_SESSION while logout awaits push cleanup.
+  let rejectedSession: { token: string; userId: string } | null = null;
   let active: {
     controller: AbortController;
     token?: string;
@@ -35,14 +38,29 @@ export function createAuthSessionGuard() {
     attempt: AppleSessionAttempt;
   } | null = null;
 
-  const invalidate = () => { active?.controller.abort(); };
+  const invalidate = () => {
+    if (active?.token !== undefined && active.userId !== undefined) {
+      rejectedSession = { token: active.token, userId: active.userId };
+    }
+    active?.controller.abort();
+  };
+
+  const canConsumeSession = (session: SessionIdentity | null): boolean => !(
+    rejectedSession && session?.user?.id === rejectedSession.userId
+    // During explicit logout, a refresh of this rejected Apple session must not
+    // regain hydration authority either. Other accounts/normal refresh pass.
+    && (signingOut > 0 || session.access_token === rejectedSession.token)
+  );
+
+  const ownsSession = (session: SessionIdentity | null): boolean => !!(
+    active && !active.controller.signal.aborted && active.token !== undefined
+    && active.token === session?.access_token && active.userId === session?.user?.id
+  );
 
   const observeSession = (event: string, session: SessionIdentity | null) => {
+    if (!canConsumeSession(session)) return;
     const userId = typeof session?.user?.id === 'string' ? session.user.id : null;
-    const ownSession = active && !active.controller.signal.aborted
-      && active.token !== undefined && active.token === session?.access_token
-      && active.userId === userId;
-    if (event === 'SIGNED_OUT' || (userId !== currentUserId && !ownSession)) invalidate();
+    if (event === 'SIGNED_OUT' || (userId !== currentUserId && !ownsSession(session))) invalidate();
     currentUserId = userId;
   };
 
@@ -75,6 +93,7 @@ export function createAuthSessionGuard() {
   return {
     beginAppleAttempt,
     currentAttempt: () => active?.attempt,
+    canConsumeSession,
     observeSession,
     beginSignOut: () => {
       signingOut += 1;
@@ -101,6 +120,9 @@ export function createAuthSessionGuard() {
         if (session && active && active.token === session.access_token) active.attempt.assertCurrent();
         // No await between the ownership check and the underlying commit.
         storage.setItem(key, value);
+        // A fresh, still-owned Apple commit can legitimately reauthenticate the
+        // same account. Do not mistake its own SIGNED_IN for the rejected one.
+        if (ownsSession(session)) rejectedSession = null;
         if (session) observeSession('SESSION_WRITE', session);
       },
     }),

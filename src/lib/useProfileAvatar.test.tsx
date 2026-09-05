@@ -38,6 +38,18 @@ describe('profile avatar identity and lifecycle', () => {
     await act(async () => { pending.resolve(avatar('old-face')); });
     expect(view.result.current.dataUrl).toBeNull();
   });
+  it('does not restore an old partner photo until recovery is freshly authorized', async () => {
+    const view = renderHook(() => useProfileAvatar(partner));
+    await waitFor(() => expect(view.result.current.dataUrl).toBe('photo'));
+    sync = 'unavailable'; view.rerender();
+    const pending = deferred<ReturnType<typeof avatar>>();
+    api.read.mockReturnValueOnce(pending.promise);
+    sync = 'live'; view.rerender();
+    expect(view.result.current.dataUrl).toBeNull();
+    expect(view.result.current.ready).toBe(false);
+    await act(async () => { pending.resolve(avatar('new-photo')); });
+    expect(view.result.current.dataUrl).toBe('new-photo');
+  });
   it.each(['sync', 'deletion'])('hides a previously loaded partner photo when %s becomes unverified', async (kind) => {
     const view = renderHook(() => useProfileAvatar(partner));
     await waitFor(() => expect(view.result.current.dataUrl).toBe('photo'));

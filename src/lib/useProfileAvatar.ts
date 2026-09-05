@@ -26,6 +26,11 @@ export function useProfileAvatar(ownerId: string | undefined) {
 
   useLayoutEffect(() => {
     ++identityGeneration.current;
+    ++loadSequence.current;
+    // A temporarily forbidden identity must earn a fresh read even if it later
+    // returns to the same key. Never revive its old authorized snapshot.
+    setSnapshot(null);
+    setReadStatus(null);
     currentKey.current = key;
     return () => { currentKey.current = null; };
   }, [key]);

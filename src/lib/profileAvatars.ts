@@ -88,7 +88,7 @@ export async function saveProfileAvatar(input: {
       return check.ok && check.avatar.version === operationId && check.avatar.dataUrl === dataUrl
         ? { ok: true, avatar: check.avatar }
         : { ok: false, reason: 'unavailable' };
-    }, { expectedUserId: ownerId });
+    }, { expectedUserId: ownerId, policy: 'best_effort' });
     return outcome.kind === 'executed' ? outcome.value : { ok: false, reason: 'unavailable' };
   } catch { return { ok: false, reason: 'unavailable' }; }
 }

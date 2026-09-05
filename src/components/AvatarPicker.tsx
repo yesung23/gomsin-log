@@ -60,7 +60,7 @@ export function AvatarPicker({
   // Old, device-only choices are never uploaded implicitly. A tombstone from
   // another device also suppresses a legacy local photo after remote removal.
   const dataUrl = slot === 'me'
-    ? shared.allowed ? shared.dataUrl ?? (shared.version === null ? localDataUrl : null) : null
+    ? shared.allowed ? shared.dataUrl ?? (shared.ready && shared.version === null ? localDataUrl : null) : null
     : localDataUrl;
   const [busy, setBusy] = useState(false);
   const preparing = useRef(false);

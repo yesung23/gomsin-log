@@ -59,7 +59,7 @@
 - 독립 avatar DELTA 실제 소스 비교 10 scenarios/36 assertions PASS, 기존 MEDIUM 3건 종결.
 - auth worker 500 PASS/2 Android SKIP; 독립 SDK review 78 PASS + 새 경합 3 FAIL로 HIGH 1건 OPEN.
 - imageSanitization + recordMediaFailures 50 PASS; 경제 계산 node:test 7 PASS.
-- Node22 실제 Chromium photo benchmark 3 synthetic fixtures PASS; native/인쇄 품질은 UNVERIFIED.
+- Node22 실제 Chromium photo benchmark 4 synthetic fixtures PASS (투명 PNG 흰색 합성 포함); native/인쇄 품질은 UNVERIFIED.
 - `npx --yes --package=node@22 node node_modules/playwright/cli.js test --config e2e/.artifacts/source-entry.config.ts`: 8 PASS/22.6s/exit 0.
 - 이전 Node26 종료 지연은 PASS로 합산하지 않음. 이전 dark preference-only run은 앱 dark 증거에서 제외.
 - placeholder Supabase env `npm run build`: PASS/2581 modules, 505KB chunk warning; 전체 최신 suite 미실행.

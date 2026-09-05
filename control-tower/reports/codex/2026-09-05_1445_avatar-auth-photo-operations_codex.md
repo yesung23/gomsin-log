@@ -56,7 +56,7 @@ tags: [control-tower, profile, auth, media, release-gate]
 | auth 독립 review | 78 PASS + 새 경합 3 FAIL | 새 HIGH 1건 발견, 완료로 표시하지 않음 |
 | image sanitizer + media failures | 50 PASS | timeout/비JPEG 실패 및 기존 업로드 실패 |
 | node --test scripts/operations/media-economics.test.mjs | 7 PASS | 단위/포함량/초과/순수익 계산; 실제 청구 아님 |
-| Node22 photo-benchmark.mjs | 3 synthetic fixtures PASS | 실제 Chromium sanitizer/EXIF/회전/크기; 품질/실기기 아님 |
+| Node22 photo-benchmark.mjs | 4 synthetic fixtures PASS | 실제 Chromium sanitizer/EXIF/회전/크기/투명 PNG 흰색 합성; 품질/실기기 아님 |
 | Node22 Playwright source-entry config | 8 PASS, exit 0, 22.6s | 실제 theme/375·402·430px/2계정 photo/200%; backend mocks |
 | scoped ESLint + typecheck + git diff --check | PASS | 변경 소스 정적 검사 |
 | placeholder env npm run build | PASS, 2581 modules | 로컬 artifact 생성, 505KB chunk 경고 |

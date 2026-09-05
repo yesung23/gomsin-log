@@ -1,9 +1,13 @@
 import { strict as assert } from 'node:assert';
 import {
+  EXTERNAL_CALL_TIMEOUT_MS,
+  CLEANUP_INVOCATION_TIMEOUT_MS,
+  CLEANUP_LANE_TIMEOUT_MS,
   MAX_DELETE_BATCH_SIZE,
   MAX_DELETE_ROUNDS,
   MAX_DIRECTORY_DEPTH,
   MAX_OBJECTS_PER_INVOCATION,
+  RECORD_MEDIA_CLEANUP_LEASE_SECONDS,
   type RecordMediaCleanupDeps,
   type RecordMediaCleanupJob,
   type RecordMediaObjectCleanupJob,
@@ -64,6 +68,7 @@ function createFixture(initialObjects: string[] = []) {
   const failed: Array<[string, string, string]> = [];
   const value: RecordMediaCleanupDeps = {
     createLeaseId: () => LEASE_ID,
+    contractVersion: async () => 3,
     claim: async () => JOB,
     list: async (path, { limit, offset }) => {
       listed.push(path);
@@ -94,6 +99,68 @@ function createFixture(initialObjects: string[] = []) {
   };
   return { objects, listed, removed, completed, deferred, failed, value };
 }
+
+Deno.test('record media cleanup: timeout ordering stays below the database lease', () => {
+  assert.ok(EXTERNAL_CALL_TIMEOUT_MS < CLEANUP_LANE_TIMEOUT_MS);
+  assert.ok(CLEANUP_LANE_TIMEOUT_MS < CLEANUP_INVOCATION_TIMEOUT_MS);
+  assert.ok(CLEANUP_INVOCATION_TIMEOUT_MS < RECORD_MEDIA_CLEANUP_LEASE_SECONDS * 1_000);
+  assert.deepEqual(
+    [EXTERNAL_CALL_TIMEOUT_MS, CLEANUP_LANE_TIMEOUT_MS, CLEANUP_INVOCATION_TIMEOUT_MS],
+    [8_000, 40_000, 55_000],
+  );
+});
+
+Deno.test('record media cleanup: exact contract 3 is required before either lane claims', async () => {
+  const fixture = createFixture();
+  let claims = 0;
+  fixture.value.contractVersion = async () => 2;
+  fixture.value.claim = async () => {
+    claims += 1;
+    return null;
+  };
+  fixture.value.object.claim = async () => {
+    claims += 1;
+    return null;
+  };
+
+  await assert.rejects(
+    () => runRecordMediaCleanup(fixture.value),
+    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_CONTRACT_UNAVAILABLE',
+  );
+  assert.equal(claims, 0);
+});
+
+Deno.test('record media cleanup: a stalled prefix call is aborted without starving the object lane', async () => {
+  const fixture = createFixture();
+  let prefixStarted = false;
+  let prefixAborted = false;
+  let objectClaims = 0;
+  fixture.value.claim = (_leaseId, _leaseSeconds, signal) => {
+    prefixStarted = true;
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        prefixAborted = true;
+        reject(signal.reason);
+      }, { once: true });
+    });
+  };
+  fixture.value.object.claim = async (_leaseId, _leaseSeconds, signal) => {
+    assert.equal(signal.aborted, false);
+    objectClaims += 1;
+    return null;
+  };
+
+  await assert.rejects(
+    () => runRecordMediaCleanup(fixture.value, {
+      externalCallTimeoutMs: 15,
+      laneTimeoutMs: 35,
+    }),
+    (error: unknown) => error instanceof Error && error.message === 'E_CLEANUP_LANE_FAILED',
+  );
+  assert.equal(prefixStarted, true);
+  assert.equal(objectClaims, 1);
+  assert.equal(prefixAborted, true);
+});
 
 function flattenRemoved(fixture: Fixture): string[] {
   return fixture.removed.flat();
@@ -339,8 +406,8 @@ Deno.test('record media cleanup: a concurrent upload found by the fresh scan is 
   const fixture = createFixture([`${ROOT}/first.jpg`]);
   const baseRemove = fixture.value.remove;
   let addedLateObject = false;
-  fixture.value.remove = async (paths) => {
-    await baseRemove(paths);
+  fixture.value.remove = async (paths, signal) => {
+    await baseRemove(paths, signal);
     if (!addedLateObject) {
       fixture.objects.add(`${ROOT}/late.jpg`);
       addedLateObject = true;

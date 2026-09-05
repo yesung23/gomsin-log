@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * PostgreSQL actor/race harness for migrations 083 through 085.
+ * PostgreSQL actor/race harness for migrations 083 through 086.
  *
  * This runs the migration against a minimal current-schema fixture and proves
  * behavior with real roles, RLS, triggers, transactions, record-scoped
@@ -19,6 +19,7 @@ const MIGRATION_028 = join(ROOT, 'supabase/migrations/028_restore_couple_media_a
 const MIGRATION_083 = join(ROOT, 'supabase/migrations/083_record_media_cleanup_jobs.sql');
 const MIGRATION_084 = join(ROOT, 'supabase/migrations/084_record_media_object_lifecycle.sql');
 const MIGRATION_085 = join(ROOT, 'supabase/migrations/085_harden_record_media_cleanup.sql');
+const MIGRATION_086 = join(ROOT, 'supabase/migrations/086_reconcile_record_media_cleanup.sql');
 const DB = 'record_media_cleanup_harness';
 // PostgreSQL's Unix socket path is capped at roughly 100 bytes. macOS tmpdir()
 // is already deeply nested, so keep this harness-owned path deliberately short.
@@ -81,6 +82,44 @@ const IDS = {
   fenceAttempt: '40000000-0000-4000-8000-000000000002',
 };
 
+const RECONCILE = {
+  owner: '86000000-0000-4000-8000-000000000001',
+  couple: '86000000-0000-4000-8000-000000000002',
+  completedRecord: '86000000-0000-4000-8000-000000000003',
+  completedMedia: '86000000-0000-4000-8000-000000000004',
+  completedLease: '86000000-0000-4000-8000-000000000005',
+  ledgerRecord: '86000000-0000-4000-8000-000000000006',
+  ledgerOperation: '86000000-0000-4000-8000-000000000007',
+  ledgerMedia: '86000000-0000-4000-8000-000000000008',
+  orphanRecord: '86000000-0000-4000-8000-000000000009',
+  orphanMedia: '86000000-0000-4000-8000-000000000010',
+  liveRecord: '86000000-0000-4000-8000-000000000011',
+  liveMedia: '86000000-0000-4000-8000-000000000012',
+  existingJobRecord: '86000000-0000-4000-8000-000000000013',
+  existingJobOperation: '86000000-0000-4000-8000-000000000014',
+  photoOwner: '86000000-0000-4000-8000-000000000015',
+  photoCouple: '86000000-0000-4000-8000-000000000016',
+  photoRecord: '86000000-0000-4000-8000-000000000017',
+  photoAttempt: '86000000-0000-4000-8000-000000000018',
+  photoLease: '86000000-0000-4000-8000-000000000019',
+  prefixLease: '86000000-0000-4000-8000-000000000020',
+  staleOrphanRecord: '86000000-0000-4000-8000-000000000021',
+  staleOrphanOperation: '86000000-0000-4000-8000-000000000022',
+  staleOrphanLease: '86000000-0000-4000-8000-000000000023',
+  staleLiveRecord: '86000000-0000-4000-8000-000000000024',
+  staleLiveOperation: '86000000-0000-4000-8000-000000000025',
+  staleLiveMedia: '86000000-0000-4000-8000-000000000026',
+};
+
+const PREFLIGHT = {
+  owner: '86100000-0000-4000-8000-000000000001',
+  unrelated: '86100000-0000-4000-8000-000000000002',
+  couple: '86100000-0000-4000-8000-000000000003',
+  otherCouple: '86100000-0000-4000-8000-000000000004',
+  record: '86100000-0000-4000-8000-000000000005',
+  otherRecord: '86100000-0000-4000-8000-000000000006',
+};
+
 let serverStarted = false;
 let checks = 0;
 
@@ -135,6 +174,23 @@ function mutationStatusSql(operationId, recordId, userId, coupleId) {
 
 function abandonMutationSql(operationId, recordId, userId, coupleId) {
   return `SELECT public.abandon_record_media_mutation(${q(operationId)}::UUID, ${q(recordId)}::UUID, ${q(userId)}::UUID, ${q(coupleId)}::UUID) ->> 'state'`;
+}
+
+function replaceCleanupContractVersionSql(version) {
+  return `CREATE OR REPLACE FUNCTION public.record_media_cleanup_contract_version()
+RETURNS INTEGER
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF auth.role() IS DISTINCT FROM 'service_role' THEN
+    RAISE EXCEPTION 'Service role required' USING ERRCODE = '42501';
+  END IF;
+  RETURN ${version};
+END;
+$$;`;
 }
 
 function actorSql(role, userId, text) {
@@ -362,7 +418,9 @@ CREATE TABLE storage.buckets (id TEXT PRIMARY KEY, name TEXT NOT NULL, public BO
 CREATE TABLE storage.objects (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   bucket_id TEXT NOT NULL,
-  name TEXT NOT NULL UNIQUE
+  name TEXT NOT NULL UNIQUE,
+  owner UUID,
+  owner_id TEXT
 );
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO authenticated, service_role;
@@ -375,6 +433,22 @@ $$;
 CREATE FUNCTION storage.filename(TEXT) RETURNS TEXT LANGUAGE sql IMMUTABLE AS $$
   SELECT (string_to_array($1, '/'))[array_length(string_to_array($1, '/'), 1)]
 $$;
+
+-- Hosted Storage writes the authenticated owner's current owner_id claim.
+-- Direct SQL fixtures emulate that service behavior for lifecycle tests.
+CREATE FUNCTION public.fixture_storage_owner_id() RETURNS TRIGGER
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
+BEGIN
+  IF auth.role() = 'authenticated' AND auth.uid() IS NOT NULL THEN
+    NEW.owner_id := coalesce(NEW.owner_id, auth.uid()::TEXT);
+    NEW.owner := coalesce(NEW.owner, auth.uid());
+  END IF;
+  RETURN NEW;
+END
+$$;
+CREATE TRIGGER aaa_fixture_storage_owner_id
+  BEFORE INSERT ON storage.objects
+  FOR EACH ROW EXECUTE FUNCTION public.fixture_storage_owner_id();
 
 CREATE FUNCTION public.fixture_account_write_statement() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -498,6 +572,401 @@ expectOk(psql(['-q', '-f', MIGRATION_028]), 'apply migration 028');
 expectOk(psql(['-q', '-f', MIGRATION_083]), 'apply migration 083');
 expectOk(psql(['-q', '-f', MIGRATION_084]), 'apply migration 084');
 expectOk(psql(['-q', '-f', MIGRATION_085]), 'apply migration 085');
+
+for (const version of [20, 21]) {
+  expectOk(sql(replaceCleanupContractVersionSql(version)), `install false v${version} predecessor`);
+  expectFail(
+    psql(['-q', '-f', MIGRATION_086]),
+    `reject false v${version} predecessor`,
+    /migration_086_contract_predecessor_mismatch/i,
+  );
+  expectEqual(
+    expectOk(
+      asActor('service_role', null, 'SELECT public.record_media_cleanup_contract_version()::text'),
+      `read rolled-back v${version} predecessor`,
+    ).split('\n').at(-1),
+    String(version),
+    `086 rejection must leave the v${version} predecessor untouched`,
+  );
+}
+expectOk(sql(replaceCleanupContractVersionSql(2)), 'restore exact v2 predecessor');
+
+const ledgerIdentityCases = [
+  {
+    label: 'wrong bucket',
+    bucket: 'other-media',
+    path: `${PREFLIGHT.couple}/${PREFLIGHT.record}/photo.jpg`,
+    ownerId: PREFLIGHT.owner,
+  },
+  {
+    label: 'wrong couple path',
+    bucket: 'couple-media',
+    path: `${PREFLIGHT.otherCouple}/${PREFLIGHT.record}/photo.jpg`,
+    ownerId: PREFLIGHT.owner,
+  },
+  {
+    label: 'wrong record path',
+    bucket: 'couple-media',
+    path: `${PREFLIGHT.couple}/${PREFLIGHT.otherRecord}/photo.jpg`,
+    ownerId: PREFLIGHT.owner,
+  },
+  {
+    label: 'wrong current owner_id',
+    bucket: 'couple-media',
+    path: `${PREFLIGHT.couple}/${PREFLIGHT.record}/photo.jpg`,
+    ownerId: PREFLIGHT.unrelated,
+  },
+];
+for (const [index, identityCase] of ledgerIdentityCases.entries()) {
+  const suffix = String(index + 1).padStart(12, '0');
+  const mediaObjectId = `86110000-0000-4000-8000-${suffix}`;
+  const storageObjectId = `86120000-0000-4000-8000-${suffix}`;
+  expectOk(sql(`
+    INSERT INTO storage.objects(id, bucket_id, name, owner_id)
+    VALUES ('${storageObjectId}', '${identityCase.bucket}', '${identityCase.path}', '${identityCase.ownerId}');
+    INSERT INTO public.record_media_objects(
+      media_object_id, storage_object_id, record_id, couple_id, owner_user_id, state
+    ) VALUES (
+      '${mediaObjectId}', '${storageObjectId}', '${PREFLIGHT.record}',
+      '${PREFLIGHT.couple}', '${PREFLIGHT.owner}', 'active'
+    );
+  `), `seed ledger-bound ${identityCase.label}`);
+  const output = expectFail(
+    psql(['-q', '-f', MIGRATION_086]),
+    `reject ledger-bound ${identityCase.label}`,
+    /record_media_cleanup_identity_ambiguous/i,
+  );
+  if (output.includes(identityCase.path) || output.includes(identityCase.ownerId)) {
+    throw new Error(`ledger-bound ${identityCase.label} failure exposed Storage identity`);
+  }
+  checks += 1;
+  expectEqual(
+    expectOk(sql(`SELECT concat_ws('|',
+      (SELECT count(*) FROM public.record_media_objects WHERE media_object_id = '${mediaObjectId}'),
+      (SELECT count(*) FROM storage.objects WHERE id = '${storageObjectId}'))`),
+    `read atomic ${identityCase.label} rejection`),
+    '1|1',
+    `086 ${identityCase.label} rejection must preserve both ledger and Storage rows`,
+  );
+  expectOk(sql(`
+    DELETE FROM public.record_media_objects WHERE media_object_id = '${mediaObjectId}';
+    DELETE FROM storage.objects WHERE id = '${storageObjectId}';
+  `), `retire ledger-bound ${identityCase.label}`);
+}
+
+const reconcilePhotoPath = `${RECONCILE.photoCouple}/${RECONCILE.photoRecord}/photo.jpg`;
+const reconcileCompletedPath = `${RECONCILE.couple}/${RECONCILE.completedRecord}/${RECONCILE.completedMedia}.jpg`;
+expectOk(psql(['-q', '-c', `
+INSERT INTO auth.users(id) VALUES ('${RECONCILE.owner}'), ('${RECONCILE.photoOwner}');
+INSERT INTO public.couples(id) VALUES ('${RECONCILE.couple}'), ('${RECONCILE.photoCouple}');
+INSERT INTO public.couple_members(couple_id, user_id, status)
+VALUES ('${RECONCILE.couple}', '${RECONCILE.owner}', 'active');
+INSERT INTO public.daily_records(id, user_id, couple_id, is_private)
+VALUES ('${RECONCILE.liveRecord}', '${RECONCILE.owner}', '${RECONCILE.couple}', false);
+INSERT INTO public.account_deletion_requests(user_id, attempt_id, phase)
+VALUES ('${RECONCILE.photoOwner}', '${RECONCILE.photoAttempt}', 'relational_prepared');
+
+INSERT INTO public.record_media_cleanup_jobs(
+  record_id, couple_id, owner_user_id, state, lease_id, completed_at
+) VALUES
+  (
+    '${RECONCILE.completedRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+    'completed', '${RECONCILE.completedLease}', clock_timestamp()
+  ),
+  (
+    '${RECONCILE.existingJobRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+    'pending', NULL, NULL
+  );
+INSERT INTO storage.objects(bucket_id, name, owner_id) VALUES
+  ('couple-media', '${reconcileCompletedPath}', '${RECONCILE.owner}'),
+  ('couple-media', '${RECONCILE.couple}/${RECONCILE.orphanRecord}/${RECONCILE.orphanMedia}.jpg', '${RECONCILE.owner}'),
+  ('couple-media', '${RECONCILE.couple}/${RECONCILE.liveRecord}/${RECONCILE.liveMedia}.jpg', '${RECONCILE.owner}'),
+  ('couple-media', '${reconcilePhotoPath}', '${RECONCILE.photoOwner}');
+
+INSERT INTO public.record_media_mutations(
+  operation_id, record_id, couple_id, owner_user_id, base_content_revision,
+  target_content_revision, desired_object_count, upload_reservation_count
+) VALUES
+  (
+    '${RECONCILE.ledgerOperation}', '${RECONCILE.ledgerRecord}',
+    '${RECONCILE.couple}', '${RECONCILE.owner}', 1, 2, 1, 0
+  ),
+  (
+    '${RECONCILE.existingJobOperation}', '${RECONCILE.existingJobRecord}',
+    '${RECONCILE.couple}', '${RECONCILE.owner}', 1, 2, 0, 0
+  );
+WITH object AS (
+  INSERT INTO storage.objects(bucket_id, name, owner_id)
+  VALUES (
+    'couple-media',
+    '${RECONCILE.couple}/${RECONCILE.ledgerRecord}/${RECONCILE.ledgerMedia}.jpg',
+    '${RECONCILE.owner}'
+  )
+  RETURNING id
+)
+INSERT INTO public.record_media_objects(
+  media_object_id, storage_object_id, record_id, couple_id, owner_user_id, state
+)
+SELECT '${RECONCILE.ledgerMedia}', object.id, '${RECONCILE.ledgerRecord}',
+       '${RECONCILE.couple}', '${RECONCILE.owner}', 'active'
+FROM object;
+`]), 'seed migration 086 reconciliation fixtures');
+
+expectOk(psql(['-q', '-f', MIGRATION_086]), 'apply migration 086');
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${RECONCILE.completedRecord}'),
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${RECONCILE.ledgerRecord}'),
+    (SELECT state FROM public.record_media_mutations
+      WHERE operation_id = '${RECONCILE.ledgerOperation}'),
+    (SELECT state FROM public.record_media_mutations
+      WHERE operation_id = '${RECONCILE.existingJobOperation}'),
+    (SELECT state FROM public.record_media_objects
+      WHERE media_object_id = '${RECONCILE.ledgerMedia}'),
+    (SELECT state FROM public.record_media_objects
+      WHERE media_object_id = '${RECONCILE.orphanMedia}'),
+    (SELECT count(*) FROM public.record_media_objects AS media
+      JOIN storage.objects AS object ON object.id = media.storage_object_id
+      WHERE object.name = '${reconcilePhotoPath}' AND media.state = 'cleanup_pending'),
+    (SELECT count(*) FROM public.record_media_objects
+      WHERE media_object_id = '${RECONCILE.liveMedia}'))`), 'read migration 086 reconciliation'),
+  'pending|pending|abandoned|abandoned|superseded|cleanup_pending|1|0',
+  '086 must reopen residue, retire recordless pending work, recover jobless work, adopt exact orphans and preserve live v0 media',
+);
+expectEqual(
+  expectOk(sql(`SELECT count(*)::text
+    FROM public.record_media_objects AS media
+    JOIN storage.objects AS object ON object.id = media.storage_object_id
+    WHERE media.media_object_id = '${RECONCILE.orphanMedia}'
+      AND media.record_id = '${RECONCILE.orphanRecord}'
+      AND media.couple_id = '${RECONCILE.couple}'
+      AND media.owner_user_id = '${RECONCILE.owner}'
+      AND object.owner_id = '${RECONCILE.owner}'`), 'verify exact orphan attribution'),
+  '1',
+  '086 must bind an orphan only to its exact Storage id and current owner_id',
+);
+
+const [photoMediaObjectId, photoStorageObjectId] = expectOk(
+  sql(`SELECT concat_ws('|', media.media_object_id, object.id)
+    FROM public.record_media_objects AS media
+    JOIN storage.objects AS object ON object.id = media.storage_object_id
+    WHERE object.name = '${reconcilePhotoPath}'`),
+  'read generated photo.jpg cleanup identity',
+).split('|');
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    public.record_media_uuid_from_name(storage.filename(object.name)) IS NULL,
+    media.media_object_id IS NOT NULL,
+    media.record_id = '${RECONCILE.photoRecord}',
+    media.couple_id = '${RECONCILE.photoCouple}',
+    media.owner_user_id = '${RECONCILE.photoOwner}',
+    media.storage_object_id = object.id)
+  FROM public.record_media_objects AS media
+  JOIN storage.objects AS object ON object.id = media.storage_object_id
+  WHERE object.id = '${photoStorageObjectId}'`), 'verify generated photo.jpg ledger'),
+  't|t|t|t|t|t',
+  '086 must assign a new ledger UUID while preserving exact Storage UUID and routing identity',
+);
+expectFail(
+  asActor('service_role', null, `SELECT public.assert_account_record_media_cleanup_complete(
+    '${RECONCILE.photoOwner}', '${RECONCILE.photoAttempt}')`),
+  'photo.jpg account fence before exact cleanup',
+  /record_media_cleanup_pending/i,
+);
+expectOk(sql(`
+UPDATE public.record_media_objects
+SET next_attempt_at = clock_timestamp() + interval '1 day'
+WHERE state = 'cleanup_pending';
+UPDATE public.record_media_objects
+SET next_attempt_at = clock_timestamp()
+WHERE media_object_id = '${photoMediaObjectId}';
+`), 'prioritize photo.jpg exact cleanup');
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT media_object_id::text
+    FROM public.claim_record_media_object_cleanup_job('${RECONCILE.photoLease}', 120)`),
+  'claim photo.jpg exact cleanup').split('\n').at(-1),
+  photoMediaObjectId,
+  'photo.jpg must be claimable only by its generated immutable ledger UUID',
+);
+expectOk(sql(`UPDATE storage.objects SET owner_id = '${RECONCILE.owner}'
+  WHERE id = '${photoStorageObjectId}'`), 'corrupt exact object current owner_id');
+const exactResolveMismatch = expectFail(
+  asActor('service_role', null, `SELECT storage_path
+    FROM public.resolve_record_media_object_cleanup_path(
+      '${photoMediaObjectId}', '${photoStorageObjectId}', '${RECONCILE.photoLease}')`),
+  'resolve exact object after current owner_id mismatch',
+  /record_media_cleanup_identity_ambiguous/i,
+);
+if (exactResolveMismatch.includes(reconcilePhotoPath) || exactResolveMismatch.includes(RECONCILE.owner)) {
+  throw new Error('exact resolver identity failure exposed Storage identity');
+}
+checks += 1;
+const exactDeleteMismatch = expectFail(
+  asActor('service_role', null, `DELETE FROM storage.objects WHERE id = '${photoStorageObjectId}'`),
+  'delete exact object after current owner_id mismatch',
+  /record_media_cleanup_identity_ambiguous/i,
+);
+if (exactDeleteMismatch.includes(reconcilePhotoPath) || exactDeleteMismatch.includes(RECONCILE.owner)) {
+  throw new Error('exact delete identity failure exposed Storage identity');
+}
+checks += 1;
+expectEqual(
+  expectOk(sql(`SELECT count(*)::text FROM storage.objects WHERE id = '${photoStorageObjectId}'`),
+  'read exact object after wrong-owner delete'),
+  '1',
+  'wrong-owner exact object must survive cleanup DELETE',
+);
+expectOk(sql(`UPDATE storage.objects SET owner_id = '${RECONCILE.photoOwner}'
+  WHERE id = '${photoStorageObjectId}'`), 'restore exact object current owner_id');
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT storage_path
+    FROM public.resolve_record_media_object_cleanup_path(
+      '${photoMediaObjectId}', '${photoStorageObjectId}', '${RECONCILE.photoLease}')`),
+  'resolve restored photo.jpg exact path').split('\n').at(-1),
+  reconcilePhotoPath,
+  'exact resolver must return only the matching current-owner Storage path',
+);
+expectOk(
+  asActor('service_role', null, `DELETE FROM storage.objects WHERE id = '${photoStorageObjectId}'`),
+  'delete restored photo.jpg exact object',
+);
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT public.settle_record_media_object_cleanup_job(
+    '${photoMediaObjectId}', '${photoStorageObjectId}', '${RECONCILE.photoLease}')::text`),
+  'settle photo.jpg exact cleanup').split('\n').at(-1),
+  'true',
+  'photo.jpg exact cleanup must settle by immutable Storage UUID',
+);
+expectOk(
+  asActor('service_role', null, `SELECT public.assert_account_record_media_cleanup_complete(
+    '${RECONCILE.photoOwner}', '${RECONCILE.photoAttempt}')`),
+  'close photo.jpg account deletion fence after exact cleanup',
+);
+
+expectOk(sql(`
+UPDATE public.record_media_cleanup_jobs
+SET next_attempt_at = clock_timestamp() + interval '1 day'
+WHERE state = 'pending';
+UPDATE public.record_media_cleanup_jobs
+SET next_attempt_at = clock_timestamp()
+WHERE record_id = '${RECONCILE.completedRecord}';
+`), 'prioritize reconciled prefix cleanup');
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT record_id::text
+    FROM public.claim_record_media_cleanup_job('${RECONCILE.prefixLease}', 120)`),
+  'claim reconciled prefix cleanup').split('\n').at(-1),
+  RECONCILE.completedRecord,
+  'reopened completed prefix must be claimable with a fresh lease',
+);
+expectOk(sql(`UPDATE storage.objects SET owner_id = '${RECONCILE.photoOwner}'
+  WHERE name = '${reconcileCompletedPath}'`), 'corrupt prefix object current owner_id');
+const prefixDeleteMismatch = expectFail(
+  asActor('service_role', null, `DELETE FROM storage.objects WHERE name = '${reconcileCompletedPath}'`),
+  'delete prefix object after current owner_id mismatch',
+  /record_media_cleanup_identity_ambiguous/i,
+);
+if (prefixDeleteMismatch.includes(reconcileCompletedPath) || prefixDeleteMismatch.includes(RECONCILE.photoOwner)) {
+  throw new Error('prefix delete identity failure exposed Storage identity');
+}
+checks += 1;
+expectEqual(
+  expectOk(sql(`SELECT count(*)::text FROM storage.objects WHERE name = '${reconcileCompletedPath}'`),
+  'read prefix object after wrong-owner delete'),
+  '1',
+  'wrong-owner prefix object must survive cleanup DELETE',
+);
+expectOk(sql(`UPDATE storage.objects SET owner_id = '${RECONCILE.owner}'
+  WHERE name = '${reconcileCompletedPath}'`), 'restore prefix object current owner_id');
+expectOk(
+  asActor('service_role', null, `DELETE FROM storage.objects WHERE name = '${reconcileCompletedPath}'`),
+  'delete restored prefix object',
+);
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${RECONCILE.completedRecord}', '${RECONCILE.prefixLease}')::text`),
+  'settle restored prefix cleanup').split('\n').at(-1),
+  'true',
+  'restored-owner prefix cleanup must settle normally',
+);
+
+const staleOrphanPath = `${RECONCILE.couple}/${RECONCILE.staleOrphanRecord}/legacy.jpg`;
+expectOk(sql(`
+INSERT INTO public.daily_records(id, user_id, couple_id, is_private)
+VALUES ('${RECONCILE.staleLiveRecord}', '${RECONCILE.owner}', '${RECONCILE.couple}', false);
+INSERT INTO public.record_media_cleanup_jobs(
+  record_id, couple_id, owner_user_id, state, lease_id, completed_at
+) VALUES (
+  '${RECONCILE.staleOrphanRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+  'completed', '${RECONCILE.staleOrphanLease}', clock_timestamp()
+);
+INSERT INTO storage.objects(bucket_id, name, owner_id)
+VALUES ('couple-media', '${staleOrphanPath}', '${RECONCILE.owner}');
+INSERT INTO public.record_media_mutations(
+  operation_id, record_id, couple_id, owner_user_id, base_content_revision,
+  target_content_revision, desired_object_count, upload_reservation_count,
+  created_at, updated_at
+) VALUES
+  (
+    '${RECONCILE.staleOrphanOperation}', '${RECONCILE.staleOrphanRecord}',
+    '${RECONCILE.couple}', '${RECONCILE.owner}', 1, 2, 0, 0,
+    clock_timestamp() - interval '30 minutes', clock_timestamp() - interval '30 minutes'
+  ),
+  (
+    '${RECONCILE.staleLiveOperation}', '${RECONCILE.staleLiveRecord}',
+    '${RECONCILE.couple}', '${RECONCILE.owner}', 1, 2, 1, 1,
+    clock_timestamp() - interval '20 minutes', clock_timestamp() - interval '20 minutes'
+  );
+INSERT INTO public.record_media_objects(
+  media_object_id, record_id, couple_id, owner_user_id,
+  reservation_operation_id, state, created_at, updated_at
+) VALUES (
+  '${RECONCILE.staleLiveMedia}', '${RECONCILE.staleLiveRecord}',
+  '${RECONCILE.couple}', '${RECONCILE.owner}',
+  '${RECONCILE.staleLiveOperation}', 'reserved',
+  clock_timestamp() - interval '20 minutes', clock_timestamp() - interval '20 minutes'
+);
+`), 'seed oldest-recordless then live stale mutation');
+expectEqual(
+  expectOk(asActor('service_role', null,
+    'SELECT public.expire_stale_record_media_mutation()::text'),
+  'expire recordless and later live stale mutations').split('\n').at(-1),
+  'true',
+  'recordless stale work must not hide later live stale mutation expiry',
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT state FROM public.record_media_mutations
+      WHERE operation_id = '${RECONCILE.staleOrphanOperation}'),
+    (SELECT state FROM public.record_media_mutations
+      WHERE operation_id = '${RECONCILE.staleLiveOperation}'),
+    (SELECT state FROM public.record_media_objects
+      WHERE media_object_id = '${RECONCILE.staleLiveMedia}'),
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${RECONCILE.staleOrphanRecord}'),
+    (SELECT count(*) FROM storage.objects WHERE name = '${staleOrphanPath}'))`),
+  'read recordless/live stale expiry outcome'),
+  'abandoned|abandoned|deleted|completed|1',
+  'recordless mutation must become terminal despite completed job and physical remainder while later live work advances',
+);
+expectOk(sql(`
+DELETE FROM storage.objects WHERE name = '${staleOrphanPath}';
+DELETE FROM public.record_media_objects WHERE media_object_id = '${RECONCILE.staleLiveMedia}';
+DELETE FROM public.record_media_mutations
+WHERE operation_id IN ('${RECONCILE.staleOrphanOperation}', '${RECONCILE.staleLiveOperation}');
+DELETE FROM public.record_media_cleanup_jobs WHERE record_id = '${RECONCILE.staleOrphanRecord}';
+DELETE FROM public.daily_records WHERE id = '${RECONCILE.staleLiveRecord}';
+`), 'retire recordless/live stale expiry fixtures');
+expectOk(sql(`
+DELETE FROM storage.objects WHERE owner_id = '${RECONCILE.owner}';
+UPDATE public.record_media_objects
+SET state = 'deleted', deleted_at = coalesce(deleted_at, clock_timestamp())
+WHERE owner_user_id = '${RECONCILE.owner}' AND state <> 'deleted';
+UPDATE public.record_media_cleanup_jobs
+SET state = 'completed', completed_at = coalesce(completed_at, clock_timestamp())
+WHERE owner_user_id = '${RECONCILE.owner}' AND state <> 'completed';
+`), 'retire migration 086 reconciliation fixtures');
 expectOk(psql(['-q', '-c', `
 CREATE FUNCTION public.fixture_log_cleanup_job() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -552,6 +1021,8 @@ const IDENTITY = {
   mediaObject: '72000000-0000-4000-8000-000000000001',
   fenceMediaObject: '72000000-0000-4000-8000-000000000002',
   foreignMediaObject: '72000000-0000-4000-8000-000000000003',
+  fenceUnledgeredRecord: '72000000-0000-4000-8000-000000000004',
+  fenceUnledgeredMedia: '72000000-0000-4000-8000-000000000005',
 };
 
 expectOk(
@@ -678,6 +1149,25 @@ INSERT INTO public.record_media_objects(
   '${IDS.unrelated}', 'active'
 );
 `), 'retire target object and retain unrelated live object');
+const fenceUnledgeredPath = `${IDS.fenceCouple}/${IDENTITY.fenceUnledgeredRecord}/${IDENTITY.fenceUnledgeredMedia}.jpg`;
+expectOk(sql(`INSERT INTO storage.objects(bucket_id, name, owner_id)
+  VALUES ('couple-media', '${fenceUnledgeredPath}', '${IDS.fenceUser}')`),
+  'insert owner-attributable unledgered cleanup object');
+const unledgeredFenceOutput = expectFail(
+  asActor('service_role', null, `SELECT public.close_account_relationship_generations_v2(
+    '${IDS.fenceUser}', '${IDS.fenceAttempt}')`),
+  'account close with owner-attributable unledgered Storage object',
+  /record_media_cleanup_pending/i,
+);
+if (
+  unledgeredFenceOutput.includes(IDENTITY.fenceUnledgeredRecord)
+  || unledgeredFenceOutput.includes(IDENTITY.fenceUnledgeredMedia)
+) {
+  throw new Error('account cleanup fence exposed unledgered Storage identity');
+}
+checks += 1;
+expectOk(sql(`DELETE FROM storage.objects WHERE name = '${fenceUnledgeredPath}'`),
+  'retire owner-attributable unledgered cleanup object');
 expectOk(
   asActor('service_role', null, `SELECT public.close_account_relationship_generations_v2(
     '${IDS.fenceUser}', '${IDS.fenceAttempt}')`),
@@ -1004,8 +1494,8 @@ expectEqual(
 );
 expectEqual(
   expectOk(asActor('service_role', null, 'SELECT public.record_media_cleanup_contract_version()::text'), 'service contract probe').split('\n').at(-1),
-  '2',
-  'service cleanup contract must expose exact version 2',
+  '3',
+  'service cleanup contract must expose exact version 3',
 );
 expectFail(
   asActor('authenticated', IDS.owner, 'SELECT public.record_media_cleanup_contract_version()'),
@@ -1472,6 +1962,50 @@ expectEqual(
   'true',
   'prefix object retirement must remain idempotent after response loss',
 );
+
+const replayResidueMedia = '70000000-0000-4000-8000-000000000099';
+const replayResiduePath = `${IDS.couple}/${IDS.lifecycleRecord}/${replayResidueMedia}.jpg`;
+expectOk(sql(`INSERT INTO storage.objects(bucket_id, name, owner_id)
+  VALUES ('couple-media', '${replayResiduePath}', '${IDS.owner}')`),
+  'insert matching residue after completed response');
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${IDS.lifecycleRecord}', '${lifecyclePrefixLease}')::text`),
+  'replay contaminated completed prefix settlement').split('\n').at(-1),
+  'false',
+  'completed replay must reject residue and atomically reopen the prefix job',
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|', state, completed_at IS NULL,
+    next_attempt_at <= clock_timestamp())
+    FROM public.record_media_cleanup_jobs WHERE record_id = '${IDS.lifecycleRecord}'`),
+  'read reopened completed prefix job'),
+  'pending|t|t',
+  'reopened residue must be immediately claimable with no completed marker',
+);
+expectOk(sql(`
+DELETE FROM storage.objects WHERE name = '${replayResiduePath}';
+UPDATE public.record_media_cleanup_jobs
+SET state = 'completed', lease_id = '${lifecyclePrefixLease}',
+    lease_expires_at = NULL, completed_at = clock_timestamp()
+WHERE record_id = '${IDS.lifecycleRecord}';
+`), 'restore completed prefix after replay-residue proof');
+
+expectOk(sql(`INSERT INTO storage.objects(bucket_id, name, owner_id)
+  VALUES ('couple-media', '${replayResiduePath}', '${IDS.unrelated}')`),
+  'insert wrong-owner completed-prefix residue');
+const completedMismatchOutput = expectFail(
+  asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${IDS.lifecycleRecord}', '${lifecyclePrefixLease}')`),
+  'replay completed prefix with wrong current Storage owner',
+  /record_media_cleanup_identity_ambiguous/i,
+);
+if (completedMismatchOutput.includes(replayResiduePath) || completedMismatchOutput.includes(IDS.unrelated)) {
+  throw new Error('completed-prefix identity failure exposed Storage identity');
+}
+checks += 1;
+expectOk(sql(`DELETE FROM storage.objects WHERE name = '${replayResiduePath}'`),
+  'retire wrong-owner completed-prefix residue');
 
 // An actively leased exact-object job wins over record deletion; once expired,
 // the retry can safely supersede it without reversing the lock order.

@@ -61,3 +61,26 @@ Deno.test('record media cleanup handler: hides worker errors and object paths', 
   assert.deepEqual(JSON.parse(body), { error: 'E_RECORD_MEDIA_CLEANUP_FAILED' });
   assert.equal(body.includes('private/folder/photo.jpg'), false);
 });
+
+Deno.test('record media cleanup handler: aborts a stalled invocation and returns bounded 503', async () => {
+  const fixture = deps();
+  let signalWasAborted = false;
+  fixture.value.invocationTimeoutMs = 20;
+  fixture.value.runCleanup = (signal) => {
+    return new Promise((_resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        signalWasAborted = signal.aborted;
+        reject(signal.reason);
+      }, { once: true });
+    });
+  };
+
+  const startedAt = Date.now();
+  const response = await handleRecordMediaCleanupRequest(request(), fixture.value);
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'E_RECORD_MEDIA_CLEANUP_FAILED' });
+  assert.equal(signalWasAborted, true);
+  assert.ok(elapsedMs < 1_000, `test deadline should be bounded, observed ${elapsedMs}ms`);
+});

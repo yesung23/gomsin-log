@@ -6,8 +6,8 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *
  * 0. Resolve CORS against an explicit allowlist and refuse any origin that is
  *    not on it, before any authentication or admin-client work.
- * 0b. Verify the bearer token, then probe migration 084's exact media cleanup
- *    contract before any flag or destructive phase.
+ * 0b. Verify the bearer token, then probe migration 086's contract-v3 media
+ *    cleanup boundary before any flag or destructive phase.
  * 0c. Write the admin-only Auth flag
  *    `app_metadata.account_deletion_pending = true`. This is the PRIMARY
  *    authority for deletion recovery and it gates everything below: if the
@@ -22,7 +22,7 @@ import { parseAdminSecretKey } from '../_shared/adminSecret.ts';
  *    plan ownership, removes private/blocking rows, deletes records, and
  *    enqueues their media-cleanup tombstones in one database transaction.
  * 4. Call the service-role-only close_account_relationship_generations RPC.
- *    Migrations 083/084 refuse this step until every owned prefix and object
+ *    Migration 086 refuses this step until every owned prefix and object
  *    cleanup job is complete, so Auth remains intact while asynchronous
  *    Storage work remains.
  *    It terminally closes every relationship generation, revokes pairing and
@@ -245,8 +245,9 @@ export async function handleDeleteAccountRequest(
   const userId = user.id;
 
   // This Edge artifact is unsafe against a database that only has the
-  // full-prefix cleanup contract from migration 083: record preparation could
-  // delete rows while per-object work is still unknown to the account barrier.
+  // pre-reconciliation cleanup contracts: record preparation could delete rows
+  // while historical or unledgered Storage work is still unknown to the
+  // account barrier.
   // Probe the exact contract before writing even the recoverable Auth flag or
   // reading a record. A missing, stale, malformed, or unreachable contract is
   // therefore a clean no-op from the user's point of view.
@@ -255,7 +256,7 @@ export async function handleDeleteAccountRequest(
     const { data, error } = await admin.rpc(
       'record_media_cleanup_contract_version',
     );
-    mediaCleanupContractReady = !error && data === 2;
+    mediaCleanupContractReady = !error && data === 3;
   } catch {
     mediaCleanupContractReady = false;
   }

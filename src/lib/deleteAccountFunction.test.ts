@@ -136,7 +136,7 @@ function makeAdmin(options: AdminOptions = {}) {
       calls.push(`rpc:${name}`);
       rpcCalls.push({ name, args });
       if (name === 'record_media_cleanup_contract_version') {
-        return { data: 2, error: null };
+        return { data: 3, error: null };
       }
       if (name === 'begin_account_deletion_v2') {
         if (options.beginError) return { data: null, error: options.beginError };

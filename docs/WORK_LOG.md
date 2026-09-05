@@ -13547,3 +13547,13 @@ PRODUCTION
 - REVIEW IMPACT: DELTA. GitHub CI and hosted/device gates remain outstanding.
 - NEXT: RC branch push, protected master PR checks, then approved notebook Home implementation. Automatic production deployment remains held.
 - Report: [RC history secret-scan gate](../control-tower/reports/codex/2026-09-06_gitleaks-integration-gate_codex.md).
+# 2026-09-06 — PR93 CI configuration repair
+
+- PLAN POSITION: existing-work master integration before notebook Home; previous GitHub gate FAIL.
+- DIRECTION CHECK: approved V5 and exact CI failures; business NOT APPLICABLE; no product direction change.
+- OWNERSHIP: Codex parent, Sol implementation, independent Terra Max initial review; base `065592f`, PR93.
+- CHANGED: pinned cold-cache Edge setup, missing Apple checks/tests, exact PG17, approved entitlement assertion, redacted narrow signing scanner and complete history scan. No app/DB/Production changes.
+- VERIFICATION: worker Edge82 and targeted Vitest45 PASS; parent scanner controls/worktree/diff PASS. GitHub rerun pending; browser7 failures remain.
+- REVIEW IMPACT: DELTA; initial scanner findings addressed and parent verified. No full-app approval implied.
+- NEXT: browser repair and CI, then merge before Home implementation. Hosted recovery/compatibility and beta gates remain open.
+- Report: [PR93 CI repair](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).

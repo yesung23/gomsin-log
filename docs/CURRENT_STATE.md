@@ -27,6 +27,17 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
+- **2026-09-06 PR #93 checkpoint (기존 작업 통합 중):** `codex/rc-v5-final-fixes`
+  `065592f`를 origin에 실제 push하고 master 대상 PR #93을 열었다. master merge는 아직 아니다.
+  첫 GitHub 실행에서 Vitest 6177 PASS / 3 FAIL / 3 SKIP, browser 188 PASS / 7 FAIL.
+  DB fresh-chain, Android, Capacitor sync, dependency audit, diff integrity는 통과했다.
+  Deno cold dependency 설치, Apple source 검사 목록, PG17 선택, 옛 entitlement/scanner 기대값을
+  수정 중이며 브라우저 실패는 별도로 재현한다. 아래 로컬 PASS를 이 GitHub 실패보다 최신
+  통합 판정으로 사용하지 않는다. 승인된 notebook Home은 아직 구현 전이다.
+  운영 catalog 재조회: 계정삭제 v2 열과 media ledger/photo metadata/Apple custody 구조 부재.
+  필요한 의존 체인과 기존 RPC 호환성, 백업 복원 rehearsal이 선행돼야 하므로 전체 migration
+  replay와 운영 배포는 수행하지 않는다. Book Studio에는 별도 책 북마크 연계 요구를 전달했다.
+
 - **2026-09-06 배포 승인 이후:** 이전 자동배포 승인 대기는 해소됐다. Vercel gomsin-log만
   Ignored Build Step `Don't build anything` / `exit 0`로 저장·재조회 확인했다. 서버 호환성 준비 중
   기존 served artifact를 유지하기 위한 임시 조치이며, 준비 후 Automatic 복원이 필요하다.

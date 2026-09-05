@@ -108,6 +108,17 @@ jobs:
       - name: Install the locked dependency graph
         run: npm ci
 
+      - name: Put the runner's PostgreSQL 17 binaries on PATH
+        # PostgreSQL integration tests in the Vitest suite require 17. The
+        # runner's default pg_config may point at 16 even though 17 is installed.
+        run: |
+          bindir='/usr/lib/postgresql/17/bin'
+          if [ ! -x "$bindir/postgres" ] || ! "$bindir/postgres" --version | grep -E '^postgres \(PostgreSQL\) 17([.]|$)'; then
+            echo "PostgreSQL 17 server binaries are not installed on this runner." >&2
+            exit 1
+          fi
+          echo "$bindir" >> "$GITHUB_PATH"
+
       - name: Typecheck
         run: npm run typecheck
 

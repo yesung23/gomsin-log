@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, Settings } from 'lucide-react';
+import { CalendarDays, ChevronRight, Heart, Settings, Shield } from 'lucide-react';
 import { MobileShell } from '@/components/MobileShell';
 import { AvatarPicker } from '@/components/AvatarPicker';
+import { PenFace } from '@/components/paper';
 import { RowGroup, PressableRow, SectionHeader } from '@/components/ui/List';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { useStore } from '@/lib/useStore';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 export function MyPage() {
   const navigate = useNavigate();
@@ -12,6 +14,9 @@ export function MyPage() {
   const { profile } = state;
 
   const isGomsin = profile.role === 'gomsin';
+  const isMilitaryRelationship = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  ) === 'military';
   const roleLabel = isGomsin ? '곰신' : '군화';
   const connected = Boolean(
     profile.couple.coupleId
@@ -60,13 +65,7 @@ export function MyPage() {
       <div className="notebook min-h-full px-4 pt-4 pb-28 space-y-5">
 
         <div className="flex items-center gap-3 py-2">
-          {/*
-            The role glyph doubles as this screen's profile picture, so it can be
-            replaced with a photo. Device-local; see `src/lib/avatarImage.ts` for why
-            it is not uploaded. The emoji stays as the fallback: it is the one place
-            an emoji is fine, because it stands in for a face rather than decorating
-            a sentence.
-          */}
+          {/* One account photo, also shown in both partners' story rings. */}
           <AvatarPicker
             userId={state.authenticatedUser?.id || profile.id}
             slot="me"
@@ -74,21 +73,26 @@ export function MyPage() {
             label="내 사진"
           >
             <span className="text-coral-strong font-extrabold text-heading">
-              {isGomsin ? '🌸' : '🪖'}
+              {isMilitaryRelationship
+                ? <PenFace size={32} tone={isGomsin ? 'b' : 'a'} />
+                : <Heart size={22} aria-hidden="true" />}
             </span>
           </AvatarPicker>
           <div className="min-w-0 flex-1">
             <h2 className="text-heading text-foreground">{profile.myName || '나'}</h2>
             <div className="flex items-center gap-2 mt-0.5 text-caption text-muted-foreground">
-              <span className="text-coral-strong font-bold text-caption">
-                {roleLabel}
-              </span>
+              {isMilitaryRelationship ? (
+                <span className="text-coral-strong font-bold text-caption">
+                  {roleLabel}
+                </span>
+              ) : null}
               {connected ? (
                 <span className="text-foreground font-semibold">{coupleStatusLabel}</span>
               ) : (
                 <span className="text-muted-foreground">{coupleStatusLabel}</span>
               )}
             </div>
+            <p className="mt-1 text-caption text-muted-foreground">프로필 사진은 서로에게 보여요</p>
           </div>
         </div>
 
@@ -101,22 +105,22 @@ export function MyPage() {
           때문이다.
         */}
 
-        {!isGomsin && (
+        {isMilitaryRelationship && !isGomsin && (
           <section className="space-y-3">
             <SectionHeader title="복무와 일정" caption="필요할 때 바로 확인" />
             <RowGroup boxed>
               <PressableRow
                 onClick={() => navigate('/service')}
-                leading={<span className="text-body">🎖️</span>}
-                trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+                leading={<Shield size={18} className="text-coral" aria-hidden="true" />}
+                trailing={<ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />}
               >
                 <span className="text-label font-bold text-foreground">복무 현황 · D-Day</span>
                 <p className="text-caption text-muted-foreground">복무율과 남은 기간 확인</p>
               </PressableRow>
               <PressableRow
                 onClick={() => navigate('/schedule')}
-                leading={<span className="text-body">🏖️</span>}
-                trailing={<ChevronRight size={16} className="text-muted-foreground" />}
+                leading={<CalendarDays size={18} className="text-coral" aria-hidden="true" />}
+                trailing={<ChevronRight size={16} className="text-muted-foreground" aria-hidden="true" />}
               >
                 <span className="text-label font-bold text-foreground">휴가·면회 일정</span>
                 <p className="text-caption text-muted-foreground">둘이 함께 볼 일정으로 이동</p>
@@ -129,8 +133,8 @@ export function MyPage() {
           <RowGroup boxed>
             <PressableRow
               onClick={() => navigate('/settings')}
-              leading={<Settings className="w-4 h-4 text-coral" />}
-              trailing={<ChevronRight className="w-4 h-4 text-muted-foreground" />}
+              leading={<Settings className="w-4 h-4 text-coral" aria-hidden="true" />}
+              trailing={<ChevronRight className="w-4 h-4 text-muted-foreground" aria-hidden="true" />}
             >
               <span className="text-label font-bold text-foreground">설정 및 계정 관리</span>
               <p className="text-caption text-muted-foreground">프로필, 연결, 내보내기, 로그아웃</p>

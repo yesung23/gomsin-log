@@ -9,6 +9,640 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
+
+- PLAN POSITION: predesign integration → hosted compatibility → beta readiness. 이전 배포 승인 대기는 최신 사용자 지시로 해소.
+- DIRECTION CHECK: V5/Business/Engineering/Current State/최신 원장 확인, 제품·사업 변경 NO, conflict NO. master-before-notebook 유지.
+- OWNERSHIP: parent orchestrator, 시작 HEAD `fc3f43a`; Nash DB Architect / Godel native readonly / Copernicus scanner scoped worker. Parent app/test source 수정 없음.
+- CHANGED: Vercel gomsin-log Ignored Build Step `exit 0` 일시 보류 APPLIED; 기존 서비스 유지. App Store Connect 곰신로그 iOS 항목 `6809005110` 생성 APPLIED, 목록 재조회 확인.
+- VERIFIED: remote master `bd4a9f3`; Supabase legacy schema/Book14 tracking/최신 media RPC 부재/Edge v6/backup 없음 재확인. diff-check PASS. Gitleaks9 의심 항목 검증 중.
+- NOT VERIFIED: restore drill, hosted actor/Storage matrix, native signed archive/로그인, TestFlight 배포. DB/Edge/master 변경 NOT APPLIED. Apple activation fuse 유지.
+- REVIEW IMPACT: operational DELTA. NEXT: scanner 판정→원격 CI→통제된 master 통합; 복구·DB 호환성 gate 후 공개. [상세 보고서](../control-tower/reports/codex/2026-09-06_deployment-resumed_codex.md).
+
+## 2026-09-06 — Apple caller lifecycle M1 확인·좁은 교정 배정
+
+- PLAN POSITION: predesign Apple final DELTA HOLD. Product/Engineering/Current State와 기존 master-first 지시 유지; business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: `7d8805d` + Apple WIP. Boyle SolMax readonly C0/H0/M1/L0; Meitner SolMax sole4file worker. Parent source 수정 없음.
+- VERIFIED: 부모 SQL430 duplicate/459 no-token finalizer 읽기 확인. 호출 당시 lifecycle 증거가 없어 새 terminal 이후 옛 완료가 성공으로 해석될 수 있음. 이전 provider/ACL finding CLOSED.
+- REVIEW IMPACT: Apple DELTA required, 기존 green test가 누락 경합을 증명하지 않음. 사진 commit 보존.
+- NEXT: 두 실제 PG 재현 RED→caller fence 수정→focused GREEN→동결 독립 리뷰. 그전 Apple commit/master/remote 진행하지 않음.
+- PRODUCTION: NOT APPLIED. 자동배포 일시중단 사용자 선택 대기, Book untouched.
+- 상세: [Apple caller lifecycle HOLD](../control-tower/reports/codex/2026-09-06_apple-caller-lifecycle-hold_codex.md).
+- 교정 반환: Meitner4파일 동결·종료. 부모4hash 일치, 실제 PG180PASS 및 Edge39PASS/0FAIL 재실행. Boyle 동일 M1 DELTA 재검토 시작, 판정 pending. 전체UI 재실행 없음; parent source 수정/commit/push/Production 없음.
+- 최종 판정: Boyle **M1 CLOSED / Spec·Quality PASS / C/H/M/L0**, 종료. named stage/stat/check 후 DB2파일 `c2785690c61f1b137aaa5c15dade5c5bf5cdfae7`, server13파일 `abd5909bdd9508a4e46f8ecc4d47a510957b2f47` 로컬 커밋. 검토된 source bytes 변경 없음(패키징), 상세 report 최상단이 최신. master/push/Production/새Home 미적용, 자동배포 안전 선택 대기.
+
+## 2026-09-06 — 동결 소스 사진 브라우저 8PASS·최종 통합 검증
+
+- PLAN POSITION: predesign master 전 통합; 기존 photo 독립 review PASS, 이번 browser gate PASS.
+- DIRECTION CHECK: 기존 V5/Engineering/Current State와 master-first 승인 유지; 사업 변경 없음, conflict NO.
+- OWNERSHIP: parent source/test 수정 없음; Apple writer 반환, Sol Max Boyle read-only DELTA; Astra Nietzsche browser.
+- BASE/HEAD: `676eda2d3ad1b4ddbeaa901cd90ea92d766cd5f9` + frozen WIP, stage/commit/push 없음.
+- VERIFICATION: 부모 raw JSON 직접 확인: 기존 mediaGallery 8PASS/0FAIL/0SKIP/0flaky, trace OFF, 30.835초. 최초 trace ON timeout 증거 보존. 전체 ESLint exit0, diff-check PASS. 전체 Vitest 진행 중으로 PASS 주장 없음.
+- REVIEW IMPACT: 사진 소스 변경 없음; Apple 4파일 hash 보고서와 일치, DELTA pending.
+- BLOCKERS/REMAINING: Apple review·전체 회귀·master 배포 영향 해결. 새 Home 및 remote/device 검증 미완료.
+- PRODUCTION: 이번 checkpoint NOT APPLIED. 다음 owner parent; 통합 게이트 충족 전 push하지 않음.
+- 상세/복구: [동결 통합 검증](../control-tower/reports/codex/2026-09-06_frozen-integration-verification_codex.md).
+- 최종 갱신: 부모 전체 Vitest **363파일/6181PASS/2SKIP/0FAIL**, 320.19초; 실제 local PG160assertions PASS. 사진15파일 staged검사 후 `7d8805db87bc060c455e576ff13057f8c28b0384` 커밋. Apple cors test 제외, Apple4hash 동일. source byte 변경 없는 packaging이며 Apple 독립 reviewer에게 HEAD 변경 전달. master/push/Production 없음.
+- 추가 부모 검증: Edge36PASS/0FAIL. 첫 잘못된 테스트 파일 경로 import 실패는 report에 기록하고 실제 파일로 교정. Vercel Automatic/no checks 재확인; 자동배포 일시중단을 통한 코드/공개 분리 제안, 설정은 아직 미변경. Apple reviewer live 대기.
+
+## 2026-09-06 — Photo round2 동결·Apple lifecycle 분리·배포 전제 재확인
+
+- PLAN POSITION: predesign master checkpoint, HEAD676eda2+WIP; source/test는 하위 모델만 수정.
+- DIRECTION CHECK: V5§1/11·Engineering§0·Current State·최신 원장 및 master-first 승인 확인; 사업 변경 없음, conflict NO.
+- OWNERSHIP: Aristotle photo 반환/종료; Linnaeus TerraMax 독립 검토 PASS 후 종료. Kierkegaard Apple4paths writer + Nietzsche AstraMax 현재-build 브라우저 verifier. 최신 사용자는 모델 고정을 해제했으며 진행 작업은 보존한다.
+- VERIFICATION: photo worker519PASS/TS/lint, 부모 실제 diff/호출 경로 확인, 독립 Spec/Quality C/H/M/L0. 최신 전체 회귀는 아직 미완료. 기존 전체6149PASS/2FAIL/2SKIP을 성공으로 덮지 않음.
+- REVIEW IMPACT: photo DELTA PASS/hash고정, Apple pending. Vercel Git 연결/Automatic build/no deployment checks, Supabase 함수 부재, 기존 백업 폴더 존재를 읽기 전용 재확인.
+- STOPPED AT: master/push/새Home/Book/원격DB/배포 없음. 다음은 리뷰 반환·Apple 보완·독립검토·정확한 통합, 배포는 별도 서버/복구 gate.
+- 상세와 미검증/복구 경계: [현재 gate](../control-tower/reports/codex/2026-09-06_predesign-live-gates_codex.md).
+
+## 2026-09-05 — 사용자 승인 공개 운영 정보 Vercel 설정
+
+- 사용자 제공 운영자명 한예성 / 문의 gomsinlog@gmail.com을 Vercel gomsin-log Production Config 두 항목에 저장.
+- VERIFIED: 두 항목 목록 및 저장 성공 toast. Remote settings APPLIED; 배포/master/Supabase NOT APPLIED. 실제 서비스 표시·이메일 수신 미검증.
+- source/test 코드 수정 없음. 기존 비밀값·플래그·시스템변수 설정 변경 없음.
+- 상세 및 rollback: [공개 운영 정보 설정](../control-tower/reports/codex/2026-09-05_public-operator-vercel-settings_codex.md).
+
+## 2026-09-05 — Predesign 전체 회귀 2FAIL와 독립 검토 후 수정 범위 확정
+
+- PLAN POSITION: master 전 통합 gate, HEAD676eda2+WIP. 사용자 순서/권한/기능 보존 유지; business NOT APPLICABLE.
+- OWNERSHIP: Aristotle Sol Max photo14+검증test2 writer, Gibbs Sol Max Apple readonly Architect; parent 구현코드 수정 없음.
+- VERIFICATION: 운영빌드 gate79PASS; 전체 Vitest6149PASS/2FAIL/2SKIP, 실패2건은 실제 응답·RPC 경로 확인 후 수정 배정. 상세는 아래 리포트.
+- REVIEW IMPACT: Apple M2/L1, 사진 authority provenance 등 미해결. tests PASS만으로 승인하지 않음.
+- NEXT: 기존 review finding 교정→scoped independent review→통합. Home/Book/master/Production NOT APPLIED.
+- 상세: [검토 및 실제 전체 테스트 결과](../control-tower/reports/codex/2026-09-05_predesign-round3-status_codex.md).
+
+## 2026-09-05 — Predesign 검증 담당 복구와 배포 영향 확인
+
+- PLAN POSITION: predesign master gate; HEAD676eda2+기존 WIP 보존.
+- DIRECTION CHECK: 사용자 master 우선 순서 유지, 사업 변경 없음. 기존 두 handle not_found 확인 후 미완료 범위만 재배정.
+- OWNERSHIP: Russell Sol High photo14 writer; Gibbs Sol Max Apple readonly DELTA. parent 통합 담당.
+- VERIFICATION: GitHub 현재 master의 과거 Vercel Production 성공 확인; 현재 자동배포 설정/새 코드 backend 호환성은 UNVERIFIED. 이번 새 테스트 없음.
+- REVIEW IMPACT: 사진 수정 후 독립 검토 필요; Apple 구현 보고서는 독립 승인 아님.
+- PRODUCTION NOT APPLIED. 다음: 두 gate 반환→통합 검증→master→notebook Home.
+- 상세: [복구 및 배포 증거](../control-tower/reports/codex/2026-09-05_predesign-gate-recovery_codex.md).
+
+## 2026-09-05 — 사용자 요청: 기존 작업 master 통합 우선, 새 디자인 중지
+
+- PLAN POSITION: predesign integration priority; notebook approval retained but source changes0, paused.
+- DIRECTION CHECK: 최신 사용자 순서승인/기존RC 안전gate/현재원장 확인; business변경없음, conflict NO.
+- OWNERSHIP: HEAD676eda2, remote/localorigin masterbd4a9f3 확인;0behind244ahead, pendingWIP별도. Indexempty.
+- CHANGED/REVIEWED: parent 순서변경만; Archimedes serverround2유일writer, Beauvoir photo14readonly independentreview 배정.
+- VERIFICATION: gitlive/두agentstop확인; 새테스트없음. REVIEW IMPACT: serverH1/photoreview미완료, 통합gate유지.
+- EXPLICITLY NOT CHANGED: 새Home/Book/remote. BLOCKERS: serverfix/reviews/exactintegration/auto-deploy compatibility.
+- NEXT: namedcommits 및 검증→READY TO MERGE→승인된master업데이트→새디자인. 알려진HIGH를 그대로merge하지 않음.
+- PRODUCTION NOT APPLIED; push/merge/stash/reset없음. 기존WIP모두보존.
+- 상세: [master 우선 실행경계](../control-tower/reports/codex/2026-09-05_predesign-master-priority_codex.md).
+
+## 2026-09-05 — Apple 재검토 신규 H1/M2/L2 HOLD
+
+- PLAN POSITION: RC Task1 server re-review 반환; previousH3구조해결, 새H1로 integration HOLD.
+- DIRECTION CHECK: 기존 V5인증/삭제·Engineering·현재원장·round1brief 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Hubble SolMax readonly→좁은 Architect 후속; photo Archimedes 유일writer 유지. HEAD676eda2+WIP.
+- REVIEWED: live revoke lease를 건너뛴 premature terminal, unknown provider, 누락 operator evidence, cancel deadline, metadata reason 손실.
+- VERIFICATION: reviewer PG race 재현/서버15paths hash고정; parent SQL288/301,helper601/393,operator378 실제소스 확인. 상세 명령/보고 근거 리포트.
+- REVIEW IMPACT: prior server safety 승인 없음; H3기존수정은 보존, 새경쟁회귀 필요. EXPLICITLY NOT CHANGED: runtime/DB/crypto/remote.
+- BLOCKERS/STOPPED AT: H1미해결; 사진작업 뒤 bounded 서버수정 배정. NEXT: 모든terminal invariant Architect 처방→writer→fresh DELTA.
+- DO NOT ADVANCE UNTIL: 미처리token 있는 terminal 불가 재현검증 및 independentH0. PRODUCTION NOT APPLIED, server merge없음.
+- 상세: [서버 재검토와 수정 경계](../control-tower/reports/codex/2026-09-05_apple-server-round2-hold_codex.md).
+
+## 2026-09-05 — 사진 SliceB generation/sync 판정 후 구현 배정
+
+- PLAN POSITION: RC Task2 display integration; readonly preparation 반환, implementation 진행.
+- DIRECTION CHECK: V5 photo/BUSINESS_MEMORY_ROADMAP 무료 일반사진/Engineering Task2/CURRENT_STATE/최신원장 확인; conflict NO.
+- OWNERSHIP: Archimedes SolHigh 유일writer, Hubble SolMax frozenApple 독립review; HEAD676eda2, index empty.
+- REVIEWED: parent090 RPC source_revision=pair operation_id 확인; record 최신revision/index 비교 금지, masterID 기반 transient metadata.
+- CHANGES: exact7source7test 구현 brief 배정, parent 앱코드 수정 없음. Preview는 small cells, fullscreen/master 보존.
+- VERIFICATION: 탐색과 실제RPC/hook 확인만; 이번 slice 테스트 미실행/완료 주장 없음. REVIEW IMPACT: 새photo patch에 독립review 필요.
+- EXPLICITLY NOT CHANGED: DB/crypto/auth/Book/가격/Production. BLOCKERS: 실제 구현·회귀·network evidence 및 remote/device gate.
+- STOPPED AT/NEXT: 구현배정 완료; 실제diff/test 반환 뒤 parent검증과 독립검토. 권한거절을 missingAPI로 취급 금지.
+- PRODUCTION: NOT APPLIED. Rollback future named client patch만, 기존 master/다른WIP 보존.
+- 상세: [사진 표시 배정과 경계](../control-tower/reports/codex/2026-09-05_photo-display-dispatch_codex.md).
+
+## 2026-09-05 — 전체 Vitest 6122PASS / 기존 CORS 실패 종료
+
+- PLAN POSITION: RC local regression; 이전 full suite1FAIL, 현재 실행363files PASS/6122PASS2SKIP.
+- DIRECTION CHECK: 기존 RC/V5/Engineering/직전원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent test execution, branch codex/rc-v5-final-fixes; 시작88d8f53+serverWIP, native commit676eda2로 종료.
+- VERIFICATION: root Vitest CLI run --reporter=dot, PTY26414 exit0,314.06s. Native 실행 중 변경은 별도 final focused75PASS2SKIP로 보완; clean exact-commit 전체 판정 아님.
+- EXPLICITLY NOT CHANGED: 테스트 실행으로 app/DB/crypto/remote 의미 변경 없음. REVIEW IMPACT: 로컬 회귀 증거 추가, 독립 server security review 대체 불가.
+- BLOCKERS/REMAINING: client/서버 독립 검토/사진/실기기/hosted/운영복원 및 전체 RC. STOPPED AT: 전체 Vitest 종료.
+- NEXT: reviewer 결과와 client 연결; 실제 로그인/온디바이스/Production 검증 없이 출시 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; push/mastermerge 없음. 테스트 실행 rollback 불필요.
+- 상세: [전체 실행 결과와 증거 한계](../control-tower/reports/codex/2026-09-05_full-vitest-regression_codex.md).
+
+## 2026-09-05 — native Apple 권한 parent DELTA 검증
+
+- PLAN POSITION: RC Task1 native capability local 준비 gate; signed/device gate 미완료.
+- DIRECTION CHECK: 기존 승인 native brief/V5/Engineering/현재 원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Archimedes 구현 반환, parent exact diff 검토·focused 재실행; HEAD88d8f53+WIP unchanged.
+- CHANGED: App.entitlements/project.pbxproj/nativeConfig.test.ts 세 파일; Default 권한/target capability/실제 plist 검사.
+- VERIFICATION: parent plutil 두 파일 PASS, focused Vitest75PASS2SKIP603ms; full suite PTY26414 진행 중, 아직 판정 없음.
+- EXPLICITLY NOT CHANGED: server/crypto/flags/team/profiles/remote. REVIEW IMPACT: 좁은 native DELTA만, server Hubble 독립 검토 진행.
+- BLOCKERS/REMAINING: signed profile/device/hosted/client 및 전체 RC. STOPPED AT: native local diff+test 확인.
+- INTEGRATION: named native3files만 cached scope/check 확인 후676eda2 커밋(Old88d8f53); postcommit3files41+/13−, index empty. Server WIP 제외, reviewer 통지. Push/mastermerge 없음.
+- NEXT: server review 반환 후 client 연결. 서명/기기 증거 전 실제 Apple 로그인 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; rollback 세 파일만 revert, 다른 WIP 보존.
+- 상세: [native DELTA 및 client 연결 근거](../control-tower/reports/codex/2026-09-05_client-boundary-and-backup-reply_codex.md).
+
+## 2026-09-05 — client Architect 경계 확정 / Book 백업 의존성 회신
+
+- PLAN POSITION: RC Task1 server fix 진행; client 설계 검토 종료, 구현/출시 gate 아님.
+- DIRECTION CHECK: 기존 승인 V5/Engineering DEVELOPMENT·BETA 구분/현재 원장 기준 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent 조정, Popper SolMax readonly 종료, Archimedes 유일 writer 유지; branch codex/rc-v5-final-fixes, HEAD88d8f53 unchanged.
+- REVIEWED: captured-session credential 등록, 계정 전환 fencing, 삭제 안내 보존; hosted 선배포 없이 reviewed mock 계약으로 local 구현 가능 판정.
+- VERIFICATION: Architect 의견 수신·판정 기록만; 새 테스트 없음. Book owner의 지정 백업 직접참조 없음 회신은 복원/삭제 허가 증거가 아님.
+- EXPLICITLY NOT CHANGED: runtime/tests/DB/crypto/Book/backup/remote. REVIEW IMPACT: 설계 입력만, server 독립 review 대체 불가.
+- BLOCKERS/REMAINING: server HIGH 수정 및 fresh review, client/native/실기기/hosted/복원 증거. STOPPED AT: client brief 입력 확정.
+- NEXT / DO NOT ADVANCE UNTIL: server 실제 wire 계약 검토 후 client 배정; 복원 증거 없이 consequential production DDL 진행 금지.
+- PRODUCTION: NOT APPLIED; rollback 문서 항목만, 기존 WIP 보존.
+- 상세: [client 경계 및 백업 회신](../control-tower/reports/codex/2026-09-05_client-boundary-and-backup-reply_codex.md).
+
+## 2026-09-05 — 작은 화면 프로필/일정 오류 real-browser 2PASS
+
+- PLAN POSITION: RC Task5 bounded existing-screen verification alongside Task1 server/Architect. Gate two views PASS, wholeRC incomplete.
+- DIRECTION CHECK: V5/EngineeringRC Task5/CURRENT_STATE/직전원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent verification only, branch codex/rc-v5-final-fixes/HEAD88d8f53; no new source/test implementation or commit.
+- REVIEWED: existing settingsDialogAccessibility + scheduleFailureState; profile focus/overflow, task500 vs empty-state distinction.
+- VERIFICATION: temp exact-commit snapshot standard build PASS; matching root Playwright CLI + installedChrome 2PASS9.5s. Earlier customoutDir build and mixednpx collection failed before tests, details preserved.
+- EXPLICITLY NOT CHANGED: app/test assertions, DB/crypto/product semantics, Book4173/user4174 processes. First buildhook targeted ignoredrootdist/_headers; no prehash byte-preservation claim.
+- REVIEW IMPACT: adds scoped Chromium evidence only; physicalVoiceOver/actualAI/hosted/fullRC UNVERIFIED. No prior security review replaced.
+- STOPPED AT/NEXT: two browser cases completed, server/currentclient Architect continue. Temp4175 stopped, artifacts retained; remaining UI/native/remote gates open.
+- PRODUCTION: NOT APPLIED; no source rollback required, no commit/push/mastermerge.
+- 상세: [실행·실패·복구·검증 범위](../control-tower/reports/codex/2026-09-05_small-screen-functional-gate_codex.md).
+
+## 2026-09-05 — identity/shared matcher 독립 PASS 및 test-only commit
+
+- PLAN POSITION: RC Task1 identity test gate; Previous review pending, This Gate local test DELTA CLOSED.
+- DIRECTION CHECK: 기존 승인 V5§11/Engineering§0/CURRENT_STATE/직전원장/수정brief 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Anscombe SolMax READONLY 반환·종료, parent 실제diff+commit. Branch codex/rc-v5-final-fixes, Old/Base1c7503e→New88d8f53.
+- CHANGED: src/lib/storeAuthIdentity.test.tsx + src/test/setup.ts만 커밋; sameUID재검증/다른UID격리/공통matcher. runtime/DB/crypto/제품 의미 변경 없음.
+- VERIFICATION: independent Spec/QualityPASS C/H/M/L0,8testsPASS/test-inclusiveTS0/scopedlint. Parent actualassertions/review패키지 exactmatch/cached두파일/diffcheck/postcommitstat 확인.
+- REVIEW IMPACT: 검토된patch 그대로88d8f53에 고정; serverreview 승계 아님. 전체6108PASS1corsFAIL2skip은 기존worker결과로 여전히 fullPASS아님.
+- BLOCKERS/REMAINING: serverHIGH3수정/새review, nativeclient·서명·hosted·실기기·전체RC.
+- STOPPED AT/NEXT: 두test파일 gate종결, Archimedes server계속/Popper readonly clientArchitect. 부모 코드구현 없음.
+- DO NOT ADVANCE UNTIL: 각 server/native/실기기/Production gate 통과; 테스트로 실제 계정로그인 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; push/mastermerge/profile/기기설치 없음. Rollback named두파일revert, 다른WIP보존.
+- 상세: [독립 검토·커밋 근거](../control-tower/reports/codex/2026-09-05_identity-test-gate-closed_codex.md).
+
+## 2026-09-05 — RC 차단 수정 배정 / identity regression 반환
+
+- PLAN POSITION: RC Task1; Previous server HOLD H3, This Gate coherent fix running / identity DELTA review.
+- DIRECTION CHECK: V5 제품루프/인증계약, Engineering§0, CURRENT_STATE§0, 최신 관련 Work Log와 원 Task1 brief 확인. Business NOT APPLICABLE; 전략 변경 없음, conflict NO.
+- OWNERSHIP: branch codex/rc-v5-final-fixes, Base/Old/Reviewed HEAD1c7503e+WIP; Archimedes SolHigh server writer, Anscombe SolMax test readonly; parent 계획/검증. PR/새HEAD 없음.
+- CHANGED/REVIEWED: shared matcher 수정 반환 및 CORS fixture gap; server token custody/binding 분리·sticky uncertainty·advanced deletion evidence 수정 brief 승인. 상세파일/이유는 리포트.
+- EXPLICITLY NOT CHANGED: parent runtime/crypto/DB 구현 없음; 기존 user-content E2EE/제품 의미 보존. remote NOT APPLIED.
+- VERIFICATION: worker90focusedPASS/전체6108PASS1FAIL2skip; parent setupdiff/CORScaller 확인. 실제 xcode/devicectl/signing identity/disk 조회 성공, 일부 nonexistent config rg2 별도 기록.
+- REVIEW IMPACT: server 수정 후 fresh security review, identity DELTA pending; 이전 green 결과 자동 승계 안 함.
+- BLOCKERS/STOPPED AT: HIGH3 미해결, hosted·native 서명/실로그인/모델·백업복원 미완료. iPhone 현재available/개발인증서2개 있으나 signed install 증거 아님.
+- NEXT ACTION: server fix executable regression+새 독립review, identity 결과 뒤 native/client slice. 원래 전체 RC 목표 유지.
+- DO NOT ADVANCE UNTIL: 인증·삭제 및 실기기/hosted gates 통과 전 provider/flags/master HOLD.
+- PRODUCTION: NOT APPLIED; commit/stage/push/merge/실기기 설치 없음.
+- 상세: [RC 수정 배정 및 preflight](../control-tower/reports/codex/2026-09-05_2105_rc-fix-dispatch_codex.md).
+
+## 2026-09-05 — Apple server 독립 HIGH3 / 수정 설계 시작
+
+- PLAN POSITION: RC Task1 server independent review HOLD(C0/H3/M3/L1), fix architecture 진행.
+- DIRECTION CHECK: 기존 V5 인증/삭제 계약과 worker scope, 직전원장 확인. Business NOT APPLICABLE; 제품 정책 변경 없음.
+- OWNERSHIP: Franklin SolMax read-only review 반환→좁은 Architect 후속. Aquinas test 유일writer 유지. HEAD1c7503e+13path WIP.
+- REVIEWED: refresh-token 세대 유실, uncertainty marker pruning, advanced 삭제재시도 phase 충돌; 영구키소실/redirectURI/metadata/bodytimeout 문제.
+- VERIFICATION: parent 해당실제코드 확인. reviewer29+5Deno/71Vitest/36PG·확장68PG PASS 보고와 별도 결함 재현. 테스트 녹색이 결함부재를 증명하지 않음.
+- REVIEW IMPACT: 기존server PASS 승계 불가. 독립수정재검토 필수. reviewer ignored tsbuildinfo갱신 계약편차 기록.
+- NEXT/DO NOT ADVANCE: 세대보존·비활성격리·exact삭제attempt 재시도·운영키복구 설계 후 단일worker 수정. 서버/클라이언트/hosted/실기기 미완료.
+- PRODUCTION: NOT APPLIED; provider/flags/master HOLD, commit/stage/push 없음.
+- 상세: [독립 보안 검토와 수정 경계](../control-tower/reports/codex/2026-09-05_apple-server-independent-hold_codex.md).
+
+## 2026-09-05 — identity 수정 반환 / 공통 matcher 후속 범위 승인
+
+- PLAN POSITION: RC Task1 identity test 수정 반환, test infrastructure 후속 진행. HEAD1c7503e+WIP.
+- DIRECTION CHECK: 승인된 계정 연속성·격리 계약, 직전 원장/worker report 확인. Business NOT APPLICABLE; runtime 정책 변경 없음.
+- OWNERSHIP: Aquinas SolHigh 동일 담당 재사용, parent diff/보고서 검토. Franklin 서버 독립검토 유지.
+- VERIFICATION: worker identity8/combined30·test-inclusiveTS·scopedlint PASS 보고. authExpiry9FAIL은 공통 matcher 등록 문제. parent 재현/독립 DELTA는 다음 단계.
+- CHANGED/NEXT: src/test/setup.ts의 명시적 expect matcher 등록 + identity test 중복등록 제거만 후속 승인. 대표 suite 후 전체Vitest 한 번. dependency/runtime 변경 금지.
+- REVIEW IMPACT/DO NOT ADVANCE: 공통setup 변경 검증과 identity 독립 DELTA 필요; 실계정/실기기 증거 아님.
+- PRODUCTION: NOT APPLIED; commit/stage/push 없음.
+- 상세: [검증 반환과 후속 경계](../control-tower/reports/codex/2026-09-05_native-readiness-and-identity-fix_codex.md).
+
+## 2026-09-05 — 운영 백업 보관기한 preflight
+
+- PLAN POSITION: RC 운영 적용 준비/read-only metadata 확인; Production HOLD 유지.
+- DIRECTION CHECK: rollback-runbook§7·CURRENT_STATE·직전원장 확인. 보관정책 변경 안 함; Business 전략 변경 NOT APPLICABLE.
+- OWNERSHIP: parent 읽기/기록만, HEAD1c7503e+WIP. 기존 worker/reviewer 범위 유지.
+- VERIFICATION: 문서의 두 exact 백업경로 존재·permissions700·파일수5/4 확인. 내용/키/복원 가능성 UNVERIFIED.
+- FINDING/REVIEW IMPACT: delete-by 경과, 생성후7일 대 검증후7일 문구 충돌. 삭제/기한 연장 임의 수행 금지. runtime review 영향 NONE.
+- NEXT/DO NOT ADVANCE: 복구 의존성·공유DB 담당 확인 후 안전한 처분 승인/복구 증거 확보. 로컬 구현 계속 가능.
+- PRODUCTION: NOT APPLIED; 삭제·권한변경·commit·push 없음.
+- 상세: [백업 보관기한 점검](../control-tower/reports/codex/2026-09-05_backup-retention-preflight_codex.md).
+
+## 2026-09-05 — Native 준비 검증 반환 / identity 테스트 수정 시작
+
+- PLAN POSITION: RC Task1 native readiness HOLD → test-only 수정 배정. 기준HEAD1c7503e+WIP.
+- DIRECTION CHECK: 승인된 인증/기기 검증 범위 유지, 직전 원장/native 계획 확인. Business NOT APPLICABLE; 새 제품·사업 변경 없음.
+- OWNERSHIP: Maxwell read-only 종료; Aquinas SolHigh identity test 유일writer; Franklin SolMax server 독립검토 진행.
+- VERIFICATION: parent native 로그 확인( unsigned BUILD SUCCEEDED, signed Team 필요 FAIL). Parent identity focused Vitest FAIL7/7: DOM matcher 오류. 앱 runtime 실패로 확대 해석하지 않음.
+- CHANGED/REVIEW IMPACT: parent 보고서/계획만; test 수정 후 새 DELTA 필요. 기존 테스트 PASS 보고를 현재 상태로 승계하지 않음.
+- BLOCKERS/REMAINING: 서명팀/Apple entitlement/Xcode27beta, caller/삭제안내, 실제 로그인/요약, hosted 및 전체 RC gates.
+- NEXT/DO NOT ADVANCE: 테스트 원인 확인·수정, server 독립결과, native 연결 순서. flags/설치 승인 단계 전 활성화 금지.
+- PRODUCTION: 추가 NOT APPLIED, commit/stage/push 없음.
+- 상세: [기기 검증 및 테스트 수정 배정](../control-tower/reports/codex/2026-09-05_native-readiness-and-identity-fix_codex.md).
+
+## 2026-09-05 — Apple server 반환 / 독립 검토 배정
+
+- PLAN POSITION: RC Task1 server 구현 반환 → 독립 검토 진행. 전체 RC HOLD.
+- DIRECTION CHECK: 기존 승인 Task1 범위·직전 원장·native 후속 계획 유지. Business NOT APPLICABLE; 전략 변경 없음.
+- OWNERSHIP: HEAD1c7503e + WIP. Herschel 종료, Franklin SolMax read-only server review; Maxwell native read-only 검증. Parent 구현 없음.
+- CHANGED/VERIFICATION: worker 보고서와 실제 endpoint 일부 확인. Deno34/Vitest71/PG36 PASS는 현재 worker 보고이며 parent 재현/독립 승인 아님. 선택 Xcode26.6 및 Apple capability ON은 parent 직접 확인.
+- REVIEW IMPACT: 새 인증/삭제/DB 변경은 별도 security review 필요. 이전 리뷰 자동 승계 안 함.
+- BLOCKERS/REMAINING: identity-test 수정, native/client 연결, 실계정·실기기·hosted gate 및 전체 RC 미완료.
+- NEXT/DO NOT ADVANCE: 독립 결과와 실패 수정 후 정확한 변경 범위를 검증. Xcode27 beta 앱 설치는 구현·검증 후 수행.
+- PRODUCTION: 추가 NOT APPLIED. commit/stage/push 없음.
+- 상세: [서버 구현 반환 및 검토 배정](../control-tower/reports/codex/2026-09-05_apple-server-review-dispatch_codex.md).
+
+## 2026-09-05 — identity-test 독립 FAIL / 보안 재조회 보존하도록 계획 교정
+
+- PLAN POSITION: RC Task1 test-only review. Previous Gate7localPASS;
+  This Gate **독립Spec/Quality FAIL, 수정 대기**. 서버worker와 별도이며 전체목표 유지.
+- DIRECTION CHECK: V5§11 UID/데이터 연속성, 현재Store1660–1825의 deletionstatus+hydrate,
+  tsconfig test제외, 기존brief/직전원장 확인. Business NOT APPLICABLE; 기준V5/2026-09-05.
+  Plan conflict: parent의 절대no-hydration 조건을 canonical연속성/보안 재검증 기준으로 교정.
+- OWNERSHIP: Lovelace SolMax READONLY review, parent 계획수정만. Herschel SolHigh server유일writer.
+  기준HEAD1c7503e 및 test-only delta, reviewer patchhash는 상세report. commit/stage/remote없음.
+- CHANGED/REVIEWED: Store identity test H1/M3/L1(실제event/spy/중간격리/type7/report표현).
+  parent는 test/runtime을 수정하지 않았고 다음writer brief와 원장만 갱신했다.
+- VERIFICATION: reviewer diff일치/고정hash/diffcheckPASS, 대상TS **FAIL7**;
+  parent Store보안재조회와 tsconfig제외 확인. physicaliPhone16Pro available(paired) 재확인;
+  nativeentitlement Applekey 실제미존재(주석만존재). native실행/모델성능은 UNVERIFIED.
+- REVIEW IMPACT: testWIP승인불가, 새DELTA필요. 실제runtime데이터손실이 증명된 것은 아님.
+- STOPPED AT/NEXT: reviewer후속은 정상sameUIDread가 runtime결함이 아님을 확인했고 종료했다.
+  E2EE설치/복구marker같은 보안작업은허용, 제품귀속mutation만 금지한다. queuedtestfix는
+  serverwriter반환후 하위모델 배정. parent코딩 금지 유지.
+- BLOCKERS/DO NOT ADVANCE: testfix/독립재검토·server/codecaller/signing/provider/device gates.
+  실행중agent를 timeout만으로 재시작하지 않는다. 현재새server완료증거 없음.
+- PRODUCTION: 추가 NOT APPLIED. 앞선Appleportal만APPLIED. 전체RC/master HOLD.
+- 상세: [테스트 검토 보류](../control-tower/reports/codex/2026-09-05_1949_identity-review-hold_codex.md).
+
+## 2026-09-05 — Parent 계획 전담 / 하위 모델 구현·독립 검토 배정
+
+- PLAN POSITION: RC Task1 server lifecycle + identity-test 검토, Task2B 표시 흐름 계획.
+  Previous Gate Apple portal 등록만 APPLIED; This Gate **작업 배정/구현 진행 중**, 완료판정 없음.
+- DIRECTION CHECK: 최신 `계획만 짜고 구현은 하위모델` 지시, V5§11, Engineering§0/6task,
+  CURRENT_STATE/직전원장, 사진 BUSINESS§9.5/무료기본사진 확인. V5/2026-09-05; conflict NO.
+- OWNERSHIP: parent 계획/원장/실제검증·최종통합만. Herschel SolHigh server 유일writer,
+  Lovelace SolMax identity test READONLY. 정확한 agent ID·허용파일은 paired report/SDD brief.
+  branch codex/rc-v5-final-fixes, 배정base/HEAD1c7503e. commit/stage/remote권한 위임없음.
+- CHANGED: parent 계획brief·review package·progress와 이 운영기록만. source/test 구현은
+  하위모델 소유, 기존 WIP 보존. 사진Task2B는 실제호출경로를 읽고 queued 계획만 작성.
+- VERIFICATION: isolated worktree와 live HEAD 확인, 기존 App ID 저장 재조회 증거 별도;
+  현재 하위모델 결과 없음. 대기 timeout은 완료/종료가 아니라 작업 진행 중 상태로 유지한다.
+  `git diff --check` PASS(배정/문서시점), 새로운 구현 테스트·독립 gate는 아직 미완료.
+- REVIEW IMPACT: 기존runtime검토로 새server source를 승인하지 않음. 작업반환 후 새DELTA 필요.
+- BLOCKERS/STOPPED AT: 서명/profile·server lifecycle·provider실사용·원격복구/RC는 남음.
+  지금은 구현자가 진행 중이며 환경차단/완료로 판정하지 않는다.
+- NEXT ACTION: test reviewer 결과 판단 → server writer 반환 → parent 실제diff/테스트확인 →
+  별도SolMax server독립검토 → client/native 호출 연결·사진Task2B. parent가 수정사항 직접코딩하지 않음.
+- DO NOT ADVANCE UNTIL: 미해결C/H0와 exact범위 테스트/독립검토, 외부gate 별도충족.
+- PRODUCTION: 이번배정으로 추가변경 **NOT APPLIED**; 앞서승인한 Apple portal만 APPLIED.
+- 상세: [하위모델 배정·완료 기준](../control-tower/reports/codex/2026-09-05_1938_delegated-implementation_codex.md).
+
+## 2026-09-05 — Apple App ID 로그인 capability 실제 활성화
+
+- PLAN POSITION: RC Task1/V5-B 외부 준비. Previous Gate Apple portal OFF 확인;
+  This Gate **app.gomsinlog capability만 APPLIED**, 앱 로그인/전체RC 완료 아님.
+- DIRECTION CHECK: 최신 저장 승인 `해줘`, V5§11, ENGINEERING§0/6task, CURRENT_STATE/
+  직전 Apple 원장 확인. Business NOT APPLICABLE(인증 무료/정책 불변). 기준V5/2026-09-05;
+  conflict NO: provider/CTA 활성화 gate는 유지한다.
+- OWNERSHIP: parent Codex 단일 browser operator, 하위 구현자 없음. Branch codex/rc-v5-final-fixes;
+  Base/Old/New HEAD1c7503e620b9958adf3dad0b30f037bfea6b46c0. 신규 commit/PR 없음.
+- CHANGED/WHY: Apple Developer의 기존 app.gomsinlog Sign In with Apple OFF→ON(primary).
+  실제 로그인 서명 준비에 필요한 등록이다. 로컬 CURRENT_STATE·원장·report만 현재 적용 사실 기록.
+- EXPLICITLY NOT CHANGED: runtime/기존test WIP/DB/migration/crypto/계정정책/Google/Book/keys.
+- VERIFICATION: live App ID와 기존 ON 항목 확인 → Save → profile 영향 Confirm → 목록 복귀 →
+  같은 App ID 재진입에서 Sign In with Apple ON, Save disabled, Complete Protection/IAP 유지 확인.
+  상세 native 로그인·서명·revoke·Supabase tests 미실행. 로컬 실행/회귀PASS로 대체하지 않음.
+- REVIEW IMPACT: DELTA(외부capability). 기존source 검토불변, Apple 활성화 전체승인 아님.
+- BLOCKERS: provisioning/entitlement 정합·server token revoke·provider·실기기/계정 lifecycle 확인.
+- STOPPED AT: 승인된 Apple portal 설정만 저장/재조회. REMAINING: 실제로그인 종단검증/RC.
+- NEXT ACTION: parent Task1 서버revoke·서명 준비와 Task2B를 각 기존gate대로 이어간다.
+- DO NOT ADVANCE UNTIL: 원격provider/키는 각각의 안전조건·필요한 action-time 승인을 충족한다.
+- PRODUCTION: **Apple portal capability APPLIED**; Supabase/key/flag/DDL/배포/master **NOT APPLIED**.
+  portal OFF 복귀는 profile 재무효화·설정초기화 가능성이 있어 자동실행하지 않는다.
+- 상세: [Apple capability 적용 보고서](../control-tower/reports/codex/2026-09-05_1929_apple-capability-enabled_codex.md).
+
+## 2026-09-05 — Apple verified-email 승인 반영 / 실제 설정 화면 안내
+
+- PLAN POSITION: RC Task1 Apple activation. Previous Gate1c7503e; This Gate 정책충돌 해소,
+  **source/provider 활성화 미완료**, 신규테스트 독립검토 대기.
+- DIRECTION CHECK: 최신 명시 승인+V5§11, ENGINEERING§0/RC6task, CURRENT_STATE/최신원장,
+  privacyTier0/rollback 확인. Business NOT APPLICABLE(무료인증 유지). 기준 V5/2026-09-05.
+  이전 자동연결금지와의 충돌은 이번 명시승인으로 대체; 다른 UID 데이터 병합 금지는 유지.
+- OWNERSHIP: parent 문서/실설정조회; Bohr SolMax Architect read-only, Jason FlashHigh test-only.
+  branch codex/rc-v5-final-fixes; Base/Old/Reviewed1c7503e, New미커밋. PR없음. agents종료.
+- CHANGED/WHY: V5/Engineering/SecurityTestPlan/제출초안/현재상태 승인조건 갱신,
+  Store identity test1파일 회귀 추가. 잘못된 클라이언트 이메일 병합 없이 기존 UID 경계 확인.
+- EXPLICITLY NOT CHANGED: runtime/auth/DB/migration/crypto/결제/Book/Production 의미.
+- VERIFICATION: parent 기존4files65PASS, typecheckPASS, Store7PASS, diff-check/localdocs14linksPASS;
+  worker 관련38PASS/lint0. mock≠hosted, 예상mutation≠실행한mutant. 상세 명령은 리포트.
+- REVIEW IMPACT: DELTA 필요(신규test-quality 미완료). 기존runtime불변; 전체RC재판정 없음.
+- BLOCKERS: 서버Apple refresh token 등록/보관/revoke 미구현, key/signing/provider 설정,
+  실계정 UID/relay/revoke 검증. 실물iPhone available(paired) 확인은 실행 성공 증거가 아님.
+- STOPPED AT: 사용자 화면 안내 요청. policy/test WIP 보존, 서버 writer 미배정.
+- REMAINING/NEXT ACTION: 화면 입력 안내 → 새test 실제 SIGNED_IN 검토 → 서버revoke bounded구현.
+- DO NOT ADVANCE UNTIL: 인증/삭제·서명·실사용 gate 전 Apple provider/CTA 활성화 금지.
+- PRODUCTION: **NOT APPLIED**; 키/설정/DDL/merge/push/deploy없음. 좁은localdelta rollback가능.
+- 상세: [Apple 승인 checkpoint](../control-tower/reports/codex/2026-09-05_1915_apple-identity-approval_codex.md).
+
+## 2026-09-05 — Photo SliceA·복구 화면 종결 / 안정 HEAD 전체6092 PASS
+
+- PLAN POSITION: RC Task2 upload SliceA / Task5 복구 / Task6 로컬 검사. Previous Gate ba3f6bb;
+  This Gate bounded local PASS, **전체RC·master HOLD**.
+- DIRECTION CHECK: 최신 앱완성·사진·운영 승인, V5§1–3/7/8, BUSINESS§9/free기본사진,
+  ENGINEERING6task, CURRENT_STATE/직전원장/rollback 확인. 기준 V5/2026-09-05; conflict NO.
+  Apple정책충돌은 전항의 사용자결정 대기이며 이 작업에서 수정하지 않음.
+- OWNERSHIP: Hegel SolHigh 유일photo writer→parent통합, Russell SolMax 독립검토;
+  parent UI/test-only교정, Sartre FlashHigh 읽기전용 실패원인확인. branch `codex/rc-v5-final-fixes`,
+  base/old ba3f6bb, photo128736c, UI4800fcf, test217c666. PR없음. 모든 agent 반환·종료.
+- CHANGED: photo10파일(기존9WIP 완결+gatePathCoverage), UI App class3곳과 실제복구E2E,
+  cleanup/CORS/outbox 테스트3파일. 실제bytes의2048/640paired준비·업로드·master-only저장,
+  계정전환취소·부분실패·CAS/journal/보호된호출 유지. 자세한 파일·근거는 아래보고서.
+- EXPLICITLY NOT CHANGED: DB/migration/crypto/삭제handler/auth정책/ack/health/Book/Production.
+  기존사진 일괄변환·삭제없음. Now는claim script로만 관리하며 stage하지 않음.
+- VERIFICATION: worker259tests/lint/typecheckPASS; parent gateRED3→206+store86+edit37=329PASS.
+  독립 exact128736c465/465PASS+7memoryprobes+2defense-removal mutant 예상RED,
+  C/H/M/L0 **Spec/LocalQuality PASS**. 검토10files는217c666까지불변.
+  UI6unit/lint/rebuildPASS, built2PASS +재시도→Home검사추가1PASS; parentdark화면확인.
+  전체사전검사6018PASS/63FAIL/2skip → 4파일fixture/미등록원인분리;
+  실제handler4요구를 유지하며8부정검사추가, 관련97PASS. Flash독립원인확인/read-only.
+  **안정HEAD217c666 전체363files:6092PASS/0FAIL/2skip(6094total),287.4s**.
+  `npm run typecheck && npm run lint` PASS. 정확한명령/JSON경로는 report 한곳에 보존.
+- NOT EXECUTED: 2skip은 Android merged-manifest artifact검사. Native AI/실기기/StoreKit/
+  Production적용/owner-partner-former 실제JWT 전체권한/DB restore drill은 미검증.
+- REVIEW IMPACT: photo새독립검토fresh, UI/test-only narrowDELTA; 문서-only는runtime검토불변.
+- BLOCKERS/STOPPED AT: 이번source작업 모두커밋·localgate종결, **Task2B표시경로 미구현**,
+  Apple계정연결선택·revoke·서명/provider, unavailable실기기, backup/restore·Book호환forward/
+  실사용권한canary, 유료상품권리/승인/Sandbox/실제제공증빙, 전체RC통합판정은 남음.
+- NEXT ACTION: parent가 기존Task2B actualthumbnail/master 소비연결을 이어받되, Apple정책결정/
+  실기기연결·복구증거 없는 Production활성화는 하지 않음. 재온보딩/전체리디자인 재시작 금지.
+- DO NOT ADVANCE UNTIL: 필요한 사용자정책승인·기기/복구·실제결제검증과 전체RC조건 충족.
+- PRODUCTION: **NOT APPLIED**, merge/push/deploy없음. 개별localcommit revert가능;
+  hostedpair발생후에는companion/cleanup계약을유지하는forwardfix. master가끝났다는주장금지.
+- 보고서: [사진·회귀 종결](../control-tower/reports/codex/2026-09-05_photo-client-and-regression-closure_codex.md).
+
+## 2026-09-05 — 시간당 레벨업 종결 · Summary M1 종결 · 실제 원격 기준 확인
+
+- PLAN POSITION: RC Task5 최신 승인 delta / Task3 M1 / Task6 원격 사전조건. Previous Gate b4b479b;
+  This Gate 서비스 local·독립 PASS, Summary M1 CLOSED, 전체 RC HOLD.
+- DIRECTION CHECK: 최신 사용자 요청, V5§1–3/§11, V4_AS_BUILT/Backlog, BUSINESS§9.5 무료핵심,
+  ENGINEERING§0/6-task plan, CURRENT_STATE와 직전 복무·요약·사진 WORK_LOG/rollback 확인.
+  MASTER PLAN V5/2026-09-05. Conflict YES: 이전1EXP/Lv200은 최신 명시승인으로 시간당레벨로 변경.
+  Apple 자동verified-email연결은 별도 정책 충돌이라 변경하지 않고 사용자 선택을 요청했다.
+- OWNERSHIP: parent Control Tower/문서·통합검증; Carver SolHigh 복무 구현, Locke SolMax 독립검토;
+  Sartre FlashHigh Summary M1, Russell SolMax 독립검토; Bohr SolMax Apple 읽기전용 Architect.
+  branch `codex/rc-v5-final-fixes`, Base/Old HEAD b4b479b, New/Reviewed HEAD ac6ea50, PR없음.
+- CHANGED: `206ebb0` hourly model/UI/tests, `2a420b2` summary hook/2tests,
+  `ac6ea50` 이벤트 실계정 scope·실제caller·동일역할fixture·소수시간경계9files.
+  V5/V4/current/report 문서에 최신 승인/서버 사실을 분리했다. 상세 근거는 아래 두 보고서만 소유한다.
+- EXPLICITLY NOT CHANGED: crypto/DB/migration/ack/realtime/건강동의/Book/Production 의미.
+  photo9WIP 보존; parent는 기존ok+failedFiles계약 테스트와 legacy mock만 교정했다.
+  Now는 claim script로만 변경했고 수동편집/stage하지 않았다.
+- VERIFICATION: 복무 worker90tests/typecheck/scopedlintPASS; parent 실제diff/rebuildPASS,
+  built Playwright4/4PASS(8.1s). 이전3PASS/1FAIL은 동등하지 않은fixture 원인으로 교정해 보존.
+  Locke독립34PASS/56의도적제외, 모든M1/M2/L1 CLOSED, C/H/M/L0 Spec/QualityPASS.
+  Summary worker67PASS; parent2newPASS; Russell독립67PASS+취소probe1PASS/parentblob2RED,
+  C/H/M/L0 DELTAPASS. 실제 모델/실기기 시험이 아님.
+- REMOTE VERIFIED: master bd4a9f3와 해당 과거CI/Production배포성공, Supabase healthy,
+  GoogleON/AppleOFF, Book14schema-history/legacy앱schema존재, 새media/avatar/IAP대상 부재.
+  063 partner서비스RPC존재를 확인해 과거NOTAPPLIED단정을 교정. anon차단/UID없는0행은
+  일부 negative증거일 뿐 owner/partner/former JWT 전체승인 아님. 백업API복구본반환없음/PITRfalse.
+- REVIEW IMPACT: service/summary DELTA fresh at 해당SHA. Apple 활성화 C0/H2/M2/L1은
+  이전auth race PASS를 취소하지 않지만 Apple 출시준비완료 주장을 금지한다.
+- BLOCKERS: 사진 client SliceA/B, 오류E2E, Apple계정정책·revoke·서명·provider,
+  실물iPhone unavailable, 서버backup/restore·Book호환forward계획/actorcanary,
+  실제판매권리·상품·Sandbox·제공증빙, 안정HEAD 전체검증/독립review. 무조건 masterpush 금지.
+- STOPPED AT: **복무 기능과 Summary M1 gate만 종결**. Hegel SolHigh가 photo SliceA9WIP를 재개했다.
+- NEXT ACTION: parent가 photoSliceAdiff/실패경로확인 → 독립Max → 실제thumbnail/master표시 SliceB.
+- DO NOT ADVANCE UNTIL: 미해결HIGH/외부정책·복구조건·실기기와Task1–6 gate 충족.
+- PRODUCTION: **NOT APPLIED** — DDL/provider/Edge/flag/merge/push 없음. 서비스·요약은
+  개별commit revert 가능; photo실데이터 발생 후는 companion보존 forwardfix 필요.
+- 상세: [복무·요약 종결](../control-tower/reports/codex/2026-09-05_hourly-growth-rc-closure_codex.md),
+  [실제 원격 기준](../control-tower/reports/codex/2026-09-05_1730_live-remote-baseline_codex.md).
+
+## 2026-09-05 — 최신 승인 복무 EXP 여정
+
+- PLAN POSITION: RC Task5의 최신 사용자 우선 작업. 이전 e35ff9d; This Gate 복무 기능 local/독립 DELTA.
+- DIRECTION CHECK: 최신 요청/V5 §1–3, V4_AS_BUILT§3.4/V4_BACKLOG, BUSINESS 무료연결·관계점수금지,
+  ENGINEERING§0/RC6단계, CURRENT_STATE, 직전 summary/photo/EXP 제거 WORK_LOG 확인.
+  conflict YES: 과거 EXP 제거 ↔ 최신 명시적 재도입. 최신 승인으로 V5 범위 한정 개정; 관계점수/출석/결제EXP는 아님.
+- OWNERSHIP: parent 단일 writer; Sol Max Aristotle 계산 탐색/Huygens 독립 DELTA. Branch
+  `codex/rc-v5-final-fixes`, basee35ff9d, implementation361cfc7. PR 없음. Hegel 사진8WIP 반환·보존.
+- CHANGED: service feature5파일/Search2/ServicePage1/browser2 및 문서. 실제 읽기전용 partner
+  경로와 editor 유지, 시간 기반EXP/reduced/중지/예상등급/날짜모순 guard.
+- EXPLICITLY NOT CHANGED: DB/migration/crypto/auth/건강동의/기록/사진 WIP/Now/Book/Production.
+- VERIFICATION: parent102Vitest/typecheck/scopedlint/build PASS, source browser4PASS.
+  built browser3PASS/1FAIL(다크 제어 아이콘 대비) → ead5000 좁은 색 transition 수정,
+  source대비1PASS/rebuildPASS/built4PASS. 기존photoWIP포함build이며 clean전체RC검사 아님.
+  추가 provenance caller test10PASS/1FAIL(옛문구) → a35acd7 새문구 검사로11PASS/scopedlintPASS.
+- REVIEW IMPACT: DELTA. 기존 계급 계산 read-only H2/M1에 guard/중립투영/실제now호출로 대응;
+  최종 기능검토 H1(구형 Object.hasOwn)/M1(reduced 입대 대기 갱신) → c6cddd8 수정,
+  parent2FAIL재현후57PASS/typecheck/lint/rebuild/built4PASS. 최종독립 exactc6cddd8 **C/H/M/L0 PASS**,
+  reviewer21tests/diff-check PASS. 전체 앱·실기기·hosted gate PASS 아님. 이후 docs-only는 A영역, runtime불변.
+- BLOCKERS/STOPPED AT: **복무 local gate 종결**. 기존 사진Store미검증/summaryM1/실기기/IAP/전체RC남음.
+- NEXT ACTION: parent 사진 SliceA 정확한 중단점 재개. 근거 없는 mastermerge 금지.
+- PRODUCTION: NOT APPLIED. 기능 commit만 revert 가능, schema/data rollback 불필요.
+- 상세: [복무 여정](../control-tower/reports/codex/2026-09-05_service-journey_codex.md).
+
+## 2026-09-05 — Summary source binding·Photo CI·실제 화면 점검
+
+- PLAN POSITION: Task1 local 독립종결 / Task2 backend독립종결·CI연결 / Task3관찰된HIGH종결·M1 OPEN / Task5실제화면.
+- DIRECTION CHECK: 최신 요청, V5§4/5/7/8, BUSINESS§9/free기본사진·보안, ENGINEERING6단계,
+  CURRENT_STATE/직전WORK_LOG/rollback 확인. NO conflict. 실제SQL과 충돌한 runbook의 미래082표기만 교정.
+- OWNERSHIP: Kepler→명시적중단후 parent인수, 독립Russell Sol Max; branch `codex/rc-v5-final-fixes`,
+  old0d20a9c, summary **d01793a**, CI/immutable browser **e35ff9d**. PR/remote변경없음.
+- CHANGED: summary16파일/PG하네스·package·CI3파일, 현재사실/보고서. source-fulltext검증·수동요청·
+  전체20제한과 PG상속환경분리. DB schema/crypto/auth/ack/Now/Book/실사용자데이터는 변경하지 않음.
+- VERIFICATION: parent258PASS 후최종65+23PASS/scopedlint/typecheck/Swift PASS; 새PG환경오염RED→187+520PASS;
+  YAML검사PASS; 별도outDir실험FAIL 후표준buildPASS. immutablebrowser17/18+2/2+11/11, 실패를 숨기지 않음.
+- REVIEW IMPACT: media+090 exactfb880ed독립 C/H/M/L0 PASS. summary exactd01793a독립 C0/H0/M1/L0 FAIL.
+  M1은 거대한결합문자의 절단prefix 후보누락; 상세반례/실제검사/미검증은 report한곳에 보존.
+- BLOCKERS/STOPPED AT: summary M1·옛errorE2E기대·photo client·실기기·hosted·IAP실제제공·전체RC남음.
+- NEXT ACTION: Hegel Sol High가 photo SliceA단일writer. 반환 뒤 parent는 M1/E2E좁은교정과검증,
+  이후photo표시SliceB. AI·판매활성화/merge전 품질·권한·실기기·외부gate필요.
+- PRODUCTION: NOT APPLIED. 로컬summary/CI개별revert가능; hostedphoto pair발생후에는contract보존forwardfix.
+- 상세: [Summary/CI/browser closure](../control-tower/reports/codex/2026-09-05_1625_summary-ci-closure_codex.md).
+
+## 2026-09-05 — Photo090 backend 로컬 구현·parent 검증
+
+- PLAN POSITION: Task2 backend local gate PASS / 독립 검토·client 미완료. 다음 Task3 HIGH 구현 병렬.
+- DIRECTION CHECK: 최신 사진/운영 요청, V5 §7/8, 사업 무료 정상 사진 원칙, 로드맵6단계/current/log 확인.
+  NO conflict. 초기 metadata 즉시 GC 제안 대신 record/account까지 private 등록 이력을 보존한 이유는 상세 report.
+- OWNERSHIP: Astra backend worker → 명시적 중단 후 parent 인수; `codex/rc-v5-final-fixes`, old09aec23,
+  new/reviewed **fb880ed85a20dde96a3774300be8503eaac1bb04**, PR/remote 없음.
+- CHANGED: 신규090SQL, 전용 PG harness; parent NOTIFY와 실제 mutation controls 추가. 기존SQL/Edge/crypto/app/Now보존.
+- VERIFICATION: parent full001..090187 PASS / 기존회귀+090520 PASS / schema contract1FAIL→209PASS /
+  syntax/diff PASS. missing semicolon은 새 harness 문법 실패였으며 교정 후 final187PASS.
+- REVIEW IMPACT: C영역 새 DB/권한 계약, fresh 독립 Sol Max review PENDING. 과거 PASS 자동승계 없음.
+- BLOCKERS/STOPPED AT: 새 backend local만 완료. client 준비/표시, CI연결, hosted/실기기/전체RC 미완료.
+- NEXT ACTION: Kepler Sol High summary HIGH수정, Russell Sol Max cleanup+090 read-only검토.
+  그 뒤 photo client 실제 업로드/목록/master를 연결. 해당HIGH·negative검증 전 다음 활성화 금지.
+- PRODUCTION: NOT APPLIED. 미배포 commit revert 가능; 실제 pair가 생긴 뒤 schema 제거가 아닌 forward fix.
+- 상세: [Photo backend local gate](../control-tower/reports/codex/2026-09-05_1548_photo-backend-local_codex.md).
+
+## 2026-09-05 — 온디바이스 의미 보존 HIGH 재현 / 활성화 HOLD
+
+- PLAN POSITION: RC Task3 설계·재현; Task2 photo090은 별도 단일 worker 진행 중. 전체 RC HOLD.
+- DIRECTION CHECK: V5 §8, 사업 무료 온디바이스 원칙, ENGINEERING_ROADMAP/종결6단계,
+  CURRENT_STATE와 바로 이전 auth/media DELTA 원장 확인. 기존 총20 계약을 보존하므로 NO conflict.
+- OWNERSHIP: parent + read-only Sol Max Architect; `codex/rc-v5-final-fixes`, reviewed `1f7777f`.
+- REVIEWED: 실제 dailySummary verifier/guard/rules/hook, native bridge/types, Story caller/test.
+  HIGH2는 잘린 부정·정정의 의미 반전, 전체 후반부 검증/무효화 누락. parent 반례4건도 재현.
+- CHANGED: CURRENT_STATE와 [상세 gate report](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md).
+  앱 수정·새 전략·암호·DB 의미·Production 변경 없음; backend worker 소유 파일은 stage하지 않음.
+- VERIFICATION: Architect203 baseline PASS이나 반례는 잘못 허용됨; Story mock 수집 FAIL.
+  parent guard4개 오허용 확인; 실제 Swift iOS15 target typecheck PASS. Mac AI disabled, physical iPhone 연결만 확인.
+- REVIEW IMPACT: 기존 의미 보존 완료 주장 불가. HIGH2 OPEN이며 수정 후 fresh DELTA 필요.
+- BLOCKERS/STOPPED AT: 실제 결함과 허용 수정 경계 확정, 구현 미완료. 기기 모델 성능·hosted는 UNVERIFIED.
+- NEXT ACTION: 현재 backend writer 종료 후 Sol High summary 구현 + stable media 독립 리뷰.
+  정확한 재현·20/21·tail edit·cancel·원본 이동 검증과 HIGH 종결 전 AI/RC를 활성화하지 않는다.
+- PRODUCTION: NOT APPLIED. rollback은 이 named docs commit revert; 사용자 콘텐츠 변경 없음.
+
+## 2026-09-05 — Avatar/Auth/Photo 운영 checkpoint (진행 중)
+
+### PLAN POSITION
+- Phase: V5 RC convergence / 운영·인증·사진
+- Workstream: 실제 프로필 공유, Apple native 보호, source navigation, 비용 계측
+- Step: 로컬 avatar 완료 / Auth 이벤트 HIGH 수정 / media variant 설계
+- Previous Gate: 전체 검증 `fddb857` 이후 media cleanup 보완 `a8113b7`, `85be85b`
+- This Gate: checkpoint `02522ca`, **전체 RC HOLD**
+
+### DIRECTION CHECK
+- Product source checked: 최신 사용자 승인, `PRODUCT_V5_MASTER_DECISION.md` §4/5/7/12, V4 as-built
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1.md` §9; 무료 연결/정상 사진/보안 보존
+- Engineering source checked: `AGENTS.md`, `ENGINEERING_ROADMAP.md`, feature-build/release-validation/security-review/migration-gate
+- Current-state checked: 실제 branch/HEAD/status/code, CURRENT_STATE의 이전 Sep3 checkpoint는 historical로 분리
+- Latest relevant Work Log checked: Sep5 IAP forward reconciliation / whole-repo / Task3 기록
+- MASTER PLAN version / 기준일: V5 / 2026-09-03 + 최신 사용자 사진·사업 요청
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. AI_SESSION_PROTOCOL의 PRODUCT_V3 active 표현은 오래된 참조이며 AGENTS/V5를 우선했다.
+
+### OWNERSHIP
+- Tool: Codex; Model: primary + GPT-6 Astra Max bounded worker/architect/reviewers
+- Role: primary integration/evidence; non-overlapping auth worker, avatar architect/independent reviewer
+- PR: none in this continuation
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA / Old HEAD: `85be85b` (이 checkpoint의 feature 시작 전)
+- New HEAD: `02522ca` (문서 commit 전); Reviewed HEAD: avatar `4b78ab7`, auth `71e5746`
+- Worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`
+
+### CHANGED / REVIEWED
+- `429b612`: Home/Diary 날짜→정확한 source link. `2473591`: 글꼴/Diary text scale.
+- `d0b110b`: guarded native Apple 준비. `71e5746`: SDK 저장 전 늦은 세션 방어; 독립 HIGH 1건 아직 OPEN.
+- `c59f874`: 089 private profile-avatar SQL/harness. `b6408e3`: My/양쪽 story 실제 공유.
+- `4b78ab7`: fresh deletion/recovery/tombstone edge MEDIUM 3건 수정, independent DELTA PASS.
+- `c84799e`: 비용/순수익 계산기와 운영 기준. `70c16cd`: 사진 decode/encode 제한·JPEG 확인.
+- `de64abc`: 실제 앱 dark state 검증. `02522ca`: 실제 sanitizer 합성 benchmark/정확한 비용 가정.
+- 상세 파일·변경 이유·버린 대안·검증·위험은 [한 곳의 리포트](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md)에 기록.
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: 알고리즘/key/nonce/recovery 및 기존 record ciphertext 변경 없음
+- DB/migration semantics: 089 로컬 추가만; 086–088 삭제 계약 우회 없음; 원격 적용 없음
+- product semantics: 무료 정상 사진/보안 유지, 상품 판매 OFF, Book Studio repo/기존 고객 사진 미변경
+- Production: NOT APPLIED; push/merge/deploy/Apple/Supabase 변경 없음
+
+### VERIFICATION
+- source-navigation 56 PASS; typography 34 + Diary 46 PASS.
+- local PostgreSQL avatar harness 75 assertions PASS / 실제 migration chain 87개; hosted 증거 아님.
+- focused avatar/auth/gates 274 PASS, scoped lint/typecheck PASS.
+- 독립 avatar DELTA 실제 소스 비교 10 scenarios/36 assertions PASS, 기존 MEDIUM 3건 종결.
+- auth worker 500 PASS/2 Android SKIP; 독립 SDK review 78 PASS + 새 경합 3 FAIL로 HIGH 1건 OPEN.
+- imageSanitization + recordMediaFailures 50 PASS; 경제 계산 node:test 7 PASS.
+- Node22 실제 Chromium photo benchmark 4 synthetic fixtures PASS (투명 PNG 흰색 합성 포함); native/인쇄 품질은 UNVERIFIED.
+- `npx --yes --package=node@22 node node_modules/playwright/cli.js test --config e2e/.artifacts/source-entry.config.ts`: 8 PASS/22.6s/exit 0.
+- 이전 Node26 종료 지연은 PASS로 합산하지 않음. 이전 dark preference-only run은 앱 dark 증거에서 제외.
+- placeholder Supabase env `npm run build`: PASS/2581 modules, 505KB chunk warning; 전체 최신 suite 미실행.
+- targeted ESLint, `git diff --check`: PASS. 전체 정확한 범위/증거는 리포트 참조.
+
+### REVIEW IMPACT
+- FULL: 새 private avatar DB/RLS/버전 계약은 독립 reviewed; DELTA 4b78ab7 PASS.
+- Auth: 기존 리뷰 자동 승계 불가, 71e5746에서 새 HIGH OPEN. 다음 fix fresh DELTA 필수.
+- media cleanup a8113b7/85be85b 누적 리뷰는 아직 필요. 문서/benchmark 변화는 security NONE.
+
+### BLOCKERS
+- code: Apple 저장 후 event race HIGH, thumbnail/print metadata/실제 PPI 미구현, summary semantic guard 미완료
+- environment: 실제 iPhone/저사양/HEIC/발열/온디바이스 추론/전체 최신 suite UNVERIFIED
+- external/manual: remote migrations/Apple identity&revoke/Sandbox/결제 운영/인쇄 교정/비용 실측 미확인
+
+### STOPPED AT
+- 이 항목은 진행 중 checkpoint: avatar local gate 완료, 비용 benchmark 완료, RC 아님.
+
+### REMAINING / NEXT ACTION
+- owner: primary + bounded Astra Max auth worker 및 photo Architect
+- 기준 SHA: `02522ca`; 정확한 다음 task: Apple late event 재현/수정 → fresh independent delta,
+  병렬 photo variant/Book Studio 최소 계약 검토 → upload/read/delete 실제 통합.
+- 별도 Book Studio task에 경계 확인 전달, 해당 repo는 직접 수정하지 않음.
+
+### DO NOT ADVANCE UNTIL
+- 모든 HIGH/CRITICAL 닫힘, migration/negative actor/runtime 검증, 실기기·remote 출시 게이트 확인.
+- 판매/Production은 현재 local test만으로 켜지 않는다. 기존 콘텐츠 삭제/강제 재압축 금지.
+
+### PRODUCTION
+- NOT APPLIED / 원격 상태 UNVERIFIED.
+
+### 2026-09-05 · Photo checkpoint 후속 — 늦은 미디어 재조회 차단
+
+- PLAN POSITION: V5 사진/운영 gate의 기존 조회 안정성. 이전 `e907c11`; 이번 local focused PASS.
+- DIRECTION CHECK: 위 checkpoint와 같은 source, NO conflict. 비용 절감을 위한 variant 전 기존 source 권한 보존.
+- OWNERSHIP: primary Codex, `codex/rc-v5-final-fixes`; auth worker 파일과 비중첩.
+- CHANGED: `useMediaAttachment.ts` 및 직접 hook test. 사진/record/couple/상위 URL·권한 결과가
+  바뀌면 이전 재조회 세대를 무효화한다. 늦은 성공/실패가 새 사진·금지 상태·현재 spinner를 덮지 못한다.
+- WHY: 원본 교체/권한 거절/새 URL 뒤 늦은 응답 재설치 3 tests RED를 확인했다.
+- EXPLICITLY NOT CHANGED: Storage/RLS/DB/crypto/형식/압축 품질/디자인/Production.
+- VERIFICATION: hook17 + Gallery16 + playback5 = **38 PASS**, scoped ESLint/typecheck/diff-check PASS.
+  StrictMode wrapper 호환도 PASS지만 해당 테스트는 수정 전에도 통과했으므로 결함 재현 근거로 사용하지 않는다.
+- REVIEW IMPACT: narrow DELTA 필요. 기존 avatar 독립 리뷰의 범위 밖이다.
+- BLOCKERS/REMAINING: 원격 권한/실기기/variant 미검증. UI의 기존에 받은 URL을 원격 회수한다고 주장하지 않음.
+- STOPPED AT/NEXT: 실제 shared hook 안전성 수정, photo Architect에 파일 소유권 반환 후 variant 통합.
+- PRODUCTION: NOT APPLIED. rollback은 해당 local commit revert, 콘텐츠 삭제 없음.
+- 상세 리포트: [Avatar/Auth/Photo](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+
+### 2026-09-05 · 계획 고정과 역할별 배정 / Apple event fix
+
+- PLAN POSITION: RC 후속 6개 task. 기존 완료 작업 재실행 금지, 신규 기능 무단 확대 금지.
+- DIRECTION CHECK: 최신 사용자 “계획·역할 배분, Astra 필수 아님”; V5/사업§9/로드맵/current/log 확인. NO conflict.
+- OWNERSHIP: parent가 계획/문서/통합 소유. 새 배정은 Flash High 탐색·좁은 구현, Sol High 통합·검증,
+  Sol Max 아키텍처·독립 리뷰, 복잡한 교차 상태는 Astra Max. 기존 Astra 2명은 문맥을 유지해 종료.
+- CHANGED: `operations/rc-closure-plan-2026-09-05.md`, ENGINEERING_ROADMAP §0.1, CURRENT_STATE.
+  목표/수정 범위/금지/완료/테스트/보고 형식 고정. 별도 Book Studio 소유권 유지.
+- Auth 구현 `d08519f`: authSessionGuard/store 진입에서 취소된 Apple 이벤트 거부, INITIAL_SESSION 무한대기 방지.
+  SDK+실제 Store RED4 FAIL→worker475 PASS, parent47 PASS, typecheck/scoped lint PASS. 독립 DELTA 진행 중.
+- EXPLICITLY NOT CHANGED: 기존 crypto/원격DB/계정/상품/Production. metadata backend090은 아직 구현 진행 단계.
+- VERIFICATION: 문서 링크 대상/정확한 branch/HEAD 확인, `git diff --check` PASS.
+  task-brief helper의 실행 비트 누락은 명시적 outfile+`bash`로 우회; 전역 권한/도구 설정 미변경.
+- REVIEW IMPACT: 계획 문서 NONE; auth d08519f DELTA pending. 로컬 테스트를 실제 Apple 인증 증거로 사용하지 않음.
+- BLOCKERS/STOPPED AT: RC HOLD. 계획 작성 및 현재 2명 배정 완료, 앱 전체 완료 아님.
+- NEXT: auth 독립검토 → 사진 backend/API 확정·통합 → 요약 의미/기기 → 수익운영 → UX/복구 → exactRC.
+- DO NOT ADVANCE UNTIL: auth/media 모든HIGH·CRITICAL 종결 및 해당부정권한/실기기/외부게이트 증거.
+- PRODUCTION: NOT APPLIED. 문서 rollback은 이 문서 commit revert, 코드 rollback은 d08519f 별도.
+- 리포트: [Avatar/Auth/Photo control tower](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+
+### 2026-09-05 · 독립 Auth/media DELTA 종결, photo API 동결
+
+- PLAN POSITION: RC Task1 auth/hook local종결; 누적 cleanup검토는 남음. Task2 backend, Task3 readonly설계 진행.
+- DIRECTION CHECK: 최신 역할별 배정 승인, V5 §7/8, 사업/로드맵/current/log 확인. NO conflict.
+- OWNERSHIP: `codex/rc-v5-final-fixes`, 검토 d08519f, 시작 b55d25d. parent가 실제 대상5파일diff동일 확인.
+- REVIEWED: auth47f5d07..d08519f3파일 + mediae907c11..47f5d07hook/test2파일, C/H/M/L0.
+- VERIFICATION: 독립 reviewer 실제auth86+경합2PASS, media17+경합1PASS. 이전HIGH종결.
+  parent `git diff --exit-code d08519f --` 대상5파일 종료0. 전체RC/원격/네이티브로그인 검증이 아님.
+- CHANGED: CurrentGate의8월LV를 historical로 분리하고 현재실행선링크를 먼저 노출;
+  AI_SESSION_PROTOCOL의legacyPRODUCT_V3참조를현재V5로 정정. 절차/공유 권한은 확대하지 않음.
+- API DECISION: photo begin/getmetadata및descriptor는 backend보고서계약 승인. master2048/10MiB,
+  thumb640/1MiB 상한, 논리32/물리64; client보고치수/hash이며 서버인쇄검증아님.
+  새metadataREAD는cipher>=1제외(본인/상대동일). 기존허용master경로유지, 암호화다운그레이드없음.
+- WHY/대안: 서버는해독성공을증명할수없어 clientboolean신뢰안을기각. 비용은 해당기록thumb최적화보류이지기능/보안손실이아님.
+- EXPLICITLY NOT CHANGED: DB090구현은worker진행중; auth/crypto/가격/Production 이번문서delta없음.
+- REVIEW IMPACT: auth/media독립DELTA PASS. 새090은아직미검토. 지도수정 NONE.
+- BLOCKERS/STOPPED AT: authlocal경합닫힘, provider/silentmerge/revoke/실기기는HOLD. 전체앱RC아님.
+- NEXT: 단일backendworker090+harness, SolMax요약설계후SolHigh구현. 원격APPLIED없음.
+- PRODUCTION: NOT APPLIED. 문서rollback은namedcommitrevert.
+- 리포트: [독립종결/Photo API](../control-tower/reports/codex/2026-09-05_1505_auth-delta-photo-api_codex.md).
+
 ## 앞으로 사용할 표준 세션 원장 형식
 
 새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해
@@ -3209,6 +3843,1038 @@ trip 범위와 **같은** `isCalendarDate`로 검증하는 것(검증기 2개는
 
 #### PRODUCTION
 - APPLIED / NOT APPLIED / UNVERIFIED: NOT APPLIED
+
+---
+
+## 2026-09-05 — Whole-repository gate closure after IAP integration
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: whole-repository release gate and Edge type-check coverage
+- Step: run the canonical full gate, convert both discovered failures into focused regressions, and re-run the complete gate from a clean process
+- Previous Gate: IAP documentation HEAD `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- This Gate: implementation HEAD `fddb857a44ebeab39e502cdddef5d9c7167bf2f6`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — no customer, pricing, storage, media, AI-role, or monetization decision changed
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/release-validation.md`
+- Current-state checked: exact branch/HEAD/status and canonical `npm run verify` behavior
+- Latest relevant Work Log checked: immediately following Apple IAP forward-only safety entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03, latest owner overrides through 2026-09-05
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex Control Tower
+- Model: GPT-5.6 Sol / Max ceiling
+- Role: primary verifier and focused correction owner
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- Old HEAD: `a611acaef0c492dfbdd4d60be334f6beaf9d848e`
+- New HEAD / Reviewed HEAD: `fddb857a44ebeab39e502cdddef5d9c7167bf2f6`; this ledger/report is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `src/pages/CallModePage.tsx`
+- function/component/migration: call topic card spacing
+- what changed/reviewed: replaced the lone off-scale 28px vertical padding with the canonical 24px spacing step
+- why: the repository-wide six-step spacing gate correctly detected visual-system drift
+- file: `package.json`
+- function/component/migration: `check:edge`
+- what changed/reviewed: added the four tracked Edge sources that the canonical Deno gate had omitted: Apple server API, notification RPC mapping, and consumption handler/entrypoint
+- why: an explicit-file gate that silently skips service-key code is not a valid release gate
+- file: `supabase/functions/_shared/appleIapServerApi.ts`, `deno.lock`
+- function/component/migration: node-fetch timeout subclass typing
+- what changed/reviewed: aligned request/response types with the exact `@types/node-fetch` contract used by Apple's base class and pinned that direct type dependency in the frozen Deno lock
+- why: once the source was directly checked, two real override incompatibilities surfaced; transitive entrypoint checks alone had hidden them
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; migrations 079/082 were not edited
+- product semantics: unchanged except one token-compliant spacing correction with no behavior removal
+- Production: no push, merge, deploy, remote Supabase, Apple, or customer-data action
+
+### VERIFICATION
+- command: first `npm run verify` at `a611aca`
+- PASS / FAIL / UNVERIFIED: FAIL as intended evidence — 5,681 passed, 2 failed, 2 skipped; failures were `CallModePage.tsx: py-7` and four omitted `check:edge` sources
+- what it actually proves: the canonical gate was non-vacuous and found two integration regressions that focused IAP tests did not cover
+- command: focused `typeScale.test.ts` and `lintGateStrictness.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 2 files, 34 tests
+- what it actually proves: spacing vocabulary and complete tracked Edge-source enumeration
+- command: `npm run check:edge`
+- PASS / FAIL / UNVERIFIED: PASS — every tracked non-test Edge TypeScript source named and checked
+- what it actually proves: direct Deno type compatibility, including Apple server API subclass override
+- command: `npm run check:iap && npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — frozen lock accepted; 83 tests passed
+- what it actually proves: IAP entrypoint/type/handler behavior after the explicit node-fetch type contract change
+- command: fresh `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder LANG=en_US.UTF-8 npm run verify`
+- PASS / FAIL / UNVERIFIED: PASS — typecheck; zero-warning lint; 345 files, 5,683 tests passed and 2 device-dependent tests skipped; production Vite build completed with 2,582 modules transformed
+- what it actually proves: full local repository compile/lint/test/build consistency with placeholder configuration; it is not Production credential, device, or deployment evidence
+- command: remote Supabase/Apple/Production, physical device, CI
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: external state remains outside this local gate
+
+### REVIEW IMPACT
+- FULL: exact-HEAD independent IAP review must use `fddb857`, because the directly checked Apple server module and lockfile changed after the prior review was dispatched
+- whether an earlier review is stale: YES; the first reviewer was stopped before verdict and a fresh exact-HEAD Sol Max review was dispatched
+
+### BLOCKERS
+- code: separate CRITICAL record/media deletion atomicity flaw remains open; IAP exact-HEAD independent review is pending
+- environment: physical-device-only native tests remain intentionally skipped locally
+- external/manual: remote/Production/Apple/CI/device states remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: full local canonical verify PASS and two atomic implementation commits (`f90c708`, `fddb857`)
+
+### REMAINING
+- independent exact-HEAD IAP review; transactional record/media deletion repair; remaining app security/UX/device/release gates
+
+### NEXT ACTION
+- next owner: Sol Max independent reviewer and Control Tower
+- tool/model: GPT-5.6 Sol / Max
+- 기준 SHA: `fddb857a44ebeab39e502cdddef5d9c7167bf2f6` plus this documentation-only commit
+- exact next task: finish the IAP exact-HEAD verdict, then implement the reviewed forward-only record-media deletion outbox contract
+
+### DO NOT ADVANCE UNTIL
+- IAP review has no CRITICAL/HIGH finding
+- record/media deletion no longer has a Storage-first data-loss window
+- external state is verified separately before any Production action
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-05 — Apple IAP reconciliation forward-only safety closure
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: Apple IAP refund evidence, reconciliation correctness, and bounded worker reliability
+- Step: restore immutable migration 079, move the rejected rewrite into forward migration 082, and close cross-account attribution, cursor atomicity, replay, timeout, and authorization gates
+- Previous Gate: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- This Gate: local implementation commit `9cd0686d86b83b062301fc0dcb9e2e00f7235b03`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, and the latest explicit owner direction for paid Garden accessories/buildings while sales remain gated
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; privacy/E2EE/storage capacity remain outside paid gating and Book Studio remains outside this app-only tranche
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/migration-gate.md`, `docs/skills/security-review.md`, `docs/skills/release-validation.md`
+- Current-state checked: exact worktree/branch/HEAD/status, repository implementation/tests, and `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-05 RC Task 3 and RC build/offline correction entries
+- MASTER PLAN version / 기준일: V5 / 2026-09-03, latest owner overrides through 2026-09-05
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex Control Tower with bounded read-only architecture consultation
+- Model: GPT-5.6 Sol, maximum reasoning for security review preparation; no model above Max
+- Role: primary implementation, integration, and local verification owner
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- Old HEAD: `5a76bdd5381fd3cb9e79d5e89ac87d42e7b21802`
+- New HEAD / Reviewed HEAD: implementation `9cd0686d86b83b062301fc0dcb9e2e00f7235b03`; this ledger/report is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `supabase/migrations/079_apple_iap_refund_consumption.sql`, `supabase/migrations/082_apple_iap_refund_reconciliation_forward_fix.sql`
+- function/component/migration: immutable 079 restoration and forward-only 082 reconciliation contract
+- what changed/reviewed: restored migration 079 byte-for-byte to its previously reviewed content; added 082 with strict predecessor preflight, one checkpoint per Apple environment/original-transaction chain, per-transaction account-token attribution, durable review facts, atomic page settlement and cursor advance, same-lease/page response-loss replay, failure-only lease release, service-only RPCs, RLS, and sale-hold preservation
+- why: a historical migration must never be rewritten, one app billing account is not proof of one Apple customer, and cursor progress must never survive a partially applied page
+- file: `supabase/functions/apple-iap-reconcile/*`, `_shared/appleIapHistory.ts`, `_shared/appleIapContract.ts`, notification/sync token mapping
+- function/component/migration: bounded reconciliation worker and canonical appAccountToken hashing
+- what changed/reviewed: one target/page per invocation, ingress-based monotonic runtime budget, Apple history timeout bounded by remaining work time, a single atomic settlement RPC, and lowercase UUID hashing shared by notification, sync, and reconciliation paths
+- why: prevent cross-account attribution, ambiguous replay, Edge deadline overrun, and casing-dependent binding failures
+- file: `supabase/functions/apple-iap-consumption/*`, `_shared/adminSecret.ts`
+- function/component/migration: consumption worker deadline and bounded Supabase administration requests
+- what changed/reviewed: limits each invocation to one send job, reserves completion time, requires a minimum Apple network window, caps Apple I/O at 100 seconds, and composes caller aborts with a 10-second same-origin Supabase RPC timeout
+- why: never begin irreversible Apple I/O when the worker cannot safely persist its result
+- file: `scripts/phase0/apple-iap-ledger-harness.mjs`, `src/lib/migration082.test.ts`, focused Edge tests
+- function/component/migration: upgrade-path, actor/authz, failure atomicity, response-loss, and deadline regression proof
+- what changed/reviewed: real PostgreSQL chain `077 -> original 079 -> 081 -> 082` now exercises two owners in one Apple history page, missing/unknown/deleted/conflicting bindings, stale/wrong leases, page rollback, empty page, idempotent response recovery, RLS/role denial, and sale hold
+- why: static SQL presence is insufficient evidence for database behavior
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no E2EE algorithm, key, nonce, recovery, or ciphertext semantics changed
+- DB/migration semantics: migrations 077/078/080/081 were not changed; migration 079 was restored exactly, never evolved in place
+- product semantics: no app UI, entitlement pricing, Garden catalog, media, health, auth provider, or Book Studio behavior changed; IAP remains unavailable to customers
+- Production: no push, merge, deploy, remote Supabase, Apple App Store Server API, scheduler, product, transaction, or customer-data action
+
+### VERIFICATION
+- command: `git diff --exit-code 5315c129d3d7886a209e8a560901abba07e8a245 -- supabase/migrations/079_apple_iap_refund_consumption.sql`; `shasum -a 256 ...079...`
+- PASS / FAIL / UNVERIFIED: PASS — parent diff empty; SHA-256 `cda1defda9d197c91a997d0ff4e6f669e5edaa65dbd0fd5737ec69505d5dc132`
+- what it actually proves: migration 079 in the candidate is byte-identical to the reviewed predecessor content
+- command: `npm run test:iap:ledger`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 500 assertions
+- what it actually proves: local fresh/upgrade schema, actor authorization, ownership resolution, rollback, lease, replay, review evidence, and sale-hold behavior; expected permission/check failures are negative tests
+- command: `npm run check:iap && npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — four IAP entrypoints type-checked; 83 Deno tests passed
+- what it actually proves: local Edge type contracts and handler behavior including one-job/one-target limits, aborting timeouts, runtime reserves, and fail-closed entrypoints
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/adminSecret.test.ts src/lib/migration082.test.ts src/lib/migrationSecurityContracts.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files, 215 tests
+- what it actually proves: migration shape/hash/ACL/RLS contracts and composed administration-request abort semantics
+- command: `npm run typecheck`; scoped ESLint over every changed TypeScript file; `node --check scripts/phase0/apple-iap-ledger-harness.mjs`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: local TypeScript, configured lint, harness syntax, and staged whitespace integrity
+- command: default `deno fmt --check` over changed Deno files
+- PASS / FAIL / UNVERIFIED: NOT APPLICABLE — no repository Deno formatter configuration exists and the default formatter would rewrite the established project-wide single-quote style; configured ESLint passed without mass-formatting unrelated code
+- what it actually proves: no format PASS is claimed from a tool whose defaults conflict with the repository convention
+- command: remote Supabase catalog/migration state, Apple Sandbox/Production, deployed Edge functions, StoreKit/device refund lifecycle
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: local evidence is not generalized to external state
+
+### REVIEW IMPACT
+- FULL: payment/refund database state machines, service-role RPCs, worker deadlines, and migration history handling changed
+- whether an earlier review is stale: YES; an independent exact-HEAD Sol Max security review is required before any remote action
+
+### BLOCKERS
+- code: no blocking defect found by the executed local gates; independent exact-HEAD review still pending
+- environment: none for local PostgreSQL/Deno/Vitest/type/lint checks
+- external/manual: legal/retention approval, production catalog fingerprint, Apple credentials/products/server notifications, deployed V2 Edge canary, scheduler configuration, Sandbox purchase/refund, and physical-device evidence remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: forward-only implementation commit and complete local focused verification; documentation and independent review follow
+
+### REMAINING
+- independent exact-HEAD security review and any resulting delta; no sale, remote migration, deploy, or scheduler activation before all external gates are evidenced
+
+### NEXT ACTION
+- next owner: independent Sol Max read-only reviewer, then Control Tower
+- tool/model: GPT-5.6 Sol / Max
+- 기준 SHA: implementation `9cd0686d86b83b062301fc0dcb9e2e00f7235b03` plus the following factual documentation commit
+- exact next task: review migration upgrade safety, authz/RLS, lock ordering, idempotence, cross-account attribution, worker deadline composition, and test gaps; classify CRITICAL/HIGH/MEDIUM/LOW
+
+### DO NOT ADVANCE UNTIL
+- exact-HEAD independent review has no CRITICAL or HIGH finding
+- migration 079 remains byte-identical and 082 remains forward-only
+- remote migration/deploy/sale activation receives a separate evidence-backed release decision
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-05 — RC build/offline and migration 080 correction tranche
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: production build integrity, service-worker offline correctness, and migration 080 trigger-function ACL closure
+- Step: independently confirmed blockers A–D — cache namespace inputs, non-vacuous stale-cache proof, cold authenticated Home offline proof, and explicit role-grant revocation proof
+- Previous Gate: required starting commit `88d9aea98e632cdb81547896501a491fb42683df`
+- This Gate: local implementation commits `38e5c0ca336bc5c57e735ee12a6278c2e04bc4e5` and `21cbd699d39bbdc4fbe49a03f447087d503b37f9`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE — this tranche corrects release/offline and exact ACL behavior without changing customer, product, AI, pricing, media, storage, or monetization strategy
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/offline-migration080-fix-brief.md`, and applicable procedures under `docs/skills/`
+- Current-state checked: exact worktree/branch/starting HEAD/status, repository implementation/tests, and `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-05 RC Task 3 entry immediately preceding this entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 Codex
+- Role: sole correction-tranche implementation owner and local verifier
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `88d9aea98e632cdb81547896501a491fb42683df`
+- Old HEAD: `88d9aea98e632cdb81547896501a491fb42683df`
+- New HEAD / Reviewed HEAD: implementation `21cbd699d39bbdc4fbe49a03f447087d503b37f9`; this ledger is a following documentation-only commit
+
+### CHANGED / REVIEWED
+- file: `build/buildEnv.ts`, `build/viteBuildEnvironmentPlugin.ts`, `vite.config.ts`, and their focused build/CSP/bundle/gate tests
+- function/component/migration: fail-closed production environment validation, CSP injection, empty-chunk/build gates, and service-worker build injection ordering
+- what changed/reviewed: preserved and completed the existing dirty release-build tranche, including scoped static regressions for build environment and artifact hygiene
+- why: release artifacts must fail closed on invalid configuration or structurally broken output
+- file: `build/serviceWorkerManifest.ts`, `public/sw.js`, `src/lib/serviceWorkerManifest.test.ts`, `src/lib/serviceWorkerRuntime.test.ts`, `e2e/serviceWorkerOffline.spec.ts`
+- function/component/migration: service-worker cache namespace derivation, activation cleanup, cold offline shell, and response-integrity behavior
+- what changed/reviewed: the cache id now hashes all final `dist` files except injected `sw.js`, the original service-worker template bytes, and the canonical sorted unique injected manifest; the injected build id is excluded to avoid a circular hash. Runtime and real-browser tests prove a prior cache is deleted/inaccessible, authenticated Home boots offline without warming Home, backend routes are unavailable, and the Home chunk is served by the worker
+- why: service-worker-only or manifest-only changes must invalidate the namespace, and browser tests must prove worker ownership rather than a fallback response
+- file: `supabase/migrations/080_revoke_private_record_trigger_execute.sql`, `scripts/phase0/migration080-trigger-acl-harness.mjs`, `src/lib/migration080.test.ts`
+- function/component/migration: `080_revoke_private_record_trigger_execute`
+- what changed/reviewed: the harness begins with PUBLIC revoked and explicit `anon`, `authenticated`, and `service_role` EXECUTE grants; it proves the exact pre-state, applies the real migration, proves all explicit grants and effective access are gone, and proves unrelated pre-existing/future function ACLs remain unchanged
+- why: a PUBLIC-only fixture cannot prove that migration 080 removes direct role grants
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, ciphertext, or E2EE change
+- DB/migration semantics: no migration other than new migration 080 was changed; migrations 079/081 and all IAP files were untouched
+- product semantics: no UI, Garden, media, health, auth, Book Studio, navigation, or user-flow redesign
+- Production: no push, merge, deploy, remote Supabase, Production, device, or customer-data action; no separate report file was created outside the explicit write set
+
+### VERIFICATION
+- command: focused service-worker manifest TDD RED, then `npx vitest run --config vitest.config.ts --configLoader runner src/lib/serviceWorkerManifest.test.ts`
+- PASS / FAIL / UNVERIFIED: expected RED — 3 passed, 1 failed because `deriveServiceWorkerBuildId` did not exist; GREEN — 4 passed, 0 failed
+- what it actually proves: template-only, manifest-only, and final-artifact byte changes affect the namespace, while manifest ordering alone does not
+- command: migration080 actor-harness TDD RED, then `node scripts/phase0/migration080-trigger-acl-harness.mjs`
+- PASS / FAIL / UNVERIFIED: expected RED — exit 1 because the revised PUBLIC-revoked fixture lacked explicit role grants; GREEN — 71 assertions passed
+- what it actually proves: real ephemeral PostgreSQL role/catalog/trigger behavior for the checked migration and unrelated ACL controls; it does not prove remote state
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/buildEnv.test.ts src/lib/bundleHygiene.test.ts src/lib/cspExternalResources.test.ts src/lib/gatePathCoverage.test.ts src/lib/serviceWorkerManifest.test.ts src/lib/serviceWorkerRuntime.test.ts src/lib/viteBuildGate.test.ts src/lib/migration080.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 8 files, 295 tests, 0 failed
+- what it actually proves: focused static/runtime regressions for every changed local build, service-worker, and migration test module
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/serviceWorkerOffline.spec.ts --config playwright.config.ts --project=chromium-390 --trace=off`
+- PASS / FAIL / UNVERIFIED: PASS — Google Chrome 152.0.7977.76, 4 passed, 0 failed, 24.0 seconds
+- what it actually proves: a real Chrome worker owns both cold signed-out/authenticated offline shells, rejects HTML-poisoned asset caching, and deletes the previous namespace. An earlier trace-enabled run reached 3 passed before one infrastructure FAIL while copying a retained trace with `ENOSPC`; after ephemeral cache cleanup, repeated trace-off runs passed 4/4
+- command: `npm run typecheck`; scoped ESLint over the changed TypeScript/test files; `node --check public/sw.js`; `node --check scripts/phase0/migration080-trigger-acl-harness.mjs`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: local TypeScript graph, scoped lint policy, and JavaScript syntax integrity
+- command: placeholder production `npm run build`, followed by an independent framed SHA-256 recomputation over the final artifacts, original worker template, and parsed canonical manifest
+- PASS / FAIL / UNVERIFIED: PASS — 2,582 modules transformed; injected/recomputed id `1e7bbe704780`; 21 manifest assets; 362 final artifacts
+- what it actually proves: the emitted worker's namespace matches all required local byte inputs without hashing its injected id; placeholder configuration is not Production configuration evidence
+- command: named-path staging checks for both implementation commits; `git diff --cached --stat`; `git diff --cached --check`; final `git diff --check`; exact committed-path and forbidden-path checks
+- PASS / FAIL / UNVERIFIED: PASS — build/offline and migration080 remained separate atomic commits; `control-tower/Now.md`, migrations 079/081, IAP, and all other forbidden product areas were absent from both commits
+- what it actually proves: the requested tranche did not absorb the preserved unrelated dirty Control Tower file or disallowed paths
+- command: remote Supabase catalog/migration state, Production deployment, CI, and physical-device offline behavior
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: local test results were not generalized to external state
+
+### REVIEW IMPACT
+- FULL: release-build hashing/service-worker update behavior and a database function authorization migration changed
+- whether an earlier review is stale: YES for these corrected paths; the exact implementation commits have complete scoped local verification but still require the independently owned release/security review before external promotion
+
+### BLOCKERS
+- code: none found by the scoped local acceptance gates
+- environment: none for the requested local gates after ephemeral derived-cache cleanup
+- external/manual: remote migration/catalog state, Production/CI, deployed update behavior, and physical-device offline behavior remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: two separate implementation commits, final focused Vitest/type/lint/syntax/build/hash/PostgreSQL actor gates, and real-Chrome service-worker E2E; only this factual ledger commit follows
+
+### REMAINING
+- fresh independent exact-HEAD release/security review and any explicitly authorized remote, deployment, CI, or device gates
+
+### NEXT ACTION
+- next owner: independent release/security reviewer, then an authorized release integrator only if review and external gates are clear
+- tool/model: strongest available read-only build/database security reviewer; deployment owner only after approval
+- 기준 SHA: implementation `21cbd699d39bbdc4fbe49a03f447087d503b37f9` plus this documentation-only ledger commit
+- exact next task: inspect the exact committed diff, then verify migration 080 target-state and service-worker update behavior in the authorized release environment without changing sales, UI, or unrelated product areas
+
+### DO NOT ADVANCE UNTIL
+- exact-HEAD independent review has no blocking finding
+- remote migration and deployment state are evidenced separately and never inferred from the repository
+- push, merge, deploy, Production, or remote Supabase work receives explicit authorization
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+
+### 2026-09-03 · 온디바이스 하루 정리의 공유 건강·위치 본문 입력 승인 반영
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary input and provenance contract
+- Step: explicit product-owner override를 canonical 문서에 반영
+- Previous Gate: exact-true/default-OFF 네이티브 adapter와 5개 단위 순차 배치
+- This Gate: 제품 입력·발췌·원본 이동 계약 승인; 구현과 실기기는 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7 AI 보조 역할·온디바이스
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` M6, V5-A, 정밀 위치 gate
+- Current-state checked: `bash scripts/agent/session-start.sh`, branch/HEAD/status/claim
+- Latest relevant Work Log checked: 2026-08-25 하루 요약 5개 초과 progressive disclosure와 상대 신원 권위 결속
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? YES — 기존 §8.1은 민감 분류 가능성만 있어도 그날 전체 모델 경로를 막았다.
+- If YES, what conflict: 제품 오너가 2026-09-03 명시적으로 현재 파트너에게 공유된 기록 본문의 건강·위치 표현은 온디바이스 처리해도 된다고 승인했다. 이 최신 승인을 canonical 문서에 기록한 뒤에만 구현을 진행한다.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + read-only Sol architecture/review agents
+- Model: GPT-5.6 Sol Ultra primary; Sol Max/High bounded reviewers
+- Role: 제품 계약 판정·문서 통합은 primary, 구현 전 privacy architecture는 독립 자문
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `b28a79c36b1698c98a08fcf7e45c21b8aed70aad`
+- Old HEAD: `b28a79c36b1698c98a08fcf7e45c21b8aed70aad`
+- New HEAD / Reviewed HEAD: docs-only commit pending
+
+#### CHANGED / REVIEWED
+- file: `docs/PRODUCT_V5_MASTER_DECISION.md`
+- function/component/migration: §8 온디바이스 요약
+- what changed/reviewed: 적격 공유 본문의 건강·위치 표현 허용, owner-only 구조화 데이터와 metadata 제외, 1:1 exact-source 발췌, 120→40·5×4 후보, atomic fallback, 고지 경계
+- why: 최신 사용자 승인과 “많은 하루 기록을 정리하고 누르면 정확한 기록으로 이동” 요구를 구현 가능한 계약으로 고정
+- file: `docs/ENGINEERING_ROADMAP.md`
+- function/component/migration: M6 pull-forward checkpoint
+- what changed/reviewed: product-owner input override와 구현·실기기 gate를 추가
+- why: 계획서와 코드가 다시 충돌하지 않게 다음 Worker의 범위를 제한
+- file: `control-tower/reports/codex/2026-09-03_1026_on-device-summary-input-override_codex.md`
+- function/component/migration: Control Tower decision record
+- what changed/reviewed: 발견, 결정, 위험, 다음 gate를 사실 상태별로 기록
+- why: 세션 간 추측 대신 canonical trace를 남기기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스를 E2EE라고 부르지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: AI 중요 기록 선정·관계/감정/진단 추론 금지 유지
+- Production: 변경 없음
+
+#### VERIFICATION
+- command: canonical 문서와 최신 관련 Work Log read-only 재확인
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 기존 문서 충돌과 명시적 사용자 override의 범위를 확인
+- command: `git diff --check -- docs/PRODUCT_V5_MASTER_DECISION.md docs/ENGINEERING_ROADMAP.md docs/WORK_LOG.md control-tower/reports/codex/2026-09-03_1026_on-device-summary-input-override_codex.md`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 문서 whitespace integrity만 증명
+- command: physical iPhone Foundation Models
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실제 모델 품질·오프라인·지연·발열·배터리는 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- DELTA: 제품 입력 정책과 다음 구현 계약이 바뀌어 과거 “민감 문구 whole-day reject” 판단은 폐기된다.
+- whether an earlier review is stale: 해당 입력 정책에 한해 YES; exact-source, partner authority, private exclusion, default-OFF review는 유지
+
+#### BLOCKERS
+- code: 120→40 발췌와 batch-per-timeout 미구현
+- environment: 지원 iPhone Foundation Models 실측 미완료
+- external/manual: 검증 빌드 외 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: canonical 제품·엔지니어링 결정 문서 개정; 앱 구현 전
+
+#### REMAINING
+- semantic output firewall 독립 재검토
+- 120→40 exact excerpt, 최대 20개, 배치당 timeout TDD 구현
+- 실제 UI 생략 표시와 exact original navigation 검증
+- 독립 privacy/security review와 실물 iPhone gate
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded Worker/Verifier/Reviewer
+- tool/model: 구현 Worker, 독립 Sol privacy/security reviewer
+- 기준 SHA: docs-only commit 예정 HEAD
+- exact next task: 현재 두 미커밋 코드 gate를 먼저 분리 폐쇄한 뒤 on-device source/excerpt contract 구현
+
+#### DO NOT ADVANCE UNTIL
+- exact-true/default-OFF, private/unreadable/former-partner exclusion, no-cloud, one-record-one-item, atomic fallback을 테스트로 유지
+- 실물 기기 증거 없이 Production 활성화 PASS를 주장하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: Supabase·Vercel·TestFlight·App Store 모두 NOT APPLIED; 실제 배포 flag UNVERIFIED
+
+---
+
+### 2026-09-03 · 온디바이스 하루 정리 모델 출력 방화벽 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary output integrity and exact-source binding
+- Step: 모델 출력 semantic firewall TDD·독립 재검토
+- Previous Gate: 공유 가능한 기록 본문의 건강·위치 표현을 온디바이스 입력으로 허용한 제품 계약
+- This Gate: 현재 40자 입력 단계의 모델 출력은 원문 그대로 또는 안전한 최종 마침표 하나만 통과
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md` M6, `AGENTS.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, HEAD `d0914b54732408ddbb56d6f388c3e6fc75099764`, exact dirty-file inventory
+- Latest relevant Work Log checked: 2026-09-03 공유 건강·위치 본문 입력 승인 항목 바로 위
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded independent read-only reviewer
+- Model: GPT-5.6 Sol primary; configured independent reviewer
+- Role: TDD 통합·검증은 primary, 의미 오염·Unicode 우회 검토는 독립 reviewer
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `d0914b54732408ddbb56d6f388c3e6fc75099764`
+- Old HEAD: `d0914b54732408ddbb56d6f388c3e6fc75099764`
+- New HEAD / Reviewed HEAD: code/report commit pending; independent review snapshot은 old HEAD 위 exact five-file delta
+
+#### CHANGED / REVIEWED
+- file: `src/lib/dailySummary/semanticGuard.ts`, `src/lib/dailySummary/semanticGuard.test.ts`
+- function/component/migration: `guardSummaryRewrite`
+- what changed/reviewed: raw source·candidate의 위험 Unicode를 먼저 차단하고 NFC+바깥 trim 뒤 내부 문자·띄어쓰기·구두점을 exact 비교한다. 마지막 문자가 Letter/Number/Mark/Symbol일 때 ASCII `.` 하나만 추가 허용한다.
+- why: 모델이 감정·관계·진단·의도·수량을 지어내거나 인용·부정·불확실성 맥락을 잘라낸 출력을 화면에 노출하지 않기 위해
+- file: `src/lib/dailySummary/verify.ts`, `src/lib/dailySummary/verify.test.ts`
+- function/component/migration: `verifyRefinedItems`, `semantic_mismatch`
+- what changed/reviewed: 길이·index·순서 검사 뒤 각 후보를 같은 index의 원문과 결속해 검증하고 한 줄이라도 실패하면 배치 전체를 거부한다.
+- why: 올바른 형태만 갖춘 환각 출력과 다른 기록의 문장 재결합을 fail-closed 하기 위해
+- file: `src/features/story/storyDailySummary.test.tsx`
+- function/component/migration: whole-day atomic fallback and exact original navigation regression coverage
+- what changed/reviewed: 안전한 원문 echo fixture로 교체하고 뒤 배치 한 줄의 semantic mismatch도 앞 배치까지 포함한 하루 전체 규칙 기반 fallback이 되도록 회귀 테스트를 추가했다.
+- why: 일부 모델 결과와 일부 원문이 섞여 출처를 오해하게 하지 않기 위해
+- file: `control-tower/reports/codex/2026-09-03_1043_on-device-summary-semantic-firewall_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 정확한 변경·검증·한계·다음 gate를 기록
+- why: 구현 존재와 실기기/Production 검증을 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스 처리를 E2EE 또는 완전한 비밀성으로 주장하지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: 공유 가능한 현재 파트너 기록만 대상, 1기록=1항목과 exact source 이동, AI 자동 중요도 선정 금지 유지
+- Production: Supabase·Vercel·TestFlight·App Store·remote flag 모두 변경하지 않음
+
+#### VERIFICATION
+- command: `npm run test -- --run src/lib/dailySummary/onDeviceSummaryBridge.test.ts src/lib/dailySummary/corpus.test.ts src/lib/dailySummary/verify.test.ts src/lib/dailySummary/contract.test.ts src/lib/dailySummary/nativeOnDeviceSummary.test.ts src/lib/dailySummary/semanticGuard.test.ts src/lib/dailySummary/rules.test.ts src/features/story/storyDailySummary.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 8 files / 182 tests
+- what it actually proves: JS 계약·검증·Story fallback·exact-source route 회귀만 증명
+- command: exact five files `npx eslint --no-cache ...`; `npm run typecheck`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 lint와 전체 TypeScript 정합성
+- command: non-secret placeholder public env로 `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules
+- what it actually proves: production-mode 번들 생성 가능; 실제 Production 환경·연결은 증명하지 않음
+- command: 독립 adversarial direct probes와 재검토
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0, 43/43 probes
+- what it actually proves: 인용·꿈·주체·부정·불확실성·부호·통화·숫자·공백·Unicode 우회와 final-period 경계에 대한 exact reviewed delta
+- command: Foundation Models physical iPhone execution
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실기기 지연·오프라인·발열·배터리·실제 생성 품질은 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- FULL: 이 five-file semantic output boundary는 두 차례 반례 수정 후 exact snapshot을 독립 재검토했다.
+- whether an earlier review is stale: NO for this snapshot; 다음 120→40 발췌 구현은 새 review가 필요
+
+#### BLOCKERS
+- code: 유용한 120→40 exact contiguous excerpt와 visible omission contract 미구현
+- environment: 지원 실물 iPhone Foundation Models 검증 미완료
+- external/manual: 검증 build 외 feature flag 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: 현재 40자 입력/40자 출력 adapter의 fail-closed semantic firewall; feature default-OFF 유지
+
+#### REMAINING
+- 120자 공유 원문에서 최대 40자 exact contiguous excerpt 생성·검증
+- 5개/배치, 최대 20개, 배치당 4초, 하루 단위 atomic fallback
+- 화면의 생략 표시와 한 탭 exact original 이동
+- Native Swift prompt/contract 일치, 독립 review, 실물 iPhone gate
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded implementation Worker/Verifier/Reviewer
+- tool/model: 다음 excerpt contract는 TDD Worker와 독립 privacy/correctness reviewer
+- 기준 SHA: 이 code/report commit
+- exact next task: 정원 좌표 안정성 gate를 먼저 분리 폐쇄한 뒤 120→40 exact excerpt를 별도 커밋으로 구현
+
+#### DO NOT ADVANCE UNTIL
+- private/unreadable/former-partner 행, owner-only 구조화 건강 데이터, GPS/EXIF metadata가 모델 입력에 들어가지 않음
+- 한 항목이 한 exact recordId에 남고 모델이 drop/merge/reorder하지 못함
+- 실물 기기 증거 없이 release-ready 또는 Production-enabled라고 주장하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---
+
+### 2026-09-03 · 정원 캐릭터 자연스러운 pair-safe 움직임·접근성 gate 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A interaction/accessibility reliability
+- Workstream: Diary companion garden D2 motion
+- Step: 두 캐릭터의 자율 이동·직접 이동·드래그·reduced motion을 실제 DOM geometry로 통합
+- Previous Gate: 로컬 캐릭터 꾸미기·직접 상호작용 surface와 exact paper-pair asset 연결
+- This Gate: pair-safe motion과 접근성의 unit/browser 독립 review PASS
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 점수·streak·유료 재화·결제 기능 추가 없음
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `AGENTS.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, base HEAD `4fecfdfbc8562a8bf069adc40768e5182f3ce932`, exact seven-file dirty inventory
+- Latest relevant Work Log checked: 2026-09-03 Garden local customization·interrupt-resume 항목
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded motion Worker + two independent read-only review passes
+- Model: GPT-5.6 Sol primary; configured Worker and independent Reviewers
+- Role: motion implementation은 bounded Worker, 실패 재현·client-box correction·통합 검증은 primary, final verdict는 fresh reviewer
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `4fecfdfbc8562a8bf069adc40768e5182f3ce932`
+- Old HEAD: `4fecfdfbc8562a8bf069adc40768e5182f3ce932`
+- New HEAD / Reviewed HEAD: feature/report commit pending; exact seven-file unstaged snapshot independently reviewed PASS
+
+#### CHANGED / REVIEWED
+- file: `src/features/diary/companionGardenMotion.ts`, `src/features/diary/companionGardenMotion.test.ts`
+- function/component/migration: physical bounds, AABB/swept-path safety, pair reconciliation, destination/cadence model
+- what changed/reviewed: 실측 footprint와 장면 크기로 4px 간격·경계·이동 경로를 검증하고, 한 번에 한 캐릭터만 52–140px를 자연 속도로 움직이며 짧은 휴식과 긴 휴식을 섞는다.
+- why: 반복적 순간이동, 겹침, 경계 이탈, 과도한 배터리 사용을 구조적으로 줄이기 위해
+- file: `src/features/diary/CompanionGardenView.tsx`, `src/features/diary/CompanionGardenView.test.tsx`
+- function/component/migration: one-timer scheduler, measured client-box geometry, pointer/keyboard/action-sheet controls, reduced motion
+- what changed/reviewed: clientWidth/clientHeight와 rect+client offsets를 freeze·resize·drag에 공통 사용하고, long press pickup·두 번째 pointer·pointercancel/lost capture·키보드 이동·focus restore를 fail-safe 처리한다.
+- why: border-box/client-box 왕복 오차와 상호작용 중 race 없이 자연스럽고 보조기술로도 같은 기능에 접근하게 하기 위해
+- file: `e2e/companionGarden.spec.ts`
+- function/component/migration: actual Chrome portrait/small-phone/short-landscape/reduced-motion motion matrix
+- what changed/reviewed: 자율 이동, 매 frame non-overlap, 리사이즈 Y 불변, drag 후 자율 이동 재개, 3.999px 실측 간격, 44px hit target, overflow와 reduced-motion을 검증한다.
+- why: jsdom이 증명할 수 없는 실제 layout·transform·hit area·animation 경계를 확인하기 위해
+- file: `src/features/diary/companionGardenStyles.test.ts`, `src/styles/index.css`
+- function/component/migration: compositor promotion policy
+- what changed/reviewed: 지속적인 `will-change` layer promotion을 제거하고 움직이는 순간의 transform만 사용한다.
+- why: 두 캐릭터가 상시 GPU layer를 점유하지 않도록 하기 위해
+- file: `control-tower/reports/codex/2026-09-03_1106_companion-garden-motion-accessibility-closure_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 발견·수정·검증·잔여 실기기/성능 경계를 기록
+- why: 코드 테스트와 실제 기기·Production 증거를 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음; 정원 상태는 기존 로컬 계약 유지
+- product semantics: 캐릭터·악세사리·종이의 소유권/가격/결제 없음; 점수·streak·feeding·mission·확률형 뽑기 없음
+- Production: push·merge·deploy·Supabase·TestFlight·App Store 변경 없음
+
+#### VERIFICATION
+- command: 신규 drag client-box unit를 구현 전 실행
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — outer 계산 21.76%, 기대 inner 계산 20%
+- what it actually proves: 드래그에만 남은 border/client 좌표 불일치를 재현
+- command: Garden focused Vitest 7 files
+- PASS / FAIL / UNVERIFIED: PASS — 7 files / 119 tests
+- what it actually proves: motion math, scheduler, pointer cleanup, reduced motion, wiring·route·asset 회귀
+- command: system Chrome `e2e/companionGarden.spec.ts --project=chromium-390`
+- PASS / FAIL / UNVERIFIED: PASS — 7/7, 56.9s
+- what it actually proves: 실제 browser transform·DOM gap·viewport·drag/post-drag scheduler·접근성 surface
+- command: exact changed TS/TSX files ESLint; `npm run typecheck`; scoped `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 lint, 전체 TypeScript, whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; Garden route 28.67 kB / gzip 10.38 kB
+- what it actually proves: production-mode bundle 생성 가능; 실제 backend/Production 연결은 증명하지 않음
+- command: fresh independent seven-file review after drag correction
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0
+- what it actually proves: exact local delta의 correctness/race/a11y 회귀 검토
+- command: physical iPhone touch/VoiceOver/battery profile
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실제 기기 촉감·VoiceOver·장시간 배터리는 아직 증명하지 않음
+
+#### REVIEW IMPACT
+- FULL: motion/state/interaction 구현 전체가 바뀌어 이전 Garden review는 승계하지 않고 fresh exact-delta review를 수행했다.
+- whether an earlier review is stale: NO for final local snapshot; 이후 Garden 코드 변경 시 재검토 필요
+
+#### BLOCKERS
+- code: 이 gate에서 알려진 blocker 없음
+- environment: physical iPhone VoiceOver·장시간 energy profile 미완료
+- external/manual: exact character의 상업적 권리/provenance는 여전히 별도 manual gate
+
+#### STOPPED AT
+- exact completed boundary: local pair-safe Garden motion + actual Chrome accessibility/responsive gate PASS
+
+#### REMAINING
+- 1.489 MB paper-pair WebP와 전역 CSS 332.83 kB의 별도 성능 최적화 판단
+- 실물 iPhone touch, VoiceOver, reduced motion, 10분 이상 energy profile
+- 향후 건물 interaction/유료 entitlement는 승인된 catalog·StoreKit·권리 gate 이후 별도 구현
+
+#### NEXT ACTION
+- next owner: Codex primary + privacy/data Worker/Verifier/Reviewer
+- tool/model: Realtime private-metadata Level-4 implementation and independent security review
+- 기준 SHA: 이 Garden feature/report commit
+- exact next task: records/tasks의 private-capable direct Realtime를 content-free invalidation + RLS refetch로 단계적 전환
+
+#### DO NOT ADVANCE UNTIL
+- remote migration ledger/publication/adoption을 확인하기 전 source publication 제거를 Production에 적용하지 않음
+- 실제 기기 증거 없이 battery/VoiceOver PASS를 주장하지 않음
+- 상업적 캐릭터 권리 확인 전 유료 판매 또는 App Store 제출 금지
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---
+
+### 2026-09-03 · 비공개 가능 기록·할 일 Realtime 메타데이터 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A Release Candidate privacy/reliability
+- Workstream: records/tasks Realtime authorization and reconciliation
+- Step: private-capable source publication 제거, content-free invalidation 전환, race-safe authoritative re-read
+- Previous Gate: Garden pair-safe motion·접근성 local PASS
+- This Gate: migration 072 fresh-chain·actor proof와 client dual-read compatibility local PASS; Production rollout HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 연결·보존 무료와 개인정보 비프리미엄 원칙 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/skills/release-validation.md`
+- Current-state checked: branch/HEAD/status, current record/task call paths, migration 001→072 local chain, `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-03 Garden gate와 cycle consent/revocation privacy entries
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + two independent Sol architecture/security review passes
+- Model: GPT-5.6 Sol primary; fresh Sol architect reviewers
+- Role: primary TDD·integration·verification owner; reviewers는 exact local delta의 authorization/race/rollback 독립 감사
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `5b0a7b7073d87384ad2906c828ece66e70c60101`
+- Old HEAD: `5b0a7b7073d87384ad2906c828ece66e70c60101`
+- New/Reviewed HEAD: `1636592f3504f5d260fcc71317c9bbeaf407299a`
+
+#### CHANGED / REVIEWED
+- file: `supabase/migrations/072_close_private_capable_realtime_metadata.sql`, `src/lib/migration072.test.ts`
+- function/component/migration: private-filtered trigger, source publication boundary, content-free `collaboration_invalidations`
+- what changed/reviewed: `daily_records`와 `couple_tasks`를 Realtime publication에서 제거하고 shared CRUD·shared↔private 전환에만 couple/slice invalidation을 갱신한다. trigger 함수 직접 실행권한을 회수하고, parent couple가 이미 삭제된 cascade에서는 child invalidation을 재생성하지 않는다.
+- why: Postgres Changes DELETE가 row filter로 비공개 행의 존재·삭제 시점을 숨기지 못하는 metadata leak과 account-deletion FK 회귀를 함께 막기 위해
+- file: `src/lib/store.tsx`, `src/lib/store.test.tsx`
+- function/component/migration: record compatibility subscription, authoritative invalidation/refetch, sequence and mutation reconciliation
+- what changed/reviewed: direct source channel을 migration 전 호환용으로 격리하고 authoritative invalidation channel·foreground·online·bounded failure polling으로 RLS-visible snapshot을 다시 읽는다. stale/failed reads가 새 상태를 덮지 못하고 create/update/delete와 racing refetch가 중복·부활·rollback을 만들지 않게 한다.
+- why: migration 전후 앱 버전을 단계적으로 지원하면서 private/shared 권한 변화와 네트워크 race를 fail-closed로 복구하기 위해
+- file: `src/pages/SchedulePage.tsx`, `src/pages/ScheduleTasksState.test.tsx`
+- function/component/migration: tasks dual-read transition, refresh result/sequence, post-response authority check and transport-failure fallback
+- what changed/reviewed: 성공한 mutation 뒤 authoritative re-read를 우선하고, 그 read까지 transport-fail이면 committed snapshot sequence를 기준으로 create merge·delete removal·안전한 update를 적용하면서 명시적 retry 상태를 유지한다. forbidden은 오래된 데이터를 복원하지 않는다.
+- why: 느린 mutation response와 더 최신인 다른 기기 snapshot이 교차할 때 성공 상태 유실이나 최신 상태 overwrite를 막기 위해
+- file: `scripts/phase0/storage-authz-harness.mjs`, `supabase/migrations/README.md`
+- function/component/migration: migration 072 executable actor/cascade proof and rollout contract
+- what changed/reviewed: 실제 PostgreSQL fresh chain에서 publication, function privilege, private/shared transition, old/new couple scope, RLS actors, sole-couple account cleanup cascade를 실행하고 client-adoption/WebSocket rollout gate를 문서화했다.
+- why: SQL 파일 존재가 보안 동작이나 Production 적용 증거로 오인되지 않게 하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; E2EE key/envelope/protocol 미수정
+- DB/migration semantics: 072 파일은 로컬에 추가했지만 remote에는 적용하지 않음
+- product semantics: 기록·할 일 본문/공유 의미/원본 연결/읽음 의미 변경 없음
+- Production: push·merge·deploy·Supabase catalog query/migration·TestFlight·App Store 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, 온디바이스 요약 slice, `.gstack/`, `.unlazy/`를 이 커밋에서 제외
+
+#### VERIFICATION
+- command: 구현 전 failing PostgreSQL account-cleanup cascade와 record/task refetch-first·delayed-mutation tests
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL 후 수정
+- what it actually proves: reviewer가 찾은 FK 재생성, duplicate create, stale mutation overwrite 및 double-read failure를 재현한 뒤 닫음
+- command: `npm test -- --run src/lib/store.test.tsx src/pages/ScheduleTasksState.test.tsx src/lib/migration072.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 89 tests
+- what it actually proves: records/tasks subscription 분리, 순서·중복·mutation race, forbidden/transport failure와 migration text contract
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — active 001→072 fresh chain, 68 applied migrations, 668 assertions
+- what it actually proves: throwaway PostgreSQL 17에서 publication·trigger·privilege·RLS actor·account deletion cascade의 실제 local DB 동작
+- command: exact target ESLint; `npm run typecheck`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 정적 규칙, 전체 TypeScript, staged whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; Schedule 33.65 kB / gzip 9.85 kB
+- what it actually proves: production-mode bundle 생성 가능; remote Supabase 또는 실제 WebSocket은 증명하지 않음
+- command: first independent Sol review, RED fixes, second fresh Sol final review
+- PASS / FAIL / UNVERIFIED: initial HOLD 3건 + follow-up MEDIUM 1건을 수정한 뒤 LOCAL PASS — actionable CRITICAL/HIGH/MEDIUM 0
+- what it actually proves: exact local authorization/race/cascade delta의 독립 검토; Production rollout 안전성은 별도 gate
+
+#### REVIEW IMPACT
+- FULL: Realtime source/publication과 records/tasks reconciliation 의미가 바뀌어 이전 검토를 승계하지 않고 두 차례 fresh review를 수행했다.
+- whether an earlier review is stale: final local snapshot에 대해서는 NO; 이후 이 8개 파일 변경 또는 migration 재작성 시 재검토 필요
+
+#### BLOCKERS
+- code: 이 local gate에서 알려진 blocker 없음
+- environment: 실제 Supabase WebSocket, background/foreground, reconnect, slow/partial network의 staging 2-account 검증 미완료
+- external/manual: remote migration 068→072 적용 상태·publication/RLS/function catalog와 compatible-client adoption/minimum-version gate가 UNVERIFIED
+
+#### STOPPED AT
+- exact completed boundary: commit `1636592` local PASS; migration 072는 저장소에만 존재하고 remote에는 미적용
+
+#### REMAINING
+- remote migration ledger와 068→072 dependency를 read-only 확인한 뒤 적용 전 backup/rollback readiness 판정
+- compatible client adoption/minimum-version gate를 먼저 충족
+- staging 두 계정으로 private CRUD event 0건, shared CRUD/privacy transitions, reconnect/foreground/channel failure를 실제 WebSocket에서 검증
+
+#### NEXT ACTION
+- next owner: Codex primary + on-device AI security architect/reviewer
+- tool/model: GPT-5.6 Sol implementation audit and simulator build
+- 기준 SHA: `1636592f3504f5d260fcc71317c9bbeaf407299a`
+- exact next task: 하루 모든 eligible record의 exact-source 온디바이스 요약 contract와 native Foundation Models adapter를 local/simulator gate까지 폐쇄
+
+#### DO NOT ADVANCE UNTIL
+- migration 072를 compatible-client adoption보다 먼저 Production에 적용하지 않음
+- action-time remote authority, backup/rollback, staging 2-actor WebSocket 증거 없이 APPLIED/secure/release-ready라고 주장하지 않음
+- rollback 목적으로 private-capable source table을 publication에 다시 넣지 않음; forward invalidation/HTTP repair 사용
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
+### 2026-09-03 · 온디바이스 하루 전체 exact-source 발췌·원문 이동 gate 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A / M6 on-device AI safety and usefulness gate
+- Workstream: partner daily-summary exact excerpt and native boundary
+- Step: 120→40 연속 원문 발췌, 하루 전체 순서·출처 보존, Swift bridge·simulator 검증
+- Previous Gate: 모델 출력은 원문 그대로만 통과하는 semantic firewall
+- This Gate: 최대 20개 partner-readable 기록의 1:1 온디바이스 발췌와 exact-original navigation local PASS; 실기기 HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md` §8, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7; AI는 편집·압축 보조이고 자동 중요도 판정 주체가 아님
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md` M6, `docs/kiro/AI_HANDOFF.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, base `7ba2df809220180d704086921ae3ed4fe503cd98`, exact dirty-file inventory, native package call path
+- Latest relevant Work Log checked: 2026-09-03 온디바이스 입력 override와 semantic firewall 항목, Realtime metadata gate
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. 현재 파트너에게 이미 공유된 기록 본문의 건강·위치 표현 허용은 2026-09-03 제품 오너의 최신 명시적 승인 범위다.
+
+#### OWNERSHIP
+- Tool: Codex primary orchestrator + bounded independent Sol architecture/security reviewer
+- Model: GPT-5.6 Sol primary; Sol independent reviewer
+- Role: primary TDD·native integration·verification owner, reviewer는 exact-source·Unicode·Swift type·fallback 경계 독립 감사
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `7ba2df809220180d704086921ae3ed4fe503cd98`
+- Old HEAD: `7ba2df809220180d704086921ae3ed4fe503cd98`
+- New HEAD / Reviewed HEAD: `68dc6c1fa20233157e68acc2027c768c2cc2eb9c`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/dailySummary/contract.ts`, `rules.ts`, `semanticGuard.ts`, `verify.ts`와 테스트
+- function/component/migration: 120 UTF-16 source normalization, grapheme-safe exact contiguous excerpt, omission boundary, 40자 decorated-output ceiling
+- what changed/reviewed: 모델 결과는 같은 index 원문의 연속 부분 문자열이어야 하고 앞·뒤 생략은 실제 원문 경계를 반영한다. 위험 Unicode, 잘린 단어/기호, 합성 punctuation, grapheme 파손, 40자 초과를 whole-batch reject한다.
+- why: 많은 하루 기록을 짧게 훑되 사실·부정·수량·출처를 바꾸지 않기 위해
+- file: `src/lib/dailySummary/useOnDeviceDailySummary.ts`, `src/features/story/StoryRoute.tsx`, `StoryViewer.tsx`, `storyDailySummary.test.tsx`
+- function/component/migration: eligible corpus, 5개 배치, 최대 20개, 배치당 4초, whole-day atomic fallback, exact-original route
+- what changed/reviewed: 현재 active partner의 today/readable/persisted/non-private 기록을 시간순으로 유지하고 한 기록당 한 항목으로 표시한다. bodyless source 또는 어느 배치 실패도 모델 결과를 섞지 않고 결정론적 목록으로 복귀한다.
+- why: AI가 기록을 누락·병합·재정렬하거나 잘못된 원문으로 연결하지 못하게 하기 위해
+- file: `packages/capacitor-on-device-summary/**`, `ios/App/Podfile.lock`
+- function/component/migration: Foundation Models prompt/schema, strict native dictionary decoding, plugin package version
+- what changed/reviewed: 원문 index와 excerpt만 반환하는 native 계약으로 조이고 exact key set, integer `NSNumber`, true CFBoolean을 엄격히 확인한다. network/storage/logging/cloud fallback은 추가하지 않았다.
+- why: JavaScript 검증 전 native bridge에서 형태·타입 우회나 사용자 본문 유출을 막기 위해
+- file: `control-tower/reports/codex/2026-09-03_1305_on-device-daily-excerpt-closure_codex.md`
+- function/component/migration: Control Tower gate report
+- what changed/reviewed: 구현·검증·실기기/Production 미확인 경계를 기록
+- why: 코드 존재와 실제 지원 iPhone release 증거를 구분하기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음; 온디바이스를 E2EE 또는 완전한 보안으로 표현하지 않음
+- DB/migration semantics: 변경 없음
+- product semantics: current-partner shared body의 건강·위치 문구는 허용하되 owner-only structured health, GPS/EXIF metadata, private/unreadable/former-partner row는 제외; AI 중요도 선정·drop·merge·reorder 금지
+- Production: push·merge·deploy·Supabase·TestFlight·App Store·remote flag 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, `.gstack/`, `.unlazy/`를 stage하지 않음
+
+#### VERIFICATION
+- command: daily-summary focused Vitest 8 files
+- PASS / FAIL / UNVERIFIED: PASS — 8 files / 211 tests
+- what it actually proves: corpus·contract·Unicode·semantic output·batch/timeout/atomic fallback·exact-original route의 JavaScript 회귀
+- command: Segmenter preflight delta focused Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 78 tests
+- what it actually proves: Segmenter가 없는 환경에서 41–120자 입력을 native에 넘기지 않는 fail-closed 보정
+- command: Story integration 5회 반복
+- PASS / FAIL / UNVERIFIED: PASS — 매회 38/38
+- what it actually proves: 테스트 환경에서 비동기 Story 요약 상태가 반복 실행에도 결정적임
+- command: native configuration tests
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 106 tests
+- what it actually proves: Swift/package/Pod wiring의 저장소 계약
+- command: exact target ESLint; `npm run typecheck`; scoped `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 대상 정적 규칙, 전체 TypeScript, whitespace integrity
+- command: non-secret placeholder public env `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules; StoryRoute 26.82 kB / gzip 9.40 kB
+- what it actually proves: production-mode 번들 생성 가능; 실제 backend/Production 연결은 증명하지 않음
+- command: unsigned iOS Simulator clean Xcode build
+- PASS / FAIL / UNVERIFIED: PASS — exit 0
+- what it actually proves: 현재 Xcode/Simulator에서 native package가 compile·link됨; 실물 Foundation Models 실행은 증명하지 않음
+- command: independent Sol architecture/security review, reviewer 반례 TDD 후 fresh re-review
+- PASS / FAIL / UNVERIFIED: initial HOLD 4건 수정 후 FINAL LOCAL PASS — actionable CRITICAL/HIGH/MEDIUM 0, final focused 78/78
+- what it actually proves: appended punctuation, unsafe cut, bodyless synthesis, truncation 표시와 Segmenter fail-closed를 포함한 final local delta의 독립 검토
+- command: `npm run test -- --run`
+- PASS / FAIL / UNVERIFIED: FAIL snapshot — 296 files, 4,218 passed / 3 failed / 4,221 total; 기능 관련 `storyProjection` Segmenter 실패는 위 78/78로 수정·재검증, 별도 lifecycle/migration 2건은 다음 gate에서 조사
+- what it actually proves: 당시 전체 suite의 나머지 두 안정성 regression을 발견했으며 전체 Release Candidate PASS는 아직 아님
+- command: physical supported iPhone Foundation Models/Korean/offline/latency/thermal/battery/memory
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 실기기 활성화 조건은 아직 충족되지 않음
+
+#### REVIEW IMPACT
+- FULL: JavaScript source/output contract와 Swift bridge 의미가 모두 바뀌어 이전 40자 firewall review를 승계하지 않고 fresh independent review를 수행했다.
+- whether an earlier review is stale: final implementation HEAD `68dc6c1`에 대해서는 NO; 이후 daily-summary/native 파일 변경 시 재검토 필요
+
+#### BLOCKERS
+- code: full suite의 `coupleLifecycleTransitions`와 `migrationSecurityContracts` 실패 2건을 별도 안정성 gate에서 조사 중
+- environment: supported physical iPhone Foundation Models, Korean quality, offline/no-network, cancel latency, thermal/battery/memory 미검증
+- external/manual: 검증 build 외 feature flag 활성화 금지
+
+#### STOPPED AT
+- exact completed boundary: commit `68dc6c1`의 on-device exact-excerpt local/simulator/review PASS; feature default OFF
+
+#### REMAINING
+- 두 full-suite 실패 root cause 수정 후 전체 suite fresh PASS
+- 지원 실물 iPhone에서 feature availability·한국어·오프라인·timeout·성능·메모리 검증
+- 실제 활성화 전 개인정보 문구와 지원기기/실패 fallback 제품 QA
+
+#### NEXT ACTION
+- next owner: Codex primary + bounded verifier/reviewer
+- tool/model: systematic root-cause investigation, targeted TDD, fresh PostgreSQL chain and full-suite verification
+- 기준 SHA: `68dc6c1fa20233157e68acc2027c768c2cc2eb9c`
+- exact next task: couple lifecycle remote-revocation test와 migration 072 schema-cache reload test의 원인을 분리 확정하고 Realtime 의미를 보존하는 최소 수정
+
+#### DO NOT ADVANCE UNTIL
+- 두 실패를 단순 기대값 변경으로 덮지 않고 실제 subscription/migration contract를 확인
+- migration 072 remote 적용이나 compatible-client rollout을 수행하지 않음
+- 실물 기기 증거 없이 on-device feature를 기본 ON 또는 release-ready로 판정하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
+### 2026-09-03 · Realtime lifecycle·schema-cache 전체 suite 회귀 폐쇄
+
+#### PLAN POSITION
+- Phase: V5-A Release Candidate reliability/privacy
+- Workstream: migration 072 client adoption and cumulative migration contracts
+- Step: full-suite 두 실패 root-cause 조사, 최소 수정, fresh full verification
+- Previous Gate: 온디바이스 하루 exact-source 발췌 local/simulator/review PASS에서 full-suite 두 실패 발견
+- This Gate: local full Vitest·fresh PostgreSQL·lint·typecheck·build와 independent review PASS; Production rollout HOLD
+
+#### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 수익·저장·AI 역할 변경 없음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/operations/rollback-runbook.md`
+- Current-state checked: branch `codex/sol-gomsinlog-rc-v4`, HEAD `75a3676`, exact status/diff, migration 072와 `store.tsx` subscription call path
+- Latest relevant Work Log checked: 2026-09-03 Realtime private-metadata gate와 온디바이스 exact-source gate 바로 위
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+#### OWNERSHIP
+- Tool: Codex primary systematic investigation + independent Sol Architect + independent Reviewer
+- Model: GPT-5.6 Sol primary; Sol Architect; configured independent Reviewer
+- Role: primary root-cause/TDD/integration owner, Architect는 Realtime/migration authority 검토, Reviewer는 exact two-file delta 독립 검증
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `75a367624422d2526dc5124fa050fb93862de807`
+- Old HEAD: `75a367624422d2526dc5124fa050fb93862de807`
+- New HEAD / Reviewed HEAD: `717635bba3414d67f168b62b484c36bcc0526288`
+
+#### CHANGED / REVIEWED
+- file: `src/lib/coupleLifecycleTransitions.test.tsx`
+- function/component/migration: remote membership revocation regression test
+- what changed/reviewed: 첫 mock channel 결과를 고정하지 않고 실제 authoritative `couple-sync:couple-1` channel index를 찾아 `couple_members` callback과 최종 `disconnected` purge를 검증한다.
+- why: migration 072 호환 전환이 legacy records channel을 먼저 생성한 뒤 생긴 test-harness order regression을 고치되 제품 기대값은 완화하지 않기 위해
+- file: `supabase/migrations/072_close_private_capable_realtime_metadata.sql`
+- function/component/migration: PostgREST schema-cache convergence
+- what changed/reviewed: migration transaction `COMMIT` 뒤 정적 `NOTIFY pgrst, 'reload schema'`를 추가했다.
+- why: 마지막 function-definition migration이 자신의 schema catalog refresh를 보장하게 하기 위해
+- file: `control-tower/reports/codex/2026-09-03_1319_realtime-regression-suite-closure_codex.md`
+- function/component/migration: Control Tower/debug report
+- what changed/reviewed: 증상·root cause·수정·전체 검증·Production HOLD를 기록
+- why: test-only 결함과 실제 migration 누락을 구분하고 remote 미확인을 남기기 위해
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 072의 trigger·RLS·REVOKE·publication 의미는 변경하지 않고 cache reload만 추가; remote 미적용
+- product semantics: current membership revocation은 기존 own-row signal → quarantine → authoritative RPC → purge 경로 유지
+- Production: Supabase query/migration, Vercel, push, merge, TestFlight, App Store 모두 변경 없음
+- unrelated dirty files: `control-tower/Now.md`, `.gstack/`, `.unlazy/`는 stage하지 않음
+
+#### VERIFICATION
+- command: 구현 전 `npm run test -- --run src/lib/coupleLifecycleTransitions.test.tsx src/lib/migrationSecurityContracts.test.ts`
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 2 files / 2 deterministic failures
+- what it actually proves: channel-order assumption과 latest-function reload omission을 각각 재현
+- command: `npm run test -- --run src/lib/coupleLifecycleTransitions.test.tsx src/lib/migrationSecurityContracts.test.ts src/lib/migration072.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 3 files / 125 tests
+- what it actually proves: 기존 revocation outcome, cumulative schema-cache contract, 072 text contract가 함께 복구됨
+- command: `npm run test:phase0`
+- PASS / FAIL / UNVERIFIED: PASS — PostgreSQL 17, 68 applied migrations / 668 assertions
+- what it actually proves: throwaway fresh DB에서 001→072 apply와 RLS·privilege·private/shared invalidation·account-cleanup actor behavior
+- command: `npm run test -- --run`
+- PASS / FAIL / UNVERIFIED: PASS — 296 files / 4,221 tests
+- what it actually proves: repository 전체 Vitest에 알려진 회귀가 없음
+- command: `npm run lint`; `npm run typecheck`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: 전체 ESLint·TypeScript·whitespace integrity
+- command: placeholder public env로 `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,536 modules
+- what it actually proves: production-mode bundle 생성 가능; 실제 Production backend는 증명하지 않음
+- command: independent Sol Architect + independent Reviewer exact-delta review
+- PASS / FAIL / UNVERIFIED: LOCAL PASS — exact delta actionable CRITICAL/HIGH/MEDIUM 0; Reviewer CRITICAL/HIGH/MEDIUM/LOW 0
+- what it actually proves: test expectation 유지, membership call path, NOTIFY 위치, privacy semantics 불변에 대한 독립 검토
+
+#### REVIEW IMPACT
+- DELTA: migration 072에 cache-convergence statement만 추가하고 lifecycle test harness 결속만 수정했다. 1636592의 trigger/RLS/publication/runtime semantics는 유지된다.
+- whether an earlier review is stale: NO for implementation semantics; exact two-file delta는 fresh independent reviews로 폐쇄
+
+#### BLOCKERS
+- code: 이 gate에서 알려진 blocker 없음
+- environment: actual Supabase WebSocket, reconnect/background, remote PostgREST reload 처리 미검증
+- external/manual: remote migration ledger/catalog와 compatible-client adoption/minimum-version gate 미확인
+
+#### STOPPED AT
+- exact completed boundary: commit `717635b` local full-suite/fresh-DB/build/review PASS
+
+#### REMAINING
+- migration 072 적용 전 remote read-only preflight, compatible-client adoption, backup/rollback readiness
+- staging 두 계정으로 own-membership revoke·foreground recovery·private CRUD 0-event·shared invalidation 실제 WebSocket 검증
+- canonical roadmap/current implementation 대조 후 다음 local RC blocker 폐쇄
+
+#### NEXT ACTION
+- next owner: Codex Control Tower + photo-lifecycle Architect, bounded Worker/Verifier/Reviewer
+- tool/model: Sol privacy/data architecture, scoped TDD implementation, independent security review
+- 기준 SHA: `717635bba3414d67f168b62b484c36bcc0526288`
+- exact next task: V5-E1 `EXIF-free screen master + thumbnail + 최소 lifecycle metadata + 멱등 cleanup`의 구버전 호환·RLS·orphan 안전 계약을 먼저 확정하고 현재 `ComposePage → addRecordWithMedia → Storage → attachment patch` 경로에 별도 commit으로 구현
+
+#### DO NOT ADVANCE UNTIL
+- migration 072를 compatible-client adoption보다 먼저 remote에 적용하지 않음
+- 실제 Supabase WebSocket과 remote catalog evidence 없이 Production PASS를 주장하지 않음
+- 이후 Realtime/migration 072 변경 시 exact review freshness를 다시 확보
+- 사진 server ledger에 filename·GPS·EXIF·본문 같은 사용자 콘텐츠를 추가하거나 기존 Storage RLS를 약화하지 않음
+
+#### PRODUCTION
+- NOT APPLIED / UNVERIFIED: GitHub master, Supabase, Vercel, TestFlight, App Store 모두 변경하지 않음
+
+---
+
+## 2026-09-03 — Cycle consent atomic revocation and write gate
+
+PLAN POSITION
+- Phase: Release Candidate reliability / sensitive health-data boundary
+- Workstream: cycle consent, raw-data authorization, partner projection
+- Previous Gate: migration 069 required current consent for partner projection but did not make consent checks atomic with raw writes
+- This Gate: local migration 070, client authority state machine, identity pinning, PostgreSQL concurrency proof, and independent security review
+
+DIRECTION CHECK
+- Product source checked: latest user-approved V4 direction, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: NOT APPLICABLE; this slice does not change monetization, customer, storage, or AI role
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/security-review.md`, `docs/skills/migration-gate.md`, `docs/skills/release-validation.md`
+- Current-state checked: live branch/HEAD/status, repository call paths, `docs/CURRENT_STATE.md`, and local migration chain
+- Latest relevant Work Log checked: migration 069 and Diary/Garden/Shop V2 entries
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Primary: Codex Control Tower / Sol Ultra, implementation integration and exact-diff verification
+- Independent reviewer: Sol Ultra read-only security review
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base: `origin/codex/diary-garden-shop-v2`
+- Old HEAD: `453bda99633d2ee3d384cf038ff65103bb08c7e9`
+- Code/migration commit: `dc3d221c956e6d5bb211d300d57d17adccba55e9`
+
+CHANGED / REVIEWED
+- `src/lib/sensitiveConsent.ts`: server-authoritative grant/revoke RPCs, monotonic revision, pending-revoke lock, and process-lifetime fallback when durable marker storage fails
+- `src/components/CycleTrackerSection.tsx`: generation-scoped consent state machine, immediate privacy lock on revoke, retry-only error state, stale-response rejection, and sharing cleanup
+- `src/lib/cycle.ts`: initiating user identity is pinned through raw read/write/delete/settings/sharing requests so an account switch cannot retarget an operation
+- `supabase/migrations/070_cycle_consent_atomic_write_gate.sql`: revision-CAS grant, privacy-wins revoke, account-deletion barrier, row-locking write helper, restrictive raw-table write policies, and consent-locked partner projection
+- related unit/contract tests and `scripts/phase0/storage-authz-harness.mjs`: negative actor matrix and real PostgreSQL lock-order proofs
+- `supabase/migrations/README.md`: local-only migration status and forward-repair boundary
+
+PRESERVED CONTRACTS
+- a revoked owner may still read/export and delete their own raw health data
+- a revoked owner cannot write new raw health data or re-enable partner sharing
+- all sharing toggles may always be turned off
+- partner projection remains sanitized and requires current consent plus explicit sharing
+- already accessed partner data is not falsely claimed to be remotely revocable
+
+VERIFICATION
+- `npm test`: PASS, 292 files / 4,099 tests
+- `npm run lint`: PASS
+- `npm run typecheck`: PASS
+- `git diff --check`: PASS
+- `scripts/agent/validate.sh migration`: P0, phase0, P5, write-floor, native contract, rollback, lint, typecheck, full Vitest, and diff-check PASS
+- phase0: PASS on fresh PostgreSQL 17 through migration 070, 614 assertions including verified lock waits and both transaction orders
+- default `npm run build` inside the validation script: FAIL because `VITE_SUPABASE_URL` and publishable key were intentionally absent
+- `VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_local_build_verification npm run build`: PASS on exact code HEAD
+- independent Sol Ultra review: PASS; confirmed Critical 0, High 0 and closed raw read/delete, raw write deny, sharing re-enable deny, race, and remount invariants
+
+NOT EXECUTED / UNVERIFIED
+- remote Supabase catalog and migration ordering: UNVERIFIED
+- Production migration 070: NOT APPLIED
+- authenticated Production actor matrix: UNVERIFIED
+- physical iPhone process-kill recovery, Secure Enclave, cold start, and accessibility: UNVERIFIED
+- server revoke plus simultaneous durable-storage failure across an OS process termination remains a documented residual; the same-process remount privacy lock is verified
+
+ROLLBACK / RECOVERY
+- do not restore the weaker 069 write boundary or rewrite an applied migration
+- if a deployment issue is found, issue a forward migration that fail-closes cycle writes and partner projection, then repair
+- client rollback must retain the ability to revoke; migration-first deployment intentionally makes unsupported re-grants fail closed
+
+STOPPED AT
+- exact completed boundary: cycle consent atomicity is locally implemented, committed, migration-gated, and independently approved
+- explicitly not changed: Production, Supabase remote, master, App Store, user data
+- next owner: Codex Control Tower
+- next action: establish the user-approved V5 business/server/media/IAP contract, then implement only default-off activation-ready surfaces
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote state UNVERIFIED
+- Vercel/TestFlight/App Store: NOT APPLIED
 
 ---
 
@@ -10787,3 +12453,1123 @@ PRODUCTION
 - Vercel: NOT APPLIED by this task; PR preview status only
 - TestFlight: NOT APPLIED
 - App Store: NOT APPLIED
+## 2026-09-01 — Diary · Garden · Shop V2 interrupted-state handoff
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: stopped-state capture and continuation handoff
+- Step: live dirty-tree audit, failure reproduction, checkpoint, Obsidian report, next-owner prompt
+- Previous Gate: Tasks 1–3 committed through `7e515fe`; Task 4 partially edited
+- This Gate: exact interrupted state preserved and documented; implementation remains blocked on red Task 4 tree
+
+DIRECTION CHECK
+- Product source checked: current user correction, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; current branch remains no-real-money. The later IAP request is separate and not implemented.
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, session protocol
+- Current-state checked: `bash scripts/agent/session-start.sh`, live Git branch/HEAD/status/diff, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-01 Companion Garden implementation and Git/CI closure entries
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-01
+- Does this task conflict with canonical direction? NO for state capture. IAP implementation would require a separate monetization direction check.
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop
+- Model: GPT-5 primary
+- Role: orchestrator / factual state capture; no implementation
+- PR: none
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: unchanged `7e515fe123d9e7a4c2345fc394326d34db0a96ee`; dirty tree explicitly not reviewed for release
+
+CHANGED / REVIEWED
+- file: `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`
+- function/component/migration: handoff and ready-to-paste Luna Max continuation prompt
+- what changed/reviewed: recorded seven committed slices, exact dirty files/staging boundary, current failures, do-not-damage rules, Task 4 completion order, validation and master promotion gates
+- why: allow a new owner to resume without discarding or misrepresenting the interrupted work
+- file: `control-tower/reports/codex/2026-09-01_2141_diary-garden-shop-v2-handoff_codex.md`
+- function/component/migration: non-canonical Obsidian task report
+- what changed/reviewed: factual stopped-state report with local/remote evidence boundaries
+- why: mandatory Control Tower record
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: no new app behavior; no IAP/payment implementation
+- Production: unchanged
+
+VERIFICATION
+- command: `npm run typecheck`
+- FAIL: 13 errors in the partially edited `CompanionGardenView.tsx`; proves current tree is not releasable
+- command: focused Vitest run over Garden view/route/styles, exact asset, and CSP files
+- FAIL: 18 failed / 21 passed; exact asset hash test passed but Task 4 render/CSS/precache work is incomplete
+- command: `git diff --check`
+- PASS: pre-handoff dirty implementation diff had no whitespace errors
+- command: `git fetch origin --prune`; SHA/divergence inspection
+- PASS: observed `origin/master` `bd4a9f3`, branch 0 behind / 7 ahead; no remote write
+
+REVIEW IMPACT
+- DELTA: docs-only handoff. Existing reviews do not cover the final future Task 4 HEAD.
+- whether an earlier review is stale: yes for any completed Task 4 claim; final exact HEAD requires fresh verification/review
+
+BLOCKERS
+- code: partial Task 4 render wiring, CSS, and precache implementation; current typecheck/tests red
+- environment: physical iPhone remains disconnected; device evidence not attempted
+- external/manual: IAP/refund request requires separate current-policy/legal research and monetization direction check
+
+STOPPED AT
+- exact completed boundary: live state reproduced, checkpointed, and handed off without modifying implementation or losing dirty work
+
+REMAINING
+- complete Task 4 from current diff, run focused/full/browser/native validation, obtain fresh independent review, finish Task 5 docs, then safely promote to master
+- separately research and draft Apple IAP/refund readiness; do not mix it into the free Garden branch
+
+NEXT ACTION
+- next owner: bounded Luna Max implementer, then primary orchestrator and Terra reviewer
+- tool/model: Luna Max implementation; Terra review; Daybreak Blue only if security/privacy/release boundaries materially change
+- 기준 SHA: `7e515fe123d9e7a4c2345fc394326d34db0a96ee` plus the exact preserved dirty tree
+- exact next task: follow the prompt in `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`, beginning with repairing Task 4 to focused test/typecheck GREEN
+
+DO NOT ADVANCE UNTIL
+- exact worktree/branch/HEAD/status are rechecked
+- no reset/stash/clean/overwrite occurs
+- focused tests, typecheck, lint, build, relevant browser checks, and fresh exact-HEAD review pass
+- live `origin/master` is rechecked before any non-force promotion
+
+PRODUCTION
+- NOT APPLIED: GitHub master, Vercel, Supabase, TestFlight, App Store, physical iPhone
+- UNVERIFIED: remote Supabase state and final dirty-tree runtime behavior
+
+---
+
+## 2026-09-01 — Diary · Garden · Shop V2 Task 4 local completion
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: interrupted Task 4 completion + Task 5 local verification/documentation
+- Previous Gate: Task 4 dirty tree with 13 type errors and 18/39 focused failures
+- This Gate: Task 4 implementation and local verification green; independent exact-tree review/promotion still pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/HANDOFF_DIARY_GARDEN_SHOP_V2_2026-09-01.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; this branch remains free/no-real-money and does not implement the separate IAP request
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, repository session protocol
+- Current-state checked: exact preserved worktree, branch/HEAD/status/diff, live `origin/master` via read-only `git ls-remote`
+- Latest relevant Work Log checked: immediately preceding Diary · Garden · Shop V2 interrupted-state handoff
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-01
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: ChatGPT + DevSpace
+- Model: GPT-5.6 Sol
+- Role: primary implementation integrator / verifier
+- PR: none created or modified by this continuation
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: committed HEAD unchanged `7e515fe123d9e7a4c2345fc394326d34db0a96ee`; verification covers the exact preserved uncommitted Task 4 tree on top of it
+
+CHANGED / REVIEWED
+- file: `src/assets/characters/paper-pair-v1.webp`, `src/features/diary/companionGardenAsset.test.ts`
+- function/component/migration: exact historical character asset and byte-identity guard
+- what changed/reviewed: restored the 1254×1254 historical WebP derivative and enforced SHA-256 `cac84b0179f4f0d05a655b4c41c03b644a7fdd67d3701c51a9de30c5f04ff856`; private source PNG with C2PA remains outside Git
+- why: use the approved original character source rather than a newly drawn replacement
+- file: `src/features/diary/CompanionGardenPage.tsx`, `src/features/diary/CompanionGardenView.tsx`, focused tests
+- function/component/migration: full-content Garden and companion interaction state machine
+- what changed/reviewed: hidden persistent tab bar, Shop app-bar action, exact sprite crops, two independent wanderers, 500ms continuous long-press, pre-activation movement cancellation, pointer-captured bounded drag, release/cancel cleanup, Enter/Space 900ms equivalent, owned-accessory filtering, reduced-motion behavior, minimal scene-object registry seam
+- why: finish Task 4 against its written acceptance criteria without adding economy/server scope
+- file: `src/styles/index.css`, `vite.config.ts`, `src/lib/cspExternalResources.test.ts`, `e2e/companionGarden.spec.ts`
+- function/component/migration: pickup feedback/motion accessibility, lazy asset boundary, browser acceptance
+- what changed/reviewed: continuous held wriggle, immediate pressed feedback, reduced-motion overrides, `paper-pair-v1` service-worker precache exclusion, portrait/landscape/reduced-motion E2E
+- why: make direct manipulation reliable while avoiding a 1.49MB unconditional offline-install cost
+- file: `src/components/HandwritingSection.test.tsx`, `src/components/ProfilePaperMenu.tsx`, `src/features/us/postComposerSheet.test.tsx`
+- function/component/migration: earlier Tasks 1–3 integration freshness
+- what changed/reviewed: immediate paper application assertion, non-stale owned-paper inventory read, Settings reachability through relocated My overflow
+- why: preserve the previously committed paper/menu direction while the combined branch is verified
+- file: `docs/V4_AS_BUILT.md`, `docs/CURRENT_STATE.md`, `control-tower/reports/codex/2026-09-01_2358_diary-garden-shop-v2-task4-local-closure_codex.md`
+- function/component/migration: factual as-built/current-state/Control Tower closure record
+- what changed/reviewed: replaced interrupted-state claims with verified local behavior and explicit remote/review boundaries
+- why: keep repository and Obsidian records aligned with the actual tree
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase SQL/RPC/RLS/storage work
+- product semantics: no score, streak, food, mission, paid entitlement, StoreKit, price, fake currency, server inventory, AI, analytics, or unrelated redesign added
+- Production: no GitHub master push/merge, Vercel deploy, Supabase mutation, TestFlight/App Store action, or physical-device installation
+
+VERIFICATION
+- command: `npm run typecheck`
+- PASS: TypeScript build graph is clean; the previous 13 `CompanionGardenView.tsx` errors are resolved
+- command: focused Vitest over `CompanionGardenView`, route, styles, exact asset, and CSP/service-worker tests
+- PASS: 5 files / 39 tests
+- command: focused ESLint plus `git diff --check`
+- PASS: changed Garden/build surface linted cleanly and no whitespace errors were found
+- command: `npm exec playwright test e2e/companionGarden.spec.ts`
+- PASS: 3/3; 375×812 portrait, 812×375 landscape, and reduced-motion cover exact crops, hidden nav, wandering, quick-tap rejection, long-press/drag/release, keyboard equivalent, Shop routing, and bounds
+- command: `npm run test`
+- PASS: 279 files / 3,904 tests
+- command: `npm run lint`
+- PASS: full repository lint
+- command: `npm run verify:native`
+- PASS: 4 files / 106 tests
+- command: placeholder production build with an invalid-looking API key
+- PASS AS NEGATIVE GATE: build correctly failed closed instead of accepting a non-key placeholder
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder npm run build`
+- PASS: non-secret shape-valid placeholder production build completed
+- command: inspect emitted Garden asset plus `dist/index.html` and `dist/sw.js`
+- PASS: `paper-pair-v1` emitted as a separate asset, absent from initial HTML and absent from service-worker precache
+- command: source hash verification
+- PASS: app WebP SHA-256 `cac84b...ff856`; private C2PA PNG SHA-256 `8b8db0...42d01`
+- command: `git ls-remote origin refs/heads/master` and branch divergence inspection
+- PASS: live `origin/master` remained `bd4a9f3...`, committed branch remained 0 behind / 7 ahead; read-only only
+
+REVIEW IMPACT
+- DELTA: UI/local-state/assets/build-precache semantics changed after the interrupted handoff, so prior Garden review cannot be inherited
+- whether an earlier review is stale: YES for final Task 4; independent exact-tree correctness/accessibility review is still UNVERIFIED
+
+BLOCKERS
+- code: none known from local unit/browser/native/build verification
+- environment: an independent Terra-equivalent exact-tree reviewer and write-capable commit/promotion path were not available through the current execution surface; physical iPhone was not exercised
+- external/manual: private provenance packet explicitly says legal uniqueness/non-infringement remains a manual rights-review question; current use stays free/optional and does not expand to paid merchandise/accessories
+
+STOPPED AT
+- exact completed boundary: Task 4 implementation, Task 5 local test/build verification, and repository/Control Tower documentation are green in the preserved dirty worktree; no remote write or commit was performed
+
+REMAINING
+- obtain an independent exact-tree review for correctness/regression/accessibility
+- after that review, stage intended files only, commit the preserved tree, rerun required CI, recheck live `origin/master`, and promote without force only if still conflict-free
+- physical-device QA remains a separate evidence gate; do not infer it from Playwright/native static tests
+
+NEXT ACTION
+- next owner: independent reviewer, then write-capable integration owner
+- tool/model: Terra-level reviewer or equivalent, followed by normal Git integration tooling
+- 기준 SHA: `7e515fe123d9e7a4c2345fc394326d34db0a96ee` plus this exact preserved dirty tree
+- exact next task: review the final diff against Task 4 acceptance criteria and prior Tasks 1–3 regressions; only after PASS commit named intended files and run remote CI/promotion gates
+
+DO NOT ADVANCE UNTIL
+- independent exact-tree review is PASS or its absence is explicitly accepted as a release risk
+- intended feature/docs files are separated from any unrelated local changes
+- live `origin/master` is rechecked immediately before integration
+- required CI is green on the exact commit being promoted
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical iPhone: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 independent review and local integration gate
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Task 4 review/fix loop, Task 5 exact-tree verification, application commit, factual release records
+- Previous Gate: locally green uncommitted Task 4 tree with independent review still pending
+- This Gate: application commit `8d463c1` independently reviewed and locally verified; push/Draft PR/remote CI still pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`, explicit user-approved no-real-money direction
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no-real-money, device-local Shop remains aligned and IAP/payment stays closed
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: exact worktree/branch/HEAD/status/diff, source call paths, current tests, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-01 interrupted handoff and Task 4 local completion entries immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop multi-agent orchestration
+- Model: GPT-5 primary orchestrator; Luna implementer/verifier; Sol security/state-boundary reviewer; Terra independent regression reviewer
+- Role: primary integration owner with bounded implementation and two independent final delta reviews
+- PR: none at this local gate
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: live `origin/master` `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `7e515fe123d9e7a4c2345fc394326d34db0a96ee`
+- New HEAD / Reviewed HEAD: application commit `8d463c1685d071634c88eef4564e0ec6844d5758`; following documentation commit is docs/report-only
+
+CHANGED / REVIEWED
+- file: `src/features/diary/CompanionGardenView.tsx`, `src/features/diary/companionGardenMotion.ts`, focused tests, `e2e/companionGarden.spec.ts`
+- function/component/migration: full-content Garden, physical geometry, pickup/drag input state machine
+- what changed/reviewed: exact 98×112 footprint containment, non-overlap wandering/drag, 430×180 epsilon boundary, rendered-position pickup freeze, pointer cancellation/lost-capture cleanup, finite keyboard/semantic activation, reduced motion, portrait/landscape browser coverage
+- why: close all Sol/Terra Critical/Important review findings and satisfy Task 4 acceptance criteria
+- file: `src/assets/characters/paper-pair-v1.webp`, `src/features/diary/companionGardenAsset.test.ts`, `vite.config.ts`, `src/lib/cspExternalResources.test.ts`
+- function/component/migration: exact historical asset and lazy/precache boundary
+- what changed/reviewed: exact WebP derivative is hash-guarded, emitted separately, and omitted from initial HTML/service-worker precache
+- why: use the approved historical character source without unconditional 1.49MB startup/offline cost
+- file: `src/App.tsx`, `src/lib/paperTexturePreference.ts`, `src/components/HandwritingSection.tsx`, `src/components/ProfilePaperMenu.tsx`, `src/features/shop/ShopPage.tsx` and tests
+- function/component/migration: owned-paper recovery, single paper-setting owner, truthful free Shop disclosure
+- what changed/reviewed: unowned retained selection is reconciled on app/shop/profile entry; Settings duplicate removed; Shop states all current items are free and no payment exists
+- why: close cross-feature ownership contradictions and malformed-state recovery without server/economy scope
+- file: `docs/CURRENT_STATE.md`, `docs/V4_AS_BUILT.md`, `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_0308_diary-garden-shop-v2-reviewed-closure_codex.md`
+- function/component/migration: factual current-state/as-built/ledger/Control Tower record
+- what changed/reviewed: replaced stale 3,904-PASS and review-unverified claims with exact final evidence and explicit remaining boundaries
+- why: repository documentation must match the actual reviewed tree
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no SQL/RPC/RLS/storage migration
+- product semantics: no paid entitlement, StoreKit, price, fake currency, server inventory, score, streak, mission, AI, analytics, or adjacent redesign
+- Production: no master merge, deploy, Supabase mutation, TestFlight/App Store action, or physical-device install
+
+VERIFICATION
+- command: focused feature Vitest across Garden view/state/geometry/route/styles/asset/wiring, Shop/local state, paper preference, Settings and CSP paths
+- PASS: 14 files / 148 tests
+- command: repeat former flaky no-overlap View test
+- PASS: Luna 30/30; Terra independent 20/20
+- command: `npm run test -- --exclude src/features/search/searchPage.test.tsx --exclude src/lib/e2eeRollback.test.ts`
+- PASS: 277 files / 3,874 tests
+- command: `npm run test -- src/lib/e2eeRollback.test.ts` in a throwaway PostgreSQL environment
+- PASS: 17/17
+- command: `npm run test -- src/features/search/searchPage.test.tsx`
+- FAIL: 26/27 passed; one date-dependent `soldier-next-leave` fixture uses 2026-09-01 and is now past current date. Test and Search implementation are unchanged from `origin/master`, so this is an existing unrelated failure, not counted as feature green.
+- command: aggregate current-tree unit evidence
+- PASS / FAIL: 3,917 PASS / 1 existing unrelated FAIL across 279 files
+- command: `npm run typecheck`; `npm run lint`; `git diff --check`; `git diff --cached --check`
+- PASS: TypeScript, full ESLint, and whitespace/staged-integrity gates are clean
+- command: `npm exec playwright test e2e/companionGarden.spec.ts`
+- PASS: 3/3 for 375×812 portrait, 812×375 landscape, reduced motion, exact crops, navigation, long press/drag/release, and containment
+- command: `npm run verify:native`
+- PASS: 4 files / 106 tests; native configuration/privacy/assets/permissions only, not physical-device behavior
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_placeholder npm run build`
+- PASS: production build with non-secret shape-valid placeholders
+- command: source hash plus built `dist/index.html`/`dist/sw.js` inspection
+- PASS: WebP SHA-256 `cac84b...ff856`; asset emitted separately and absent from initial HTML/precache
+- command: Sol final geometry delta review
+- PASS: former 430×180 Important resolved; 270 additional supported geometry combinations produced 0 overlap; new Critical 0 / Important 0
+- command: Terra final delta review
+- PASS: former test flake and 430×180 boundary closed; focused 44/44 and repeat 20/20; new Critical 0 / Important 0
+- command: `git fetch origin --prune`; ancestry/divergence check
+- PASS: live master `bd4a9f3`, merge base identical, branch 0 behind / 8 ahead after application commit; no force or remote write
+
+REVIEW IMPACT
+- FULL: final Task 4 behavior was independently reviewed after earlier findings; Sol and Terra final delta verdicts are PASS with no open Critical/Important
+- whether an earlier review is stale: earlier HOLD reports remain historical; final PASS applies to the content recorded in application commit `8d463c1`. The following docs-only commit requires only narrow factual delta review.
+
+BLOCKERS
+- code: no feature-code blocker found; one unchanged date-dependent Search test remains red outside this branch scope
+- environment: physical iOS/Android touch, VoiceOver/TalkBack/Switch Control, and device pointer-capture behavior remain UNVERIFIED
+- external/manual: remote CI awaits push/Draft PR; external C2PA/right-to-use/legal judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: reviewed application tree committed as `8d463c1`; factual docs prepared; no remote write or production mutation yet
+
+REMAINING
+- commit docs/report without `control-tower/Now.md`, push branch, create Draft PR, and inspect exact-commit remote checks
+- do not merge/deploy until repository approval and required CI are green
+
+NEXT ACTION
+- next owner: Codex primary integration owner, then repository maintainer/user for approval
+- tool/model: Git/GitHub integration; exact-commit CI; no additional implementation model unless CI finds a branch-caused failure
+- 기준 SHA: application commit `8d463c1685d071634c88eef4564e0ec6844d5758`
+- exact next task: commit factual documentation, push `codex/diary-garden-shop-v2`, open Draft PR, record CI result without merging
+
+DO NOT ADVANCE UNTIL
+- `control-tower/Now.md` is excluded from the feature/docs commit
+- live `origin/master` remains an ancestor and no force operation is used
+- Draft PR required checks pass on the exact final docs HEAD
+- physical-device and external-rights gaps are either completed or explicitly accepted as separate manual gates before release
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 Draft PR CI remediation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Draft PR browser-contract alignment and deterministic full-suite closure
+- Previous Gate: Draft PR #92 opened; reviewed application commit locally green; remote checks pending
+- This Gate: branch-caused browser expectations corrected; unrelated date-expired Search fixture isolated; exact final CI rerun pending
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`, current implemented paper ownership path
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; free local collection direction unchanged
+- Engineering source checked: `AGENTS.md`, `docs/skills/feature-build.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: PR #92 checks/logs, exact branch diff, local full suite, live `origin/master`
+- Latest relevant Work Log checked: 2026-09-02 independent review and local integration gate immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex desktop multi-agent orchestration
+- Model: GPT-5 primary orchestrator; Luna browser-test worker; Terra independent reviewer; prior Sol security/state review remains PASS
+- Role: CI diagnosis, bounded test maintenance, independent verification, integration owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `d5fdc0ed2d3b144ce0878f6f632dd0d2b7cbffe2`
+- New HEAD / Reviewed HEAD: browser contract `75c08708c5ea4f0bd788affa5b5dbdb2480cf967`; date fixture `4b8a8f94d8e8997275d2ca2c824103728e847745`; following report commit is docs-only
+
+CHANGED / REVIEWED
+- file: `e2e/realUsability.spec.ts`, `e2e/storyProfilePresentation.spec.ts`
+- function/component/migration: Diary-to-Shop route, free paper acquisition/application, Settings presentation regression
+- what changed/reviewed: replaced deleted labels/controls with the current `상점 열기`, `무료로 받기 → 적용하기 → 사용 중`, reload persistence, and Settings text-size-only contract
+- why: the first remote browser run correctly found stale tests after the approved paper-setting ownership move
+- file: `src/features/search/searchPage.test.tsx`
+- function/component/migration: upcoming leave fixture clock
+- what changed/reviewed: pins only the affected test to 2026-08-27 and restores real timers in a render-safe finally boundary
+- why: fixed vacation date 2026-09-01 expired on the 2026-09-02 UTC runner; product code is unchanged
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1011_diary-garden-shop-v2-ci-remediation_codex.md`
+- function/component/migration: factual CI remediation record
+- what changed/reviewed: records remote failures, bounded fixes, review results, local proof, and remaining exact-HEAD CI gate
+- why: keep the mandatory ledger and Control Tower aligned with repository reality
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: unchanged by CI remediation; no new feature, payment, or ownership rule
+- Production: no master merge/deploy, Supabase mutation, TestFlight/App Store action, or physical-device install
+
+VERIFICATION
+- command: `npx playwright test e2e/realUsability.spec.ts e2e/storyProfilePresentation.spec.ts`
+- PASS: 16/16; proves the corrected browser flows locally
+- command: GitHub `Real-browser creator/partner matrix` on `75c0870`
+- PASS: 5m44s; proves the production-bundle browser matrix, including the four former failures, is green on that commit
+- command: `npm run test -- src/features/search/searchPage.test.tsx`
+- PASS: 27/27 after deterministic clock isolation
+- command: `npm run test`
+- PASS: 279 files / 3,918 tests after deterministic clock isolation
+- command: `npm run typecheck`; `npm run lint`; `git diff --check`
+- PASS: TypeScript, ESLint, and whitespace integrity are clean
+- command: Terra review of browser delta and final clock-isolation delta
+- PASS: no Critical/Important; initial timer-leak HOLD was fixed and re-reviewed PASS
+
+REVIEW IMPACT
+- DELTA: tests/docs only; application/security semantics remain covered by the earlier Sol/Terra PASS on `8d463c1`
+- whether an earlier review is stale: NO for application semantics; browser/date-test deltas have their own Terra PASS
+
+BLOCKERS
+- code: none known locally
+- environment: exact final documentation-inclusive HEAD CI is pending; physical touch/accessibility remains UNVERIFIED
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: browser contract and deterministic Search fixture are committed/pushed and locally green; final factual docs are prepared for push
+
+REMAINING
+- wait for all required checks on the exact final Draft PR HEAD
+- do not merge/deploy; physical-device and external-rights gates remain separate
+
+NEXT ACTION
+- next owner: Codex primary orchestrator, then repository maintainer/user
+- tool/model: GitHub exact-HEAD CI; no new implementation model unless CI finds a branch-caused failure
+- 기준 SHA: documentation-inclusive HEAD following `4b8a8f94d8e8997275d2ca2c824103728e847745`
+- exact next task: push report commit, confirm every required check, release the claim, and hand off the Draft PR without promotion
+
+DO NOT ADVANCE UNTIL
+- exact final Draft PR HEAD required checks are green
+- repository approval is explicit
+- production/manual gates are separately satisfied or consciously deferred
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel: PR PREVIEW ONLY / production NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: NOT APPLIED / UNVERIFIED
+
+---
+
+## 2026-09-02 — Diary · Garden · Shop V2 physical iPhone installation
+
+PLAN POSITION
+- Phase: V4 diary experience / companion garden
+- Workstream: Diary · Garden · Shop V2
+- Step: Xcode 27 Beta physical-device build, signed install, launch, and visual smoke proof
+- Previous Gate: Draft PR #92 exact HEAD `f5fc1a0` had all required remote checks green; physical iOS remained UNVERIFIED
+- This Gate: connected iPhone installation and launch verified on the exact reviewed branch content
+
+DIRECTION CHECK
+- Product source checked: `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no business, pricing, storage, or AI-role change
+- Engineering source checked: `AGENTS.md`, `docs/skills/release-validation.md`, `docs/skills/control-tower.md`
+- Current-state checked: exact branch HEAD, clean feature diff, Xcode build result, installed-app inventory, launch result, and physical-device screenshot
+- Latest relevant Work Log checked: 2026-09-02 Draft PR CI remediation immediately above
+- MASTER PLAN version / 기준일: V4 current direction / 2026-09-02
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+OWNERSHIP
+- Tool: Codex primary orchestrator with Xcode 27.0 beta 6 and CoreDevice `devicectl`
+- Model: GPT-5 primary; no new implementation subagent required for device-only verification
+- Role: physical-device build/install/verification owner
+- PR: Draft PR #92
+- Branch: `codex/diary-garden-shop-v2`
+- Base SHA: `bd4a9f3c7d3adda70d4a7c906b8788bd914d29e0`
+- Old HEAD: `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- New HEAD / Reviewed HEAD: installed content `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`; following ledger/report commit is docs-only
+
+CHANGED / REVIEWED
+- file: no application/source file changed
+- function/component/migration: iOS Debug package for `app.gomsinlog`
+- what changed/reviewed: rebuilt the exact branch with configured public app environment, synced Capacitor assets, signed with the matching development team/profile, installed over the existing developer app, launched it, and captured a physical-device smoke screenshot
+- why: close the previously explicit physical iOS installation gate without merging, deploying, or changing product behavior
+- file: `docs/WORK_LOG.md`, `control-tower/reports/codex/2026-09-02_1042_diary-garden-shop-v2-iphone-install_codex.md`
+- function/component/migration: factual physical-device evidence record
+- what changed/reviewed: records toolchain, signing diagnosis, install/launch proof, boundaries, and remaining manual interaction scope
+- why: mandatory work ledger and Control Tower traceability
+
+EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no Supabase query or mutation
+- product semantics: unchanged
+- Production: no master merge, Vercel promotion, TestFlight upload, or App Store action
+
+VERIFICATION
+- command: configured `npm run build`; `npx cap sync ios`
+- PASS: web production bundle and Capacitor iOS assets completed; proves the installed native package contains the current branch web bundle
+- command: Xcode 27.0 beta 6 `xcodebuild` for physical destination with iOS 27 SDK and matching development team `CB3WLY278W`
+- PASS: `** BUILD SUCCEEDED **`; signed with the development profile for `app.gomsinlog`
+- command: `codesign --verify --deep --strict`; bundle/version/profile inspection
+- PASS: signature valid; bundle `app.gomsinlog`, version `0.1.0` (1), development profile UUID matched the downloaded app profile
+- command: Xcode 27 Beta `devicectl device install app`; `devicectl device process launch`
+- PASS: app installed and launched on the connected physical iPhone without uninstalling the existing bundle first
+- command: `devicectl device info apps --filter ...`; physical screenshot capture and visual inspection
+- PASS: installed inventory lists `곰신로그` / `app.gomsinlog` / `0.1.0` (1); screenshot shows the live `우리 정원` screen and Shop entry point
+
+REVIEW IMPACT
+- NONE: no application, security, data, or migration file changed; this entry only closes a physical-device evidence gap
+- whether an earlier review is stale: NO; installation used the exact already-reviewed application HEAD `f5fc1a0`
+
+BLOCKERS
+- code: none found during build/install/launch
+- environment: full touch interactions, long-press dragging, VoiceOver/Switch Control, and all Shop state transitions were not automated in this install-only pass
+- external/manual: external character-rights judgment remains manual and UNVERIFIED
+
+STOPPED AT
+- exact completed boundary: exact branch package built with Xcode 27 Beta, signed, installed, launched, inventoried, and visually smoke-verified on the connected iPhone
+
+REMAINING
+- user/manual interaction QA for Shop acquisition/application/reload, long-press garden movement, and accessibility gestures
+- Draft PR remains unmerged; no production or App Store promotion was performed
+
+NEXT ACTION
+- next owner: user/product QA, then repository maintainer after explicit approval
+- tool/model: physical iPhone manual touch/accessibility QA; existing Draft PR checks for the docs-only record commit
+- 기준 SHA: installed application `f5fc1a0717ca989e6917ea658f7b8ed724de7fbe`
+- exact next task: exercise the Shop and garden gestures on the installed phone, then decide whether Draft PR #92 is ready for approval
+
+DO NOT ADVANCE UNTIL
+- any release decision distinguishes this successful install/smoke proof from the still-manual interaction/accessibility coverage
+- repository approval is explicit and exact release HEAD checks are green
+- external character-rights gate is resolved or explicitly accepted by the responsible owner
+
+PRODUCTION
+- GitHub master: NOT APPLIED
+- Supabase: NOT APPLIED / remote catalog not queried
+- Vercel production: NOT APPLIED
+- TestFlight: NOT APPLIED
+- App Store: NOT APPLIED
+- physical device: APPLIED to the connected iPhone as a signed development build
+
+---
+
+## 2026-09-03 — 글자 없는 조용한 육성 정원·Realtime 브라우저 게이트 폐쇄
+
+### PLAN POSITION
+- Phase: V5-D Garden local release gate
+- Workstream: Diary Garden interaction, accessibility, and browser reliability
+- Step: 날짜/나무/설명 제거 → 직접 돌보기 반응 → 반복 모션 회귀 → current Realtime mock contract
+- Previous Gate: finite free starter reveal의 소유권 선저장·계정 전환·storage failure closure (`63beb82`)
+- This Gate: exact application HEAD `27c0805` local RELEASE
+
+### DIRECTION CHECK
+- Product source checked: latest 2026-09-03 product-owner correction, `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; 유료 확률형 뽑기·압박형 retention을 추가하지 않음
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`
+- Current-state checked: `docs/CURRENT_STATE.md`, branch/status/HEAD, actual source and browser output
+- Latest relevant Work Log checked: 2026-09-03 Garden pair-safe motion/accessibility gate
+- MASTER PLAN version / 기준일: V5 approved direction / 2026-09-03
+- Does this task conflict with canonical direction? YES, product owner가 명시적으로 좁게 supersede함
+- If YES, what conflict: 함께한 날 copy와 direct starter choice를 제거/변경했다. 현재 계약은 사용 가능한 정원에 가시 텍스트 없음, 압박 없는 직접 돌보기, 날짜 제한 없는 유한 무료 회전 공개다. 유료 랜덤 loot는 계속 금지한다.
+
+### OWNERSHIP
+- Tool: Codex primary orchestrator + independent Reviewer + independent Verifier
+- Model: GPT-5.6 Sol primary; configured Terra Reviewer and Luna Verifier roles
+- Role: primary 구현·root-cause investigation·통합, Reviewer exact-delta/cumulative 검사, Verifier exact-HEAD 명령 재실행
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `63beb82a48e64b7a3c827ddaa79bf3c21032b092`
+- Old HEAD: `63beb82a48e64b7a3c827ddaa79bf3c21032b092`
+- New HEAD / Reviewed HEAD: `27c0805c3eb24e1cb19c0a63b66f876b0847ace7`
+
+### CHANGED / REVIEWED
+- file: `src/features/diary/CompanionGardenView.tsx`, `CompanionGardenActionSheet.tsx`, `src/styles/index.css`
+- function/component/migration: available Garden surface, care state machine, exact-source character animation
+- what changed/reviewed: `함께한 N일`, 나무, 단계, 설명을 제거하고 흰 전체화면에 25×28px 원본 캐릭터 두 마리와 뒤로가기/놀기 아이콘만 남겼다. 쓰다듬기·인사하기·같이 놀기는 각각 유한 body/limb 반응을 내고 동일 행동 반복도 generation token으로 새로 시작한다.
+- why: 대시보드 문구보다 직접 만지고 반응하는 조용한 육성감을 만들면서 관계 점수·출석 압박을 피하기 위해
+- file: `src/features/diary/CompanionGardenView.test.tsx`, route/style tests
+- function/component/migration: timer generation, scheduler pause/resume, focus restoration, reduced motion, 44px target contracts
+- what changed/reviewed: 동일 행동 재실행, stale timer 무효화, care 동안 자율 이동 정지, action 후 새 idle cadence, unavailable cleanup을 고정했다.
+- why: 눈에 보이는 모션과 키보드/보조기술 경로가 같은 상태 의미를 갖게 하기 위해
+- file: `e2e/companionGarden.spec.ts`, `e2e/realUsability.spec.ts`
+- function/component/migration: actual Chrome Garden/Shop matrix
+- what changed/reviewed: 반복 CSS 모션, 320px action target, reduced motion, no-copy surface, pair geometry, 10.75초 Realtime subscribe boundary, finite free roulette persistence를 검증한다.
+- why: jsdom으로 증명할 수 없는 layout, animation, focus, viewport, protocol timeout을 실제 브라우저에서 닫기 위해
+- file: `e2e/fixtures/mockBackend.ts`
+- function/component/migration: Phoenix Realtime JSON wire decoder/encoder
+- what changed/reviewed: object-only mock을 current array `[join_ref, ref, topic, event, payload]`와 legacy object 모두 읽고 같은 wire format으로 reply하도록 고쳤다.
+- why: Supabase Realtime 2.111.0 join을 mock이 무응답으로 버려 10초 후 앱의 정상 quarantine을 오탐하던 원인을 제거하기 위해
+- file: `docs/V5_GARDEN_NATURAL_INTERACTION_PLAN_2026-09-03.md`, `docs/V4_AS_BUILT.md`, `docs/CURRENT_STATE.md`, `docs/DIARY_GARDEN_SHOP_V2_PLAN.md`, Control Tower report
+- function/component/migration: canonical/current/historical boundary record
+- what changed/reviewed: 최신 사용자 override, 구현 사실, 검증과 Production/실기기 미확인 범위를 기록하고 once-per-day/direct-choice 역사 계약을 superseded로 표시했다.
+- why: 다음 AI가 과거 계획을 현재 제품 계약으로 재활성화하지 않게 하기 위해
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: couple lifecycle, anniversary 계산, RLS, 기록/unread/briefing, E2EE, AI 의미 변경 없음
+- Production: push·merge·deploy·Supabase·TestFlight·App Store 변경 없음
+
+### VERIFICATION
+- command: Garden/Shop focused Vitest 11개 실제 파일 경로
+- PASS / FAIL / UNVERIFIED: PASS — 11 files / 171 tests
+- what it actually proves: view/state/motion/geometry/asset/route/wiring/local ownership 회귀
+- command: `npm run typecheck`; cumulative changed TS/TSX scoped ESLint; `git diff --check 63beb82..27c0805`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, 대상 lint, whitespace integrity
+- command: pre-fix temporary Realtime diagnostic browser spec
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — received 4 frames / sent 0, `unavailableAt: 10392ms`, 화면 `정원 확인 중`
+- what it actually proves: 캐릭터 timer가 아니라 object-only mock이 current array join을 무응답 처리한 것이 공통 원인
+- command: `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' npx playwright test e2e/companionGarden.spec.ts --project=chromium-390 --workers=1`
+- PASS / FAIL / UNVERIFIED: PASS — 11/11, retry 0; independent Verifier 재실행도 11/11 PASS
+- what it actually proves: 10초 경계 이후 availability, wordless surface, motion/pair gap, care repeat, touch/focus/reduced-motion/browser layout
+- command: same system Chrome `e2e/realUsability.spec.ts --grep 'finite free Shop reveal stays usable'`
+- PASS / FAIL / UNVERIFIED: PASS — 320px·393px 2/2; independent 재실행도 2/2 PASS
+- what it actually proves: finite free spinner, 44px, no overflow, reload persistence의 mock browser 경로
+- command: loopback URL + non-secret placeholder anon JWT `npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,546 modules; Garden 33.87 kB / gzip 11.43 kB; source sheet 1,489.08 kB lazy asset
+- what it actually proves: production-mode bundle 생성; 실제 backend 연결은 증명하지 않음
+- command: independent cumulative Garden review at `3137715` + Realtime harness delta review at `27c0805`
+- PASS / FAIL / UNVERIFIED: PASS — CRITICAL 0 / HIGH 0 / MEDIUM 0 / LOW 0
+- what it actually proves: 기능 누적 diff와 final test-wire delta에 알려진 차단 결함 없음
+- command: exact-HEAD full repository Vitest, current physical iPhone touch/VoiceOver/energy, remote RLS/Production
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: 이번 local slice 증거를 전체 앱·실기기·Production으로 확대 주장할 수 없음
+
+### REVIEW IMPACT
+- FULL: Garden surface/interaction/motion 계약은 누적 fresh review. Final `27c0805`는 test-harness-only DELTA review.
+- whether an earlier review is stale: NO for exact application checkpoint; 이후 Garden 또는 mock protocol 변경 시 재검토 필요
+
+### BLOCKERS
+- code: 이 local Garden gate에서 알려진 blocker 없음
+- environment: current physical iPhone touch, VoiceOver, reduced-motion, 10분 이상 energy profile 미실행
+- external/manual: 캐릭터/액세서리 상업적 권리, StoreKit 상품·App Review·server entitlement 미확인
+
+### STOPPED AT
+- exact completed boundary: 글자 없는 조용한 육성 정원 + 유한 무료 회전 공개 + current Realtime mock browser gate local RELEASE
+
+### REMAINING
+- exact HEAD 전체 repository suite
+- 1.489 MB source sheet decode/memory와 장시간 실제 iPhone energy 측정
+- 유료 액세서리/상호작용 건물은 권리·StoreKit·server ledger gate 뒤 별도 구현
+
+### NEXT ACTION
+- next owner: Codex Control Tower
+- tool/model: bounded photo reliability Worker + Verifier + independent security review where storage/data semantics change
+- 기준 SHA: docs commit의 parent application checkpoint `27c0805`
+- exact next task: `docs/V5_PHOTO_SAFETY_SLICE_PLAN_2026-09-03.md`의 안전한 선택·압축·retry 경계를 다시 검증하고 RC blocker부터 닫기
+
+### DO NOT ADVANCE UNTIL
+- 실기기 증거 없이 VoiceOver/energy PASS를 주장하지 않음
+- 실제 RLS/remote catalog 증거 없이 Supabase/Production PASS를 주장하지 않음
+- 권리와 server-authoritative entitlement 검증 전 유료 Garden 판매를 켜지 않음
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: 모든 remote·Production 상태를 변경하거나 조회하지 않음
+
+---
+
+## 2026-09-03 — 함께 자라는 중앙 나무·표현형 캐릭터 정원 local candidate
+
+### PLAN POSITION
+- Phase: V5-D Garden product foundation
+- Workstream: aspirational shared world, generated tree art, character motion, accessibility
+- Step: 첫 심기 → 일일 성장 → 걷기/뛰기/부끄러움/잡힘 → actual-browser boundary
+- Previous Gate: 글자 없는 흰 정원·유한 무료 starter reveal local release (`27c0805`)
+- This Gate: application `a96b0c45be5ea545ae2190c3e5878f50579a11c0` local candidate; final delta pending
+
+### DIRECTION CHECK
+- Product source checked: latest 2026-09-03 product-owner messages, `PRODUCT_V5_MASTER_DECISION`, `V4_AS_BUILT`, current Garden plan
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1`; 무료 연결/기본 정원과 향후 direct-purchase 표현 상품 원칙 유지
+- Engineering source checked: `AGENTS.md`, `ENGINEERING_ROADMAP` V5-D, `DIARY_GARDEN_SHOP_V2_PLAN`
+- Current-state checked: `session-start.sh`, exact branch/HEAD/status, code and system Chrome output
+- Latest relevant Work Log checked: 2026-09-03 글자 없는 조용한 육성 정원 gate
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? YES, latest explicit product-owner instruction resolves it
+- If YES, what conflict: 이전 `나무 없음`과 25×28px 제약을 중앙 성장 나무와 72×76px 캐릭터로 supersede했다. 점수·스트릭·needs/decay·유료 랜덤 loot 금지는 유지한다.
+
+### OWNERSHIP
+- Tool: Codex primary, OpenAI image generation, independent Terra Reviewer, system Chrome Playwright
+- Model: GPT-5.6 Sol primary; configured Reviewer
+- Role: product decision, test-first implementation, asset provenance, integration, browser verification, independent defect review
+- PR: none
+- Branch: `codex/sol-gomsinlog-rc-v4`
+- Base SHA: `2b10a8cf663f5757b1191160f49a19d123cd17bb`
+- Old HEAD: `2b10a8cf663f5757b1191160f49a19d123cd17bb`
+- New HEAD / Reviewed HEAD: `a96b0c45be5ea545ae2190c3e5878f50579a11c0`; post-fix exact delta pending
+
+### CHANGED / REVIEWED
+- file: `src/assets/garden/garden-tree-stage-{1..4}-v1.webp`, `CompanionGardenTree.tsx`, asset tests
+- function/component/migration: complete alpha tree family and one-image-per-stage renderer
+- what changed/reviewed: rejected false-checkerboard output, generated real RGBA art, losslessly cropped four complete trees, pinned hashes, removed crop-composite tree
+- why: prior stretched/composite tree was not commercially acceptable
+- file: `companionGarden.ts`, `CompanionGardenPage.tsx`, `companionGardenLocalState.ts` and tests
+- function/component/migration: account-scoped planting and daily visual growth
+- what changed/reviewed: successful first planting persists in local v2; v1 accessories load as planted; milestones remain 1/30/100/365 while height grows daily and does not shrink at one year
+- why: express accumulated time without a score or attendance pressure
+- file: `CompanionGardenView.tsx`, `gardenCharacterCrops.ts`, `companionGardenMotion.ts`, `index.css` and tests
+- function/component/migration: exact-source 72×76 companions and walk/run/shy/held state machine
+- what changed/reviewed: `살구/초록`, opposing limb phases, touch/encounter shy→safe run, four-limb held flail, pair-safe geometry, pending-reaction cancellation on reduced-motion/visibility/sheet/unavailable
+- why: replace mechanical drift/shake with legible nurturing behavior and preserve accessibility
+- file: `e2e/companionGarden.spec.ts`
+- function/component/migration: actual browser geometry, interaction, and growth regression
+- what changed/reviewed: 72×76 expectations plus 320/390 rendered-height test at 364→365 days
+- why: width-only unit tests missed intrinsic-aspect-ratio shrink
+- file: current/canonical/provenance docs and Control Tower report
+- function/component/migration: product override, implementation facts, asset provenance, evidence boundary
+- what changed/reviewed: records aspirational-world direction, exact derivatives/hashes, local proof, and remote/legal unknowns
+- why: prevent superseded no-tree/tiny-character plan from being reactivated
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged; no schema or remote query/mutation
+- product semantics: couple lifecycle, anniversary calculation, records, unread/briefing, AI, E2EE, account deletion unchanged
+- Production: no push, merge, deploy, Supabase, Vercel, TestFlight, or App Store action
+
+### VERIFICATION
+- command: reduced-motion transition regressions before fix
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 2 failures reproduced delayed shy/care run after reduce was enabled
+- what it actually proves: a real stale-timer accessibility race existed
+- command: height contract before implementation
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — 13 failures for missing height function/style
+- what it actually proves: old width contract did not encode visible-height monotonicity
+- command: focused Garden Vitest
+- PASS / FAIL / UNVERIFIED: PASS — 7 files / 167 tests
+- what it actually proves: planting, local migration, asset hash, growth, rig, timer/motion/geometry, style, route authority
+- command: `npm run typecheck`; scoped ESLint; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, changed-source lint, whitespace integrity
+- command: system Chrome `e2e/companionGarden.spec.ts --project=chromium-390 --workers=1`
+- PASS / FAIL / UNVERIFIED: PASS — 12/12, retry 0, 1.2 minutes
+- what it actually proves: local production bundle, Realtime boundary, one-year height, exact characters, collision/drag/actions, light/dark, landscape, small phone, reduced motion
+- command: `e2e/.artifacts/garden-final-a96b0c4-390.png`
+- PASS / FAIL / UNVERIFIED: PASS — mature tree and two full characters visible without checkerboard, seam, clipping, or body loss
+- what it actually proves: one 390px light frame, not a full animation cycle or physical-iPhone result
+- command: independent cumulative review before final height fix
+- PASS / FAIL / UNVERIFIED: MEDIUM 1 — one-year height regression; CRITICAL/HIGH/LOW 0; reproduced and fixed
+- what it actually proves: fresh post-fix exact-commit delta is still required
+- command: exact-HEAD full repository, physical iPhone, remote RLS/Production
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: Garden local evidence cannot be generalized to whole-app RC or Production
+
+### REVIEW IMPACT
+- FULL: assets, planting, growth, geometry, and interaction changed; older Garden reviews are stale
+- whether an earlier review is stale: YES until post-fix delta closes `a96b0c4`
+
+### BLOCKERS
+- code: fresh independent delta of the height fix and exact commit pending
+- environment: physical iPhone motion/VoiceOver/reduced-motion/10+ minute energy unverified
+- external/manual: historical character/accessory rights, StoreKit products, server entitlement, App Review unverified
+
+### STOPPED AT
+- exact completed boundary: committed Garden candidate with focused/browser tests and final screenshot; docs/final delta remain
+
+### REMAINING
+- exact-commit independent delta; whole-repo suite; physical-iPhone accessibility/energy
+- future world layout/building manifest, server sync, direct-purchase entitlement, owned-world editing
+
+### NEXT ACTION
+- next owner: Codex Control Tower
+- tool/model: Sol for V5-B auth/security; bounded workers for isolated UI; independent final reviewer
+- 기준 SHA: `a96b0c45be5ea545ae2190c3e5878f50579a11c0` plus docs commit
+- exact next task: Apple-primary/Google-secondary auth, default-OFF first; separately gate same-email linking and Apple deletion-token revocation
+
+### DO NOT ADVANCE UNTIL
+- Apple Production activation has same-email/private-relay negative tests and deletion revoke evidence
+- paid Garden has rights manifest, server transaction verification, refund fallback, and authoritative entitlement
+- local browser evidence is not presented as physical-iPhone or Production PASS
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: remote state was neither queried nor changed
+
+---
+
+- NOT APPLIED — no Supabase, Vercel, Apple, TestFlight or App Store mutation
+### 2026-08-30 · Kiro Sol · P1-3 Android ML Kit base-APK removal
+
+#### PLAN POSITION
+- Phase: iOS-first App Store integration
+- Workstream: Android packaging safety
+- Step: P1-3 closure
+- Previous Gate: Sol independent audit found ML Kit API 26 AAR forced into a minSdk 23 base APK through `tools:overrideLibrary`
+- This Gate: base APK excludes ML Kit; Android deterministic fallback contract remains
+
+#### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no customer, AI role, pricing, storage, or product-scope change
+- Engineering source checked: `docs/ENGINEERING_ROADMAP.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/skills/feature-build.md`
+- Current-state checked: exact branch/HEAD/status, Android Gradle/manifest/plugin, built dependency graph and merged manifest
+- Latest relevant Work Log checked: 2026-08-29 Partner Briefing integration and whole-app native audit entries
+- MASTER PLAN version / 기준일: V4 + Partner Briefing / 2026-08-30
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. iOS is the first store release; Android retains web/PWA and Supabase shared data, while Google Play is deferred.
+
+#### OWNERSHIP
+- Tool: Kiro
+- Model: kiro/gpt-5.6-sol
+- Role: implementation owner and local verifier
+- PR: none
+- Branch: `codex/app-store-integration-2026-08-29`
+- Base SHA: `d52007b46da98855626020e7d2e8d0c91fb1db60`
+- Old HEAD: `d52007b46da98855626020e7d2e8d0c91fb1db60`
+- New HEAD / Reviewed HEAD: local commit recorded after this entry
+
+#### CHANGED / REVIEWED
+- file: `packages/capacitor-on-device-briefing/android/**`
+- function/component/migration: Android Capacitor briefing plugin and package manifest/dependencies
+- what changed/reviewed: removed ML Kit GenAI Prompt, the minSdk override, inference engine, coroutines/JUnit-only dependencies and obsolete engine tests; retained the four-method bridge as an explicit `unsupported` / `E_UNAVAILABLE` provider
+- why: Google's current Prompt API requires API 26+, while the app remains minSdk 23 and Google Play is outside this release; removing the provider eliminates process-start class/provider risk on API 23–25
+- file: `src/lib/nativeConfig.test.ts`
+- function/component/migration: native package and merged-manifest guards
+- what changed/reviewed: asserts ML Kit, AICore permission, minSdk override and engine do not return; asserts the bridge remains fail-closed
+- why: make the packaging decision a runnable release guard
+- file: `docs/PARTNER_BRIEFING_ARCHITECTURE.md`
+- function/component/migration: Android provider current-state description
+- what changed/reviewed: changed Gate D from shipping/complete to deferred and documented deterministic Android behavior
+- why: repository documentation must match shipped code
+
+#### EXPLICITLY NOT CHANGED
+- crypto semantics: unchanged
+- DB/migration semantics: unchanged
+- product semantics: iOS provider, Partner Briefing TypeScript pipeline, JS provider contract, exact-source fallback and shared Supabase data unchanged
+- Production: no remote mutation, push, merge, deploy, App Store or Google Play action
+
+#### VERIFICATION
+- command: official Google ML Kit Prompt API Android guide checked 2026-08-30
+- PASS / FAIL / UNVERIFIED: PASS — current guide requires `minSdk = 26` and names `com.google.mlkit:genai-prompt:1.0.0-beta2`
+- what it actually proves: the removed AAR is not compatible with the app's minSdk 23 without an override; it does not test a device
+- command: `npm run verify:native`
+- PASS / FAIL / UNVERIFIED: PASS — 4 files / 112 tests
+- what it actually proves: tracked native config plus rebuilt merged-manifest exclusion guards
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/lib/nativeConfig.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 72 tests
+- what it actually proves: focused Android packaging and bridge static contract
+- command: `npx vitest run --config vitest.config.ts --configLoader runner src/features/story/storyRoutes.test.tsx`
+- PASS / FAIL / UNVERIFIED: PASS — 1 file / 38 tests
+- what it actually proves: the unchanged Story user path still renders its deterministic route when native refinement is unavailable; it is not physical Android evidence
+- command: `npm run typecheck`; `npx eslint src/lib/nativeConfig.test.ts`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TS build contract, changed TS lint, patch whitespace
+- command: SDK-scoped `./gradlew :gomsinlog-capacitor-on-device-briefing:compileDebugKotlin :app:processDebugManifest :app:assembleDebug --stacktrace`
+- PASS / FAIL / UNVERIFIED: PASS — BUILD SUCCESSFUL, 152 tasks, debug APK 16,533,481 bytes
+- what it actually proves: Android module compiles, manifest merges, and debug APK packages without ML Kit
+- command: SDK-scoped `./gradlew :app:testDebugUnitTest :gomsinlog-capacitor-on-device-briefing:dependencies --configuration debugRuntimeClasspath --stacktrace`
+- PASS / FAIL / UNVERIFIED: PASS — BUILD SUCCESSFUL, 113 tasks; plugin graph contains only Kotlin stdlib and Capacitor Android directly
+- what it actually proves: Android JVM config tests pass and plugin dependency graph has no ML Kit GenAI artifact
+- command: built merged-manifest `rg` for `com.google.mlkit|aicore.service.BIND_SERVICE|overrideLibrary|genai-prompt`
+- PASS / FAIL / UNVERIFIED: PASS — zero matches
+- what it actually proves: rebuilt debug manifest and plugin sources contain none of the removed packaging paths
+
+#### REVIEW IMPACT
+- DELTA — Android packaging/provider only. iOS, TypeScript Partner Briefing semantics, DB/RLS/auth/crypto review freshness unchanged.
+
+#### BLOCKERS
+- code: none
+- environment: API 23/24/25 physical-device cold start not run
+- external/manual: Android WebView deterministic fallback not observed on a physical Android device
+
+#### STOPPED AT
+- exact completed boundary: local Android package removal, rebuilt APK/manifest, static/type/lint/unit verification and single local commit
+
+#### REMAINING
+- API 23/24/25 physical-device cold-start and Android WebView fallback smoke remain UNVERIFIED
+- any future Google Play GenAI provider requires a new API-floor/package-isolation decision
+
+#### NEXT ACTION
+- next owner: release integrator
+- tool/model: Kiro/Sol delta review if this commit is rebased or conflicts
+- 기준 SHA: commit produced by this entry
+- exact next task: integrate without reintroducing ML Kit into the minSdk 23 base APK
+
+#### DO NOT ADVANCE UNTIL
+- any future Android model provider respects its declared minSdk without `overrideLibrary` and has physical-device startup evidence
+
+#### PRODUCTION
+- NOT APPLIED
+
+---
+
+## 2026-09-04 — account-deletion operation barrier · durable media outbox · E2EE release fuse
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence
+- Workstream: account lifecycle, outbound mutation safety, offline media durability
+- Step: account-deletion operation-lifetime barrier → exact-user mutation audit → immutable media retry plan → release fuse
+- Previous Gate: account-deletion bootstrap fence at `8a29e7f986142f2114a35c2cec9e696e70e71b99`
+- This Gate: local reliability commit `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+
+### DIRECTION CHECK
+- Product source checked: latest user-approved V5 direction, `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; no customer, monetization, storage-tier, AI-selection, or Memory Product semantic change
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, account-deletion/E2EE/outbox current code and tests
+- Current-state checked: `scripts/agent/session-start.sh`, exact branch/HEAD/status, current source and runnable suite
+- Latest relevant Work Log checked: 2026-09-03 realtime regression and Garden candidate entries plus account-deletion predecessor commits
+- MASTER PLAN version / 기준일: V5 / 2026-09-04
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex primary; independent reviewer feedback integrated before commit
+- Model: GPT-5.6 Sol primary; prior independent review supplied one remaining MEDIUM static-audit gap
+- Role: reliability implementation, integration, local verification, release-gate documentation
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `2e377afe622f6aa9da9b771c4097362365a07513`
+- Old HEAD: `2e377afe622f6aa9da9b771c4097362365a07513`
+- New HEAD / Reviewed HEAD: `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`; final exact-HEAD Sol Ultra review still pending
+
+### CHANGED / REVIEWED
+- file: `src/lib/accountDeletion.ts`, `src/lib/store.tsx`, server-mutation helpers and account-deletion tests
+- function/component/migration: operation-lifetime shared/exclusive Web Locks, intent lock, v2 recovery marker attempt authority, exact-user identity assertions
+- what changed/reviewed: outbound server writes now remain behind the same deletion barrier for their full operation; stale identity and a different deletion attempt fail closed; old Provider teardown cannot clear a surviving runtime
+- why: a preflight-only check left a race where deletion or account switching could happen after the check and before a write completed
+- file: `src/lib/outbox.ts`, `src/lib/outboxStorage.ts`, `src/lib/store.tsx`, media failure/outbox tests
+- function/component/migration: schema-v2 immutable media plan, stable UUID object paths, atomic IndexedDB row replacement, retry disposition and authoritative duplicate reconciliation
+- what changed/reviewed: queued media order/path identity survives retries; partial uploads no longer fabricate completion; definitive media errors block while connectivity failures remain retryable; an authoritative existing row is checked before decrypting or creating a media plan
+- why: prevent duplicate uploads, reordered attachments, plaintext handling before authority, and silent media loss during interrupted offline delivery
+- file: `build/buildEnv.ts`, `vite.config.ts`, E2EE runtime lifecycle and release tests
+- function/component/migration: exact-true E2EE production/release fuse and token-scoped runtime registrations
+- what changed/reviewed: release builds reject `VITE_E2EE_DEVICE_PROTECTION_ENABLED=true` until every reachable ceremony has the same account-deletion barrier and migration 076 is verified; stale Provider cleanup no longer tears down newer capabilities
+- why: keep currently incomplete crypto activation unreachable without removing the reviewed OFF-state implementation
+- file: `src/lib/gatePathCoverage.test.ts`, `src/lib/serverCallGate.test.ts`, author-role and feature regressions
+- function/component/migration: exact transport occurrence and exemption-token audit
+- what changed/reviewed: every direct Supabase/RPC/Edge mutation exemption is pinned to an expected transport token and occurrence count; adding a call inside an already allowlisted file now fails the audit
+- why: close the independent review's MEDIUM false-pass path
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, or ciphertext-format change; E2EE remains release-disabled when the flag is exactly `true`
+- DB/migration semantics: no migration or remote schema change in this commit
+- product semantics: records, exact-source briefing, unread/confirmed-through, couple lifecycle, role behavior, Garden, AI and health-sharing meaning unchanged
+- Production: no push, merge, deploy, Supabase, Vercel, TestFlight, App Store Connect, or customer-data action
+
+### VERIFICATION
+- command: focused account-deletion, store/outbox, server-gate and fixture suites during implementation
+- PASS / FAIL / UNVERIFIED: PASS — latest focused seven-file run 117 tests; static gate run 196 tests
+- what it actually proves: targeted race, exact-user, retry-plan and static-call-path regressions behave as encoded locally
+- command: `npm test -- --run --reporter=json --outputFile=/tmp/gomsinlog-full-vitest-latest.json`
+- PASS / FAIL / UNVERIFIED: PASS — 1,395 suites; 5,606 tests; 5,604 passed; 2 pending/skipped; 0 failed
+- what it actually proves: current local JavaScript/React unit and integration suite has no observed regression
+- command: `npm run typecheck`; `npm run lint`; `git diff --cached --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: TypeScript graph, repository ESLint policy and staged patch whitespace integrity
+- command: bare `npm run build`
+- PASS / FAIL / UNVERIFIED: EXPECTED FAIL — `VITE_SUPABASE_URL is missing or empty`
+- what it actually proves: the worktree does not silently emit a demo artifact without mandatory configuration
+- command: `VITE_SUPABASE_URL=https://example.supabase.co VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_test_public_key_not_a_secret npm run build`
+- PASS / FAIL / UNVERIFIED: PASS — 2,581 modules transformed, production Vite bundle emitted
+- what it actually proves: the source/type/bundle graph builds with a non-secret validation fixture; it is not a Production configuration check
+- command: prior independent cumulative reliability review and post-finding focused rerun
+- PASS / FAIL / UNVERIFIED: PASS WITH CLOSED MEDIUM — CRITICAL/HIGH 0; one MEDIUM stale allowlist risk fixed by exact occurrence checks
+- what it actually proves: the reported static-audit gap is closed; final exact-HEAD independent security/release review remains required
+- command: physical iPhone, remote migration 076, live Supabase/RLS, Production deployment
+- PASS / FAIL / UNVERIFIED: UNVERIFIED
+- what it actually proves: local test evidence cannot be generalized to remote or device behavior
+
+### REVIEW IMPACT
+- FULL: account-deletion operation authority, outbound mutation call paths, E2EE runtime lifetime and outbox media delivery changed; older whole-app reliability/security reviews are stale for these paths
+- whether an earlier review is stale: YES; final convergence requires a fresh exact-HEAD Sol Ultra review
+
+### BLOCKERS
+- code: Apple IAP consumption/refund evidence, transaction-scoped credit attribution and user consent are not yet implemented; sales remain OFF
+- environment: physical-iPhone account switch/deletion/offline interruption and accessibility checks remain UNVERIFIED
+- external/manual: migration 076 target-state, remote RLS, Apple Sandbox/TestFlight and legal operator values remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: local reliability implementation, whole-suite/lint/type/build verification and commit `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+
+### REMAINING
+- forward migration 079 and IAP consumption worker; actual export reserve/commit/release integration; exact-HEAD Sol Ultra security/release review; remote and device gates
+
+### NEXT ACTION
+- next owner: Codex Control Tower with one bounded Sol Max IAP worker
+- tool/model: GPT-5.6 Sol Max implementation; GPT-5.6 Sol Ultra final independent reviewer
+- 기준 SHA: `f4182593ff1f852e03dcedaa89b0ab7b76f0bf0a`
+- exact next task: build transaction-scoped refund/consumption evidence as additive migration 079 and server functions while keeping sale activation OFF
+
+### DO NOT ADVANCE UNTIL
+- no CRITICAL/HIGH remains in exact-HEAD Sol Ultra review
+- IAP sales, Apple login and E2EE activation fuses remain OFF until their external/manual gates have direct evidence
+- remote migrations/functions are not called APPLIED without querying the target project
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED: no remote state was queried or changed by this gate
+
+---
+
+## 2026-09-05 — RC Task 3 Apple IAP refund/consumption state-machine hardening
+
+### PLAN POSITION
+- Phase: V5 Release Candidate convergence (`V5-C` payment foundation toward `V5-G` verification)
+- Workstream: Apple IAP database/Edge correctness and rollout safety
+- Step: Task 3 — consumption/refund evidence race gates and expand/deploy/contract closure
+- Previous Gate: required starting commit `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- This Gate: local implementation commit `b30c2303b3e5536b7fe980b1590e071fd56f8253`
+
+### DIRECTION CHECK
+- Product source checked: `docs/PRODUCT_V5_MASTER_DECISION.md`, `docs/V4_AS_BUILT.md`, `docs/V4_BACKLOG.md`
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md`; checked because Task 3 hardens a future paid path, but it does not change product/pricing/paid-boundary strategy
+- Engineering source checked: `AGENTS.md`, `docs/ENGINEERING_ROADMAP.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-brief.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-architecture.md`
+- Current-state checked: exact worktree/branch/starting HEAD/status, repository code/tests, `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-04 RC reliability/IAP predecessor entry
+- MASTER PLAN version / 기준일: V5 / 2026-09-03
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: Codex
+- Model: GPT-5 Codex
+- Role: sole Task 3 implementation owner and local verifier
+- PR: none
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA: `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- Old HEAD: `d9c5d3899ef5e8e90eb1261dc4d053cd5fe3204c`
+- New HEAD / Reviewed HEAD: implementation `b30c2303b3e5536b7fe980b1590e071fd56f8253`; fresh independent exact-HEAD review pending
+
+### CHANGED / REVIEWED
+- file: `supabase/migrations/079_apple_iap_refund_consumption.sql`, `supabase/migrations/081_retire_apple_iap_v1_entrypoints.sql`, `scripts/phase0/apple-iap-ledger-harness.mjs`
+- function/component/migration: V2 transaction/credit/evidence/consent/review/consumption state, account lock order, V1 quarantine, sale hold, V1 external contract retirement
+- what changed/reviewed: added exact lots/allocations, trusted-ingress deadlines, immutable send authorization, exact late completion, bounded tokenless/deleted-account review facts, actor authorization, mixed-version and forward-recovery assertions; 081 only revokes two V1 service signatures after canary
+- why: prevent pooled-credit misattribution, deletion/consent/send races, blind unknown-result resend and unsafe rollout while keeping sales OFF
+- file: `supabase/functions/_shared/appleIapContract.ts`, `appleIapVerifier.ts`, `appleIapServerApi.ts` and covering tests
+- function/component/migration: verified Apple claim boundary, product-type rejection, Apple Server API timeout/Retry-After handling
+- what changed/reviewed: bounded quantity/revocation/reason claims, rejected Non-Renewing Subscription, interpreted numeric Retry-After as epoch milliseconds, pinned real request cancellation and credentials/environment checks
+- why: Edge and DB must accept the same reviewed contract and use Apple timing safely
+- file: `supabase/functions/apple-iap-sync/**`, `apple-iap-notifications/**`, `apple-iap-reconcile/**`, `apple-iap-consumption/**`, `supabase/config.toml`, `package.json`, `deno.lock`, `.gitignore`
+- function/component/migration: authenticated sync/consent, required nested notification, per-target reconcile, secret-gated consumption/alerts/review, frozen dependency entrypoints
+- what changed/reviewed: wired V2 RPCs, aggregate-only reconcile, claim/authorize/send/complete flow, bounded operations responses and frozen root Deno lock
+- why: turn the SQL contract into real fail-closed local Edge paths without activating scheduler or sales
+- file: `src/lib/iap/adapters.ts`, `src/lib/iap/runtime.ts`, `src/lib/iap/adapters.test.ts`
+- function/component/migration: exact reviewed notice consent adapter/runtime boundary
+- what changed/reviewed: added version/hash state and affirmative/withdrawal calls without inventing legal values or accepting caller account identity
+- why: provide a real application boundary while keeping UI/legal activation external
+- file: `docs/operations/apple-iap-rollout-runbook.md`, `docs/operations/rollback-runbook.md`, `supabase/migrations/README.md`, `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-report.md`
+- function/component/migration: rollout, recovery, evidence boundary and complete Task 3 report
+- what changed/reviewed: documented 079 expand → V2 deploy/canary with scheduler OFF → 081 contract, forward-only recovery, exact tests and unverified external gates
+- why: repository files/local tests must not be misrepresented as remote, App Store or Production evidence
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: no algorithm, key, nonce, recovery, ciphertext or E2EE change
+- DB/migration semantics: no remote migration; unrelated migration 080 untouched and unstaged; no sale-activation migration
+- product semantics: sale remains OFF; no Garden/Book Studio/UI/design/pricing/paid-boundary change and no fabricated legal/retention/fulfillment claim
+- Production: no push, merge, deploy, Supabase/Vercel, secret, cron, App Store Connect, Sandbox/TestFlight, device or customer-data action
+
+### VERIFICATION
+- command: strict focused TDD cycles listed in `.superpowers/sdd/gomsinlog-rc-final-plan/task-3-report.md`
+- PASS / FAIL / UNVERIFIED: PASS after observed REDs; final added deleted token-bound evidence test failed after 377 assertions, then passed after the minimal SQL change
+- what it actually proves: each reported bug had a runtime/actor behavior failure before its production change; existing green tests were not substituted for RED
+- command: `npm run check:iap`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: all four IAP Deno entrypoints resolve/typecheck using committed `deno.lock` in frozen mode
+- command: `npm run test:iap`
+- PASS / FAIL / UNVERIFIED: PASS — 59 passed, 0 failed
+- what it actually proves: local shared/Edge handler and real entrypoint behavior; it does not call Apple or deployed Edge
+- command: `npm run test:iap:ledger`
+- PASS / FAIL / UNVERIFIED: PASS — 435 PostgreSQL actor assertions
+- what it actually proves: ephemeral local PostgreSQL migration/role/state/race/rollout behavior including expected denial probes; it does not prove remote migration state
+- command: `npx vitest run src/lib/iap/adapters.test.ts src/lib/iap/runtime.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 2 files, 7 tests
+- what it actually proves: local app adapter/runtime consent contract
+- command: `npm run typecheck`; scoped app ESLint; 20-file Deno format check; harness `node --check`; `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: current local TypeScript graph, scoped formatting/lint/syntax and patch whitespace; the TypeScript run includes separately owned dirty worktree files
+- command: implementation `git diff --cached --stat`; `git diff --cached --check`; explicit forbidden-path match
+- PASS / FAIL / UNVERIFIED: PASS — 33 exact Task 3 files, no whitespace error, no forbidden path staged
+- what it actually proves: commit `b30c2303b3e5536b7fe980b1590e071fd56f8253` did not absorb the pre-existing build/offline, migration-080 or Control Tower work
+- command: remote Supabase/Edge, Production, Apple Server/App Store/Sandbox/TestFlight, physical device
+- PASS / FAIL / UNVERIFIED: NOT APPLIED / UNVERIFIED
+- what it actually proves: no local result is generalized to external state
+
+### REVIEW IMPACT
+- FULL: authorization/RLS-private DB schema, migrations, transaction/credit/refund state and external-send state machine changed
+- whether an earlier review is stale: YES; a fresh independent exact-HEAD critical security/release review is required before rollout
+
+### BLOCKERS
+- code: none found in the scoped local Task 3 acceptance suite
+- environment: full web suite/build and physical-device behavior were not run; the worktree contains separately owned forbidden build/offline changes
+- external/manual: approved legal notice/version/hash/retention, live fulfillment caller, remote catalog/backup/rehearsal, deployed V2 canary, scheduler secret/single-flight/alerts, Apple credentials/products/Sandbox/TestFlight/device and Production state remain UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: Task 3 implementation commit, complete report/ledger, local frozen Deno + Edge + PostgreSQL actor + app/type/lint/format verification; sales and scheduler remain OFF
+
+### REMAINING
+- fresh independent exact-HEAD critical review and every external/manual gate listed in the Task 3 report
+- no live Book Studio fulfillment caller was connected because Book Studio was explicitly forbidden
+
+### NEXT ACTION
+- next owner: independent critical security reviewer, then release integrator only if review is clear
+- tool/model: strongest available read-only security/database reviewer; deployment owner after approval
+- 기준 SHA: `b30c2303b3e5536b7fe980b1590e071fd56f8253` plus the accompanying report-only commit
+- exact next task: review the committed DB/Edge diff at exact HEAD, then rehearse 079 expand → deployed V2 canary with scheduler OFF → 081 contract in an authorized non-Production environment
+
+### DO NOT ADVANCE UNTIL
+- fresh exact-HEAD review has no blocking finding
+- approved legal/retention and real fulfillment evidence paths exist
+- remote backup/preflight/rehearsal and deployed canary are recorded
+- scheduler and sales stay OFF until their separate activation gates are explicitly approved
+
+### PRODUCTION
+- NOT APPLIED / UNVERIFIED
+
+---
+# 2026-09-06 — RC historical secret-scan gate
+
+- PLAN POSITION: RC integration / pre-design GitHub gate. Previous application verification remains exact-source scoped.
+- DIRECTION CHECK: V5 product and engineering roadmap checked; business NOT APPLICABLE; no direction conflict. Current Git and latest deployment log checked.
+- OWNERSHIP: Codex parent orchestration; Sol Max bounded scanner Worker. Branch `codex/rc-v5-final-fixes`, reviewed HEAD `7901e4a` plus scanner delta.
+- CHANGED: `.gitleaks.toml` exact-path/value false-positive exceptions only; no app/crypto/DB/production semantics changed.
+- VERIFICATION: parent 249-commit gitleaks scan zero findings; worker five same-path negative controls detected; diff check PASS. App suites not rerun for scanner-only delta.
+- REVIEW IMPACT: DELTA. GitHub CI and hosted/device gates remain outstanding.
+- NEXT: RC branch push, protected master PR checks, then approved notebook Home implementation. Automatic production deployment remains held.
+- Report: [RC history secret-scan gate](../control-tower/reports/codex/2026-09-06_gitleaks-integration-gate_codex.md).
+# 2026-09-06 — PR93 CI configuration repair
+
+- PLAN POSITION: existing-work master integration before notebook Home; previous GitHub gate FAIL.
+- DIRECTION CHECK: approved V5 and exact CI failures; business NOT APPLICABLE; no product direction change.
+- OWNERSHIP: Codex parent, Sol implementation, independent Terra Max initial review; base `065592f`, PR93.
+- CHANGED: pinned cold-cache Edge setup, missing Apple checks/tests, exact PG17, approved entitlement assertion, redacted narrow signing scanner and complete history scan. No app/DB/Production changes.
+- VERIFICATION: worker Edge82 and targeted Vitest45 PASS; parent scanner controls/worktree/diff PASS. GitHub rerun pending; browser7 failures remain.
+- REVIEW IMPACT: DELTA; initial scanner findings addressed and parent verified. No full-app approval implied.
+- NEXT: browser repair and CI, then merge before Home implementation. Hosted recovery/compatibility and beta gates remain open.
+- Report: [PR93 CI repair](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).
+# 2026-09-06 — PR93 second runner delta
+
+- Step: CI environment closure; base `44034d3`. Actual GitHub iOS and secret/signing checks PASS, but PG17 absent and Buffer type imports failed.
+- Changed: two web workflows install PG17 from official PGDG; two type-only IAP imports. Parent check:edge, YAML parse, scoped diff PASS. REVIEW IMPACT DELTA; runtime semantics unchanged; actual runner rerun pending.
+- Browser source/fixtures are a separate active workstream, not staged with these fixes. Production NOT APPLIED. iPhone unavailable.
+- Proposed Book bookmark contract records the separate owner's handoff without claiming persistence exists.
+- Evidence/remaining/rollback: [PR93 repair report](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).
+# 2026-09-06 — Browser CI closure and truthful summary progress
+
+- PLAN POSITION: pre-notebook master integration; base `be085e1`, PR93.
+- DIRECTION CHECK: latest approved EXP and summary original-link direction; business NOT APPLICABLE; no conflict. Live CI/current source checked.
+- CHANGED: narrow browser mock contracts/negative cases, current EXP expectations, isolated test port, watchdog timer cleanup, remove false fixed 1/1 summary progress. No security algorithms/DB/production change.
+- VERIFICATION: parent browser27 PASS/28.4s, StoryViewer52 PASS, Edge82 PASS, diff PASS. Worker normal-trace27 and Deno2.5.6 focused26 PASS. Hosted/device and new GitHub run pending.
+- REVIEW IMPACT: DELTA. Parent full diff review; mock authorization limitations explicit.
+- NEXT: push final test fixes, require GitHub checks, merge existing work, then actual notebook Home. Goal remains active; not beta complete.
+- Report: [Browser CI closure](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).

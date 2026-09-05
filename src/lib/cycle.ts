@@ -1,4 +1,7 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  runServerMutationBehindDeletionBarrier,
+  type ServerMutationBarrierContext,
+} from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
 import {
@@ -225,14 +228,32 @@ function invalidDraftFailure(): CycleWriteFailure {
 }
 
 /** No usable session, so the request cannot be attributed to a user. */
-function unauthenticatedFailure(): CycleWriteFailure {
-  return { ok: false, reason: 'auth_expired' };
-}
-
 async function currentUserId(): Promise<string | null> {
   if (!supabase) return null;
   const { data: { session } } = await supabase.auth.getSession();
   return session?.user.id || null;
+}
+
+/**
+ * Keep a raw-health request attached to the account that initiated it.
+ *
+ * A UI authority token supplies `expectedUserId` before the first await. If the
+ * auth session changes while a request is in flight, read filters and mutation
+ * payloads remain on the initiating account. A later token can therefore never
+ * turn an old request into a valid read or write for the newly signed-in user.
+ */
+async function cycleRequestUserId(expectedUserId?: string): Promise<string | null> {
+  return expectedUserId || currentUserId();
+}
+
+async function runCycleMutation<T>(
+  expectedUserId: string | undefined,
+  operation: (context: ServerMutationBarrierContext) => Promise<T>,
+): Promise<T | null> {
+  const result = await runServerMutationBehindDeletionBarrier(operation, {
+    expectedUserId: expectedUserId || 'current',
+  });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 export function toLocalDateString(date: Date): string {
@@ -534,9 +555,11 @@ export function activeCycleSupportSignal(
     && signal.expiresAt > nowIso) || null;
 }
 
-export async function fetchCycleSettingsResultFromDB(): Promise<CycleSettingsFetchResult> {
+export async function fetchCycleSettingsResultFromDB(
+  expectedUserId?: string,
+): Promise<CycleSettingsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -559,45 +582,45 @@ export async function fetchCycleSettingsResultFromDB(): Promise<CycleSettingsFet
   };
 }
 
-export async function fetchCycleSettingsFromDB(): Promise<CycleSettings | null> {
-  const result = await fetchCycleSettingsResultFromDB();
+export async function fetchCycleSettingsFromDB(expectedUserId?: string): Promise<CycleSettings | null> {
+  const result = await fetchCycleSettingsResultFromDB(expectedUserId);
   return result.ok ? result.settings : null;
 }
 
 export async function saveCycleSettingsToDB(
   averageCycleLength: number,
   averagePeriodLength: number,
+  expectedUserId?: string,
 ): Promise<CycleSettingsWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (validateCycleSettings(averageCycleLength, averagePeriodLength)) return invalidDraftFailure();
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_settings')
-    .upsert({
-      user_id: userId,
-      average_cycle_length: averageCycleLength,
-      average_period_length: averagePeriodLength,
-      updated_at: new Date().toISOString(),
-    })
-    .select('user_id, average_cycle_length, average_period_length')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save cycle settings.');
-    return writeFailure(error);
-  }
-  return {
-    ok: true,
-    settings: {
-      userId: data.user_id,
-      averageCycleLength: data.average_cycle_length,
-      averagePeriodLength: data.average_period_length,
-    },
-  };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_settings')
+      .upsert({
+        user_id: userId,
+        average_cycle_length: averageCycleLength,
+        average_period_length: averagePeriodLength,
+        updated_at: new Date().toISOString(),
+      })
+      .select('user_id, average_cycle_length, average_period_length')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save cycle settings.');
+      return writeFailure(error);
+    }
+    return {
+      ok: true as const,
+      settings: {
+        userId: data.user_id,
+        averageCycleLength: data.average_cycle_length,
+        averagePeriodLength: data.average_period_length,
+      },
+    };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function fetchCycleEntriesResultFromDB(): Promise<CycleEntriesFetchResult> {
@@ -631,30 +654,29 @@ export async function saveCycleEntryToDB(
 ): Promise<CycleEntryWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   const draft = { startDate, endDate, notes, symptoms };
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (validateCycleEntryDraft(draft)) return invalidDraftFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_entries')
-    .upsert({
-      user_id: userId,
-      start_date: startDate,
-      end_date: endDate || null,
-      notes: notes?.trim() || null,
-      symptoms,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id, start_date' })
-    .select('id, user_id, start_date, end_date, notes, symptoms')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save cycle entry.');
-    return writeFailure(error);
-  }
-  return { ok: true, entry: mapCycleEntryRow(data) };
+  const result = await runCycleMutation(undefined, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_entries')
+      .upsert({
+        user_id: userId,
+        start_date: startDate,
+        end_date: endDate || null,
+        notes: notes?.trim() || null,
+        symptoms,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, start_date' })
+      .select('id, user_id, start_date, end_date, notes, symptoms')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save cycle entry.');
+      return writeFailure(error);
+    }
+    return { ok: true as const, entry: mapCycleEntryRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function updateCycleEntryInDB(
@@ -665,57 +687,53 @@ export async function updateCycleEntryInDB(
   // No target id: there is nothing to update, which is not a transport problem.
   if (!id) return { ok: false, reason: 'not_found' };
   if (validateCycleEntryDraft(draft)) return invalidDraftFailure();
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_entries')
-    .update({
-      start_date: draft.startDate,
-      end_date: draft.endDate || null,
-      notes: draft.notes?.trim() || null,
-      symptoms: draft.symptoms,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id, user_id, start_date, end_date, notes, symptoms')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to update cycle entry.');
-    return writeFailure(error);
-  }
-  // The filters pin id + owner, so an empty answer is an ownership/visibility
-  // verdict rather than a failed request.
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true, entry: mapCycleEntryRow(data) };
+  const result = await runCycleMutation(undefined, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_entries')
+      .update({
+        start_date: draft.startDate,
+        end_date: draft.endDate || null,
+        notes: draft.notes?.trim() || null,
+        symptoms: draft.symptoms,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id, user_id, start_date, end_date, notes, symptoms')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to update cycle entry.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const, entry: mapCycleEntryRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function deleteCycleEntryFromDB(id: string): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-  const { data, error } = await supabase
-    .from('cycle_entries')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to delete cycle entry.');
-    return writeFailure(error);
-  }
-  // Nothing was deleted: the row is gone or was never this user's.
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true };
+  const result = await runCycleMutation(undefined, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_entries')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete cycle entry.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function fetchCycleSupportSignalsResultFromDB(
@@ -757,58 +775,58 @@ export async function createCycleSupportSignalInDB(
   input: CreateCycleSupportSignalInput,
 ): Promise<CycleSupportWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
-  const userId = await currentUserId();
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  if (!userId) return unauthenticatedFailure();
-  const payload = buildCycleSupportPayload(input, userId);
-  if (!payload) return invalidDraftFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_support_signals')
-    .insert(payload)
-    .select('id, couple_id, owner_id, kind, message, shared_for_date, expires_at, revoked_at, created_at, updated_at')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to create cycle support signal.');
-    return writeFailure(error);
-  }
-  return { ok: true, signal: mapCycleSupportSignalRow(data) };
+  const result = await runCycleMutation(undefined, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const payload = buildCycleSupportPayload(input, userId);
+    if (!payload) return invalidDraftFailure();
+    const { data, error } = await supabase!
+      .from('cycle_support_signals')
+      .insert(payload)
+      .select('id, couple_id, owner_id, kind, message, shared_for_date, expires_at, revoked_at, created_at, updated_at')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to create cycle support signal.');
+      return writeFailure(error);
+    }
+    return { ok: true as const, signal: mapCycleSupportSignalRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function revokeCycleSupportSignalFromDB(id: string): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-  const revokedAt = new Date().toISOString();
-  const { data, error } = await supabase
-    .from('cycle_support_signals')
-    .update({ revoked_at: revokedAt, updated_at: revokedAt })
-    .eq('id', id)
-    .eq('owner_id', userId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to revoke cycle support signal.');
-    return writeFailure(error);
-  }
-  // Nothing was revoked: the signal is gone or was never this user's to share.
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true };
+  const result = await runCycleMutation(undefined, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const revokedAt = new Date().toISOString();
+    const { data, error } = await supabase!
+      .from('cycle_support_signals')
+      .update({ revoked_at: revokedAt, updated_at: revokedAt })
+      .eq('id', id)
+      .eq('owner_id', userId)
+      .select('id')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to revoke cycle support signal.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const };
+  });
+  return result || deletionGateFailure();
 }
 
 // =============================================================
 // V3 CYCLE PERIODS & DAILY LOGS API
 // =============================================================
 
-export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetchResult> {
+export async function fetchCyclePeriodsResultFromDB(
+  expectedUserId?: string,
+): Promise<CyclePeriodsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -824,103 +842,110 @@ export async function fetchCyclePeriodsResultFromDB(): Promise<CyclePeriodsFetch
   return { ok: true, periods: (data || []).map(mapCyclePeriodRow) };
 }
 
-export async function fetchCyclePeriodsFromDB(): Promise<CyclePeriod[]> {
-  const result = await fetchCyclePeriodsResultFromDB();
+export async function fetchCyclePeriodsFromDB(expectedUserId?: string): Promise<CyclePeriod[]> {
+  const result = await fetchCyclePeriodsResultFromDB(expectedUserId);
   return result.ok ? result.periods : [];
 }
 
 export async function saveCyclePeriodToDB(
   startDate: string,
   endDate?: string,
+  expectedUserId?: string,
 ): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(startDate)) return invalidDraftFailure();
   if (endDate && (!isCalendarDate(endDate) || endDate < startDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_periods')
-    .upsert({
-      user_id: userId,
-      start_date: startDate,
-      end_date: endDate || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id, start_date' })
-    .select('id, user_id, start_date, end_date, created_at, updated_at')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save cycle period.');
-    return writeFailure(error);
-  }
-  return { ok: true, period: mapCyclePeriodRow(data) };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_periods')
+      .upsert({
+        user_id: userId,
+        start_date: startDate,
+        end_date: endDate || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, start_date' })
+      .select('id, user_id, start_date, end_date, created_at, updated_at')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save cycle period.');
+      return writeFailure(error);
+    }
+    return { ok: true as const, period: mapCyclePeriodRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
 export async function updateCyclePeriodInDB(
   id: string,
   startDate: string,
   endDate?: string,
+  expectedUserId?: string,
 ): Promise<CyclePeriodWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(startDate)) return invalidDraftFailure();
   if (endDate && (!isCalendarDate(endDate) || endDate < startDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_periods')
-    .update({
-      start_date: startDate,
-      end_date: endDate || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id, user_id, start_date, end_date, created_at, updated_at')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to update cycle period.');
-    return writeFailure(error);
-  }
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true, period: mapCyclePeriodRow(data) };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_periods')
+      .update({
+        start_date: startDate,
+        end_date: endDate || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id, user_id, start_date, end_date, created_at, updated_at')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to update cycle period.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const, period: mapCyclePeriodRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
-export async function deleteCyclePeriodFromDB(id: string): Promise<CycleDeleteResult> {
+export async function deleteCyclePeriodFromDB(
+  id: string,
+  expectedUserId?: string,
+): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_periods')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to delete cycle period.');
-    return writeFailure(error);
-  }
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_periods')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete cycle period.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const };
+  });
+  return result || deletionGateFailure();
 }
 
 // -------------------------------------------------------------
 // CYCLE DAILY LOGS API
 // -------------------------------------------------------------
 
-export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsFetchResult> {
+export async function fetchCycleDailyLogsResultFromDB(
+  expectedUserId?: string,
+): Promise<CycleDailyLogsFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return { ok: false, reason: 'unauthenticated' };
 
   const { data, error } = await supabase
@@ -936,8 +961,8 @@ export async function fetchCycleDailyLogsResultFromDB(): Promise<CycleDailyLogsF
   return { ok: true, logs: (data || []).map(mapCycleDailyLogRow) };
 }
 
-export async function fetchCycleDailyLogsFromDB(): Promise<CycleDailyLog[]> {
-  const result = await fetchCycleDailyLogsResultFromDB();
+export async function fetchCycleDailyLogsFromDB(expectedUserId?: string): Promise<CycleDailyLog[]> {
+  const result = await fetchCycleDailyLogsResultFromDB(expectedUserId);
   return result.ok ? result.logs : [];
 }
 
@@ -950,63 +975,69 @@ export async function saveCycleDailyLogToDB(
     mood?: CycleMood;
     note?: string;
   },
+  expectedUserId?: string,
 ): Promise<CycleDailyLogWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
   if (!isCalendarDate(logDate)) return invalidDraftFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_daily_logs')
-    .upsert({
-      user_id: userId,
-      log_date: logDate,
-      flow: options?.flow || null,
-      pain_level: options?.painLevel || null,
-      symptoms: symptoms || [],
-      mood: options?.mood || null,
-      note: options?.note?.trim() || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'user_id, log_date' })
-    .select('id, user_id, log_date, flow, pain_level, symptoms, mood, note, created_at, updated_at')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save cycle daily log.');
-    return writeFailure(error);
-  }
-  return { ok: true, log: mapCycleDailyLogRow(data) };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_daily_logs')
+      .upsert({
+        user_id: userId,
+        log_date: logDate,
+        flow: options?.flow || null,
+        pain_level: options?.painLevel || null,
+        symptoms: symptoms || [],
+        mood: options?.mood || null,
+        note: options?.note?.trim() || null,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id, log_date' })
+      .select('id, user_id, log_date, flow, pain_level, symptoms, mood, note, created_at, updated_at')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save cycle daily log.');
+      return writeFailure(error);
+    }
+    return { ok: true as const, log: mapCycleDailyLogRow(data) };
+  });
+  return result || deletionGateFailure();
 }
 
-export async function deleteCycleDailyLogFromDB(id: string): Promise<CycleDeleteResult> {
+export async function deleteCycleDailyLogFromDB(
+  id: string,
+  expectedUserId?: string,
+): Promise<CycleDeleteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
   if (!id) return { ok: false, reason: 'not_found' };
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const { data, error } = await supabase
-    .from('cycle_daily_logs')
-    .delete()
-    .eq('id', id)
-    .eq('user_id', userId)
-    .select('id')
-    .maybeSingle();
-
-  if (error) {
-    console.error('[gomsinlog] Failed to delete cycle daily log.');
-    return writeFailure(error);
-  }
-  if (!data) return { ok: false, reason: 'not_found' };
-  return { ok: true };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!
+      .from('cycle_daily_logs')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id')
+      .maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete cycle daily log.');
+      return writeFailure(error);
+    }
+    if (!data) return { ok: false as const, reason: 'not_found' as const };
+    return { ok: true as const };
+  });
+  return result || deletionGateFailure();
 }
 
 // -------------------------------------------------------------
 // SHARING PREFERENCES & CONSENT DB API
 // -------------------------------------------------------------
 
-export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharingPreferences> {
+export async function fetchCycleSharingPreferencesFromDB(
+  expectedUserId?: string,
+): Promise<CycleSharingPreferences> {
   const defaultPrefs: CycleSharingPreferences = {
     userId: '',
     shareCurrentPeriod: false,
@@ -1014,7 +1045,7 @@ export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharing
     shareFertilityWindow: false,
   };
   if (!isSupabaseConfigured || !supabase) return defaultPrefs;
-  const userId = await currentUserId();
+  const userId = await cycleRequestUserId(expectedUserId);
   if (!userId) return defaultPrefs;
 
   const { data, error } = await supabase
@@ -1024,12 +1055,10 @@ export async function fetchCycleSharingPreferencesFromDB(): Promise<CycleSharing
     .maybeSingle();
 
   if (error || !data) return { ...defaultPrefs, userId };
-  return {
-    userId: data.user_id,
-    shareCurrentPeriod: !!data.share_current_period,
-    sharePredictionWindow: !!data.share_prediction_window,
-    shareFertilityWindow: !!data.share_fertility_window,
-  };
+  // Automatic partner projection is disabled. Read the row only to preserve
+  // identity and migration compatibility; legacy true values are never surfaced
+  // back into the current client.
+  return { ...defaultPrefs, userId: data.user_id };
 }
 
 /**
@@ -1045,42 +1074,40 @@ export type CycleSharingPreferencesWriteResult =
   | CycleWriteFailure;
 
 export async function saveCycleSharingPreferencesToDB(
-  prefs: Partial<CycleSharingPreferences>,
+  _prefs: Partial<CycleSharingPreferences>,
+  expectedUserId?: string,
 ): Promise<CycleSharingPreferencesWriteResult> {
   if (!isSupabaseConfigured || !supabase) return unconfiguredFailure();
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return deletionGateFailure();
-  const userId = await currentUserId();
-  if (!userId) return unauthenticatedFailure();
-
-  const current = await fetchCycleSharingPreferencesFromDB();
-  const next = {
-    user_id: userId,
-    share_current_period: prefs.shareCurrentPeriod ?? current.shareCurrentPeriod,
-    share_prediction_window: prefs.sharePredictionWindow ?? current.sharePredictionWindow,
-    share_fertility_window: prefs.shareFertilityWindow ?? current.shareFertilityWindow,
-    updated_at: new Date().toISOString(),
-  };
-
-  const { data, error } = await supabase
-    .from('cycle_sharing_preferences')
-    .upsert(next)
-    .select('user_id, share_current_period, share_prediction_window, share_fertility_window')
-    .single();
-
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save sharing preferences.');
-    return writeFailure(error);
-  }
-  return {
-    ok: true,
-    preferences: {
-      userId: data.user_id,
-      shareCurrentPeriod: !!data.share_current_period,
-      sharePredictionWindow: !!data.share_prediction_window,
-      shareFertilityWindow: !!data.share_fertility_window,
-    },
-  };
+  const result = await runCycleMutation(expectedUserId, async ({ userId, assertCurrent }) => {
+    assertCurrent();
+    const next = {
+      user_id: userId,
+      share_current_period: false,
+      share_prediction_window: false,
+      share_fertility_window: false,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error } = await supabase!
+      .from('cycle_sharing_preferences')
+      .upsert(next)
+      .select('user_id, share_current_period, share_prediction_window, share_fertility_window')
+      .single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save sharing preferences.');
+      return writeFailure(error);
+    }
+    return {
+      ok: true as const,
+      preferences: {
+        userId: data.user_id,
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      },
+    };
+  });
+  return result || deletionGateFailure();
 }
 
 // -------------------------------------------------------------
@@ -1090,54 +1117,19 @@ export async function saveCycleSharingPreferencesToDB(
 /**
  * Read the sanitized cycle projection the partner is allowed to see.
  *
- * This is the ONLY path by which cycle information reaches a partner. It calls
- * `get_partner_cycle_projection()`, a SECURITY DEFINER RPC that reads the
- * owner's raw tables and returns nothing but the booleans and date ranges the
- * owner explicitly turned on. The partner's own credentials can never read
- * `cycle_periods`, `cycle_daily_logs`, `cycle_settings`,
- * `cycle_sharing_preferences`, or `user_sensitive_consents` — those stay
- * owner-only under RLS.
- *
- * Before this existed the three sharing toggles wrote to the database and
- * changed nothing a partner could see. The promise was recorded and never kept.
+ * Automatic cycle projection is disabled until a separate partner-provision
+ * consent contract exists. Keep this compatibility function fail-closed so a
+ * stale caller cannot revive the old RPC path. Deliberate, expiring support
+ * signals use their own sanitized table and API.
  */
 export async function fetchPartnerCycleProjectionFromDB(): Promise<CyclePartnerProjectionFetchResult> {
   if (!isSupabaseConfigured || !supabase) return fetchFailure();
   const userId = await currentUserId();
   if (!userId) return { ok: false, reason: 'unauthenticated' };
-
-  const { data, error } = await supabase.rpc('get_partner_cycle_projection');
-
-  if (error) {
-    console.error('[gomsinlog] Failed to fetch partner cycle projection.');
-    // `PGRST202` is the missing-function answer, the RPC analogue of a missing
-    // table. Reporting it as a bad connection would invite a pointless retry.
-    if (error.code === 'PGRST202') return { ok: false, reason: 'not_deployed' };
-    return fetchFailure(error);
-  }
-
-  // No row means there is nothing to project: no active couple, or no partner.
-  const row = Array.isArray(data) ? data[0] : data;
-  if (!row) return { ok: true, projection: null };
-
-  return {
-    ok: true,
-    projection: {
-      isCurrentPeriodShared: !!row.has_current_period_status,
-      isPeriodActive: !!row.current_period_active,
-      isPredictionShared: !!row.has_prediction_window,
-      predictedWindowStart: row.prediction_window_start || undefined,
-      predictedWindowEnd: row.prediction_window_end || undefined,
-      isFertilityShared: !!row.has_fertility_window,
-      fertilityWindowStart: row.fertility_window_start || undefined,
-      fertilityWindowEnd: row.fertility_window_end || undefined,
-    },
-  };
+  return { ok: true, projection: null };
 }
 
-/** True when the owner has turned on nothing at all. */
-export function isPartnerProjectionEmpty(projection: CyclePartnerProjection): boolean {
-  return !projection.isCurrentPeriodShared
-    && !projection.isPredictionShared
-    && !projection.isFertilityShared;
+/** Automatic projection is always empty in the current privacy contract. */
+export function isPartnerProjectionEmpty(_projection: CyclePartnerProjection): boolean {
+  return true;
 }

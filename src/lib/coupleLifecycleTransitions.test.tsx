@@ -235,7 +235,11 @@ describe('couple lifecycle transitions', () => {
   // device only learns about it through membership reconciliation.
   it('moves the lifecycle off connected when the membership is revoked remotely', async () => {
     await mountConnectedAccountA();
-    const channel = mockSupabase.channel.mock.results[0].value as {
+    const authoritativeChannelIndex = mockSupabase.channel.mock.calls.findIndex(
+      ([name]) => name === 'couple-sync:couple-1',
+    );
+    expect(authoritativeChannelIndex).toBeGreaterThanOrEqual(0);
+    const channel = mockSupabase.channel.mock.results[authoritativeChannelIndex].value as {
       on: ReturnType<typeof vi.fn>;
     };
     const membershipCall = channel.on.mock.calls.find(

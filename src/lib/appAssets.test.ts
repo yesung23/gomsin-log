@@ -1,6 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import sharp from 'sharp';
+import { describe, expect, it } from 'vitest';
+
+type MarkOnlySvg = (source: string) => string;
+
+const { markOnlySvg } = await import('../../scripts/assets/generate-app-assets.mjs') as {
+  markOnlySvg: MarkOnlySvg;
+};
 
 /**
  * H-1: the store-facing icons are real rasters in the formats the stores accept.
@@ -70,6 +78,93 @@ function hasTransparencyChunk(relativePath: string): boolean {
   return readFileSync(resolve(process.cwd(), relativePath)).includes(Buffer.from('tRNS', 'ascii'));
 }
 
+async function readPixel(relativePath: string, x: number, y: number): Promise<number[]> {
+  const { data, info } = await sharp(resolve(process.cwd(), relativePath))
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const offset = (y * info.width + x) * info.channels;
+  return Array.from(data.subarray(offset, offset + 4));
+}
+
+const faviconSource = readFileSync(resolve(process.cwd(), 'public/favicon.svg'), 'utf8');
+const faviconDocument = new DOMParser().parseFromString(faviconSource, 'image/svg+xml');
+
+describe('the approved toggle-heart source', () => {
+  it('declares one warm-paper background outside one explicit brand mark', () => {
+    const root = faviconDocument.documentElement;
+    const backgrounds = root.querySelectorAll('[data-brand-background]');
+    const marks = root.querySelectorAll('[data-brand-mark]');
+
+    expect(root.getAttribute('viewBox')).toBe('0 0 1024 1024');
+    expect(backgrounds).toHaveLength(1);
+    expect(backgrounds[0].tagName.toLowerCase()).toBe('rect');
+    expect(backgrounds[0].getAttribute('fill')).toBe('#FCFBF7');
+    expect(marks).toHaveLength(1);
+    expect(marks[0].contains(backgrounds[0])).toBe(false);
+  });
+
+  it('keeps the approved military-green-and-deep-pink heart with three slightly lowered horn toggles', () => {
+    expect(faviconDocument.querySelector('path[data-brand-half="military"][fill="#66704A"]')?.getAttribute('d'))
+      .toBe('M512 300C452 220 350 205 274 250C185 302 155 405 188 507C227 626 336 728 512 848V300Z');
+    expect(faviconDocument.querySelector('path[data-brand-half="rose"][fill="#D94F7A"]')?.getAttribute('d'))
+      .toBe('M512 300C572 220 674 205 750 250C839 302 869 405 836 507C797 626 688 728 512 848V300Z');
+    expect(
+      Array.from(faviconDocument.querySelectorAll('path[transform^="rotate(-50 "]'))
+        .map((path) => path.getAttribute('transform')),
+    ).toEqual([
+      'rotate(-50 512 378)',
+      'rotate(-50 512 518)',
+      'rotate(-50 512 658)',
+    ]);
+    expect(
+      Array.from(faviconDocument.querySelectorAll('ellipse[transform^="rotate(-50 "]'))
+        .map((ellipse) => ellipse.getAttribute('cy')),
+    ).toEqual(['383', '523', '663']);
+  });
+
+  it('keeps the small-size mark quiet without literal boot or blossom emblems', () => {
+    expect(faviconDocument.querySelectorAll('[data-brand-emblem]')).toHaveLength(0);
+  });
+
+  it('does not retain the legacy navy plate or decorative circle', () => {
+    expect(faviconSource.toUpperCase()).not.toContain('#1B2340');
+    expect(faviconDocument.querySelectorAll('circle')).toHaveLength(0);
+  });
+});
+
+describe('the generator foreground boundary', () => {
+  it('removes only the branded background while preserving nested SVG content', () => {
+    const result = markOnlySvg(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <rect data-brand-background="true" width="100" height="100" fill="#FCFBF7"/>
+        <g data-brand-mark="true">
+          <svg x="20" y="20" width="60" height="60" viewBox="0 0 60 60">
+            <g><circle data-nested-detail="true" cx="30" cy="30" r="20"/></g>
+          </svg>
+        </g>
+        <circle data-unrelated-decoration="true" cx="5" cy="5" r="2"/>
+      </svg>
+    `);
+    const document = new DOMParser().parseFromString(result, 'image/svg+xml');
+
+    expect(document.querySelector('[data-brand-background]')).toBeNull();
+    expect(document.querySelector('[data-brand-mark]')).not.toBeNull();
+    expect(document.querySelector('[data-nested-detail]')).not.toBeNull();
+    expect(document.querySelector('[data-unrelated-decoration]')).not.toBeNull();
+    expect(document.querySelector('parsererror')).toBeNull();
+  });
+
+  it('fails closed when the explicit brand mark boundary is absent', () => {
+    expect(() => markOnlySvg(`
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <rect data-brand-background="true" width="100" height="100" fill="#FCFBF7"/>
+        <path d="M0 0H100V100Z"/>
+      </svg>
+    `)).toThrow(/data-brand-mark/);
+  });
+});
+
 const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/manifest.json'), 'utf8')) as {
   icons: { src: string; sizes: string; type: string; purpose: string }[];
 };
@@ -125,6 +220,37 @@ describe('the Play / PWA icons', () => {
     const png = readPng('public/icons/apple-touch-icon.png');
     expect([png.width, png.height]).toEqual([180, 180]);
     expect(png.hasAlphaChannel).toBe(false);
+  });
+});
+
+describe('the generated warm-paper raster surfaces', () => {
+  it.each([
+    ['public/icons/icon-192.png', 2, 96],
+    ['public/icons/icon-512.png', 2, 256],
+    ['public/icons/icon-maskable-512.png', 0, 0],
+    ['public/icons/apple-touch-icon.png', 0, 0],
+    ['android/app/src/main/res/drawable/splash.png', 0, 0],
+    ['ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png', 0, 0],
+  ])('%s renders #FCFBF7 at its exposed background', async (path, x, y) => {
+    expect(await readPixel(path, x, y)).toEqual([252, 251, 247, 255]);
+  });
+
+  it('records the exact source and generator used for every committed raster', () => {
+    const generatedManifest = JSON.parse(readFileSync(
+      resolve(process.cwd(), 'scripts/assets/app-assets.manifest.json'),
+      'utf8',
+    )) as {
+      source: { sha256: string };
+      generator: { sha256: string };
+    };
+    const generator = readFileSync(
+      resolve(process.cwd(), 'scripts/assets/generate-app-assets.mjs'),
+    );
+
+    expect(generatedManifest.source.sha256)
+      .toBe(createHash('sha256').update(faviconSource).digest('hex'));
+    expect(generatedManifest.generator.sha256)
+      .toBe(createHash('sha256').update(generator).digest('hex'));
   });
 });
 
@@ -227,9 +353,9 @@ describe('the Android adaptive icon has both layers', () => {
       resolve(process.cwd(), 'scripts/assets/generate-app-assets.mjs'),
       'utf8',
     );
-    expect(colour).toContain('#1B2340');
-    expect(generator).toContain("BRAND_BACKGROUND = '#1B2340'");
-    expect(readFileSync(resolve(process.cwd(), 'public/favicon.svg'), 'utf8')).toContain('#1B2340');
+    expect(colour).toContain('#FCFBF7');
+    expect(generator).toContain("BRAND_BACKGROUND = '#FCFBF7'");
+    expect(readFileSync(resolve(process.cwd(), 'public/favicon.svg'), 'utf8')).toContain('#FCFBF7');
   });
 
   it('ships a legacy launcher raster for every density too', () => {

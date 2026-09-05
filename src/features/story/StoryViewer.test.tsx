@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { StoryViewer } from '@/features/story/StoryViewer';
 import type { StoryCard } from '@/features/story/storyProjection';
+import type { PartnerBriefing } from '@/lib/partnerBriefing/contract';
 import type { DailyRecord } from '@/types';
 
 vi.mock('@/components/media/RecordMediaGallery', () => ({
@@ -29,6 +30,39 @@ const CARDS: StoryCard[] = [
   { kind: 'closing', momentCount: 2, unreadableCount: 0 },
 ];
 
+function mockBriefing(overrides: Partial<PartnerBriefing> = {}): PartnerBriefing {
+  return {
+    version: 1,
+    sourceCount: 2,
+    generation: 'deterministic',
+    rangeLabel: '8월 22일',
+    overview: {
+      text: '총 2개의 기록이 있습니다.',
+      sourceRecordIds: ['a', 'b'],
+    },
+    days: [
+      {
+        date: '2026-08-22',
+        sections: [
+          {
+            period: 'morning',
+            items: [
+              { parts: [{ text: '오늘 시험 끝났어', sourceRecordId: 'a' }] },
+            ],
+          },
+          {
+            period: 'afternoon',
+            items: [
+              { parts: [{ text: '점심 먹었어', sourceRecordId: 'b' }] },
+            ],
+          },
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function view(props: Partial<Parameters<typeof StoryViewer>[0]> = {}) {
   return render(
     <StoryViewer
@@ -41,6 +75,14 @@ function view(props: Partial<Parameters<typeof StoryViewer>[0]> = {}) {
 afterEach(() => vi.useRealTimers());
 
 describe('스토리는 저절로 넘어가지 않는다', () => {
+  it('전체 화면 진행 표시와 이동 버튼을 iPhone 안전영역 안에 둔다', () => {
+    view();
+    const viewer = screen.getByTestId('story-viewer');
+
+    expect(viewer).toHaveClass('pt-[env(safe-area-inset-top,0px)]');
+    expect(viewer).toHaveClass('pb-[env(safe-area-inset-bottom,0px)]');
+  });
+
   it('시간이 지나도 같은 카드에 머문다', () => {
     /*
       인스타의 스토리는 6초마다 넘어간다. 여기에 타이머가 없는 것이 이 화면의 가장 중요한
@@ -56,6 +98,43 @@ describe('스토리는 저절로 넘어가지 않는다', () => {
 
   it('소스에 자동 진행 장치가 없다', () => {
     expect(SOURCE).not.toMatch(/setInterval|requestAnimationFrame/);
+  });
+});
+
+describe('A paper-home 시각 언어', () => {
+  it('공책 표면 위에 손으로 그린 원본 패널과 잉크 위치 표시를 쓴다', () => {
+    const { container } = view();
+    const viewer = screen.getByTestId('story-viewer');
+    const storyPanel = screen.getByText('오늘 시험 끝났어').parentElement;
+    const position = screen.getByTestId('story-position');
+    const marks = position.querySelectorAll('[data-story-position-state]');
+
+    expect(viewer).toHaveClass('paper-texture-layer');
+    expect(viewer).not.toHaveClass('bg-background');
+    expect(storyPanel).toHaveClass('ink-box');
+    expect(storyPanel).not.toHaveClass('bg-card', 'rounded-surface');
+    expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('[overflow-wrap:anywhere]');
+    expect(position).toHaveAttribute('aria-hidden', 'true');
+    expect(marks).toHaveLength(3);
+    expect(marks[0]).toHaveAttribute('data-story-position-state', 'current');
+    expect(marks[0].getAttribute('style')).toContain('var(--ink-accent)');
+    expect(marks[1]).toHaveAttribute('data-story-position-state', 'upcoming');
+    expect(marks[1].getAttribute('style')).toContain('var(--ink-faint)');
+    expect(container.querySelector('.ink-rule')).toBeInTheDocument();
+  });
+
+  it('아이콘만 보이는 chrome은 이름과 44px 표적을 유지한다', () => {
+    view();
+
+    for (const name of ['스토리 닫기', '이전 순간', '다음 순간']) {
+      const action = screen.getByRole('button', { name });
+      const icon = action.querySelector('svg');
+      expect(action).toHaveClass('min-h-11', 'min-w-11');
+      expect(action).toHaveAccessibleName(name);
+      expect(action).toHaveTextContent('');
+      expect(icon).toHaveClass('pen-icon');
+      expect(icon).toHaveAttribute('aria-hidden', 'true');
+    }
   });
 });
 
@@ -115,6 +194,81 @@ describe('이동', () => {
     view({ initialIndex: 1 });
     expect(screen.getByText('2 / 3')).toBeTruthy();
   });
+
+  it('실시간 선행 추가와 재정렬에도 읽던 정확한 원본에 머문다', async () => {
+    const onOpenRecord = vi.fn();
+    const { rerender } = view({ initialIndex: 1, onOpenRecord });
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+
+    const changedCards: StoryCard[] = [
+      { kind: 'moment', record: record({ id: 'new', time: '08:00', log: '새로 도착한 기록' }) },
+      CARDS[0],
+      CARDS[1],
+      CARDS[2],
+    ];
+    rerender(
+      <StoryViewer
+        cards={changedCards}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={onOpenRecord}
+      />,
+    );
+
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+    expect(screen.queryByText('오늘 시험 끝났어')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '원본 보기' }));
+    expect(onOpenRecord).toHaveBeenCalledWith('b');
+  });
+
+  it('읽던 원본이 사라지면 옆 카드를 대신 열지 않고 안내로 포커스를 옮긴다', async () => {
+    const { rerender } = view({ initialIndex: 1 });
+    expect(screen.getByText('점심 먹었어')).toBeInTheDocument();
+    screen.getByRole('button', { name: '원본 보기' }).focus();
+
+    rerender(
+      <StoryViewer
+        cards={[CARDS[0], CARDS[2]]}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('story-current-unavailable')).toBeInTheDocument();
+    expect(screen.getByText('이 기록은 더 이상 볼 수 없어요')).toBeInTheDocument();
+    expect(screen.queryByText('오늘 시험 끝났어')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('story-acknowledge')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '원본 보기' })).not.toBeInTheDocument();
+    const unavailableHeading = screen.getByRole('heading', { name: '이 기록은 더 이상 볼 수 없어요' });
+    await act(async () => undefined);
+    expect(unavailableHeading).toHaveFocus();
+  });
+
+  it('읽던 원본이 같은 ID의 부재 카드로 바뀌어도 안내로 포커스를 옮긴다', async () => {
+    const { rerender } = view({ initialIndex: 1 });
+    screen.getByRole('button', { name: '원본 보기' }).focus();
+
+    rerender(
+      <StoryViewer
+        cards={[CARDS[0], { kind: 'missing', recordId: 'b' }, CARDS[2]]}
+        initialIndex={1}
+        mode="today"
+        title="춘향의 오늘"
+        onClose={vi.fn()}
+        onOpenRecord={vi.fn()}
+      />,
+    );
+
+    const unavailableHeading = screen.getByRole('heading', { name: '이 기록은 더 이상 볼 수 없어요' });
+    await act(async () => undefined);
+    expect(unavailableHeading).toHaveFocus();
+    expect(screen.queryByRole('button', { name: '원본 보기' })).not.toBeInTheDocument();
+  });
 });
 
 describe('확인은 읽기의 끝에서만 일어난다', () => {
@@ -160,9 +314,41 @@ describe('확인은 읽기의 끝에서만 일어난다', () => {
 describe('책갈피', () => {
   it('오늘 스토리에서는 붙일 수 있다', async () => {
     const onToggleBookmark = vi.fn();
-    view({ onToggleBookmark, markedRecordIds: new Set<string>() });
+    view({ onToggleBookmark, talkAboutStateByRecordId: new Map([['a', 'none']]) });
     await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
     expect(onToggleBookmark).toHaveBeenCalledWith('a', true);
+  });
+
+  it('상대만 표시했으면 내 표시는 눌리지 않고 나도 표시하는 동작을 준다', async () => {
+    const onToggleBookmark = vi.fn();
+    view({
+      onToggleBookmark,
+      bookmarkPartnerName: '몽룡',
+      talkAboutStateByRecordId: new Map([['a', 'partner_only']]),
+    });
+
+    const action = screen.getByRole('button', {
+      name: '몽룡님이 표시했어요. 나도 이따 이야기하기',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(action);
+    expect(onToggleBookmark).toHaveBeenCalledWith('a', true);
+  });
+
+  it('둘 다 표시했으면 상대도 표시했음을 말하고 내 표시만 빼는 동작을 준다', async () => {
+    const onToggleBookmark = vi.fn();
+    view({
+      onToggleBookmark,
+      bookmarkPartnerName: '몽룡',
+      talkAboutStateByRecordId: new Map([['a', 'both']]),
+    });
+
+    const action = screen.getByRole('button', {
+      name: '몽룡님도 표시했어요. 이따 이야기하기 표시 해제',
+    });
+    expect(action).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(action);
+    expect(onToggleBookmark).toHaveBeenCalledWith('a', false);
   });
 
   it('보관 모드에서는 사라진다', () => {
@@ -304,6 +490,67 @@ describe('부재와 목차', () => {
   });
 });
 
+describe('시간순 baseline과 선택형 기기 AI 상태', () => {
+  const cover: StoryCard = {
+    kind: 'cover',
+    rangeLabel: '오늘',
+    lines: Array.from({ length: 8 }, (_, index) => ({
+      recordId: `r${index}`,
+      text: `줄 ${index}`,
+      time: `0${index}:00`,
+      date: '2026-08-22',
+    })),
+  };
+
+  it('모델과 무관하게 전체 개수와 시간순 정리 상태를 사실대로 표시한다', () => {
+    view({ cards: [cover], initialIndex: 0 });
+    expect(screen.getByText('오늘 기록 8개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.queryByText(/AI/)).toBeNull();
+  });
+
+  it('running은 role=status로 baseline이 계속 보인다는 사실을 알리고 모션에 의존하지 않는다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'running',
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI로 긴 문장 줄이는 중 · 기본 시간순 정리는 계속 보여요',
+    );
+    const action = screen.getByRole('button', { name: '긴 문장 줄이는 중' });
+    expect(action).toHaveAttribute('aria-busy', 'true');
+    expect(action.querySelector('svg')).toHaveClass('motion-safe:animate-spin', 'motion-reduce:hidden');
+  });
+
+  it('success를 role=status로 알린다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'applied',
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI로 긴 문장 줄이기 완료 · 원문 연결은 그대로예요',
+    );
+  });
+
+  it('fallback을 role=status로 알리고 baseline 유지와 같은 CTA 재시도를 제공한다', () => {
+    view({
+      cards: [cover],
+      initialIndex: 0,
+      onRefineCover: vi.fn(),
+      coverRefinementStatus: 'fallback',
+      coverRefinementReason: 'timeout',
+    });
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '기기 AI가 제시간에 끝나지 않았어요. 시간순 정리를 그대로 보여드려요.',
+    );
+    expect(screen.getByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeTruthy();
+  });
+});
+
 describe('접근성', () => {
   it('대화상자로 알리고 이름을 준다', () => {
     view();
@@ -334,5 +581,173 @@ describe('사용자가 쓴 글에만 손글씨', () => {
     view();
     expect(screen.getByText('오늘 시험 끝났어')).toHaveClass('hand-text', 'record-copy');
     expect(screen.getByText('09:00')).not.toHaveClass('hand-text', 'record-copy');
+  });
+});
+
+describe('파트너 브리핑 화면 지원 (Phase B3 Gate)', () => {
+  it('briefing이 있으면 0번에서 브리핑으로 시작하고 Next 전까지 원본 카드가 노출되지 않는다', () => {
+    const briefing = mockBriefing();
+    const { container } = view({ briefing, cards: CARDS, initialIndex: 0 });
+
+    // 1 / 4 표시
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    expect(screen.getByText('총 2개의 기록이 있습니다.')).toBeTruthy();
+
+    // 원본 카드의 순간 전용 컨트롤 및 시간 헤더 미노출
+    expect(screen.queryByRole('button', { name: '이따 이야기하기' })).toBeNull();
+    expect(screen.queryByText('09:00')).toBeNull();
+
+    // 스크린리더 공지
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toContain('4개 중 1번째, 브리핑');
+  });
+
+  it('Next 이동 시 정확한 첫 번째 원본 순간에 도달하고 이후 closing 카드가 유지된다', async () => {
+    const onAcknowledge = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onAcknowledge });
+
+    // 브리핑 -> 첫 순간 (a)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    expect(screen.getByText('09:00')).toBeTruthy();
+    expect(screen.getByText('오늘 시험 끝났어')).toBeTruthy();
+
+    // 첫 순간 -> 둘째 순간 (b)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('3 / 4')).toBeTruthy();
+    expect(screen.getByText('13:00')).toBeTruthy();
+    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+
+    // 둘째 순간 -> 닫는 카드 (closing)
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    expect(screen.getByText('여기까지가 춘향의 오늘이에요')).toBeTruthy();
+    expect(screen.getByTestId('story-acknowledge')).toBeTruthy();
+  });
+
+  it('PartnerBriefingCard의 원본 보기 클릭 시 exact sourceRecordId로 onOpenRecord가 호출된다', async () => {
+    const onOpenRecord = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onOpenRecord });
+
+    // 자세히 보기 펼치기
+    await userEvent.click(screen.getByTestId('partner-briefing-expand'));
+    const viewButtons = screen.getAllByRole('button', { name: '원본 보기' });
+    expect(viewButtons).toHaveLength(2);
+
+    // 첫 번째 항목 클릭 -> 'a'
+    await userEvent.click(viewButtons[0]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('a');
+
+    // 두 번째 항목 클릭 -> 'b'
+    await userEvent.click(viewButtons[1]);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+    expect(onOpenRecord).toHaveBeenLastCalledWith('b');
+  });
+
+  it('브리핑 펼치기/접기/이동/닫기는 onAcknowledge를 호출하지 않는다', async () => {
+    const onAcknowledge = vi.fn();
+    const onClose = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 0, onAcknowledge, onClose });
+
+    const expandBtn = screen.getByTestId('partner-briefing-expand');
+    await userEvent.click(expandBtn);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(expandBtn);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(onAcknowledge).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '스토리 닫기' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onAcknowledge).not.toHaveBeenCalled();
+  });
+
+  it('onAcknowledge는 오직 closing 카드의 명시적 확인 버튼에서만 호출된다', async () => {
+    const onAcknowledge = vi.fn();
+    const briefing = mockBriefing();
+    view({ briefing, cards: CARDS, initialIndex: 3, onAcknowledge });
+
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    await userEvent.click(screen.getByTestId('story-acknowledge'));
+    expect(onAcknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('combined 시퀀스에서 진행 표시 및 화살표 비활성 상태가 정확하다', () => {
+    const briefing = mockBriefing();
+
+    // 0번 (브리핑): 이전 비활성, 다음 활성
+    const { unmount } = view({ briefing, cards: CARDS, initialIndex: 0 });
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).not.toBeDisabled();
+    unmount();
+
+    // 마지막 3번 (closing): 이전 활성, 다음 비활성
+    view({ briefing, cards: CARDS, initialIndex: 3 });
+    expect(screen.getByText('4 / 4')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).toBeDisabled();
+  });
+
+  it('initialIndex가 combined 시퀀스의 raw moment를 가리키면 정확한 카드를 열고 엉뚱한 기록으로 밀리지 않는다', async () => {
+    const briefing = mockBriefing();
+
+    // initialIndex = 1 -> 첫 번째 카드 (a)
+    const { unmount } = view({ briefing, cards: CARDS, initialIndex: 1 });
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    expect(screen.getByText('09:00')).toBeTruthy();
+    expect(screen.getByText('오늘 시험 끝났어')).toBeTruthy();
+    expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
+    unmount();
+
+    // initialIndex = 2 -> 두 번째 카드 (b)
+    view({ briefing, cards: CARDS, initialIndex: 2 });
+    expect(screen.getByText('3 / 4')).toBeTruthy();
+    expect(screen.getByText('13:00')).toBeTruthy();
+    expect(screen.getByText('점심 먹었어')).toBeTruthy();
+
+    // 이전 순간 클릭 시 브리핑으로 역방향 이동 가능
+    await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+    expect(screen.getByText('2 / 4')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '이전 순간' }));
+    expect(screen.getByText('1 / 4')).toBeTruthy();
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+  });
+
+  it('briefing만 있고 cards=[]인 경우에도 안전하게 렌더된다', () => {
+    const briefing = mockBriefing();
+    const { container } = view({ briefing, cards: [], initialIndex: 0 });
+
+    expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+    expect(screen.getByText('1 / 1')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '이전 순간' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '다음 순간' })).toBeDisabled();
+
+    const live = container.querySelector('[aria-live="polite"]');
+    expect(live?.textContent).toContain('1개 중 1번째, 브리핑');
+  });
+
+  it('briefing도 없고 cards도 없으면 null을 반환한다', () => {
+    const { container } = view({ briefing: null, cards: [], initialIndex: 0 });
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('briefingLocale props가 PartnerBriefingCard에 전달된다', async () => {
+    const briefing = mockBriefing({
+      rangeLabel: 'August 22',
+      overview: { text: '2 records in total.', sourceRecordIds: ['a', 'b'] },
+    });
+    view({ briefing, cards: CARDS, briefingLocale: 'en', initialIndex: 0 });
+
+    expect(screen.getByText('Since you last checked')).toBeTruthy();
+    expect(screen.getByText('2 moments')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /See details/i })).toBeTruthy();
   });
 });

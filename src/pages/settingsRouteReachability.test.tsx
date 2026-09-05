@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import type { AppState, Role } from '@/types';
+import type { AppState, GenderIdentity, Role } from '@/types';
 
 /**
  * H-4: /schedule, /trips and /service must have an entry point that a user
@@ -30,6 +30,7 @@ import type { AppState, Role } from '@/types';
 
 const navigate = vi.hoisted(() => vi.fn());
 const setPartnerUsername = vi.hoisted(() => vi.fn());
+const updateProfile = vi.hoisted(() => vi.fn());
 
 vi.mock('react-router-dom', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router-dom')>();
@@ -51,6 +52,8 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 let currentRole: Role = 'gomsin';
+let relationshipContext: 'military' | 'general' = 'military';
+let currentGenderIdentity: GenderIdentity | undefined;
 
 function makeState(): AppState {
   return {
@@ -61,6 +64,7 @@ function makeState(): AppState {
       id: 'u1',
       myName: currentRole === 'gomsin' ? '춘향' : '몽룡',
       role: currentRole,
+      genderIdentity: currentGenderIdentity,
       couple: {
         coupleId: 'c1',
         partnerName: currentRole === 'gomsin' ? '몽룡' : '춘향',
@@ -68,6 +72,7 @@ function makeState(): AppState {
         coupleCode: '',
         connected: true,
         status: 'active',
+        relationshipContext,
       },
       military: { branch: 'army', militaryStatus: 'unknown', dischargeDateSource: 'unknown' },
       contact: {
@@ -92,7 +97,7 @@ vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
     state: makeState(),
     isReady: true,
-    updateProfile: vi.fn(),
+    updateProfile,
     disconnect: vi.fn(),
     deleteAccount: vi.fn(),
     signOut: vi.fn(),
@@ -124,7 +129,10 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
   beforeEach(() => {
     navigate.mockReset();
     setPartnerUsername.mockReset().mockResolvedValue(true);
+    updateProfile.mockReset().mockResolvedValue(true);
     currentRole = 'gomsin';
+    relationshipContext = 'military';
+    currentGenderIdentity = undefined;
   });
 
   for (const { to, label } of ORPHANED_ROUTES) {
@@ -150,6 +158,48 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
     for (const { label } of ORPHANED_ROUTES) {
       expect(screen.getByRole('button', { name: label }), label).toBeTruthy();
     }
+  });
+
+  it('keeps military routes and internal role labels out of general-couple settings', async () => {
+    relationshipContext = 'general';
+    currentRole = 'soldier';
+    const user = userEvent.setup();
+    renderSettings();
+
+    expect(screen.queryByRole('button', { name: '복무 현황 · D-Day' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '복무 정보 수정' })).toBeNull();
+    expect(screen.queryByText('군화')).toBeNull();
+    expect(screen.queryByText(/^곰신$/)).toBeNull();
+    expect(screen.queryByText(/님 \((군화|곰신)\)/)).toBeNull();
+    expect(screen.getByRole('button', { name: '일정 관리' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '여행 플래너' })).toBeTruthy();
+
+    await user.click(screen.getByRole('button', { name: '내 프로필 수정' }));
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    expect(within(dialog).getByRole('textbox', { name: '상대방 영어 아이디' })).toBeTruthy();
+    expect(within(dialog).queryByRole('option', { name: '전역' })).toBeNull();
+    expect(within(dialog).getByRole('option', { name: '함께한 날' })).toBeTruthy();
+    expect(within(dialog).getByRole('option', { name: '만남' })).toBeTruthy();
+    expect(within(dialog).getByRole('combobox', { name: '성별 (선택)' })).toBeTruthy();
+  });
+
+  it('lets a general-couple user erase an optional gender from profile settings', async () => {
+    relationshipContext = 'general';
+    currentGenderIdentity = 'woman';
+    const user = userEvent.setup();
+    renderSettings();
+
+    await user.click(screen.getByRole('button', { name: '내 프로필 수정' }));
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    const gender = within(dialog).getByRole('combobox', { name: '성별 (선택)' });
+    expect(gender).toHaveValue('woman');
+
+    await user.selectOptions(gender, '');
+    await user.click(within(dialog).getByRole('button', { name: '저장하기' }));
+
+    expect(updateProfile).toHaveBeenCalledWith(expect.objectContaining({
+      genderIdentity: undefined,
+    }));
   });
 
   it('groups them under a labelled shortcut section', () => {
@@ -185,6 +235,44 @@ describe('H-4: settings offers a durable route to every non-tab feature', () => 
     await user.click(within(dialog).getByRole('button', { name: '상대방 아이디 저장' }));
 
     expect(setPartnerUsername).toHaveBeenCalledWith('partner_name');
+  });
+
+  it('프로필 편집으로 포커스를 옮기고 가둔 뒤 연 버튼으로 돌려보낸다', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const opener = screen.getByRole('button', { name: '내 프로필 수정' });
+
+    await user.click(opener);
+
+    const dialog = screen.getByRole('dialog', { name: '내 프로필 수정' });
+    expect(within(dialog).getByRole('textbox', { name: /내 닉네임/ })).toHaveFocus();
+
+    const close = within(dialog).getByRole('button', { name: '프로필 수정 닫기' });
+    close.focus();
+    await user.tab({ shift: true });
+    expect(within(dialog).getByRole('button', { name: '저장하기' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '내 프로필 수정' })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  it('설치 안내의 유일한 행동에 포커스를 두고 닫은 뒤 시작점으로 돌아간다', async () => {
+    const user = userEvent.setup();
+    renderSettings();
+    const opener = screen.getByRole('button', { name: /^PWA 홈 화면 설치 방법/ });
+
+    await user.click(opener);
+
+    const dialog = screen.getByRole('dialog', { name: 'PWA 앱 설치 안내' });
+    const confirm = within(dialog).getByRole('button', { name: '확인' });
+    expect(confirm).toHaveFocus();
+    await user.tab();
+    expect(confirm).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'PWA 앱 설치 안내' })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
   });
 });
 

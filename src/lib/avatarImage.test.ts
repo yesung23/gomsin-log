@@ -133,7 +133,40 @@ describe('the purge reaches avatars, including a previous account\'s', () => {
 
 describe('an image is validated before it is decoded', () => {
   afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it('releases an image that never finishes decoding so the picker can retry', async () => {
+    vi.useFakeTimers();
+    class HangingImage {
+      onload = null;
+      onerror = null;
+      src = '';
+    }
+    vi.stubGlobal('Image', HangingImage);
+    const revoke = vi.spyOn(URL, 'revokeObjectURL');
+    const result = prepareAvatarFile(new File(['jpeg'], 'portrait.jpg', { type: 'image/jpeg' }));
+    await vi.advanceTimersByTimeAsync(15_001);
+    await expect(result).resolves.toHaveProperty('error');
+    expect(revoke).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rejects extreme decoded dimensions before allocating a canvas', async () => {
+    class HugeImage {
+      onload: (() => void) | null = null;
+      onerror = null;
+      naturalWidth = 30_000;
+      naturalHeight = 30_000;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    }
+    vi.stubGlobal('Image', HugeImage);
+    const createElement = vi.spyOn(document, 'createElement');
+    await expect(prepareAvatarFile(new File(['jpeg'], 'portrait.jpg', { type: 'image/jpeg' })))
+      .resolves.toHaveProperty('error');
+    expect(createElement).not.toHaveBeenCalledWith('canvas');
   });
 
   it('rejects a type no browser canvas can decode', async () => {
@@ -184,17 +217,12 @@ describe('an image is validated before it is decoded', () => {
   });
 });
 
-describe('the module documents why the photo is not uploaded', () => {
+describe('the module documents separate profile and legacy storage', () => {
   it('names the storage-policy constraint rather than leaving it to be rediscovered', () => {
-    /*
-     * This is the decision most likely to be reopened -- "why is it not synced?" --
-     * and the answer is a specific policy shape, not a preference: migration 007
-     * scopes `couple-media` to `coupleId/recordId` and its INSERT policy requires a
-     * matching `daily_records` row, which an avatar has none of.
-     */
     const source = read('src/lib/avatarImage.ts');
     expect(source).toContain('couple-media');
     expect(source).toContain('daily_records');
+    expect(source).toContain('profileAvatars.ts');
     expect(source).toMatch(/does not sync/i);
   });
 });

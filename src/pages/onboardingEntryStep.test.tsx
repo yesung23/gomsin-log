@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import type { AuthUser } from '@/types';
 
 /**
@@ -32,6 +32,22 @@ const state = {
 
 const setOnboardingStep = vi.fn();
 const fetchAuthProviderAvailability = vi.hoisted(() => vi.fn());
+const nativeAppleLoginAvailable = vi.hoisted(() => ({ value: false }));
+const consumeAppleNameCandidate = vi.hoisted(() => vi.fn());
+const appleNameCandidateListener = vi.hoisted(() => ({
+  current: null as null | ((userId: string) => void),
+}));
+
+vi.mock('@/lib/appleAuth', () => ({
+  isNativeAppleLoginAvailable: () => nativeAppleLoginAvailable.value,
+  consumeAppleNameCandidate: (...args: unknown[]) => consumeAppleNameCandidate(...args),
+  subscribeAppleNameCandidate: (listener: (userId: string) => void) => {
+    appleNameCandidateListener.current = listener;
+    return () => {
+      if (appleNameCandidateListener.current === listener) appleNameCandidateListener.current = null;
+    };
+  },
+}));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
@@ -50,7 +66,16 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 vi.mock('@/lib/accountDeletion', () => ({
-  serverCallBlockedByPendingDeletion: vi.fn(async () => false),
+  runServerMutationBehindDeletionBarrier: vi.fn(async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => ({
+    kind: 'executed',
+    value: await operation({
+      userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+      assertCurrent: () => {},
+    }),
+  })),
 }));
 
 vi.mock('sonner', () => ({
@@ -75,9 +100,15 @@ const ROLE_STEP = '곰신로그를 어떻게 사용할까요?';
 
 describe('onboarding entry step', () => {
   beforeEach(() => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'true');
+    vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'false');
     setOnboardingStep.mockClear();
     state.authenticatedUser = null;
     state.onboardingStep = 0;
+    state.profile.myName = '';
+    nativeAppleLoginAvailable.value = false;
+    consumeAppleNameCandidate.mockReset().mockReturnValue(null);
+    appleNameCandidateListener.current = null;
     fetchAuthProviderAvailability.mockReset().mockResolvedValue({
       google: true,
       apple: false,
@@ -89,6 +120,10 @@ describe('onboarding entry step', () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('shows the sign-in screen to a visitor who is not signed in', async () => {
     render(<OnboardingPage />);
     expect(await screen.findByText(SIGN_IN_CTA)).toBeInTheDocument();
@@ -96,6 +131,7 @@ describe('onboarding entry step', () => {
   });
 
   it('does not show a dead Apple button on iPhone when the server disables Apple login', async () => {
+    nativeAppleLoginAvailable.value = true;
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
@@ -107,7 +143,24 @@ describe('onboarding entry step', () => {
     expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
   });
 
-  it('shows Apple login on iPhone after the server confirms the provider', async () => {
+  it('shows Apple first only after both the native plugin gate and server provider are ready', async () => {
+    nativeAppleLoginAvailable.value = true;
+    fetchAuthProviderAvailability.mockResolvedValue({
+      google: true,
+      apple: true,
+      email: true,
+    });
+
+    render(<OnboardingPage />);
+
+    const apple = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+    const google = screen.getByRole('button', { name: /Google로 계속하기/ });
+    expect(apple.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole('separator', { name: '기타 로그인' })).toBeInTheDocument();
+  });
+
+  it('keeps Apple login hidden when the server enables it but the reviewed build gate is off', async () => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'false');
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
@@ -120,7 +173,29 @@ describe('onboarding entry step', () => {
 
     render(<OnboardingPage />);
 
-    expect(await screen.findByText('Apple로 계속하기')).toBeInTheDocument();
+    expect(await screen.findByText(SIGN_IN_CTA)).toBeInTheDocument();
+    expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
+  });
+
+  it('shows a recoverable unavailable state when Apple is the only remote provider but its build gate is off', async () => {
+    vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'false');
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    });
+    fetchAuthProviderAvailability.mockResolvedValue({
+      google: false,
+      apple: true,
+      email: true,
+    });
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
+    );
+    expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '다시 시도' })).toBeInTheDocument();
   });
 
   it('does NOT ask an already-signed-in account to sign in again', async () => {
@@ -131,6 +206,37 @@ describe('onboarding entry step', () => {
     // The defect: this rendered the landing screen, and there was no way forward.
     await waitFor(() => expect(screen.queryByText(SIGN_IN_CTA)).not.toBeInTheDocument());
     expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+  });
+
+  it('keeps the general-couple path hidden until its reviewed build gate is on', async () => {
+    state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
+
+    render(<OnboardingPage />);
+
+    expect(await screen.findByText(ROLE_STEP)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /곰신 커플이 아니에요/ })).not.toBeInTheDocument();
+  });
+
+  it('lets a general couple answer optional gender and continue without military wording', async () => {
+    vi.stubEnv('VITE_GENERAL_COUPLE_ONBOARDING_ENABLED', 'true');
+    state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
+    const user = (await import('@testing-library/user-event')).default.setup();
+
+    render(<OnboardingPage />);
+
+    await user.click(await screen.findByRole('button', { name: /곰신 커플이 아니에요/ }));
+    const genderGroup = screen.getByRole('group', { name: '성별' });
+    expect(genderGroup).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '여성이에요' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '남성이에요' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '답하지 않을래요' })).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(screen.getByRole('button', { name: '여성이에요' }));
+    expect(screen.getByRole('button', { name: '여성이에요' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: '다음' }));
+
+    expect(await screen.findByText('어떻게 불러드리면 될까요?')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('예) 하루')).toBeInTheDocument();
   });
 
   it('advances a visitor who signs in while the landing screen is open', async () => {
@@ -172,6 +278,72 @@ describe('onboarding entry step', () => {
     await waitFor(() => expect(next()).toBeEnabled());
   });
 
+  it('offers a verified Apple name once as editable nickname without overwriting a user value', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루').mockReturnValue(null);
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+
+    const view = render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await waitFor(() => expect(input).toHaveValue('김하루'));
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(1);
+    expect(consumeAppleNameCandidate).toHaveBeenCalledWith('apple-user');
+
+    await user.clear(input);
+    await user.type(input, '내선택');
+    view.rerender(<OnboardingPage />);
+
+    expect(input).toHaveValue('내선택');
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes but never overwrites an existing onboarding nickname', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    state.profile.myName = '사용자이름';
+    consumeAppleNameCandidate.mockReturnValueOnce('Apple 이름');
+
+    render(<OnboardingPage />);
+
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await waitFor(() => expect(consumeAppleNameCandidate).toHaveBeenCalledWith('apple-user'));
+    expect(input).toHaveValue('사용자이름');
+  });
+
+  it('accepts the verified name when Supabase hydration wins the auth-event race', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    consumeAppleNameCandidate.mockReturnValueOnce(null);
+    render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    expect(input).toHaveValue('');
+    expect(appleNameCandidateListener.current).not.toBeNull();
+
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루');
+    await act(async () => {
+      appleNameCandidateListener.current?.('apple-user');
+    });
+
+    expect(input).toHaveValue('김하루');
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refill a nickname the user cleared before the Apple name arrived', async () => {
+    state.authenticatedUser = { id: 'apple-user', provider: 'apple' };
+    state.onboardingStep = 2;
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await user.type(input, '내선택');
+    await user.clear(input);
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루');
+    act(() => appleNameCandidateListener.current?.('apple-user'));
+    expect(input).toHaveValue('');
+  });
+
   it('respects a resumed step instead of forcing the user back to the start', async () => {
     state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
     state.onboardingStep = 3;
@@ -198,6 +370,7 @@ describe('onboarding entry step', () => {
       fetchAuthProviderAvailability.mockReturnValue(new Promise(() => {}));
       render(<OnboardingPage />);
 
+      expect(screen.getByRole('status')).toHaveTextContent('로그인 방법을 확인하고 있어요.');
       expect(screen.queryByRole('button', { name: /Google로 계속하기/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -240,7 +413,7 @@ describe('onboarding entry step', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
-    it('shows the unavailable message on non-iOS when Apple is the only enabled provider', async () => {
+    it('fails closed on non-native surfaces when Apple is the only enabled remote provider', async () => {
       fetchAuthProviderAvailability.mockResolvedValue({
         google: false,
         apple: true,
@@ -248,14 +421,41 @@ describe('onboarding entry step', () => {
       });
       render(<OnboardingPage />);
 
-      await waitFor(() => expect(fetchAuthProviderAvailability).toHaveBeenCalledOnce());
       expect(await screen.findByRole('alert')).toHaveTextContent(
-        '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.',
+        '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요.',
       );
       expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
+    });
+
+    it('offers Apple when the native iOS plugin gate and remote provider are both ready', async () => {
+      nativeAppleLoginAvailable.value = true;
+      fetchAuthProviderAvailability.mockResolvedValue({
+        google: false,
+        apple: true,
+        email: true,
+      });
+
+      render(<OnboardingPage />);
+
+      expect(await screen.findByRole('button', { name: /Apple로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('does not label Google as an alternate when Apple is unavailable', async () => {
+      fetchAuthProviderAvailability.mockResolvedValue({
+        google: true,
+        apple: false,
+        email: true,
+      });
+      render(<OnboardingPage />);
+
+      expect(await screen.findByRole('button', { name: /Google로 계속하기/ })).toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
     });
 
     it('fails closed on re-entering step 0 and prevents stale Google/Apple CTA during pending recheck', async () => {
+      nativeAppleLoginAvailable.value = true;
       Object.defineProperty(navigator, 'userAgent', {
         configurable: true,
         value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',

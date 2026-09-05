@@ -78,6 +78,13 @@ const deleteRecordFromDB = vi.fn(async () => {
 const removeRecordMedia = vi.fn(async () => {
   callOrder.push('removeRecordMedia');
 });
+const beginRecordMediaMutation = vi.fn(async (request: { baseContentRevision: number }) => ({
+  ok: true as const,
+  state: 'pending' as const,
+  targetContentRevision: request.baseContentRevision + 1,
+}));
+const getRecordMediaMutationStatus = vi.fn(async () => ({ ok: true as const, state: 'pending' as const }));
+const abandonRecordMediaMutation = vi.fn(async () => ({ ok: true as const, state: 'abandoned' as const }));
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
 
@@ -88,6 +95,9 @@ vi.mock('@/lib/records', () => ({
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
   uploadRecordMedia: vi.fn(async (file: File) => ({ attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } })),
   removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
+  beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(...(args as [])),
+  getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
+  abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/')
@@ -97,6 +107,7 @@ vi.mock('@/lib/records', () => ({
     if (typeof path !== 'string') return false;
     return path.startsWith(`${coupleId}/${recordId}/`);
   },
+  isValidMediaObjectId: () => true,
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -214,7 +225,7 @@ function buildConnectedState(records: DailyRecord[] = []): Partial<AppState> {
   };
 }
 
-describe('deleteRecord with storage cleanup', () => {
+describe('deleteRecord with database-owned media cleanup', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
     createdChannels.length = 0;
@@ -234,6 +245,15 @@ describe('deleteRecord with storage cleanup', () => {
     deleteRecordFromDB.mockImplementation(async () => { callOrder.push('deleteRecordFromDB'); return { ok: true as const }; });
     saveRecordToDB.mockReset();
     saveRecordToDB.mockImplementation(async () => { callOrder.push('saveRecord'); return { ok: true as const }; });
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
     localStorage.clear();
     mockSupabase.auth.getUser.mockResolvedValue({ data: { user: { id: 'user-1', app_metadata: {} } } });
   });
@@ -264,7 +284,7 @@ describe('deleteRecord with storage cleanup', () => {
     return unmount;
   }
 
-  it('cleans up storage objects then deletes the DB row', async () => {
+  it('deletes through the atomic DB path without issuing a client Storage DELETE', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -285,13 +305,12 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // Storage cleanup happens BEFORE the DB delete
-    expect(callOrder).toEqual(['removeRecordMedia', 'deleteRecordFromDB']);
-    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/abc.jpg']);
+    expect(callOrder).toEqual(['deleteRecordFromDB']);
+    expect(removeRecordMedia).not.toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');
   });
 
-  it('aborts delete if storage cleanup fails', async () => {
+  it('cannot lose a record through a failing legacy Storage helper', async () => {
     removeRecordMedia.mockReset();
     removeRecordMedia.mockRejectedValue(new Error('Storage error'));
 
@@ -313,15 +332,14 @@ describe('deleteRecord with storage cleanup', () => {
     await act(async () => {
       screen.getByTestId('delete-rec1').click();
     });
-    await waitFor(() => expect(lastDeleteResult).toBe(false));
+    await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // DB delete should NOT have been called
-    expect(deleteRecordFromDB).not.toHaveBeenCalled();
-    // Record should still be present
-    expect(screen.getByTestId('records').textContent).toBe('rec-1');
+    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(deleteRecordFromDB).toHaveBeenCalled();
+    expect(screen.getByTestId('records').textContent).toBe('');
   });
 
-  it('skips non-canonical paths during storage cleanup', async () => {
+  it('does not trust or inspect attachment paths during record deletion', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -343,11 +361,11 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // Only the canonical path should be cleaned up
-    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/abc.jpg']);
+    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(deleteRecordFromDB).toHaveBeenCalled();
   });
 
-  it('succeeds when record has no attachments (no storage cleanup needed)', async () => {
+  it('uses the same atomic DB path when the record has no attachments', async () => {
     const records: DailyRecord[] = [{
       id: 'rec-1',
       userId: 'user-1',
@@ -365,10 +383,84 @@ describe('deleteRecord with storage cleanup', () => {
     });
     await waitFor(() => expect(lastDeleteResult).toBe(true));
 
-    // No storage cleanup, just DB delete
     expect(removeRecordMedia).not.toHaveBeenCalled();
     expect(deleteRecordFromDB).toHaveBeenCalled();
     expect(screen.getByTestId('records').textContent).toBe('');
+  });
+
+  it.each(['offline', 'server', 'not_found'] as const)(
+    'converges an ambiguous %s delete to success only after an authorized read-back proves the row is absent',
+    async (reason) => {
+      const records: DailyRecord[] = [{
+        id: 'rec-1',
+        userId: 'user-1',
+        date: '2026-01-01',
+        time: '10:00',
+        authorRole: 'gomsin',
+        log: 'hello',
+        isPrivate: false,
+        createdAt: '2026-01-01T10:00:00.000Z',
+      }];
+      deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason });
+      fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [] });
+      await setup(records);
+
+      await act(async () => {
+        screen.getByTestId('delete-rec1').click();
+      });
+      await waitFor(() => expect(lastDeleteResult).toBe(true));
+
+      expect(fetchRecordsResultFromDB).toHaveBeenCalledWith('couple-1');
+      expect(screen.getByTestId('records').textContent).toBe('');
+    },
+  );
+
+  it('keeps the local record when an ambiguous delete read-back still contains it', async () => {
+    const record: DailyRecord = {
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      createdAt: '2026-01-01T10:00:00.000Z',
+    };
+    deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [record] });
+    await setup([record]);
+
+    await act(async () => {
+      screen.getByTestId('delete-rec1').click();
+    });
+    await waitFor(() => expect(lastDeleteResult).toBe(false));
+
+    expect(lastDeleteReason).toBe('offline');
+    expect(screen.getByTestId('records').textContent).toBe('rec-1');
+  });
+
+  it('keeps the local record when the authoritative delete read-back is unavailable', async () => {
+    const record: DailyRecord = {
+      id: 'rec-1',
+      userId: 'user-1',
+      date: '2026-01-01',
+      time: '10:00',
+      authorRole: 'gomsin',
+      log: 'hello',
+      isPrivate: false,
+      createdAt: '2026-01-01T10:00:00.000Z',
+    };
+    deleteRecordFromDB.mockResolvedValueOnce({ ok: false, reason: 'not_found' });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: false, reason: 'server' });
+    await setup([record]);
+
+    await act(async () => {
+      screen.getByTestId('delete-rec1').click();
+    });
+    await waitFor(() => expect(lastDeleteResult).toBe(false));
+
+    expect(lastDeleteReason).toBe('not_found');
+    expect(screen.getByTestId('records').textContent).toBe('rec-1');
   });
 });
 

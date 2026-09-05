@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { classifyServerError } from '@/lib/serverErrors';
 import { pushNotificationsEnabled } from '@/lib/pushFeature';
+import { runServerMutationBehindDeletionBarrier } from '@/lib/accountDeletion';
 
 /**
  * The client half of push token lifecycle.
@@ -50,6 +51,7 @@ export interface PushTokenResult {
 export async function registerPushToken(
   platform: PushPlatform,
   token: string,
+  expectedUserId: string,
 ): Promise<PushTokenResult> {
   if (!pushNotificationsEnabled()) {
     return { ok: false, error: '알림 기능이 꺼져 있어요.' };
@@ -57,20 +59,26 @@ export async function registerPushToken(
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 알림을 설정할 수 없어요.' };
   }
-  if (!token.trim()) {
+  if (!token.trim() || !expectedUserId) {
     return { ok: false, error: '알림 등록에 필요한 정보를 받지 못했어요.' };
   }
+  const client = supabase;
 
-  const { error } = await supabase.rpc('register_push_token', {
-    p_platform: platform,
-    p_token: token,
-  });
+  const guarded = await runServerMutationBehindDeletionBarrier(async () => {
+    const { error } = await client.rpc('register_push_token', {
+      p_platform: platform,
+      p_token: token,
+    });
 
-  if (error) {
-    console.error('[gomsinlog] Push token registration failed:', classifyServerError(error).kind);
-    return { ok: false, error: '알림을 설정하지 못했어요. 잠시 후 다시 시도해 주세요.' };
-  }
-  return { ok: true };
+    if (error) {
+      console.error('[gomsinlog] Push token registration failed:', classifyServerError(error).kind);
+      return { ok: false, error: '알림을 설정하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+    }
+    return { ok: true };
+  }, { expectedUserId });
+  return guarded.kind === 'executed'
+    ? guarded.value
+    : { ok: false, error: '계정 상태를 확인한 뒤 다시 시도해 주세요.' };
 }
 
 /**
@@ -106,8 +114,11 @@ export async function revokeOwnPushTokens(): Promise<PushTokenResult> {
  * receipt. A read receipt is defined by the OTHER side learning something, and
  * nothing here reaches them.
  */
-export async function clearOwnUnseen(): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) return;
-  const { error } = await supabase.rpc('clear_my_unseen');
-  if (error) console.warn('[gomsinlog] Clearing the delivery flag failed:', classifyServerError(error).kind);
+export async function clearOwnUnseen(expectedUserId: string): Promise<void> {
+  if (!expectedUserId || !isSupabaseConfigured || !supabase) return;
+  const client = supabase;
+  await runServerMutationBehindDeletionBarrier(async () => {
+    const { error } = await client.rpc('clear_my_unseen');
+    if (error) console.warn('[gomsinlog] Clearing the delivery flag failed:', classifyServerError(error).kind);
+  }, { expectedUserId, policy: 'best_effort' });
 }

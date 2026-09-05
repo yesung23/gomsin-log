@@ -2,6 +2,11 @@ import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   classifyMediaFile,
   buildMediaPath,
+  beginRecordMediaMutation,
+  beginRecordPhotoMutation,
+  getRecordPhotoRenditionCapability,
+  getRecordMediaMutationStatus,
+  abandonRecordMediaMutation,
   MAX_BYTES,
   MEDIA_ACCEPT,
   MEDIA_POLICY_REFUSAL,
@@ -9,9 +14,13 @@ import {
   deleteRecordFromDB,
   downloadRecordPhotoForReuse,
   fetchRecordsFromDB,
+  fetchRecordsResultFromDB,
+  resolveAttachmentUrls,
   saveRecordToDB,
   setRecordCryptoEnvironment,
+  uploadRecordPhotoRendition,
 } from '@/lib/records';
+import { prepareRecordPhotoRenditions, type PreparedRecordPhotoRendition } from '@/lib/recordPhotoRenditions';
 import { AES_KEY_BYTES, importAesKey } from '@/crypto/suite';
 import type { RecordCryptoEnvironment, ScopeEpoch } from '@/app/records/contentCrypto';
 import {
@@ -19,16 +28,24 @@ import {
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
 
-const { mockFrom, mockStorageDownload, mockSupabase } = vi.hoisted(() => {
+const { mockCreateSignedUrls, mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase } = vi.hoisted(() => {
+  const mockCreateSignedUrls = vi.fn();
   const mockFrom = vi.fn();
+  const mockRpc = vi.fn();
   const mockStorageDownload = vi.fn();
+  const mockStorageUpload = vi.fn();
   const mockSupabase = {
     from: mockFrom,
+    rpc: mockRpc,
     storage: {
-      from: vi.fn(() => ({ download: mockStorageDownload })),
+      from: vi.fn(() => ({
+        createSignedUrls: mockCreateSignedUrls,
+        download: mockStorageDownload,
+        upload: mockStorageUpload,
+      })),
     },
   };
-  return { mockFrom, mockStorageDownload, mockSupabase };
+  return { mockCreateSignedUrls, mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -312,26 +329,32 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
   afterEach(() => mockFrom.mockReset());
 
   it('maps explicit profile posts without changing the stored record time', async () => {
-    const secondOrder = vi.fn().mockResolvedValue({
-      data: [{
-        id: 'record-1',
-        user_id: 'user-1',
-        record_date: '2026-08-28',
-        record_time: '09:07:33',
-        log_text: '아침 기록',
-        attachments: [],
-        is_private: false,
-        is_profile_post: true,
-        created_at: '2026-08-28T00:07:33.000Z',
-        content_revision: 1,
-        cipher_format: 0,
-      }],
-      error: null,
-    });
-    const firstOrder = vi.fn().mockReturnValue({ order: secondOrder });
-    const eq = vi.fn().mockReturnValue({ order: firstOrder });
-    const select = vi.fn().mockReturnValue({ eq });
-    mockFrom.mockReturnValue({ select });
+    let pageIndex = 0;
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      or: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(async () => pageIndex++ === 0
+        ? {
+            data: [{
+              id: '11111111-1111-4111-8111-111111111111',
+              user_id: '22222222-2222-4222-8222-222222222222',
+              record_date: '2026-08-28',
+              record_time: '09:07:33',
+              log_text: '아침 기록',
+              attachments: [],
+              is_private: false,
+              is_profile_post: true,
+              created_at: '2026-08-28T00:07:33.000000Z',
+              content_revision: 1,
+              cipher_format: 0,
+            }],
+            error: null,
+          }
+        : { data: [], error: null }),
+    };
+    mockFrom.mockReturnValue(builder);
 
     const [mapped] = await fetchRecordsFromDB('couple-1');
 
@@ -340,58 +363,507 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
   });
 });
 
+describe('fetchRecordsResultFromDB photo display enrichment', () => {
+  const RECORD_ID = '11111111-1111-4111-8111-111111111111';
+  const MASTER_ID = '33333333-3333-4333-8333-333333333333';
+  const THUMBNAIL_ID = '44444444-4444-4444-8444-444444444444';
+  const SECOND_MASTER_ID = '88888888-8888-4888-8888-888888888888';
+  const SECOND_THUMBNAIL_ID = '99999999-9999-4999-8999-999999999999';
+  const SOURCE_REVISION = '55555555-5555-4555-8555-555555555555';
+  const COUPLE_ID = '66666666-6666-4666-8666-666666666666';
+  const masterPath = `${COUPLE_ID}/${RECORD_ID}/${MASTER_ID}.jpg`;
+  const thumbnailPath = `${COUPLE_ID}/${RECORD_ID}/${THUMBNAIL_ID}.jpg`;
+
+  function installRecordPage(
+    attachments: unknown[] = [{ type: 'photo', name: 'photo.jpg', path: masterPath }],
+    rowOverrides: Record<string, unknown> = {},
+  ) {
+    let pageIndex = 0;
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      or: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(async () => pageIndex++ === 0
+        ? {
+            data: [{
+              id: RECORD_ID,
+              user_id: '22222222-2222-4222-8222-222222222222',
+              record_date: '2026-09-05',
+              record_time: '09:07:33',
+              log_text: '사진 기록',
+              attachments,
+              is_private: false,
+              created_at: '2026-09-05T00:07:33.000000Z',
+              content_revision: 9,
+              media_contract_version: 1,
+              last_media_operation_id: '77777777-7777-4777-8777-777777777777',
+              cipher_format: 0,
+              ...rowOverrides,
+            }],
+            error: null,
+          }
+        : { data: [], error: null }),
+    };
+    mockFrom.mockReturnValue(builder);
+  }
+
+  function metadata(overrides: Record<string, unknown> = {}) {
+    return {
+      record_id: RECORD_ID,
+      media_id: MASTER_ID,
+      source_revision: SOURCE_REVISION,
+      screen_master: {
+        media_object_id: MASTER_ID,
+        width_px: 2048,
+        height_px: 1536,
+        byte_size: 900_000,
+        sha256: 'a'.repeat(64),
+        mime_type: 'image/jpeg',
+      },
+      thumbnail: {
+        media_object_id: THUMBNAIL_ID,
+        width_px: 640,
+        height_px: 480,
+        byte_size: 90_000,
+        sha256: 'b'.repeat(64),
+        mime_type: 'image/jpeg',
+      },
+      ...overrides,
+    };
+  }
+
+  afterEach(() => {
+    mockCreateSignedUrls.mockReset();
+    mockFrom.mockReset();
+    mockRpc.mockReset();
+  });
+
+  it('joins an authorized pair by record and canonical master id, then signs both variants', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: [metadata()], error: null });
+    mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+      error: null,
+    }));
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(mockRpc).toHaveBeenCalledWith('get_record_photo_metadata', {
+      p_record_ids: [RECORD_ID],
+    });
+    expect(mockCreateSignedUrls).toHaveBeenCalledWith(
+      [masterPath, thumbnailPath],
+      3600,
+    );
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      url: `https://media.test/${masterPath}`,
+      photoRendition: {
+        sourceRevision: SOURCE_REVISION,
+        screenMaster: { mediaObjectId: MASTER_ID, widthPx: 2048, heightPx: 1536 },
+        thumbnail: {
+          mediaObjectId: THUMBNAIL_ID,
+          path: thumbnailPath,
+          url: `https://media.test/${thumbnailPath}`,
+          widthPx: 640,
+          heightPx: 480,
+        },
+      },
+    });
+  });
+
+  it('keeps old photo generations bound by master id when attachment order changes', async () => {
+    const secondMasterPath = `${COUPLE_ID}/${RECORD_ID}/${SECOND_MASTER_ID}.jpg`;
+    installRecordPage([
+      { type: 'photo', name: 'second.jpg', path: secondMasterPath },
+      { type: 'photo', name: 'first.jpg', path: masterPath },
+    ]);
+    const second = metadata({
+      media_id: SECOND_MASTER_ID,
+      source_revision: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      screen_master: {
+        media_object_id: SECOND_MASTER_ID, width_px: 1200, height_px: 900,
+        byte_size: 500_000, sha256: 'c'.repeat(64), mime_type: 'image/jpeg',
+      },
+      thumbnail: {
+        media_object_id: SECOND_THUMBNAIL_ID, width_px: 640, height_px: 480,
+        byte_size: 80_000, sha256: 'd'.repeat(64), mime_type: 'image/jpeg',
+      },
+    });
+    mockRpc.mockResolvedValueOnce({ data: [metadata(), second], error: null });
+    mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+      error: null,
+    }));
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.map((attachment) => ({
+      name: attachment.name,
+      master: attachment.photoRendition?.screenMaster.mediaObjectId,
+      thumbnail: attachment.photoRendition?.thumbnail.mediaObjectId,
+    }))).toEqual([
+      { name: 'second.jpg', master: SECOND_MASTER_ID, thumbnail: SECOND_THUMBNAIL_ID },
+      { name: 'first.jpg', master: MASTER_ID, thumbnail: THUMBNAIL_ID },
+    ]);
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(uuid[]) does not exist' },
+  ])('uses the legacy master path only for a confirmed missing 090 RPC: %j', async (error) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, records: [{ attachments: [{ path: masterPath }] }] });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result).not.toHaveProperty('mediaUnavailable');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+  });
+
+  it('reports a metadata permission denial and does not retain a thumbnail', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'forbidden' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'forbidden',
+      photoMetadataUnavailable: 'forbidden',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('blocks an eligible master when the authoritative metadata response omits its row', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: [], error: null });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'forbidden' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'forbidden',
+      photoMetadataUnavailable: 'forbidden',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ code: 'PGRST301', message: 'JWT expired' }, 'auth_expired'],
+    [{ status: 503, message: 'service unavailable' }, 'server'],
+  ] as const)('blocks eligible master signing after authoritative metadata failure: %j', async (error, reason) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: reason });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('carries a thrown metadata transport failure as an authority block', async () => {
+    installRecordPage();
+    mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'unreachable' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'unreachable',
+      photoMetadataUnavailable: 'unreachable',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(other_ids) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(uuid[]) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.other_rpc(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(text[]) does not exist' },
+    { code: '42883', message: 'function public.other_rpc(uuid[]) does not exist' },
+  ])('does not treat another function or signature as the missing photo metadata RPC: %j', async (error) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: 'server',
+      photoMetadataUnavailable: 'server',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [metadata(), metadata()],
+    [metadata({ record_id: '99999999-9999-4999-8999-999999999999' })],
+    [metadata({ thumbnail: { media_object_id: THUMBNAIL_ID, width_px: 641, height_px: 480,
+      byte_size: 90_000, sha256: 'b'.repeat(64), mime_type: 'image/jpeg' } })],
+    [metadata({ screen_master: { media_object_id: MASTER_ID, width_px: '2048', height_px: 1536,
+      byte_size: 900_000, sha256: 'a'.repeat(64), mime_type: 'image/jpeg' } })],
+  ])('rejects duplicate, cross-record, or malformed metadata as an unavailable enrichment', async (rpcData) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: rpcData, error: null });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: 'server',
+      photoMetadataUnavailable: 'server',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'auth_expired',
+    'forbidden',
+    'not_found',
+    'offline',
+    'unreachable',
+    'server',
+    'unknown',
+  ] as const)('never signs a master carrying a metadata authority block: %s', async (reason) => {
+    const blocked = {
+      type: 'photo' as const,
+      name: 'photo.jpg',
+      path: masterPath,
+      url: 'https://media.test/stale-master.jpg',
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    };
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: 'https://media.test/signer-would-succeed.jpg' }],
+      error: null,
+    });
+
+    await expect(resolveAttachmentUrls([blocked], COUPLE_ID, RECORD_ID)).resolves.toEqual([{
+      type: 'photo',
+      name: 'photo.jpg',
+      path: masterPath,
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    }]);
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each(['master', 'thumbnail', 'cross-role'] as const)(
+    'rejects a %s media UUID collision across metadata batches and records',
+    async (collision) => {
+      const uuid = (seed: number) => {
+        const head = seed.toString(16).padStart(8, '0');
+        const tail = seed.toString(16).padStart(12, '0');
+        return `${head}-0000-4000-8000-${tail}`;
+      };
+      const rows = Array.from({ length: 101 }, (_, index) => {
+        const recordId = uuid(index + 1);
+        const masterId = uuid(index + 1_001);
+        const thumbnailId = uuid(index + 2_001);
+        return {
+          record_id: recordId,
+          media_id: masterId,
+          source_revision: uuid(index + 3_001),
+          screen_master: {
+            media_object_id: masterId,
+            width_px: 2048,
+            height_px: 1536,
+            byte_size: 900_000,
+            sha256: 'a'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+          thumbnail: {
+            media_object_id: thumbnailId,
+            width_px: 640,
+            height_px: 480,
+            byte_size: 90_000,
+            sha256: 'b'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+        };
+      });
+      const first = rows[0];
+      const last = rows.at(-1)!;
+      if (collision === 'master') {
+        last.media_id = first.media_id;
+        last.screen_master.media_object_id = first.screen_master.media_object_id;
+      } else if (collision === 'thumbnail') {
+        last.thumbnail.media_object_id = first.thumbnail.media_object_id;
+      } else {
+        last.media_id = first.thumbnail.media_object_id;
+        last.screen_master.media_object_id = first.thumbnail.media_object_id;
+      }
+
+      let pageIndex = 0;
+      const builder = {
+        select: vi.fn(() => builder),
+        eq: vi.fn(() => builder),
+        or: vi.fn(() => builder),
+        order: vi.fn(() => builder),
+        limit: vi.fn(async () => pageIndex++ === 0
+          ? {
+              data: rows.map((item) => ({
+                id: item.record_id,
+                user_id: '22222222-2222-4222-8222-222222222222',
+                record_date: '2026-09-05',
+                record_time: '09:07:33',
+                log_text: '사진 기록',
+                attachments: [{
+                  type: 'photo',
+                  name: 'photo.jpg',
+                  path: `${COUPLE_ID}/${item.record_id}/${item.screen_master.media_object_id}.jpg`,
+                }],
+                is_private: false,
+                created_at: `2026-09-05T00:07:${String(item.record_id).slice(0, 2)}.000000Z`,
+                content_revision: 9,
+                media_contract_version: 1,
+                last_media_operation_id: item.source_revision,
+                cipher_format: 0,
+              })),
+              error: null,
+            }
+          : { data: [], error: null }),
+      };
+      mockFrom.mockReturnValue(builder);
+      mockRpc
+        .mockResolvedValueOnce({ data: rows.slice(0, 100), error: null })
+        .mockResolvedValueOnce({ data: rows.slice(100), error: null });
+      mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+        data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+        error: null,
+      }));
+
+      const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+      expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+      if (!result.ok) throw new Error('record fetch failed');
+      expect(result.records.every((record) =>
+        record.attachments?.[0]?.photoMetadataUnavailable === 'server')).toBe(true);
+      expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not request plaintext thumbnail metadata for an encrypted record', async () => {
+    installRecordPage(undefined, { cipher_format: 1, content_envelope: '\\x00' });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockCreateSignedUrls).toHaveBeenCalledWith([masterPath], 3600);
+    expect(result).toMatchObject({
+      ok: true,
+      records: [{ attachments: [{ path: masterPath, url: `https://media.test/${masterPath}` }] }],
+    });
+  });
+});
+
 describe('deleteRecordFromDB', () => {
   const recordId = 'rec-001';
   const userId = 'user-001';
   const coupleId = 'couple-001';
 
-  it('calls .from(daily_records).delete().eq(id).eq(user_id).eq(couple_id).select(id).maybeSingle()', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: { id: recordId }, error: null });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
+  it('routes deletion through the atomic owner RPC instead of direct table DELETE', async () => {
+    mockRpc.mockResolvedValueOnce({ data: true, error: null });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
     expect(result).toEqual({ ok: true });
-    expect(mockFrom).toHaveBeenCalledWith('daily_records');
-    expect(eqId).toHaveBeenCalledWith('id', recordId);
-    expect(eqUserId).toHaveBeenCalledWith('user_id', userId);
-    expect(eqCoupleId).toHaveBeenCalledWith('couple_id', coupleId);
-    expect(select).toHaveBeenCalledWith('id');
-    expect(maybeSingle).toHaveBeenCalled();
+    expect(mockRpc).toHaveBeenCalledWith('delete_my_record', {
+      p_record_id: recordId,
+      p_expected_user_id: userId,
+      p_expected_couple_id: coupleId,
+    });
+    expect(mockFrom).not.toHaveBeenCalled();
   });
 
-  it('reports not_found when no row is returned', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
+  it('maps the RPC non-disclosure false result to not_found', async () => {
+    mockRpc.mockResolvedValueOnce({ data: false, error: null });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
-    // The filters pin id + owner + couple, so an empty result is an ownership
-    // answer -- not a transport failure, and never a connection message.
     expect(result).toEqual({ ok: false, reason: 'not_found' });
   });
 
   it('classifies an RLS rejection as forbidden rather than a connection problem', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({
+    mockRpc.mockResolvedValueOnce({
       data: null,
       error: { code: '42501', message: 'permission denied for table daily_records' },
     });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
@@ -399,20 +871,325 @@ describe('deleteRecordFromDB', () => {
   });
 
   it('classifies an expired session as auth_expired', async () => {
-    const maybeSingle = vi.fn().mockResolvedValue({
+    mockRpc.mockResolvedValueOnce({
       data: null,
       error: { code: 'PGRST301', message: 'JWT expired' },
     });
-    const select = vi.fn().mockReturnValue({ maybeSingle });
-    const eqCoupleId = vi.fn().mockReturnValue({ select });
-    const eqUserId = vi.fn().mockReturnValue({ eq: eqCoupleId });
-    const eqId = vi.fn().mockReturnValue({ eq: eqUserId });
-    const del = vi.fn().mockReturnValue({ eq: eqId });
-    mockFrom.mockReturnValue({ delete: del });
 
     const result = await deleteRecordFromDB(recordId, userId, coupleId);
 
     expect(result).toEqual({ ok: false, reason: 'auth_expired' });
+  });
+});
+
+describe('record media mutation RPCs', () => {
+  async function prepareUploadFixture() {
+    const close = vi.fn();
+    const decode = vi.fn(async () => ({ width: 4032, height: 3024, close }));
+    vi.stubGlobal('createImageBitmap', decode);
+    const context = { fillStyle: '', fillRect: vi.fn(), drawImage: vi.fn() };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(context as never);
+    const encode = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob')
+      .mockImplementationOnce((callback) => callback(new Blob(['master bytes'], { type: 'image/jpeg' })))
+      .mockImplementationOnce((callback) => callback(new Blob(['thumbnail bytes'], { type: 'image/jpeg' })));
+    try {
+      const original = new File(['EXIF device source'], 'private-original.heic', { type: 'image/heic' });
+      const result = await prepareRecordPhotoRenditions(original);
+      if ('error' in result) throw new Error(result.error);
+      expect(decode).toHaveBeenCalledExactlyOnceWith(original, { imageOrientation: 'from-image' });
+      expect(close).toHaveBeenCalledOnce();
+      expect(context.fillStyle).toBe('#ffffff');
+      expect(context.drawImage.mock.calls.map((call) => call.slice(3))).toEqual([[2048, 1536], [640, 480]]);
+      expect(encode).toHaveBeenCalledTimes(2);
+      expect(encode.mock.calls.map((call) => call.slice(1))).toEqual([['image/jpeg', 0.84], ['image/jpeg', 0.84]]);
+      return result;
+    } finally { vi.unstubAllGlobals(); }
+  }
+  const request = {
+    operationId: '40000000-0000-4000-8000-000000000001',
+    recordId: '20000000-0000-4000-8000-000000000001',
+    userId: '10000000-0000-4000-8000-000000000001',
+    coupleId: '30000000-0000-4000-8000-000000000001',
+    baseContentRevision: 7,
+    existingPaths: ['30000000-0000-4000-8000-000000000001/20000000-0000-4000-8000-000000000001/old.jpg'],
+    newMediaIds: ['50000000-0000-4000-8000-000000000001'],
+  };
+
+  it('detects the optional photo API with a read-only empty metadata request', async () => {
+    mockRpc.mockResolvedValueOnce({ data: [], error: null });
+
+    await expect(getRecordPhotoRenditionCapability()).resolves.toEqual({
+      ok: true,
+      supported: true,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('get_record_photo_metadata', {
+      p_record_ids: [],
+    });
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(uuid[]) does not exist' },
+  ])(
+    'allows legacy fallback only for a confirmed missing photo RPC: $code',
+    async (error) => {
+      mockRpc.mockResolvedValueOnce({ data: null, error });
+
+      await expect(getRecordPhotoRenditionCapability()).resolves.toEqual({
+        ok: true,
+        supported: false,
+      });
+    },
+  );
+
+  it('does not call an authentication failure an unsupported photo API', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: 'PGRST301', message: 'JWT expired' },
+    });
+
+    await expect(getRecordPhotoRenditionCapability()).resolves.toEqual({
+      ok: false,
+      reason: 'auth_expired',
+    });
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(other_ids) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(uuid[]) in the schema cache',
+    },
+    { code: 'PGRST202', message: 'Could not find the function public.other_rpc(p_record_ids) in the schema cache' },
+    { code: '42883', message: 'operator does not exist: uuid = text' },
+    { code: '42883', message: 'function public.get_record_photo_metadata(text[]) does not exist' },
+    { code: '42883', message: 'function public.internal_helper(uuid) does not exist' },
+    { code: '42883' },
+    { status: 500, message: 'internal server error' },
+    { code: '42501', message: 'permission denied' },
+  ])('never falls back for internal SQL or authorization failures: %j', async (error) => {
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    expect(await getRecordPhotoRenditionCapability()).toMatchObject({ ok: false });
+  });
+
+  it('rejects malformed successful capability responses', async () => {
+    mockRpc.mockResolvedValueOnce({ data: null, error: null });
+    expect(await getRecordPhotoRenditionCapability()).toEqual({ ok: false, reason: 'server' });
+  });
+
+  it('reports thrown capability transport errors without fallback', async () => {
+    mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    expect(await getRecordPhotoRenditionCapability()).toEqual({ ok: false, reason: 'unreachable' });
+  });
+
+  it('bounds a capability request without treating a timeout as missing schema', async () => {
+    vi.useFakeTimers();
+    try {
+      mockRpc.mockImplementationOnce(() => new Promise(() => {}));
+      const pending = getRecordPhotoRenditionCapability();
+      await vi.advanceTimersByTimeAsync(10_001);
+      await expect(pending).resolves.toEqual({ ok: false, reason: 'unreachable' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('begins a paired photo mutation with exact frozen descriptors', async () => {
+    const screenMaster = {
+      mediaObjectId: '50000000-0000-4000-8000-000000000001',
+      widthPx: 2048,
+      heightPx: 1536,
+      byteSize: 12,
+      sha256: 'a'.repeat(64),
+    };
+    const thumbnail = {
+      mediaObjectId: '60000000-0000-4000-8000-000000000001',
+      widthPx: 640,
+      heightPx: 480,
+      byteSize: 6,
+      sha256: 'b'.repeat(64),
+    };
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        operation_id: request.operationId,
+        state: 'pending',
+        target_content_revision: 8,
+      },
+      error: null,
+    });
+
+    await expect(beginRecordPhotoMutation({
+      ...request,
+      newPhotos: [{ screenMaster, thumbnail }],
+    })).resolves.toEqual({ ok: true, state: 'pending', targetContentRevision: 8 });
+    expect(mockRpc).toHaveBeenCalledWith('begin_record_photo_mutation', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+      p_base_content_revision: 7,
+      p_target_content_revision: 8,
+      p_existing_paths: request.existingPaths,
+      p_new_photos: [{
+        screen_master: {
+          media_object_id: screenMaster.mediaObjectId,
+          width_px: 2048,
+          height_px: 1536,
+          byte_size: 12,
+          sha256: 'a'.repeat(64),
+        },
+        thumbnail: {
+          media_object_id: thumbnail.mediaObjectId,
+          width_px: 640,
+          height_px: 480,
+          byte_size: 6,
+          sha256: 'b'.repeat(64),
+        },
+      }],
+    });
+  });
+
+  it('uploads the exact prepared JPEG object without re-encoding or overwrite', async () => {
+    const { screenMaster: rendition, thumbnail } = await prepareUploadFixture();
+    const file = rendition.file;
+    expect(rendition).toMatchObject({ widthPx: 2048, heightPx: 1536, byteSize: 12,
+      sha256: '33818390754e7425958f424be2c6cdaf53a38b3bb2912350076b5199ca33dea5' });
+    expect(thumbnail).toMatchObject({ widthPx: 640, heightPx: 480, byteSize: 15,
+      sha256: 'a16b688dbc3288e0902299c13c944a5f05fc3038c960a86ccf7f33502c903091' });
+    mockStorageUpload.mockResolvedValueOnce({ error: null });
+
+    await expect(uploadRecordPhotoRendition(
+      rendition,
+      'screen_master',
+      request.coupleId,
+      request.recordId,
+      request.newMediaIds[0],
+    )).resolves.toEqual({
+      attachment: {
+        type: 'photo',
+        name: 'photo.jpg',
+        path: `${request.coupleId}/${request.recordId}/${request.newMediaIds[0]}.jpg`,
+      },
+    });
+    expect(mockStorageUpload).toHaveBeenCalledWith(
+      `${request.coupleId}/${request.recordId}/${request.newMediaIds[0]}.jpg`,
+      file,
+      { contentType: 'image/jpeg', upsert: false },
+    );
+    expect(mockStorageUpload.mock.calls[0][1]).toBe(file);
+    mockStorageUpload.mockResolvedValueOnce({ error: null });
+    await uploadRecordPhotoRendition(thumbnail, 'thumbnail', request.coupleId, request.recordId,
+      '60000000-0000-4000-8000-000000000001');
+    expect(mockStorageUpload.mock.calls[1][1]).toBe(thumbnail.file);
+    expect(HTMLCanvasElement.prototype.toBlob).toHaveBeenCalledTimes(2);
+    expect(Object.isFrozen(rendition)).toBe(true);
+  });
+
+  it('rejects an original JPEG disguised as a prepared rendition before Storage', async () => {
+    const forged: PreparedRecordPhotoRendition = {
+      file: new File(['private EXIF original'], 'photo.jpg', { type: 'image/jpeg' }),
+      widthPx: 800, heightPx: 600, byteSize: 21, sha256: 'a'.repeat(64),
+    };
+    expect(await uploadRecordPhotoRendition(forged, 'screen_master', request.coupleId,
+      request.recordId, request.newMediaIds[0])).toHaveProperty('error');
+    expect(mockStorageUpload).not.toHaveBeenCalled();
+  });
+
+  it('carries a thrown upload transport failure to authoritative CAS with its exact reserved path', async () => {
+    const { thumbnail } = await prepareUploadFixture();
+    mockStorageUpload.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(uploadRecordPhotoRendition(thumbnail, 'thumbnail', request.coupleId,
+      request.recordId, request.newMediaIds[0])).resolves.toMatchObject({
+      reason: 'unreachable',
+      uncertainAttachment: { path: `${request.coupleId}/${request.recordId}/${request.newMediaIds[0]}.jpg` },
+    });
+    expect(mockStorageUpload).toHaveBeenCalledOnce();
+  });
+
+  it('preserves missing new begin as a failed operation without issuing legacy begin', async () => {
+    mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await expect(beginRecordPhotoMutation({ ...request, newPhotos: [] })).resolves.toEqual({ ok: false, reason: 'unreachable' });
+    expect(mockRpc).toHaveBeenCalledOnce();
+    expect(mockRpc.mock.calls[0][0]).toBe('begin_record_photo_mutation');
+  });
+
+  it('begins the exact base-to-target manifest before upload', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        operation_id: request.operationId,
+        state: 'pending',
+        base_content_revision: 7,
+        target_content_revision: 8,
+        desired_object_count: 2,
+      },
+      error: null,
+    });
+
+    await expect(beginRecordMediaMutation(request)).resolves.toEqual({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 8,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('begin_record_media_mutation', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+      p_base_content_revision: 7,
+      p_target_content_revision: 8,
+      p_existing_paths: request.existingPaths,
+      p_new_media_ids: request.newMediaIds,
+    });
+  });
+
+  it('uses status to distinguish a committed lost response from pending work', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: {
+        operation_id: request.operationId,
+        state: 'committed',
+        base_content_revision: 7,
+        target_content_revision: 8,
+        desired_object_count: 2,
+      },
+      error: null,
+    });
+
+    await expect(getRecordMediaMutationStatus(request)).resolves.toEqual({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 8,
+    });
+    expect(mockRpc).toHaveBeenCalledWith('record_media_mutation_status', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+    });
+  });
+
+  it('abandons by opaque operation identity and never calls Storage DELETE', async () => {
+    mockRpc.mockResolvedValueOnce({
+      data: { operation_id: request.operationId, state: 'abandoned' },
+      error: null,
+    });
+
+    await expect(abandonRecordMediaMutation(request)).resolves.toEqual({
+      ok: true,
+      state: 'abandoned',
+    });
+    expect(mockRpc).toHaveBeenCalledWith('abandon_record_media_mutation', {
+      p_operation_id: request.operationId,
+      p_record_id: request.recordId,
+      p_expected_user_id: request.userId,
+      p_expected_couple_id: request.coupleId,
+    });
+    expect(mockSupabase.storage.from).not.toHaveBeenCalled();
   });
 });
 
@@ -446,6 +1223,41 @@ describe('saveRecordToDB', () => {
     expect(payload).not.toHaveProperty('is_profile_post');
   });
 
+  it('never persists transient thumbnail enrichment or signed URLs', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({
+      ...record,
+      attachments: [{
+        type: 'photo',
+        name: 'photo.jpg',
+        path: 'couple-001/rec-001/33333333-3333-4333-8333-333333333333.jpg',
+        url: 'https://media.test/master-signed',
+        photoMetadataUnavailable: 'server',
+        photoRendition: {
+          sourceRevision: '55555555-5555-4555-8555-555555555555',
+          screenMaster: {
+            mediaObjectId: '33333333-3333-4333-8333-333333333333',
+            widthPx: 2048, heightPx: 1536, byteSize: 900_000,
+            sha256: 'a'.repeat(64), mimeType: 'image/jpeg',
+          },
+          thumbnail: {
+            mediaObjectId: '44444444-4444-4444-8444-444444444444',
+            widthPx: 640, heightPx: 480, byteSize: 90_000,
+            sha256: 'b'.repeat(64), mimeType: 'image/jpeg',
+            path: 'couple-001/rec-001/44444444-4444-4444-8444-444444444444.jpg',
+            url: 'https://media.test/thumbnail-signed',
+          },
+        },
+      }],
+    }, 'couple-001', 'user-001');
+
+    expect((insert.mock.calls[0][0] as { attachments: unknown[] }).attachments).toEqual([{
+      type: 'photo',
+      name: 'photo.jpg',
+      path: 'couple-001/rec-001/33333333-3333-4333-8333-333333333333.jpg',
+    }]);
+  });
+
   it('persists explicit profile publication as clear routing metadata', async () => {
     const insert = mockUpsert(null);
     await saveRecordToDB({ ...record, isProfilePost: true }, 'couple-001', 'user-001');
@@ -456,6 +1268,26 @@ describe('saveRecordToDB', () => {
     const insert = mockUpsert(null);
     await saveRecordToDB({ ...record, isProfilePost: false }, 'couple-001', 'user-001');
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ is_profile_post: false }));
+  });
+
+  it('advances a successful legacy plaintext update to expectedRevision plus one', async () => {
+    const eqCouple = vi.fn().mockResolvedValue({ error: null });
+    const eqUser = vi.fn().mockReturnValue({ eq: eqCouple });
+    const eqId = vi.fn().mockReturnValue({ eq: eqUser });
+    const update = vi.fn().mockReturnValue({ eq: eqId });
+    mockFrom.mockReturnValue({ update });
+
+    const result = await saveRecordToDB(
+      { ...record, contentRevision: 7 },
+      'couple-001',
+      'user-001',
+      { kind: 'update', expectedRevision: 7, mediaOperationId: 'operation-1' },
+    );
+
+    expect(result).toEqual({ ok: true, contentRevision: 8 });
+    expect(update).toHaveBeenCalledWith(expect.objectContaining({
+      last_media_operation_id: 'operation-1',
+    }));
   });
 
   it('reports forbidden for an RLS rejection, never a connection failure', async () => {

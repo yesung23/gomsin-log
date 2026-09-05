@@ -29,14 +29,15 @@
 
 0. `bash scripts/agent/session-start.sh` — live 상태 · 다음 작업 · **다른 AI의 점유** · 최근 세션
 1. 이 문서
-2. [`docs/PRODUCT_V3.md`](docs/PRODUCT_V3.md) — legacy 역사 기록 확인만; 활성 제품 방향으로 사용하지 않는다
-3. [`docs/BUSINESS_MEMORY_ROADMAP_V1.md`](docs/BUSINESS_MEMORY_ROADMAP_V1.md) (사업·고객·BM·AI·미디어·기억·시장·KPI에 영향이 있는 경우)
-4. [`docs/ENGINEERING_ROADMAP.md`](docs/ENGINEERING_ROADMAP.md)
-5. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)
-6. [`docs/WORK_LOG.md`](docs/WORK_LOG.md)의 최신 관련 세션
-7. [`docs/PROJECT_HANDOFF_2026-08-13.md`](docs/PROJECT_HANDOFF_2026-08-13.md)
-8. `AGENTS.md` (engineering 작업인 경우)
-9. 작업과 직접 관련된 specialist 문서
+2. [`docs/PRODUCT_V5_MASTER_DECISION.md`](docs/PRODUCT_V5_MASTER_DECISION.md) — 2026-09-03 이후 활성 제품·수익화·운영 경계
+3. [`docs/PRODUCT_V3.md`](docs/PRODUCT_V3.md) — legacy 역사 기록 확인만; 활성 제품 방향으로 사용하지 않는다
+4. [`docs/BUSINESS_MEMORY_ROADMAP_V1.md`](docs/BUSINESS_MEMORY_ROADMAP_V1.md) (사업·고객·BM·AI·미디어·기억·시장·KPI에 영향이 있는 경우)
+5. [`docs/ENGINEERING_ROADMAP.md`](docs/ENGINEERING_ROADMAP.md)
+6. [`docs/CURRENT_STATE.md`](docs/CURRENT_STATE.md)
+7. [`docs/WORK_LOG.md`](docs/WORK_LOG.md)의 최신 관련 세션
+8. [`docs/PROJECT_HANDOFF_2026-08-13.md`](docs/PROJECT_HANDOFF_2026-08-13.md)
+9. `AGENTS.md` (engineering 작업인 경우)
+10. 작업과 직접 관련된 specialist 문서
 
 문서 복구 뒤 volatile 사실은 GitHub·저장소·Supabase·로컬 환경에서 다시 확인한다.
 
@@ -101,7 +102,7 @@ bash scripts/agent/claim.sh --release opus
 | 질문 | authoritative home |
 |---|---|
 | **곰신로그가 무엇인가 (처음 오는 사람)** | `docs/WHAT_IS_GOMSINLOG.md` |
-| 활성 제품 의도 | 최신 사용자 승인 V4 방향 + `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
+| 활성 제품 의도 | `docs/PRODUCT_V5_MASTER_DECISION.md`, 현재 화면 사실은 `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
 | 이전 제품 방향 | `docs/PRODUCT_V3.md` (legacy 역사 기록) |
 | V4 화면이 실제로 어떻게 생겼나 | `docs/V4_AS_BUILT.md` |
 | 사업전략·수익화·시장·Memory Product | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
@@ -119,8 +120,8 @@ ONE FACT → ONE AUTHORITATIVE HOME을 지킨다. 지도와 작업 로그에는 
 
 모든 비사소한 작업은 `WORK_LOG.md`에 기록한다. 현재 구현·gate·blocker가 바뀌면
 `CURRENT_STATE.md`도 갱신하고, 계획·단계·진입 조건이 바뀌면
-`ENGINEERING_ROADMAP.md`를 갱신한다. 활성 제품 방향은 최신 사용자 승인 V4 문서와
-실제 코드가, 사업전략은
+`ENGINEERING_ROADMAP.md`를 갱신한다. 미래 제품 방향은 `PRODUCT_V5_MASTER_DECISION.md`가
+단독 소유하고, 실제 코드는 현재 구현의 최종 증거다. 사업전략은
 `BUSINESS_MEMORY_ROADMAP_V1.md`, remote migration 변경은 migration README가 소유한다.
 문서를 매번 모두 수정하지 않는다.
 
@@ -152,7 +153,7 @@ stale하게 만들지 않는다.
 
 ## 문서 우선순위 (충돌 시)
 
-1. **활성 제품 의도** → 최신 사용자 승인 V4 방향 + `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md`
+1. **활성 제품 의도** → 최신 사용자 명시 승인 + `docs/PRODUCT_V5_MASTER_DECISION.md`; 현재 V4 화면 사실은 `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md`
 2. **legacy 제품 방향 참고** → `docs/PRODUCT_V3.md` (활성 기준 아님)
 3. **사업전략·수익화** → `docs/BUSINESS_MEMORY_ROADMAP_V1.md`
 4. **구현 순서** → `docs/ENGINEERING_ROADMAP.md`
@@ -166,7 +167,7 @@ stale하게 만들지 않는다.
 
 - **ONE FACT → ONE AUTHORITATIVE HOME.** 이미 소유자가 있는 사실을 다른 문서에
   복사하지 말고 링크한다.
-- 일반 작업의 기본 읽기 순서는 `CLAUDE.md` → 최신 사용자 승인 V4 방향 문서 → 관련 시
+- 일반 작업의 기본 읽기 순서는 `CLAUDE.md` → `docs/PRODUCT_V5_MASTER_DECISION.md` → 관련 시
   `docs/BUSINESS_MEMORY_ROADMAP_V1.md` → `docs/ENGINEERING_ROADMAP.md` → `docs/CURRENT_STATE.md` → 작업과 직접 관련된
   specialist 문서다. `docs/PROJECT_HANDOFF_2026-08-13.md`는 온보딩용 지도이며,
   일반 세션에서 모든 역사 문서를 읽게 하는 목록이 아니다.

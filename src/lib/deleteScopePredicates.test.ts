@@ -23,6 +23,16 @@ const h = vi.hoisted(() => ({
 
 vi.mock('@/lib/accountDeletion', () => ({
   serverCallBlockedByPendingDeletion: vi.fn().mockResolvedValue(false),
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+    options: { expectedUserId: string | 'current' },
+  ) => ({
+    kind: 'executed',
+    value: await operation({
+      userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+      assertCurrent: () => {},
+    }),
+  }),
 }));
 
 vi.mock('@/lib/supabase', () => ({

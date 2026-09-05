@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { COMPANION_GARDEN_STAGES, deriveCompanionGardenState } from './companionGarden';
+import {
+  COMPANION_GARDEN_STAGES,
+  deriveCompanionGardenState,
+  getCompanionGardenTreeHeightPx,
+} from './companionGarden';
 
 describe('companion garden growth', () => {
   it.each([
@@ -48,5 +52,30 @@ describe('companion garden growth', () => {
       [100, 364],
       [365, null],
     ]);
+  });
+
+  it.each([
+    [1, 85],
+    [15, 93],
+    [29, 100],
+    [30, 185],
+    [99, 227],
+    [100, 237],
+    [364, 281],
+    [365, 284],
+    [730, 304],
+    [9999, 304],
+  ])('%i일의 나무 높이는 %ipx로 단계 안에서도 자란다', (days, height) => {
+    expect(getCompanionGardenTreeHeightPx(days)).toBe(height);
+  });
+
+  it.each([320, 390])('%ipx 화면에서도 함께한 날이 늘 때 실제 표시 높이가 작아지지 않는다', (viewportWidth) => {
+    const heights = Array.from({ length: 730 }, (_, index) => Math.min(
+      viewportWidth * 0.76,
+      getCompanionGardenTreeHeightPx(index + 1),
+    ));
+    for (let index = 1; index < heights.length; index += 1) {
+      expect(heights[index]).toBeGreaterThanOrEqual(heights[index - 1]);
+    }
   });
 });

@@ -5,13 +5,27 @@ import {
   UserProfile,
   Role,
   AuthUser,
+  toAuthUser,
   CoupleEvent,
   Attachment,
 } from '@/types';
 import { DEFAULT_LAYOUT_BY_ROLE, migrateWidgetLayout } from '@/lib/widgets';
-import { clearAllComposerDrafts } from '@/lib/composerDraft';
-import { clearAllAvatars } from '@/lib/avatarImage';
-import { revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+import {
+  clearAllComposerDrafts,
+  clearComposerDraft,
+  readComposerDraft,
+} from '@/lib/composerDraft';
+import {
+  clearAllAvatars,
+  clearAvatar,
+  readAvatar,
+} from '@/lib/avatarImage';
+import {
+  clearPendingCycleConsentRevocation,
+  hasCycleSensitiveConsent,
+  hasPendingCycleConsentRevocation,
+  revokeCycleSensitiveConsent,
+} from '@/lib/sensitiveConsent';
 import {
   authRepository,
   supabase,
@@ -20,6 +34,7 @@ import {
   saveCoupleAnniversary,
   fetchMyCoupleState,
 } from '@/lib/supabase';
+import { appleSessionGuard } from '@/lib/authSessionGuard';
 import {
   fetchFullStateResultFromDB,
   FULL_STATE_UNAVAILABLE,
@@ -49,6 +64,13 @@ import {
   saveCoupleHighlightToDB,
   type CoupleHighlightDraft,
 } from '@/lib/highlights';
+import {
+  type AppLocale,
+  DEFAULT_APP_LOCALE,
+  isAppLocale,
+  normalizeAppLocale,
+  preferredAppLocale,
+} from '@/lib/appLocale';
 import { setPartnerUsernameInDB } from '@/lib/partnerUsername';
 import {
   fetchTalkAboutMarksResultFromDB,
@@ -67,20 +89,22 @@ import {
   applyDeliveryOutcome,
   countForAccount as countOutbox,
   deliverableForAccount,
-  discardEntry as discardOutboxEntry,
   enqueueRecord,
+  ensureQueuedMediaPlan,
   isRetryableReason,
   hasSealedOutboxForAccount,
   pendingForAccount,
   purgeAccount as purgeOutboxAccount,
   readQueuedRecord,
-  unblockEntry,
   type OutboxPersistence,
+  type QueuedMediaPlan,
+  type QueuedRecord,
 } from '@/lib/outbox';
 import { createIndexedDbOutbox } from '@/lib/outboxStorage';
 import {
   clearE2eeRuntime,
   markE2eeCoupleAuthorityUnlinked,
+  registerE2eeRuntimeProvider,
 } from '@/app/e2ee/runtimeLifecycle';
 import {
   activateCoupleProtectionForAuthenticatedSession,
@@ -98,28 +122,61 @@ import {
   deleteRecordFromDB,
   fetchRecordsResultFromDB,
   uploadRecordMedia,
-  removeRecordMedia,
+  uploadRecordPhotoRendition,
+  beginRecordMediaMutation,
+  beginRecordPhotoMutation,
+  getRecordPhotoRenditionCapability,
+  getRecordMediaMutationStatus,
+  abandonRecordMediaMutation,
   resolveAttachmentUrls,
   isCanonicalRecordMediaPath,
+  isValidMediaObjectId,
+  classifyMediaFile,
 } from '@/lib/records';
+import {
+  prepareRecordPhotoRenditions,
+  type PreparedRecordPhotoRenditions,
+} from '@/lib/recordPhotoRenditions';
+import {
+  clearRecordMediaMutationJournalEntry,
+  getOrCreateRecordMediaMutationOwnerToken,
+  listRecordMediaMutationJournalEntries,
+  purgeRecordMediaMutationJournalForUser,
+  writeRecordMediaMutationJournalEntry,
+} from '@/lib/recordMediaMutationJournal';
 import { StoreContext } from '@/lib/storeContext';
 import { isValidUsername, normalizeUsername, PROFILE_CAPTION_MAX_LENGTH } from '@/lib/profileCaption';
 import type {
   RecordMutationReason,
   RecordMutationResult,
+  RecordCreateWithMediaResult,
+  RecordMediaMutationResult,
   SharedSyncStatus,
+  TalkAboutSyncStatus,
+  TalkAboutMutationResult,
 } from '@/lib/storeContext';
 import {
   assertNever,
+  accountDeletionLockLeaseMatchesUser,
+  advanceRecoveryMarkerToLocalCleanup,
   classifyDeletionStatus,
-  clearRecoveryMarker,
+  clearRecoveryMarkerForAttempt,
+  combineServerAnswers,
   deletionStatusLogToken,
+  inspectRecoveryMarker,
+  listRecoveryMarkers,
   markRecoveryPending,
   readRecoveryMarker,
   registerServerCallGate,
+  serverAnswerFromDatabase,
   serverAnswerFromUser,
+  subscribeToRecoveryMarkerChanges,
+  withAccountDeletionLock,
+  withAccountDeletionIntentLock,
+  type AccountDeletionLockLease,
   type AccountDeletionOutcome,
   type DeletionStatus,
+  type RecoveryMarkerV2,
   type ServerAnswer,
 } from '@/lib/accountDeletion';
 
@@ -127,6 +184,25 @@ import {
 type SyncSlice = 'records' | 'events' | 'trips' | 'talk-about' | 'highlights' | 'profile';
 type ActiveIdentity = { userId: string; generation: number };
 type ActiveWorkspace = ActiveIdentity & { coupleId: string };
+type InitialAuthResolution = 'pending' | 'authenticated' | 'signed_out';
+type QueuedRecordInput = Omit<QueuedRecord, 'attempts' | 'queuedAt' | 'sealedRecord'> & {
+  queuedAt?: string;
+};
+type BarrieredEnqueueResult = 'queued' | 'deletion_pending' | 'stale' | 'failed';
+type MediaRevisionUpload = { file: File; objectId: string };
+type PreparedPhotoRevisionUpload = MediaRevisionUpload & {
+  renditions: PreparedRecordPhotoRenditions;
+  thumbnailObjectId: string;
+};
+type MediaRevisionCommitResult =
+  | { ok: true; record: DailyRecord; operationId: string }
+  | {
+      ok: false;
+      phase: 'begin' | 'upload' | 'commit' | 'stale';
+      reason: RecordMutationReason;
+      error: string;
+      failedFiles: string[];
+    };
 
 function persistedMediaKey(attachment: Attachment): string {
   return `${attachment.type}\u0000${attachment.name}\u0000${attachment.path ?? ''}`;
@@ -135,6 +211,115 @@ function persistedMediaKey(attachment: Attachment): string {
 function hasSamePersistedMedia(actual: DailyRecord, expected: DailyRecord): boolean {
   return JSON.stringify((actual.attachments || []).map(persistedMediaKey))
     === JSON.stringify((expected.attachments || []).map(persistedMediaKey));
+}
+
+function hasSameAttachmentOrder(actual: Attachment[], expected: Attachment[]): boolean {
+  return JSON.stringify(actual.map(persistedMediaKey))
+    === JSON.stringify(expected.map(persistedMediaKey));
+}
+
+function plannedMediaPathPrefix(coupleId: string, recordId: string, objectId: string): string {
+  return `${coupleId}/${recordId}/${objectId}.`;
+}
+
+function attachmentMatchesPlannedObject(
+  attachment: Attachment,
+  coupleId: string,
+  recordId: string,
+  objectId: string,
+): boolean {
+  return typeof attachment.path === 'string'
+    && attachment.path.startsWith(plannedMediaPathPrefix(coupleId, recordId, objectId));
+}
+
+function plannedMediaIsComplete(
+  attachments: Attachment[],
+  plan: QueuedMediaPlan,
+  coupleId: string,
+  recordId: string,
+): boolean {
+  return plan.slots.every((slot) => attachments.some((attachment) => (
+    attachmentMatchesPlannedObject(attachment, coupleId, recordId, slot.objectId)
+  )));
+}
+
+/**
+ * Restore the exact selection order without inventing attachment metadata.
+ *
+ * Base attachments (rare legacy inputs) keep their queued order, planned files
+ * follow their immutable fileIndex, and unrelated server attachments are kept at
+ * the end. Returning null means the server row no longer contains a queued base
+ * attachment, so deleting the queue would lose user intent.
+ */
+function orderedAttachmentsForQueuedMedia(
+  current: Attachment[],
+  queuedBase: Attachment[],
+  plan: QueuedMediaPlan,
+  coupleId: string,
+  recordId: string,
+): Attachment[] | null {
+  const used = new Set<number>();
+  const take = (predicate: (attachment: Attachment) => boolean): Attachment | null => {
+    const index = current.findIndex((attachment, candidateIndex) => (
+      !used.has(candidateIndex) && predicate(attachment)
+    ));
+    if (index < 0) return null;
+    used.add(index);
+    return current[index];
+  };
+
+  const ordered: Attachment[] = [];
+  for (const base of queuedBase) {
+    const match = take((attachment) => persistedMediaKey(attachment) === persistedMediaKey(base));
+    if (!match) return null;
+    ordered.push(match);
+  }
+  for (const slot of [...plan.slots].sort((a, b) => a.fileIndex - b.fileIndex)) {
+    const match = take((attachment) => (
+      attachmentMatchesPlannedObject(attachment, coupleId, recordId, slot.objectId)
+    ));
+    if (!match) return null;
+    ordered.push(match);
+  }
+  current.forEach((attachment, index) => {
+    if (!used.has(index)) ordered.push(attachment);
+  });
+  return ordered;
+}
+
+function legacyExistingMediaIsAmbiguous(
+  current: Attachment[],
+  queuedBase: Attachment[],
+): boolean {
+  const remaining = [...current];
+  for (const base of queuedBase) {
+    const index = remaining.findIndex((attachment) => (
+      persistedMediaKey(attachment) === persistedMediaKey(base)
+    ));
+    if (index >= 0) remaining.splice(index, 1);
+  }
+  return remaining.length > 0;
+}
+
+function existingRecordMatchesQueuedCore(
+  existing: DailyRecord,
+  queued: Omit<DailyRecord, 'id' | 'createdAt'>,
+  expectedUserId: string,
+  allOrNothingMedia: boolean,
+): boolean {
+  return existing.userId === expectedUserId
+    && existing.date === queued.date
+    && existing.time === queued.time
+    && existing.authorRole === queued.authorRole
+    && existing.log === queued.log
+    && (allOrNothingMedia || existing.isPrivate === queued.isPrivate);
+}
+
+function validStableMediaObjectIds(files: File[], objectIds: string[] | undefined): boolean {
+  if (!objectIds) return true;
+  return objectIds.length === files.length
+    && new Set(objectIds).size === objectIds.length
+    && objectIds.every(isValidMediaObjectId);
 }
 
 const RECORD_UPDATE_READ_BACK_REASONS: ReadonlySet<RecordMutationReason> = new Set([
@@ -179,6 +364,25 @@ function shouldKeepCurrentRecordSnapshot(
   // before this request finishes. Preserve that newer state object (and its
   // attachments) rather than replaying the request-start snapshot over it.
   return wasReconciled || current !== requestStart;
+}
+
+function mergeCreatedRecordSnapshot(
+  records: DailyRecord[],
+  candidate: DailyRecord,
+): DailyRecord[] {
+  const existingIndex = records.findIndex((record) => record.id === candidate.id);
+  if (existingIndex < 0) return [...records, candidate];
+
+  // The record's own invalidation may win the HTTP-response race. Keep the
+  // authoritative refetch when it is at least as new, and replace it only when
+  // this create flow completed a later attachment revision.
+  const existing = records[existingIndex];
+  const existingRevision = existing.contentRevision ?? 1;
+  const candidateRevision = candidate.contentRevision ?? 1;
+  if (existingRevision >= candidateRevision) return records;
+  const next = records.slice();
+  next[existingIndex] = candidate;
+  return next;
 }
 
 /**
@@ -235,10 +439,25 @@ function preferredTheme(): 'light' | 'dark' {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'light';
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
+
+/**
+ * The locale to use on a device that has never chosen one.
+ * Falls back to 'ko' if navigator or languages are unsupported.
+ */
+function resolveBrowserLocale(): AppLocale {
+  if (typeof navigator === 'undefined') return DEFAULT_APP_LOCALE;
+  const languages = Array.isArray(navigator.languages) && navigator.languages.length > 0
+    ? navigator.languages
+    : (typeof navigator.language === 'string' && navigator.language ? [navigator.language] : []);
+  return preferredAppLocale(languages);
+}
 import { withTimeout, AUTH_SYNC_TIMEOUT_MS } from '@/lib/async';
 
 const STORE_KEY_V1 = 'gomsinlog.state.v1';
 const STORE_KEY = 'gomsinlog.state.v2';
+/** Push-token cleanup is best effort and must never hold the logout UI hostage. */
+const PUSH_TOKEN_REVOKE_TIMEOUT_MS = 2_000;
+const LOCAL_DELETION_CLEANUP_WARNING = '이 기기의 보내지 못한 기록을 아직 정리하지 못했어요.';
 
 class DevicePreferencesRepository {
   isConfigured(): boolean {
@@ -322,6 +541,7 @@ const DEFAULT_STATE: AppState = {
   soldierWidgetLayout: DEFAULT_LAYOUT_BY_ROLE.soldier,
   hasSeenInstallPrompt: false,
   theme: 'light',
+  locale: DEFAULT_APP_LOCALE,
 };
 
 /**
@@ -337,6 +557,7 @@ const DEFAULT_STATE: AppState = {
  */
 export const DEVICE_PREF_CARRY_OVER_KEYS = [
   'hasSeenInstallPrompt',
+  'locale',
   // Kept per role: the two people use one app on two devices with opposite
   // home screens, and a single shared list meant whoever edited last
   // overwrote the other's arrangement on role change.
@@ -362,7 +583,11 @@ function carryOverDevicePrefs(prev: AppState): Pick<AppState, DevicePrefKey> {
   const carried = Object.fromEntries(
     DEVICE_PREF_CARRY_OVER_KEYS.map((key) => [key, prev[key]]),
   ) as Pick<AppState, DevicePrefKey>;
-  return { ...carried, theme: prev.theme || 'light' };
+  return {
+    ...carried,
+    theme: prev.theme || 'light',
+    locale: isAppLocale(prev.locale) ? prev.locale : DEFAULT_APP_LOCALE,
+  };
 }
 
 const devicePreferencesRepository = new DevicePreferencesRepository();
@@ -445,6 +670,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(DEFAULT_STATE);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isAuthChecked, setIsAuthChecked] = useState(!supabase);
+  const [initialAuthResolution, setInitialAuthResolution] = useState<InitialAuthResolution>(
+    supabase ? 'pending' : 'signed_out',
+  );
   const [authSyncUnavailable, setAuthSyncUnavailable] = useState(false);
   /**
    * Why hydration failed. Kept outside `AppState` (never persisted) and reset to
@@ -489,8 +717,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const hydratedUserIdRef = useRef<string | null>(null);
   /** Current authenticated session owner, updated synchronously before async auth hydration. */
   const sessionUserIdRef = useRef<string | null>(null);
+  /** Distinguishes "not resolved yet" from an explicit null INITIAL_SESSION. */
+  const initialAuthResolutionRef = useRef<InitialAuthResolution>(
+    supabase ? 'pending' : 'signed_out',
+  );
   /** Invalidates post-await writes from a previous authenticated identity. */
   const sessionGenerationRef = useRef(0);
+  /** False synchronously at unmount so late promises cannot mutate a replacement Provider. */
+  const providerActiveRef = useRef(true);
   /** Set while signing out / deleting so the persistence effect cannot resurrect the cache. */
   const cachePurgedRef = useRef(false);
   /** Always-current state, so actions can read it without depending on stale closures. */
@@ -516,15 +750,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * authorization check, not user data, and must never be persisted.
    */
   const [sharedSyncStatus, setSharedSyncStatus] = useState<SharedSyncStatus>('live');
+  /** Orders every bookmark read, including full, realtime and post-write refreshes. */
+  const talkAboutRefreshSequenceRef = useRef(0);
+  /** Orders records reads across dedicated invalidations and full access reconciliation. */
+  const recordsRefreshSequenceRef = useRef(0);
+  /** Current value for mutation guards that must close before the next render. */
+  const talkAboutSyncStatusRef = useRef<TalkAboutSyncStatus>('ready');
+  const [talkAboutSyncStatusState, setTalkAboutSyncStatusState] =
+    useState<TalkAboutSyncStatus>('ready');
+  const setTalkAboutSyncStatus = useCallback((next: TalkAboutSyncStatus) => {
+    talkAboutSyncStatusRef.current = next;
+    setTalkAboutSyncStatusState(next);
+  }, []);
   /** Lets a recovery attempt started from the UI reuse the effect's retry path. */
   const retrySharedAccessRef = useRef<(() => Promise<boolean>) | null>(null);
   /** False once the couple channel reports a terminal transport failure. */
   const realtimeHealthyRef = useRef(true);
   /**
-   * Non-null while this account is in account-deletion recovery: its data has
-   * been removed but its login has not. `warnings` is kept IN MEMORY ONLY --
-   * warning strings can name storage paths, and the durable marker is a boolean
-   * carrying no deleted-account content of any kind.
+   * Non-null while this account is in account-deletion recovery. Pending and
+   * failed attempts preserve local data; only an attempt-bound local_cleanup
+   * marker authorizes removal. `warnings` is kept IN MEMORY ONLY because warning
+   * strings can name storage paths; the durable V2 marker carries no user content.
    */
   const [accountDeletionRecovery, setAccountDeletionRecovery] =
     useState<{ warnings: string[] } | null>(null);
@@ -539,6 +785,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * input: the pre-flight gate re-issues the authoritative check every time.
    */
   const deletionStatusRef = useRef<DeletionStatus>({ kind: 'unknown' });
+  /** One remote deletion request per exact user/attempt, including UI retries. */
+  const deletionFlightsRef = useRef(new Map<string, Promise<AccountDeletionOutcome>>());
   /** Cancels every deferred sync timer owned by the realtime effect. */
   const cancelDeferredSyncRef = useRef<(() => void) | null>(null);
 
@@ -566,10 +814,27 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * realtime channel constantly.
    */
   const flushOutboxRef = useRef<(() => Promise<unknown>) | null>(null);
+  /** Same-tab recovery identity; contains no user content and survives a refresh. */
+  const mediaOperationOwnerTokenRef = useRef<string | null | undefined>(undefined);
+  if (mediaOperationOwnerTokenRef.current === undefined) {
+    mediaOperationOwnerTokenRef.current = getOrCreateRecordMediaMutationOwnerToken();
+  }
+  /** Prevents resume events from abandoning an operation still running here. */
+  const activeMediaOperationIdsRef = useRef(new Set<string>());
+  const reconcileMediaOperationsRef = useRef<(() => Promise<void>) | null>(null);
 
-  // Module-level crypto capabilities must not outlive the provider instance
-  // that installed them (including test/app-shell unmount and remount cycles).
-  useEffect(() => () => clearE2eeRuntime(), []);
+  // Module-level crypto capabilities may be shared by overlapping Providers
+  // during an app-shell replacement. Only the last Provider clears them, while
+  // every unmount immediately invalidates that Provider's async continuations.
+  useEffect(() => {
+    providerActiveRef.current = true;
+    const registration = registerE2eeRuntimeProvider();
+    return () => {
+      providerActiveRef.current = false;
+      sessionGenerationRef.current += 1;
+      registration.unregister();
+    };
+  }, []);
 
   const replaceStateImmediately = useCallback((nextState: AppState) => {
     stateRef.current = nextState;
@@ -628,13 +893,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     })();
 
     authRecoveryRef.current = attempt;
-    void attempt.finally(() => {
+    const releaseAttempt = () => {
       if (authRecoveryRef.current === attempt) authRecoveryRef.current = null;
-    });
+    };
+    void attempt.then(releaseAttempt, releaseAttempt);
     return attempt;
   }, []);
 
   const captureActiveIdentity = useCallback((): ActiveIdentity | null => {
+    if (!providerActiveRef.current) return null;
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id;
     if (!userId || sessionUserIdRef.current !== userId) return null;
@@ -642,12 +909,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const isCurrentIdentity = useCallback((identity: ActiveIdentity): boolean =>
-    sessionGenerationRef.current === identity.generation
+    providerActiveRef.current
+    && sessionGenerationRef.current === identity.generation
     && sessionUserIdRef.current === identity.userId
     && stateRef.current.authenticatedUser?.id === identity.userId, []);
 
   const matchesCurrentWorkspace = useCallback((workspace: ActiveWorkspace): boolean =>
-    sessionGenerationRef.current === workspace.generation
+    providerActiveRef.current
+    && sessionGenerationRef.current === workspace.generation
     && sessionUserIdRef.current === workspace.userId
     && stateMatchesWorkspace(stateRef.current, workspace), []);
 
@@ -682,6 +951,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const isCurrentLinkedCouple = useCallback((workspace: ActiveWorkspace): boolean =>
     isCurrentIdentity(workspace)
+    && readRecoveryMarker(workspace.userId) === 'absent'
     && stateMatchesLinkedCouple(stateRef.current, workspace),
   [isCurrentIdentity]);
 
@@ -858,41 +1128,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /**
-   * Purge local account CONTENT while retaining the authenticated identity.
+   * Permanently remove one account's queued writes and attached Files.
    *
-   * Deliberately separate from `purgeLocalAccountData`, which stays exactly as
-   * it was for sign-out, account switch and fully successful deletion. Here the
-   * session is kept on purpose, because the user still has to be able to finish
-   * the deletion.
+   * Ordinary sign-out deliberately keeps this queue for the same account's
+   * return. Deletion recovery is different: the account is fenced and may no
+   * longer be able to decrypt or deliver those entries, so retaining them would
+   * leave sensitive user content in IndexedDB after the rest of the local cache
+   * has been removed. The explicit user id keeps another account's queue intact.
    */
-  const purgeLocalContentRetainingIdentity = useCallback((
-    expected: ActiveIdentity,
-  ): boolean => {
-    if (!isCurrentIdentity(expected)) return false;
-    const current = stateRef.current;
-    membershipReconciliationRef.current += 1;
-    quarantinedWorkspaceRef.current = null;
-    pendingDisconnectRef.current = null;
-    retrySharedAccessRef.current = null;
-    // Deliberately NOT bumping `sessionGenerationRef`: the session is kept.
-    localStorage.removeItem(STORE_KEY_V1);
-    purgeDiaryLocalStateForUser(expected.userId);
-    const nextState: AppState = {
-      ...DEFAULT_STATE,
-      ...carryOverDevicePrefs(current),
-      authenticatedUser: current.authenticatedUser,
-    };
-    // Rewrite `STORE_KEY` through the existing save path, then block the save
-    // effect so it cannot resurrect the cache on the next render. The recovery
-    // marker lives at its own top-level key and is untouched by either.
-    void devicePreferencesRepository.saveState(nextState, sessionUserIdRef.current !== null);
-    cachePurgedRef.current = true;
-    // Pin hydration to the retained user so the hydration effect cannot
-    // re-fetch the data that was just removed.
-    hydratedUserIdRef.current = expected.userId;
-    replaceStateImmediately(nextState);
-    return true;
-  }, [isCurrentIdentity, replaceStateImmediately]);
+  const purgeOutboxForAccount = useCallback(async (userId: string): Promise<boolean> => {
+    const persistence = outboxRef.current;
+    if (!persistence) {
+      setOutboxCounts({ waiting: 0, blocked: 0 });
+      // An unavailable adapter cannot prove that a previously created IndexedDB
+      // queue is empty. Keep local_cleanup active until storage can be inspected.
+      return false;
+    }
+    try {
+      await purgeOutboxAccount(persistence, userId);
+      // A resolved remove transaction is not proof that the adapter actually
+      // removed every entry. Re-read this exact account before clearing the
+      // durable local-cleanup obligation.
+      if ((await pendingForAccount(persistence, userId)).length !== 0) return false;
+      if (sessionUserIdRef.current === userId) {
+        setOutboxCounts({ waiting: 0, blocked: 0 });
+      }
+      return true;
+    } catch {
+      console.error('[gomsinlog] Failed to purge the account outbox during deletion recovery.');
+      return false;
+    }
+  }, []);
+
+  const purgeDeletionArtifactsForUser = useCallback(async (userId: string): Promise<boolean> => {
+    clearComposerDraft(userId);
+    clearAvatar(userId, 'me');
+    clearAvatar(userId, 'couple');
+    revokeCycleSensitiveConsent(userId);
+    clearPendingCycleConsentRevocation(userId);
+    const diaryStateRemoved = purgeDiaryLocalStateForUser(userId);
+    const mediaJournalRemoved = purgeRecordMediaMutationJournalForUser(userId);
+
+    const localArtifactsRemoved = diaryStateRemoved
+      && mediaJournalRemoved
+      && readComposerDraft(userId) === null
+      && readAvatar(userId, 'me') === null
+      && readAvatar(userId, 'couple') === null
+      && !hasCycleSensitiveConsent(userId)
+      && !hasPendingCycleConsentRevocation(userId);
+    const outboxRemoved = await purgeOutboxForAccount(userId);
+    return localArtifactsRemoved && outboxRemoved;
+  }, [purgeOutboxForAccount]);
+
+  const clearFinishedCleanupMarker = useCallback((marker: RecoveryMarkerV2): boolean =>
+    marker.phase === 'local_cleanup'
+      && clearRecoveryMarkerForAttempt(marker, 'local_cleanup'), []);
+
+  /**
+   * A startup may finish device cleanup only after Supabase has explicitly
+   * emitted a null INITIAL_SESSION. The initial `null` ref value is not an auth
+   * verdict. Each cleanup and marker clear shares the deletion lock with every
+   * tab, then re-reads both auth and marker state inside that critical section.
+   */
+  useEffect(() => {
+    if (initialAuthResolution !== 'signed_out') return;
+    let disposed = false;
+    void (async () => {
+      for (const snapshot of listRecoveryMarkers()) {
+        if (disposed
+          || initialAuthResolutionRef.current !== 'signed_out'
+          || sessionUserIdRef.current !== null) return;
+        if (snapshot.kind !== 'v2' || snapshot.phase !== 'local_cleanup') continue;
+        await withAccountDeletionLock(snapshot.userId, async () => {
+          if (disposed
+            || initialAuthResolutionRef.current !== 'signed_out'
+            || sessionUserIdRef.current !== null) return false;
+          const current = inspectRecoveryMarker(snapshot.userId);
+          if (current.kind !== 'v2' || current.phase !== 'local_cleanup') return false;
+          if (!await purgeDeletionArtifactsForUser(current.userId)) return false;
+          if (disposed
+            || initialAuthResolutionRef.current !== 'signed_out'
+            || sessionUserIdRef.current !== null) return false;
+          return clearFinishedCleanupMarker(current.marker);
+        });
+      }
+    })();
+    return () => { disposed = true; };
+  }, [clearFinishedCleanupMarker, initialAuthResolution, purgeDeletionArtifactsForUser]);
 
   /**
    * Resolve the tri-state deletion status for `userId`.
@@ -905,6 +1227,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    */
   const verifyDeletionStatus = useCallback(async (
     userId: string,
+    options: { lease?: AccountDeletionLockLease } = {},
   ): Promise<DeletionStatus> => {
     const marker = readRecoveryMarker(userId);
     if (marker === 'active') {
@@ -914,58 +1237,137 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const client = supabase;
     if (!client) return applyDeletionStatus(classifyDeletionStatus(marker, { kind: 'unavailable' }));
 
-    // `supabase.auth.getUser()` is a SERVER round-trip. `session.user.app_metadata`
-    // is deliberately not used: that JWT was issued before the flag was written
-    // and reports the stale value on exactly the reload that must catch it.
-    //
-    // `withTimeout` resolves the CALLER'S OWN fallback on both timeout and
-    // rejection, so the fallback's type IS the state. It must be `unavailable`.
-    // Passing `not_pending` (or `false`) here would reintroduce the original
-    // defect exactly: an unanswered question becoming an authoritative negative.
-    const server = await withTimeout<ServerAnswer>(
-      (async (): Promise<ServerAnswer> => {
-        try {
-          const { data, error } = await client.auth.getUser();
-          return error ? { kind: 'unavailable' } : serverAnswerFromUser(data?.user);
-        } catch {
-          // The question could not be answered. That is NOT an answer, and
-          // specifically not `not_pending`.
-          return { kind: 'unavailable' };
-        }
-      })(),
-      AUTH_SYNC_TIMEOUT_MS,
-      { kind: 'unavailable' } as ServerAnswer,
-    );
+    const readServerAnswer = async (): Promise<ServerAnswer> => {
+      // Auth metadata and the relational fence are independent server recovery
+      // authorities. Start both fresh checks before awaiting either one.
+      const unavailable: ServerAnswer = { kind: 'unavailable' };
+      const authAnswer = withTimeout<ServerAnswer>(
+        (async (): Promise<ServerAnswer> => {
+          try {
+            const { data, error } = await client.auth.getUser();
+            return error ? unavailable : serverAnswerFromUser(userId, data?.user);
+          } catch {
+            return unavailable;
+          }
+        })(),
+        AUTH_SYNC_TIMEOUT_MS,
+        unavailable,
+      );
+      const databaseAnswer = withTimeout<ServerAnswer>(
+        (async (): Promise<ServerAnswer> => {
+          try {
+            const { data, error } = await client.rpc('is_my_account_deletion_pending');
+            return error ? unavailable : serverAnswerFromDatabase(data);
+          } catch {
+            return unavailable;
+          }
+        })(),
+        AUTH_SYNC_TIMEOUT_MS,
+        unavailable,
+      );
+      // A positive authority dominates, so do not wait for the other authority's
+      // timeout before closing the fence. A clear verdict still waits for both.
+      const taggedAuth = authAnswer.then((answer) => ({ source: 'auth' as const, answer }));
+      const taggedDatabase = databaseAnswer.then((answer) => ({
+        source: 'database' as const,
+        answer,
+      }));
+      const first = await Promise.race([taggedAuth, taggedDatabase]);
+      if (first.answer.kind === 'pending') return first.answer;
+      const second = first.source === 'auth'
+        ? (await taggedDatabase).answer
+        : (await taggedAuth).answer;
+      return first.source === 'auth'
+        ? combineServerAnswers(first.answer, second)
+        : combineServerAnswers(second, first.answer);
+    };
+    const server = await readServerAnswer();
+    let effectiveServer = server;
     // A positive server answer also writes the local marker, so the next reload
     // is instant and does not depend on repeating the round-trip.
-    if (server.kind === 'pending') markRecoveryPending(userId);
-    return applyDeletionStatus(classifyDeletionStatus(marker, server));
+    if (server.kind === 'pending' && marker === 'absent') {
+      const persistPending = () => {
+        if (inspectRecoveryMarker(userId).kind === 'absent') markRecoveryPending(userId);
+      };
+      if (accountDeletionLockLeaseMatchesUser(options.lease, userId)
+        && options.lease?.mode === 'exclusive') {
+        persistPending();
+      } else if (accountDeletionLockLeaseMatchesUser(options.lease, userId)) {
+        // Ordinary mutations hold a shared lease so they can overlap each
+        // other while account deletion waits for all of them. They must not
+        // upgrade that lease in place (Web Locks are non-reentrant), nor race
+        // each other while writing the durable marker. Their wrapper re-runs
+        // this check after releasing the shared lease.
+      } else {
+        const revalidateAndPersistPending = async () => {
+          if (inspectRecoveryMarker(userId).kind !== 'absent') return;
+          // The answer that caused this path was read before lock ownership.
+          // Re-read both server authorities while holding the cooperative lock,
+          // so a completed cancellation cannot be overwritten by that stale
+          // pre-lock response.
+          const freshServer = await readServerAnswer();
+          effectiveServer = freshServer;
+          if (freshServer.kind === 'pending') persistPending();
+        };
+        const immediate = await withAccountDeletionLock(userId, revalidateAndPersistPending, {
+          ifAvailable: true,
+        });
+        if (immediate.kind === 'unavailable' && immediate.reason === 'contended') {
+          // Join the current owner, then perform the same fresh authority check.
+          await withAccountDeletionLock(userId, revalidateAndPersistPending);
+        }
+      }
+    }
+    const currentMarker = readRecoveryMarker(userId);
+    return applyDeletionStatus(classifyDeletionStatus(currentMarker, effectiveServer));
   }, [applyDeletionStatus]);
 
   /**
-   * Abort with NO WRITES APPLIED, then purge local content and enter recovery.
+   * Abort with NO WRITES APPLIED and enter recovery without destroying the
+   * original local content. Only `local_cleanup` may authorize deletion.
    *
    * Runs synchronously with respect to the caller's first request: the caller
    * returns on the gate's `pending` result and never reaches its request.
    *
-   * FORWARD CONSTRAINT: the "no queued mutation delivered" claim holds because
-   * there is no outbox in this codebase -- every mutation is issued directly by
-   * the store methods, and the only deferred work is two read-only timer-based
-   * schedulers, both cancelled in step 4. IF A PERSISTENT MUTATION QUEUE IS EVER
-   * ADDED, a drain-blocking gate must be added at its drain point too.
-   */
+   * The outbox is retained but its queue and drain paths are independently
+   * marker-gated, so a restart can recover without decrypting or replaying it.
+  */
   const abortForPendingDeletion = useCallback((identity: ActiveIdentity): void => {
-    // (1) Make the verdict durable first, so it survives a reload without
-    //     needing the round-trip again.
-    markRecoveryPending(identity.userId);
-    // (2) Content goes, identity and session stay, device prefs untouched.
-    purgeLocalContentRetainingIdentity(identity);
-    // (3) Close the route gate on the next render.
+    // During auth hydration the incoming session is already current while its
+    // user has intentionally not yet been copied into renderable state.
+    if (sessionGenerationRef.current !== identity.generation
+      || sessionUserIdRef.current !== identity.userId) return;
+    // Marker creation is deliberately absent here. Every caller either observed
+    // an existing marker or created one while holding the per-user Web Lock.
+    // A synchronous helper must never perform a non-atomic localStorage CAS.
+    // (1) Close the route gate on the next render.
     setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
     applyDeletionStatus({ kind: 'pending' });
-    // (4) Nothing deferred may fire afterwards.
+    // (2) Nothing deferred may fire afterwards.
     cancelDeferredSyncRef.current?.();
-  }, [applyDeletionStatus, purgeLocalContentRetainingIdentity]);
+  }, [applyDeletionStatus]);
+
+  /**
+   * Close the in-memory route fence when another supported Provider or tab
+   * writes a marker. Neither event payload is authority: every signal causes a
+   * fresh read of the account that is current in this Provider. Removal is not
+   * an instruction to reopen; only an authenticated flow may do that.
+   */
+  useEffect(() => {
+    const closeFenceFromCurrentMarker = () => {
+      const userId = sessionUserIdRef.current;
+      if (!userId || readRecoveryMarker(userId) !== 'active') return;
+      abortForPendingDeletion({ userId, generation: sessionGenerationRef.current });
+    };
+    const unsubscribeSameDocument = subscribeToRecoveryMarkerChanges(
+      closeFenceFromCurrentMarker,
+    );
+    window.addEventListener('storage', closeFenceFromCurrentMarker);
+    return () => {
+      unsubscribeSameDocument();
+      window.removeEventListener('storage', closeFenceFromCurrentMarker);
+    };
+  }, [abortForPendingDeletion]);
 
   /**
    * Pre-flight gate for every server synchronization and every server mutation.
@@ -974,15 +1376,74 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * verdict. A `pending` result aborts the attempt before its first request is
    * sent, so no server state is modified and no write is applied.
    */
-  const ensureNotPendingBeforeServerCall = useCallback(async (): Promise<DeletionStatus> => {
-    const identity = captureActiveIdentity();
-    if (!identity) return { kind: 'unknown' };
-    const status = await verifyDeletionStatus(identity.userId);
+  const ensureNotPendingBeforeServerCall = useCallback(async (
+    deletionLease?: AccountDeletionLockLease,
+    expectedIdentity?: ActiveIdentity,
+  ): Promise<DeletionStatus> => {
+    const identity = expectedIdentity ?? captureActiveIdentity();
+    if (!identity || !isCurrentIdentity(identity)) return { kind: 'unknown' };
+    const status = await verifyDeletionStatus(identity.userId, {
+      lease: accountDeletionLockLeaseMatchesUser(deletionLease, identity.userId)
+        ? deletionLease
+        : undefined,
+    });
     if (status.kind === 'pending' && isCurrentIdentity(identity)) {
-      abortForPendingDeletion(identity);
+      await abortForPendingDeletion(identity);
     }
     return status;
   }, [abortForPendingDeletion, captureActiveIdentity, isCurrentIdentity, verifyDeletionStatus]);
+
+  /**
+   * Serialize one ordinary remote mutation against account deletion.
+   *
+   * The pre-flight check, every remote side effect, response reconciliation and
+   * guarded local commit must remain inside this lease. A check that releases
+   * the lock before the write leaves a race in which deletion can start between
+   * those two operations. Existing leases are accepted only while they are
+   * actively owned by this exact user, which lets outbox replay call the same
+   * mutation paths without attempting a non-reentrant nested Web Lock.
+   */
+  const withOrdinaryServerMutation = useCallback(async <T,>(
+    identity: ActiveIdentity,
+    stillAuthorized: () => boolean,
+    existingLease: AccountDeletionLockLease | undefined,
+    blockedValue: () => T,
+    operation: (lease: AccountDeletionLockLease) => Promise<T>,
+  ): Promise<T> => {
+    let pendingNeedsExclusiveRecheck = false;
+    const run = async (lease: AccountDeletionLockLease): Promise<T> => {
+      if (!accountDeletionLockLeaseMatchesUser(lease, identity.userId)
+        || !isCurrentIdentity(identity)
+        || !stillAuthorized()) return blockedValue();
+      const status = await ensureNotPendingBeforeServerCall(lease, identity);
+      if (status.kind === 'pending' && lease.mode === 'shared') {
+        pendingNeedsExclusiveRecheck = true;
+      }
+      if (blocksServerCall(status)
+        || !isCurrentIdentity(identity)
+        || !stillAuthorized()) return blockedValue();
+      return operation(lease);
+    };
+
+    if (existingLease) {
+      return accountDeletionLockLeaseMatchesUser(existingLease, identity.userId)
+        && existingLease.mode === 'exclusive'
+        ? run(existingLease)
+        : blockedValue();
+    }
+
+    // Shared leases preserve legitimate concurrent actions. Deletion requests
+    // an exclusive lease, which waits for every prior shared mutation and then
+    // prevents newer ones from overtaking it in the lock queue.
+    const locked = await withAccountDeletionLock(identity.userId, run, { mode: 'shared' });
+    if ((pendingNeedsExclusiveRecheck
+      || (deletionStatusRef.current.kind === 'pending'
+        && readRecoveryMarker(identity.userId) === 'absent'))
+      && isCurrentIdentity(identity)) {
+      await ensureNotPendingBeforeServerCall(undefined, identity);
+    }
+    return locked.kind === 'acquired' ? locked.value : blockedValue();
+  }, [ensureNotPendingBeforeServerCall, isCurrentIdentity]);
 
   useEffect(() => {
     devicePreferencesRepository.loadState().then((stored) => {
@@ -990,6 +1451,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const theme = stored.theme === 'light' || stored.theme === 'dark'
           ? stored.theme
           : preferredTheme();
+        const locale: AppLocale = isAppLocale(stored.locale)
+          ? stored.locale
+          : resolveBrowserLocale();
         const devicePrefs = {
           widgetLayout: Array.isArray(stored.widgetLayout)
             && stored.widgetLayout.every((item) => typeof item === 'string')
@@ -1003,6 +1467,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ? stored.hasSeenInstallPrompt
             : DEFAULT_STATE.hasSeenInstallPrompt,
           theme,
+          locale,
         };
         // Older releases could persist complete sample-account content here.
         // Retain only harmless device preferences and drop all profile,
@@ -1011,7 +1476,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         stateRef.current = nextState;
         setState(nextState);
       } else {
-        const nextState = { ...stateRef.current, theme: preferredTheme() };
+        const nextState = {
+          ...stateRef.current,
+          theme: preferredTheme(),
+          locale: resolveBrowserLocale(),
+        };
         stateRef.current = nextState;
         setState(nextState);
       }
@@ -1026,9 +1495,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * whose deletion is pending, which is exactly what clause 2.46 forbids.
    */
   useEffect(() => {
-    registerServerCallGate(ensureNotPendingBeforeServerCall);
-    return () => registerServerCallGate(null);
-  }, [ensureNotPendingBeforeServerCall]);
+    const registration = registerServerCallGate({
+      expectedUserId: state.authenticatedUser?.id ?? null,
+      getCurrentUserId: () => sessionUserIdRef.current,
+      gate: ensureNotPendingBeforeServerCall,
+    });
+    return registration.unregister;
+  }, [ensureNotPendingBeforeServerCall, state.authenticatedUser?.id]);
 
   /**
    * Register this device for notifications once a couple exists.
@@ -1105,19 +1578,22 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         screen, only their freshness is uncertain.
       */
       if (sharedSyncStatus === 'unavailable') return;
-      void clearOwnUnseen();
+      const identity = captureActiveIdentity();
+      if (!identity) return;
+      void clearOwnUnseen(identity.userId);
     };
 
     clear();
     document.addEventListener('visibilitychange', clear);
     return () => document.removeEventListener('visibilitychange', clear);
-  }, [coupleLifecycle, sharedSyncStatus]);
+  }, [captureActiveIdentity, coupleLifecycle, sharedSyncStatus]);
 
   useEffect(() => {
     if (coupleLifecycle !== 'connected') return;
     let cancelled = false;
+    const identity = captureActiveIdentity();
     if (pushNotificationsEnabled()) {
-      void setUpPushNotifications();
+      if (identity) void setUpPushNotifications(identity.userId);
     } else {
       // Push is product-disabled, but prior builds may already have registered a
       // device token. Revoke it while the authenticated session is still valid.
@@ -1132,7 +1608,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       carried in the main state fetch, so a failure here degrades to "do not
       offer the prompt" instead of degrading the whole hydration.
     */
-    const identity = captureActiveIdentity();
     const coupleId = stateRef.current.profile.couple.coupleId;
     if (identity && coupleId) {
       void fetchPartnerMembership(coupleId, identity.userId).then((partner) => {
@@ -1156,7 +1631,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       row is scoped to the account that emitted it, so this cannot be assembled
       into a view of the other person.
     */
-    void recordProductEvent({ kind: 'couple_connected' });
+    if (identity) {
+      void recordProductEvent(
+        { kind: 'couple_connected' },
+        { expectedUserId: identity.userId },
+      );
+    }
     /*
       Keyed on lifecycle and exact couple workspace.
 
@@ -1177,6 +1657,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let disposed = false;
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      // SDK persistence and notification are separated by an await. Reject a
+      // cancelled Apple session before granting identity or hydration authority.
+      if (!appleSessionGuard.canConsumeSession(session)) {
+        if (event !== 'INITIAL_SESSION') return;
+        session = null; // Resolve a remount as signed out, not an endless splash.
+      }
+      if (event === 'INITIAL_SESSION') {
+        const resolution: InitialAuthResolution = session?.user ? 'authenticated' : 'signed_out';
+        initialAuthResolutionRef.current = resolution;
+        setInitialAuthResolution(resolution);
+      }
       // Revoke the previous account's realtime refresh authority immediately,
       // before any asynchronous state hydration for the new session begins.
       const nextSessionUserId = session?.user?.id ?? null;
@@ -1190,11 +1681,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         clearE2eeRuntime();
         sessionGenerationRef.current += 1;
         membershipReconciliationRef.current += 1;
+        recordsRefreshSequenceRef.current += 1;
+        talkAboutRefreshSequenceRef.current += 1;
         quarantinedWorkspaceRef.current = null;
         pendingDisconnectRef.current = null;
         retrySharedAccessRef.current = null;
         realtimeHealthyRef.current = true;
         setSharedSyncStatus('live');
+        setTalkAboutSyncStatus('ready');
         setAuthSyncUnavailable(false);
         setAuthSyncReason(null);
         setAuthSyncStage(null);
@@ -1227,18 +1721,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           const sessionUser = session.user;
-          const provider = (sessionUser.app_metadata?.provider as AuthUser['provider']) || 'google';
-          const authUser: AuthUser = {
-            id: sessionUser.id,
-            email: sessionUser.email,
-            provider,
-          };
+          const authUser = toAuthUser(sessionUser);
 
           // A refreshed token for the account we already loaded changes nothing.
           if (
             (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') &&
             hydratedUserIdRef.current === sessionUser.id
           ) {
+            replaceStateImmediately({ ...stateRef.current, authenticatedUser: authUser });
             setIsAuthChecked(true);
             return;
           }
@@ -1250,15 +1740,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           // spent and no round-trip required. A positive marker outranks any
           // server answer, so this branch needs no `getUser()` call at all.
           if (readRecoveryMarker(sessionUser.id) === 'active') {
-            applyDeletionStatus({ kind: 'pending' });
-            setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
-            hydratedUserIdRef.current = null;
-            cachePurgedRef.current = true;
             replaceStateImmediately({
               ...DEFAULT_STATE,
               ...carryOverDevicePrefs(stateRef.current),
               authenticatedUser: authUser,
             });
+            await abortForPendingDeletion({ userId: sessionUser.id, generation: authGeneration });
             setIsAuthChecked(true);
             return;
           }
@@ -1280,14 +1767,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               || sessionUserIdRef.current !== sessionUser.id
             ) return;
             if (deletion.kind === 'pending') {
-              setAccountDeletionRecovery((previous) => previous ?? { warnings: [] });
-              hydratedUserIdRef.current = null;
-              cachePurgedRef.current = true;
               replaceStateImmediately({
                 ...DEFAULT_STATE,
                 ...carryOverDevicePrefs(stateRef.current),
                 authenticatedUser: authUser,
               });
+              await abortForPendingDeletion({ userId: sessionUser.id, generation: authGeneration });
               return;
             }
             setAccountDeletionRecovery(null);
@@ -1355,7 +1840,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               if (hydration.ok) return null;
               return previous === 'auth_expired' ? previous : hydration.reason;
             });
-            setAuthSyncStage(hydration.ok ? null : hydration.stage);
+            setAuthSyncStage(
+              hydration.ok
+                ? null
+                : hydration.stage === 'partner-membership'
+                  ? 'membership'
+                  : hydration.stage,
+            );
             /*
               The backend's own code goes to the console, not to state.
 
@@ -1449,6 +1940,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 clearCoupleProtectionRequirement(sessionUser.id, nextState.profile.couple.coupleId);
               }
             }
+            // The deletion marker can be written while the network hydration is
+            // in flight. Re-read it at the last synchronous boundary before any
+            // fetched account state or E2EE setup is applied.
+            if (readRecoveryMarker(sessionUser.id) === 'active') {
+              await abortForPendingDeletion({ userId: sessionUser.id, generation: authGeneration });
+              return;
+            }
             replaceStateImmediately(nextState);
 
             // Install a floor-aware guard immediately, then the verified
@@ -1466,7 +1964,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               },
               isCurrentSession: () => !disposed
                 && sessionGenerationRef.current === authGeneration
-                && sessionUserIdRef.current === sessionUser.id,
+                && sessionUserIdRef.current === sessionUser.id
+                && readRecoveryMarker(sessionUser.id) === 'absent',
             });
 
             hydratedUserIdRef.current = dbState && dbState !== FULL_STATE_UNAVAILABLE
@@ -1525,10 +2024,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [
     applyDeletionStatus,
+    abortForPendingDeletion,
     handleAuthExpired,
     isHydrated,
     refreshCoupleLifecycle,
     replaceStateImmediately,
+    setTalkAboutSyncStatus,
     verifyDeletionStatus,
   ]);
 
@@ -1556,6 +2057,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [state.theme]);
 
+  useEffect(() => {
+    const locale = isAppLocale(state.locale) ? state.locale : DEFAULT_APP_LOCALE;
+    if (typeof document !== 'undefined' && document.documentElement) {
+      document.documentElement.lang = locale;
+    }
+  }, [state.locale]);
+
   /**
    * Realtime sync for the shared couple space.
    *
@@ -1577,8 +2085,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!matchesCurrentWorkspace(expected)) return false;
     const current = stateRef.current;
     membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = expected;
     setSharedSyncStatus('unavailable');
+    setTalkAboutSyncStatus('unavailable');
     const nextState: AppState = {
       ...current,
       profile: {
@@ -1604,7 +2115,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     replaceStateImmediately(nextState);
     return true;
-  }, [matchesCurrentWorkspace, replaceStateImmediately]);
+  }, [matchesCurrentWorkspace, replaceStateImmediately, setTalkAboutSyncStatus]);
 
   const purgeSharedAccess = useCallback((expected?: ActiveWorkspace): boolean => {
     const current = stateRef.current;
@@ -1619,12 +2130,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) return false;
 
     membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     pendingDisconnectRef.current = null;
     retrySharedAccessRef.current = null;
     realtimeHealthyRef.current = true;
     // There is no shared workspace left to be out of sync with.
     setSharedSyncStatus('live');
+    setTalkAboutSyncStatus('ready');
     // The lifecycle is what every banner reads, and it renders NOTHING for
     // `connected`. Leaving it stale here is what emptied the timeline with no
     // explanation and no reconnect route until the app was reloaded.
@@ -1672,10 +2186,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     replaceStateImmediately(nextState);
     return true;
-  }, [replaceStateImmediately]);
+  }, [replaceStateImmediately, setTalkAboutSyncStatus]);
 
   const reconcileSharedAccess = useCallback(async (
     workspace: ActiveWorkspace,
+    deletionLease?: AccountDeletionLockLease,
   ): Promise<boolean> => {
     const client = supabase;
     const canReconcile = () => matchesCurrentWorkspace(workspace)
@@ -1686,7 +2201,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     // funnel for the recovery poll, the visibilitychange/online handler and the
     // UI retry, so the `online` listener is the concrete path by which an
     // offline secondary device learns about a deletion started elsewhere.
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    if (blocksServerCall(await ensureNotPendingBeforeServerCall(deletionLease))) return false;
     if (!canReconcile()) return false;
 
     const reconciliation = ++membershipReconciliationRef.current;
@@ -1713,7 +2228,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
       // Recovery is never snapshot-based: every shared slice must be read again
       // through the caller's current RLS policy after membership is confirmed.
-      const [recordsResult, eventsResult, tripsResult, talkAboutResult, highlightsResult] = await Promise.all([
+      const recordsRefreshSequence = ++recordsRefreshSequenceRef.current;
+      const talkAboutRefreshSequence = ++talkAboutRefreshSequenceRef.current;
+      const [
+        recordsSettled,
+        eventsSettled,
+        tripsSettled,
+        talkAboutSettled,
+        highlightsSettled,
+      ] = await Promise.allSettled([
         fetchRecordsResultFromDB(workspace.coupleId),
         fetchEventsResultFromDB(workspace.coupleId),
         fetchTripsResultFromDB(workspace.coupleId),
@@ -1721,37 +2244,56 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         fetchCoupleHighlightsResultFromDB(workspace.coupleId),
       ]);
       if (!isLatestCurrentWorkspace()) return false;
-      if (!recordsResult.ok || !eventsResult.ok || !tripsResult.ok) {
+      const recordsResultIsLatest = recordsRefreshSequenceRef.current === recordsRefreshSequence;
+      const recordsResult = recordsSettled.status === 'fulfilled' ? recordsSettled.value : null;
+      const eventsResult = eventsSettled.status === 'fulfilled' ? eventsSettled.value : null;
+      const tripsResult = tripsSettled.status === 'fulfilled' ? tripsSettled.value : null;
+      const talkAboutResult = talkAboutSettled.status === 'fulfilled' ? talkAboutSettled.value : null;
+      const highlightsResult = highlightsSettled.status === 'fulfilled' ? highlightsSettled.value : null;
+      if (
+        (recordsResultIsLatest && (!recordsResult || !recordsResult.ok))
+        || !eventsResult?.ok
+        || !tripsResult?.ok
+      ) {
         console.error('[gomsinlog] Authoritative shared workspace refresh failed');
         quarantineSharedAccess(workspace);
         return false;
       }
 
       const current = stateRef.current;
+      const talkAboutResultIsLatest =
+        talkAboutRefreshSequenceRef.current === talkAboutRefreshSequence;
       const role = current.profile.role;
       const partnerRole: Role = role === 'gomsin' ? 'soldier' : 'gomsin';
-      const records = visibleRecordsForViewer(
-        recordsResult.records.map((record) => ({
-          ...record,
-          authorRole: record.userId === workspace.userId ? role : partnerRole,
-        })),
-        { userId: workspace.userId, role },
-      );
+      const records = recordsResult?.ok
+        ? visibleRecordsForViewer(
+            recordsResult.records.map((record) => ({
+              ...record,
+              authorRole: record.userId === workspace.userId ? role : partnerRole,
+            })),
+            { userId: workspace.userId, role },
+          )
+        : current.records;
       const nextState: AppState = {
         ...current,
-        records,
+        records: recordsResultIsLatest ? records : current.records,
         events: eventsResult.events,
         trips: reconcileParentTrips(tripsResult.trips),
         // A coordination read failure is not evidence that every topic was
         // removed. Preserve the last authorized list and let the next
         // invalidation/manual refresh retry it.
-        talkAboutMarks: talkAboutResult.ok ? talkAboutResult.marks : current.talkAboutMarks,
-        coupleHighlights: highlightsResult.ok ? highlightsResult.highlights : current.coupleHighlights,
+        talkAboutMarks: talkAboutResultIsLatest && talkAboutResult?.ok
+          ? talkAboutResult.marks
+          : current.talkAboutMarks,
+        coupleHighlights: highlightsResult?.ok ? highlightsResult.highlights : current.coupleHighlights,
       };
       quarantinedWorkspaceRef.current = null;
       // Shared data is authoritative again. Whether it will keep itself up to
       // date depends on the channel, which the caller tracks separately.
       setSharedSyncStatus(realtimeHealthyRef.current ? 'live' : 'delayed');
+      if (talkAboutResultIsLatest) {
+        setTalkAboutSyncStatus(talkAboutResult?.ok ? 'ready' : 'unavailable');
+      }
       replaceStateImmediately(nextState);
       return true;
     } catch (error) {
@@ -1767,6 +2309,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     purgeSharedAccess,
     quarantineSharedAccess,
     replaceStateImmediately,
+    setTalkAboutSyncStatus,
   ]);
 
   useEffect(() => {
@@ -1820,20 +2363,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const isCurrentRefresh = () => isCurrentActiveCouple()
         && !isWorkspaceQuarantined()
         && membershipReconciliationRef.current === authorizationRevision;
+      // A profile invalidation uses the full-state reader, which also owns the
+      // authoritative talk-about slice. Sequence both paths together so an
+      // older full-state response cannot overwrite a newer dedicated refresh.
+      const talkAboutRequestSequence = slice === 'talk-about' || slice === 'profile'
+        ? ++talkAboutRefreshSequenceRef.current
+        : null;
+      const recordsRequestSequence = slice === 'records'
+        ? ++recordsRefreshSequenceRef.current
+        : null;
+      const isLatestTalkAboutRefresh = () => isCurrentRefresh()
+        && talkAboutRequestSequence !== null
+        && talkAboutRefreshSequenceRef.current === talkAboutRequestSequence;
+      const isLatestRecordsRefresh = () => isCurrentRefresh()
+        && recordsRequestSequence !== null
+        && recordsRefreshSequenceRef.current === recordsRequestSequence;
       try {
         if (slice === 'profile') {
           const result = await fetchFullStateResultFromDB(authUserId);
-          if (!isCurrentRefresh() || !result.ok || !result.state?.profile) return;
+          if (!isLatestTalkAboutRefresh()) return;
+          if (!result.ok) {
+            if (result.stage === 'talk-about') setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          if (!result.state?.profile || !Array.isArray(result.state.talkAboutMarks)) {
+            // A nominally successful full read without this slice is not an
+            // authoritative empty list. Keep the old list and block writes.
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          const profile = result.state.profile;
+          if (
+            profile.couple.connected
+            && profile.couple.status === 'active'
+            && (!profile.couple.coupleId || !profile.couple.partnerUserId)
+          ) {
+            // A connected profile is incomplete until exact current partner
+            // membership is part of the same snapshot. Keep the last verified
+            // profile rather than publishing presentation without authority.
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          const talkAboutMarks = result.state.talkAboutMarks;
+          setTalkAboutSyncStatus('ready');
+          const hasVerifiedPartner = profile.couple.connected
+            && profile.couple.status === 'active';
+          if (!hasVerifiedPartner) {
+            // This full-state read is the successful membership authority for the
+            // profile invalidation. Publish its entire couple-scoped snapshot in
+            // one AppState replacement; updating only the profile would pair a
+            // pending/disconnected identity with the former partner's content.
+            const records = Array.isArray(result.state.records) ? result.state.records : [];
+            const events = Array.isArray(result.state.events) ? result.state.events : [];
+            const trips = Array.isArray(result.state.trips) ? result.state.trips : [];
+            const coupleHighlights = Array.isArray(result.state.coupleHighlights)
+              ? result.state.coupleHighlights
+              : [];
+            setCoupleLifecycle(profile.couple.status === 'pending' ? 'pending' : 'disconnected');
+            setInvitationExpiresAt(null);
+            updateStateImmediately((current) => {
+              if (!isLatestTalkAboutRefresh()) return current;
+              const highlightedRecordId = current.highlightedRecordId
+                && records.some((record) => record.id === current.highlightedRecordId)
+                ? current.highlightedRecordId
+                : undefined;
+              return {
+                ...current,
+                profile,
+                records,
+                events,
+                trips,
+                coupleHighlights,
+                talkAboutMarks,
+                highlightedRecordId,
+              };
+            });
+            return;
+          }
           updateStateImmediately((current) =>
-            isCurrentRefresh()
-              ? { ...current, profile: result.state!.profile! }
+            isLatestTalkAboutRefresh()
+              ? { ...current, profile, talkAboutMarks }
               : current,
           );
           return;
         }
         if (slice === 'records') {
           const result = await fetchRecordsResultFromDB(coupleId);
-          if (!isCurrentRefresh()) return;
+          if (!isLatestRecordsRefresh()) return;
           if (!result.ok) {
             quarantineSharedAccess(workspace);
             return;
@@ -1847,7 +2463,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             })),
             { userId: authUserId, role },
           );
-          if (notificationsArmed) {
+          if (notificationsArmed && isLatestRecordsRefresh()) {
             const previousIds = new Set(stateRef.current.records.map((record) => record.id));
             result.records
               .filter((record) => record.userId !== authUserId && !record.isPrivate && !previousIds.has(record.id))
@@ -1861,11 +2477,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 });
               });
           }
-          if (isCurrentRefresh()) {
-            updateStateImmediately((current) =>
-              isCurrentRefresh() ? { ...current, records } : current,
-            );
-          }
+          updateStateImmediately((current) =>
+            isLatestRecordsRefresh() ? { ...current, records } : current,
+          );
           return;
         }
         if (slice === 'events') {
@@ -1882,8 +2496,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
         if (slice === 'talk-about') {
           const result = await fetchTalkAboutMarksResultFromDB(coupleId);
-          if (!isCurrentRefresh()) return;
-          if (!result.ok) return;
+          if (!isLatestTalkAboutRefresh()) return;
+          if (!result.ok) {
+            setTalkAboutSyncStatus('unavailable');
+            return;
+          }
+          setTalkAboutSyncStatus('ready');
           const marks = result.marks;
           if (notificationsArmed) {
             unseenPartnerTalkAboutMarks(stateRef.current.talkAboutMarks, marks, authUserId)
@@ -1898,7 +2516,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               });
           }
           updateStateImmediately((current) =>
-            isCurrentRefresh() ? { ...current, talkAboutMarks: marks } : current,
+            isLatestTalkAboutRefresh() ? { ...current, talkAboutMarks: marks } : current,
           );
           return;
         }
@@ -1927,9 +2545,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : current,
         );
       } catch (error) {
-        if (!isCurrentRefresh()) return;
+        if (slice === 'talk-about' || slice === 'profile') {
+          if (!isLatestTalkAboutRefresh()) return;
+        } else if (slice === 'records') {
+          // A superseded records request may reject after a newer authoritative
+          // read has already committed. Treating that stale failure as current
+          // would quarantine (and blank) a workspace whose newest read passed.
+          if (!isLatestRecordsRefresh()) return;
+        } else if (!isCurrentRefresh()) return;
         console.error(`[gomsinlog] Realtime refresh of ${slice} failed.`);
-        quarantineSharedAccess(workspace);
+        if (slice === 'talk-about') {
+          setTalkAboutSyncStatus('unavailable');
+        } else {
+          quarantineSharedAccess(workspace);
+        }
       }
     };
 
@@ -2003,8 +2632,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return recovered;
     };
 
-    // One channel covers the shared tables and the current user's own
-    // membership row. A partner disconnect updates that row and revokes access.
+    // Release A compatibility is deliberately isolated. Once migration 072
+    // removes daily_records from the publication this channel may fail, but it
+    // cannot take the authoritative invalidation/membership channel down with it.
+    const legacyRecordsChannel = client
+      .channel(`couple-records-compat:${coupleId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
+        () => scheduleRefresh('records'),
+      )
+      .subscribe();
+
+    // The authoritative channel covers only sources that remain published after
+    // migration 072 plus the current user's own membership row. A partner
+    // disconnect updates that row and revokes access.
     const channel = client
       .channel(`couple-sync:${coupleId}`)
       .on(
@@ -2017,9 +2659,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
+        { event: 'INSERT', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
         (payload) => {
           const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'records') scheduleRefresh('records');
           if (invalidation.slice === 'events') scheduleRefresh('events');
           if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
           if (invalidation.slice === 'highlights') scheduleRefresh('highlights');
@@ -2028,8 +2671,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       )
       .on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'daily_records', filter: `couple_id=eq.${coupleId}` },
-        () => scheduleRefresh('records'),
+        { event: 'UPDATE', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` },
+        (payload) => {
+          const invalidation = payload.new as Record<string, unknown>;
+          if (invalidation.slice === 'records') scheduleRefresh('records');
+          if (invalidation.slice === 'events') scheduleRefresh('events');
+          if (invalidation.slice === 'talk_about') scheduleRefresh('talk-about');
+          if (invalidation.slice === 'highlights') scheduleRefresh('highlights');
+          if (invalidation.slice === 'profile') scheduleRefresh('profile');
+        },
       )
       // No direct `events` subscription. Realtime does not apply RLS to DELETE
       // payloads, so subscribing to the table told the partner exactly when the
@@ -2093,6 +2743,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener('online', handleVisibility);
       timers.forEach((timer) => window.clearTimeout(timer));
       timers.clear();
+      void client.removeChannel(legacyRecordsChannel);
       void client.removeChannel(channel);
     };
   }, [
@@ -2104,6 +2755,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     isAuthChecked,
     quarantineSharedAccess,
     reconcileSharedAccess,
+    setTalkAboutSyncStatus,
     updateStateImmediately,
   ]);
 
@@ -2242,12 +2894,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       && profileUpdates.profileCaption.trim().length > PROFILE_CAPTION_MAX_LENGTH) return false;
     if (hasOwn('profileDateType') && profileUpdates.profileDateType
       && !['together', 'meeting', 'discharge'].includes(profileUpdates.profileDateType)) return false;
+    if (hasOwn('genderIdentity') && profileUpdates.genderIdentity !== undefined
+      && !['woman', 'man'].includes(profileUpdates.genderIdentity)) return false;
     const commitLocally = () => updateStateImmediately((current) => ({
       ...current,
       profile: { ...current.profile, ...profileUpdates },
     }));
 
-    if (options.persist === false || !supabase || !prev.authenticatedUser) {
+    const client = supabase;
+    if (options.persist === false || !client || !prev.authenticatedUser) {
       commitLocally();
       return true;
     }
@@ -2255,10 +2910,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const identity = captureActiveIdentity();
     if (!identity) return false;
 
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentIdentity(identity)) return false;
-
-    try {
+    return withOrdinaryServerMutation(
+      identity,
+      () => isCurrentIdentity(identity),
+      undefined,
+      () => false,
+      async (deletionLease) => {
+      try {
       if (
         profileUpdates.myName !== undefined
         || profileUpdates.military !== undefined
@@ -2266,8 +2924,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         || hasOwn('username')
         || hasOwn('profileCaption')
         || hasOwn('profileDateType')
+        || hasOwn('genderIdentity')
       ) {
-        const { data, error } = await supabase
+        const { data, error } = await client
           .from('profiles')
         .update({
           display_name: newProfile.myName,
@@ -2276,6 +2935,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...(hasOwn('username') ? { username: normalizedUsername || null } : {}),
           ...(hasOwn('profileCaption') ? { profile_caption: newProfile.profileCaption?.trim() || null } : {}),
           ...(hasOwn('profileDateType') ? { profile_date_type: newProfile.profileDateType || null } : {}),
+          ...(hasOwn('genderIdentity') ? { gender_identity: newProfile.genderIdentity || null } : {}),
           updated_at: new Date().toISOString(),
         })
         .eq('id', userId)
@@ -2294,7 +2954,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (profileUpdates.contact) {
-        const { error } = await supabase.from('contact_preferences').upsert({
+        const { error } = await client.from('contact_preferences').upsert({
           user_id: userId,
           weekday_start: newProfile.contact.weekdayStart,
           weekday_end: newProfile.contact.weekdayEnd,
@@ -2311,7 +2971,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const nextAnniversary = profileUpdates.couple?.anniversaryDate;
       const coupleId = newProfile.couple.coupleId;
       if (coupleId && nextAnniversary !== prev.profile.couple.anniversaryDate) {
-        const saved = await saveCoupleAnniversary(coupleId, nextAnniversary || null);
+        const saved = await saveCoupleAnniversary(
+          coupleId,
+          nextAnniversary || null,
+          deletionLease,
+        );
         if (!saved) return false;
       }
 
@@ -2321,7 +2985,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('[gomsinlog] Failed to update profile settings.');
       return false;
-    }
+      }
+      },
+    );
   };
 
   const saveCoupleHighlight = async (draft: CoupleHighlightDraft) => {
@@ -2329,61 +2995,79 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!workspace || draft.coupleId !== workspace.coupleId) {
       return { ok: false as const, reason: 'forbidden' as const };
     }
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
-      return { ok: false as const, reason: 'forbidden' as const };
-    }
-    if (!isCurrentWorkspace(workspace)) {
-      return { ok: false as const, reason: 'forbidden' as const };
-    }
-    const result = await saveCoupleHighlightToDB(draft);
-    if (result.ok && result.highlight && isCurrentWorkspace(workspace)) {
-      updateStateImmediately((current) => {
-        const currentHighlights = current.coupleHighlights ?? [];
-        const withoutSaved = currentHighlights.filter((item) => item.id !== result.highlight?.id);
-        return {
-          ...current,
-          coupleHighlights: [...withoutSaved, result.highlight!]
-            .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)),
-        };
-      });
-    }
-    return result;
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => ({ ok: false as const, reason: 'forbidden' as const }),
+      async (deletionLease) => {
+        const result = await saveCoupleHighlightToDB(draft, deletionLease);
+        if (result.ok && result.highlight && isCurrentWorkspace(workspace)) {
+          updateStateImmediately((current) => {
+            const currentHighlights = current.coupleHighlights ?? [];
+            const withoutSaved = currentHighlights.filter((item) => item.id !== result.highlight?.id);
+            return {
+              ...current,
+              coupleHighlights: [...withoutSaved, result.highlight!]
+                .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt)),
+            };
+          });
+        }
+        return result;
+      },
+    );
   };
 
   const deleteCoupleHighlight = async (highlightId: string): Promise<boolean> => {
     const workspace = captureActiveWorkspace();
     if (!workspace || !highlightId) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentWorkspace(workspace)) return false;
-    const deleted = await deleteCoupleHighlightFromDB(workspace.coupleId, highlightId);
-    if (deleted && isCurrentWorkspace(workspace)) {
-      updateStateImmediately((current) => ({
-        ...current,
-        coupleHighlights: (current.coupleHighlights ?? []).filter((item) => item.id !== highlightId),
-      }));
-    }
-    return deleted;
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => false,
+      async (deletionLease) => {
+        const deleted = await deleteCoupleHighlightFromDB(
+          workspace.coupleId,
+          highlightId,
+          deletionLease,
+        );
+        if (deleted && isCurrentWorkspace(workspace)) {
+          updateStateImmediately((current) => ({
+            ...current,
+            coupleHighlights: (current.coupleHighlights ?? []).filter((item) => item.id !== highlightId),
+          }));
+        }
+        return deleted;
+      },
+    );
   };
 
   const setPartnerUsername = async (username: string): Promise<boolean> => {
     const workspace = captureActiveWorkspace();
     if (!workspace) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentWorkspace(workspace)) return false;
-    const saved = await setPartnerUsernameInDB(username);
-    if (saved && isCurrentWorkspace(workspace)) {
-      updateStateImmediately((current) => ({
-        ...current,
-        profile: {
-          ...current.profile,
-          couple: {
-            ...current.profile.couple,
-            partnerUsername: normalizeUsername(username),
-          },
-        },
-      }));
-    }
-    return saved;
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => false,
+      async (deletionLease) => {
+        const saved = await setPartnerUsernameInDB(username, deletionLease);
+        if (saved && isCurrentWorkspace(workspace)) {
+          updateStateImmediately((current) => ({
+            ...current,
+            profile: {
+              ...current.profile,
+              couple: {
+                ...current.profile.couple,
+                partnerUsername: normalizeUsername(username),
+              },
+            },
+          }));
+        }
+        return saved;
+      },
+    );
   };
 
   const addRecord = async (record: Omit<DailyRecord, 'id' | 'createdAt'>): Promise<boolean> => {
@@ -2474,6 +3158,448 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Persist one new queue intent under the same per-user lock as deletion.
+   * Every awaited boundary is followed by a fresh marker/identity check. If a
+   * non-cooperative writer introduces a marker during encryption or the IDB
+   * transaction, remove only the entry whose insert just succeeded. Insert-only
+   * persistence makes a duplicate id a conflict, so this compensation can never
+   * overwrite or remove a pre-existing entry.
+   */
+  const enqueueRecordWithDeletionBarrier = async (
+    persistence: OutboxPersistence,
+    workspace: ActiveWorkspace,
+    entry: QueuedRecordInput,
+    existingLease?: AccountDeletionLockLease,
+  ): Promise<BarrieredEnqueueResult> => {
+    const enqueueUnderLease = async (
+      lease: AccountDeletionLockLease,
+    ): Promise<BarrieredEnqueueResult> => {
+      const barrier = (): Exclude<BarrieredEnqueueResult, 'queued' | 'failed'> | null => {
+        if (!accountDeletionLockLeaseMatchesUser(lease, workspace.userId)) return 'stale';
+        if (readRecoveryMarker(workspace.userId) === 'active') return 'deletion_pending';
+        return isCurrentLinkedCouple(workspace) ? null : 'stale';
+      };
+      const initialBarrier = barrier();
+      if (initialBarrier) return initialBarrier;
+
+      let added = false;
+      const compensate = async (): Promise<void> => {
+        if (added) await persistence.remove(entry.id);
+      };
+
+      try {
+        await enqueueRecord(persistence, entry, () => barrier() === null);
+        added = true;
+        const afterEnqueue = barrier();
+        if (afterEnqueue) {
+          await compensate();
+          return afterEnqueue;
+        }
+
+        const counts = await countOutbox(persistence, workspace.userId);
+        const afterCount = barrier();
+        if (afterCount) {
+          await compensate();
+          return afterCount;
+        }
+        setOutboxCounts(counts);
+        return 'queued';
+      } catch {
+        const afterFailure = barrier();
+        if (afterFailure && added) {
+          try {
+            await compensate();
+          } catch {
+            console.error('[gomsinlog] Failed to compensate a deletion-blocked queue write.');
+          }
+          return afterFailure;
+        }
+        // `persistence.add()` resolves only after its IndexedDB transaction
+        // commits. A later count/read failure must not tell the composer that
+        // nothing was queued and invite a duplicate retry with a new record id.
+        if (added) return 'queued';
+        return 'failed';
+      }
+    };
+
+    if (existingLease) {
+      return accountDeletionLockLeaseMatchesUser(existingLease, workspace.userId)
+        ? enqueueUnderLease(existingLease)
+        : 'failed';
+    }
+
+    const locked = await withAccountDeletionLock(
+      workspace.userId,
+      enqueueUnderLease,
+      { ifAvailable: true },
+    );
+
+    if (locked.kind === 'unavailable') {
+      return readRecoveryMarker(workspace.userId) === 'active' ? 'deletion_pending' : 'failed';
+    }
+    return locked.value;
+  };
+
+  /**
+   * Commit exactly one record-media revision.
+   *
+   * The operation is durable before Storage is touched. An authoritative upload
+   * or row failure abandons it, which turns every reservation into either a
+   * tombstone or cleanup work. An ambiguous row response is resolved only by the
+   * operation id; if status is unavailable the pending operation is left for its
+   * bounded expiry rather than risking cleanup of a committed object.
+   */
+  const commitRecordMediaRevision = async (
+    workspace: ActiveWorkspace,
+    baseRecord: DailyRecord,
+    desiredRecordBeforeUploads: DailyRecord,
+    uploads: MediaRevisionUpload[],
+  ): Promise<MediaRevisionCommitResult> => {
+    const failedFiles = uploads.map(({ file }) => file.name);
+    const staleFailure = (): MediaRevisionCommitResult => ({
+      ok: false,
+      phase: 'stale',
+      reason: 'stale',
+      error: recordFailureMessage('stale'),
+      failedFiles,
+    });
+    let preparedPhotoUploads: PreparedPhotoRevisionUpload[] | null = null;
+    if (uploads.length > 0) {
+      const capability = await getRecordPhotoRenditionCapability();
+      if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+      if (!capability.ok) {
+        if (capability.reason === 'auth_expired') void handleAuthExpired();
+        return {
+          ok: false,
+          phase: 'begin',
+          reason: capability.reason,
+          error: recordFailureMessage(capability.reason),
+          failedFiles,
+        };
+      }
+      if (capability.supported) {
+        preparedPhotoUploads = [];
+        // Keep peak decode/canvas memory bounded: finish and release one source
+        // before starting the next photo in an all-or-nothing batch.
+        for (const upload of uploads) {
+          const classified = classifyMediaFile(upload.file);
+          if ('error' in classified) return {
+            ok: false, phase: 'upload', reason: 'unknown', error: classified.error, failedFiles,
+          };
+          const prepared = await prepareRecordPhotoRenditions(upload.file, () => isCurrentLinkedCouple(workspace));
+          if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+          if ('error' in prepared) {
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: 'unknown',
+              error: prepared.error,
+              failedFiles,
+            };
+          }
+          preparedPhotoUploads.push({
+            ...upload,
+            renditions: prepared,
+            thumbnailObjectId: crypto.randomUUID(),
+          });
+        }
+      }
+    }
+    // Capability and pixel preparation both await external/browser work. Pin
+    // the actor again before writing the durable operation journal or beginning.
+    if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+
+    const baseRevision = baseRecord.contentRevision ?? 1;
+    const operationId = crypto.randomUUID();
+    const identity = {
+      operationId,
+      recordId: baseRecord.id,
+      userId: workspace.userId,
+      coupleId: workspace.coupleId,
+    };
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!ownerToken || !writeRecordMediaMutationJournalEntry(identity, ownerToken)) {
+      return {
+        ok: false,
+        phase: 'begin',
+        reason: 'unknown',
+        error: recordFailureMessage('unknown'),
+        failedFiles,
+      };
+    }
+    activeMediaOperationIdsRef.current.add(operationId);
+    try {
+    // A duplicated attachment remains duplicated in encrypted content for
+    // rollout compatibility, but the lifecycle manifest names object identities,
+    // not display occurrences. SQL intentionally rejects duplicate paths.
+    const existingPaths = Array.from(new Set(
+      (desiredRecordBeforeUploads.attachments || [])
+        .map((attachment) => attachment.path)
+        .filter((path): path is string => (
+          isCanonicalRecordMediaPath(path, workspace.coupleId, baseRecord.id)
+        )),
+    ));
+    let begun = preparedPhotoUploads
+      ? await beginRecordPhotoMutation({
+          ...identity,
+          baseContentRevision: baseRevision,
+          existingPaths,
+          newPhotos: preparedPhotoUploads.map(({ objectId, thumbnailObjectId, renditions }) => ({
+            screenMaster: {
+              mediaObjectId: objectId,
+              widthPx: renditions.screenMaster.widthPx,
+              heightPx: renditions.screenMaster.heightPx,
+              byteSize: renditions.screenMaster.byteSize,
+              sha256: renditions.screenMaster.sha256,
+            },
+            thumbnail: {
+              mediaObjectId: thumbnailObjectId,
+              widthPx: renditions.thumbnail.widthPx,
+              heightPx: renditions.thumbnail.heightPx,
+              byteSize: renditions.thumbnail.byteSize,
+              sha256: renditions.thumbnail.sha256,
+            },
+          })),
+        })
+      : await beginRecordMediaMutation({
+          ...identity,
+          baseContentRevision: baseRevision,
+          existingPaths,
+          newMediaIds: uploads.map((upload) => upload.objectId),
+        });
+    if (!begun.ok && RECORD_UPDATE_READ_BACK_REASONS.has(begun.reason)) {
+      const recovered = await getRecordMediaMutationStatus(identity);
+      if (recovered.ok && recovered.state === 'pending') begun = recovered;
+    }
+    if (!begun.ok || begun.state !== 'pending') {
+      const reason = begun.ok ? 'server' : begun.reason;
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        clearRecordMediaMutationJournalEntry(identity);
+      }
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return {
+        ok: false,
+        phase: 'begin',
+        reason,
+        error: recordFailureMessage(reason),
+        failedFiles,
+      };
+    }
+
+    const abandonPending = async (): Promise<void> => {
+      try {
+        const abandoned = await abandonRecordMediaMutation(identity);
+        if (abandoned.ok && ['abandoned', 'committed'].includes(abandoned.state)) {
+          clearRecordMediaMutationJournalEntry(identity);
+        }
+      } catch {
+        // The reservation remains durable and the service worker expires it.
+      }
+    };
+    if (!isCurrentLinkedCouple(workspace)) {
+      await abandonPending();
+      return staleFailure();
+    }
+
+    const uploaded: Attachment[] = [];
+    if (preparedPhotoUploads) {
+      for (const { renditions, objectId, thumbnailObjectId } of preparedPhotoUploads) {
+        const master = await uploadRecordPhotoRendition(
+          renditions.screenMaster,
+          'screen_master',
+          workspace.coupleId,
+          baseRecord.id,
+          objectId,
+        );
+        if (!isCurrentLinkedCouple(workspace)) {
+          await abandonPending();
+          return staleFailure();
+        }
+        let masterAttachment: Attachment;
+        if ('error' in master) {
+          if (master.uncertainAttachment && RECORD_UPDATE_READ_BACK_REASONS.has(master.reason)) {
+            masterAttachment = master.uncertainAttachment;
+          } else {
+            await abandonPending();
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: master.reason ?? 'unknown',
+              error: master.error,
+              failedFiles,
+            };
+          }
+        } else {
+          masterAttachment = master.attachment;
+        }
+
+        const thumbnail = await uploadRecordPhotoRendition(
+          renditions.thumbnail,
+          'thumbnail',
+          workspace.coupleId,
+          baseRecord.id,
+          thumbnailObjectId,
+        );
+        if (!isCurrentLinkedCouple(workspace)) {
+          await abandonPending();
+          return staleFailure();
+        }
+        if ('error' in thumbnail) {
+          if (!(thumbnail.uncertainAttachment
+            && RECORD_UPDATE_READ_BACK_REASONS.has(thumbnail.reason))) {
+            await abandonPending();
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: thumbnail.reason ?? 'unknown',
+              error: thumbnail.error,
+              failedFiles,
+            };
+          }
+        }
+        // The record content contract remains {type,name,path} for the master.
+        uploaded.push(masterAttachment);
+      }
+    } else for (const { file, objectId } of uploads) {
+      const result = await uploadRecordMedia(
+        file,
+        workspace.coupleId,
+        baseRecord.id,
+        undefined,
+        objectId,
+      );
+      if (!isCurrentLinkedCouple(workspace)) {
+        await abandonPending();
+        return staleFailure();
+      }
+      if ('error' in result) {
+        if (
+          result.uncertainAttachment
+          && RECORD_UPDATE_READ_BACK_REASONS.has(result.reason)
+        ) {
+          // Storage may have committed even though its response was lost. Keep
+          // the exact reserved identity and let the row trigger prove whether
+          // that object exists; never tombstone a potentially successful
+          // stable-id upload before the authoritative CAS has run.
+          uploaded.push(result.uncertainAttachment);
+          continue;
+        }
+        await abandonPending();
+        return {
+          ok: false,
+          phase: 'upload',
+          reason: result.reason ?? 'unknown',
+          error: result.error,
+          failedFiles,
+        };
+      }
+      uploaded.push(result.attachment);
+    }
+
+    const desiredRecord: DailyRecord = {
+      ...desiredRecordBeforeUploads,
+      attachments: [...(desiredRecordBeforeUploads.attachments || []), ...uploaded],
+    };
+    const committed = (targetContentRevision: number): MediaRevisionCommitResult => {
+      clearRecordMediaMutationJournalEntry(identity);
+      return {
+        ok: true,
+        operationId,
+        record: {
+          ...desiredRecord,
+          contentRevision: targetContentRevision,
+          mediaContractVersion: 1,
+          mediaManifestRevision: targetContentRevision,
+          lastMediaOperationId: operationId,
+        },
+      };
+    };
+    const reconcileFailure = async (
+      reason: RecordMutationReason,
+    ): Promise<MediaRevisionCommitResult> => {
+      if (RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        const status = await getRecordMediaMutationStatus(identity);
+        if (status.ok && status.state === 'committed') {
+          return committed(status.targetContentRevision ?? baseRevision + 1);
+        }
+        if (status.ok && status.state === 'pending') await abandonPending();
+      } else {
+        await abandonPending();
+      }
+      return {
+        ok: false,
+        phase: 'commit',
+        reason,
+        error: recordFailureMessage(reason),
+        failedFiles,
+      };
+    };
+
+    try {
+      const saved = await saveRecordToDB(
+        desiredRecord,
+        workspace.coupleId,
+        workspace.userId,
+        {
+          kind: 'update',
+          expectedRevision: baseRevision,
+          mediaOperationId: operationId,
+        },
+      );
+      if (!isCurrentLinkedCouple(workspace)) {
+        return staleFailure();
+      }
+      if (!saved.ok) {
+        if (saved.reason === 'auth_expired') void handleAuthExpired();
+        return reconcileFailure(recordSaveFailureReason(saved));
+      }
+      return committed(saved.contentRevision ?? baseRevision + 1);
+    } catch (error) {
+      if (!isCurrentLinkedCouple(workspace)) {
+        return staleFailure();
+      }
+      console.error('[gomsinlog] Failed to commit record media revision.');
+      const reason = classifyServerError(error).kind;
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return reconcileFailure(reason);
+    }
+    } finally {
+      activeMediaOperationIdsRef.current.delete(operationId);
+    }
+  };
+
+  const reconcileInterruptedMediaOperations = async (): Promise<void> => {
+    const workspace = captureLinkedCouple();
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!workspace || !ownerToken) return;
+    const entries = listRecordMediaMutationJournalEntries(workspace.userId, ownerToken);
+    for (const entry of entries) {
+      if (!isCurrentLinkedCouple(workspace)) return;
+      if (activeMediaOperationIdsRef.current.has(entry.operationId)) continue;
+      if (entry.coupleId !== workspace.coupleId) {
+        // A relationship generation is never reused. Its server reservation has
+        // bounded expiry, so the old opaque client marker cannot be applied to a
+        // new partner space and may be discarded here.
+        clearRecordMediaMutationJournalEntry(entry);
+        continue;
+      }
+      const status = await getRecordMediaMutationStatus(entry);
+      if (!isCurrentLinkedCouple(workspace) || !status.ok) continue;
+      if (status.state === 'pending') {
+        const abandoned = await abandonRecordMediaMutation(entry);
+        if (
+          isCurrentLinkedCouple(workspace)
+          && abandoned.ok
+          && ['abandoned', 'committed'].includes(abandoned.state)
+        ) clearRecordMediaMutationJournalEntry(entry);
+        continue;
+      }
+      clearRecordMediaMutationJournalEntry(entry);
+    }
+  };
+  reconcileMediaOperationsRef.current = reconcileInterruptedMediaOperations;
+
+  /**
    * Create a record and attach media files to it.
    *
    * Two phases are required by the storage RLS policy (migration 007): the
@@ -2498,22 +3624,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       allowQueue?: boolean;
       expectedCoupleId?: string;
       allOrNothingMedia?: boolean;
+      /** Stable one-to-one Storage object ids supplied only by durable replay. */
+      mediaObjectIds?: string[];
+      deletionLease?: AccountDeletionLockLease;
     },
-  ): Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    queued?: boolean;
-    recordId?: string;
-    /**
-     * The classified cause, for the outbox to decide with. Absent on success and on
-     * the stale/no-workspace paths, which a retry cannot change either way, so the
-     * caller treats a missing reason as definitive.
-     */
-    reason?: RecordMutationReason;
-  }> => {
+  ): Promise<RecordCreateWithMediaResult> => {
     const recordId = options?.recordId ?? crypto.randomUUID();
     const allowQueue = options?.allowQueue !== false;
+    if (!validStableMediaObjectIds(files, options?.mediaObjectIds)) {
+      return {
+        ok: false,
+        failedFiles: files.map((file) => file.name),
+        error: '임시 보관된 사진 정보를 확인할 수 없어 업로드하지 않았어요.',
+        reason: 'unknown',
+      };
+    }
     /*
      * A profile post is public only after every selected photo is attached.
      *
@@ -2567,9 +3692,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       error: '계정 또는 커플 공간이 변경되어 작업을 중단했어요.',
     };
 
-    // Aborted at phase zero, so there is no orphaned `daily_records` row and no
-    // orphaned storage object.
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return staleResult;
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentLinkedCouple(workspace),
+      options?.deletionLease,
+      () => staleResult,
+      async (deletionLease) => {
     // The deletion pre-flight awaited the server. Pin replay to the queued
     // couple again immediately before the first mutation so an unlink/re-pair
     // during that await cannot redirect the old record into the new workspace.
@@ -2609,20 +3737,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!allowQueue || !persistence || !isRetryableReason(reason)) {
         return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
       }
-      try {
-        await enqueueRecord(persistence, {
-          id: recordId,
-          userId: workspace.userId,
-          coupleId: workspace.coupleId,
-          record,
-          files,
-          allOrNothingMedia: options?.allOrNothingMedia === true || undefined,
-        });
-      } catch (error) {
+      const queued = await enqueueRecordWithDeletionBarrier(persistence, workspace, {
+        id: recordId,
+        userId: workspace.userId,
+        coupleId: workspace.coupleId,
+        record,
+        files,
+        allOrNothingMedia: options?.allOrNothingMedia === true || undefined,
+      }, deletionLease);
+      if (queued === 'deletion_pending') {
+        return {
+          ok: false,
+          failedFiles: files.map((file) => file.name),
+          error: recordFailureMessage('deletion_pending'),
+          reason: 'deletion_pending',
+        };
+      }
+      if (queued !== 'queued') {
         console.error('[gomsinlog] Failed to queue record for later delivery.');
         return { ok: false, failedFiles: files.map((file) => file.name), error: message, reason };
       }
-      setOutboxCounts(await countOutbox(persistence, workspace.userId));
       return { ok: false, queued: true, failedFiles: [], reason, recordId };
     };
 
@@ -2658,139 +3792,75 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...newRecord,
       contentRevision: authoritativeRevision,
     };
-    const attachments: Attachment[] = [...(savedRecord.attachments || [])];
-    const uploadedPaths: string[] = [];
+    const mediaObjectIds = options?.mediaObjectIds ?? files.map(() => crypto.randomUUID());
+    const uploads = files.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
+    const retryableFailedFileIndexes: number[] = [];
+    let mediaFailureReason: RecordMutationReason | undefined;
+    let mediaFailureMessage: string | undefined;
+    let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
+    let terminalFailedFiles: string[] = [];
+    let finalRecord = savedRecord;
 
-    /**
-     * Abandon the upload loop, reclaiming what it already uploaded.
-     *
-     * Inside the loop the attachment patch has definitively NOT run yet, so no row
-     * references these objects and deleting them cannot break anything. Bailing out
-     * without this left them in Storage forever: the client only learns an object's
-     * path from local state, and the Storage DELETE policy needs an owned
-     * `daily_records` row in the ACTIVE couple, so once the workspace moved on
-     * nothing client-side could ever reach them again.
-     *
-     * Best-effort by necessity -- if the couple genuinely changed, that same policy
-     * will refuse this delete too, and only `delete-account` or an operator can
-     * reclaim them. It still recovers the common case, where "stale" is a local
-     * generation bump rather than a real membership change.
-     */
-    const abandonUploads = async (): Promise<typeof staleResult> => {
-      if (uploadedPaths.length > 0) {
-        try {
-          await removeRecordMedia(uploadedPaths);
-        } catch {
-          /* best-effort cleanup */
-        }
-      }
-      return staleResult;
+    const rememberUploadFailure = (
+      result: Extract<MediaRevisionCommitResult, { ok: false }>,
+      inputIndexes: number[],
+    ) => {
+      failedFiles.push(...result.failedFiles);
+      retryableFailedFileIndexes.push(...inputIndexes);
+      mediaFailureReason ??= result.reason;
+      mediaFailureMessage ??= result.error;
+      console.error('[gomsinlog] Attachment upload failed.');
     };
 
-    for (const file of files) {
-      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
-      const result = await uploadRecordMedia(file, workspace.coupleId, recordId);
-      if (!isCurrentLinkedCouple(workspace)) return abandonUploads();
-      if ('error' in result) {
-        failedFiles.push(file.name);
-        console.error('[gomsinlog] Attachment upload failed.');
-        continue;
-      }
-      attachments.push(result.attachment);
-      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
-    }
-
-    /*
-     * A profile post promises that the first selected photo stays the cover.
-     * Committing only the successful subset would make a later retry append the
-     * missing photos at the end and silently change that order. For this caller,
-     * roll every uploaded object back and keep the text-only row as the retry
-     * target. The normal composer keeps its existing D-05 partial-success mode.
-     */
-    if (options?.allOrNothingMedia && failedFiles.length > 0) {
-      if (uploadedPaths.length > 0) {
-        try {
-          await removeRecordMedia(uploadedPaths);
-        } catch {
-          /* best-effort; the row never references these objects */
-        }
-      }
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      updateStateImmediately((current) =>
-        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-          ? { ...current, records: [...current.records, savedRecord] }
-          : current,
+    if (files.length > 0 && options?.allOrNothingMedia) {
+      const batch = await commitRecordMediaRevision(
+        workspace,
+        savedRecord,
+        {
+          ...savedRecord,
+          // The private staging row and absent profile marker become public only
+          // in the same CAS update that activates the complete media set.
+          isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
+          ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
+        },
+        uploads,
       );
-      return {
-        ok: true,
-        failedFiles: files.map((file) => file.name),
-        recordId,
-      };
-    }
-
-    let finalRecord: DailyRecord = {
-      ...savedRecord,
-      attachments,
-      // Publish a staged post only in the same row update that commits all media.
-      isPrivate: stagesPublicMediaPrivately ? record.isPrivate : savedRecord.isPrivate,
-      ...(stagesProfilePostMarker ? { isProfilePost: intendedProfilePost } : {}),
-    };
-    if (attachments.length > 0) {
-      const reconcileAttachmentPatch = async (reason: RecordMutationReason): Promise<boolean> => {
-        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return false;
-        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
-        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
-        const persisted = remote.records.find((candidate) =>
-          candidate.id === recordId && candidate.userId === workspace.userId);
-        if (!persisted || !hasSamePersistedMedia(persisted, finalRecord)) return false;
-        finalRecord = persisted;
-        return true;
-      };
-      try {
-        const patched = await saveRecordToDB(
+      if (batch.ok) finalRecord = batch.record;
+      else if (batch.phase === 'upload') {
+        rememberUploadFailure(batch, files.map((_, index) => index));
+      }
+      else {
+        terminalFailure = batch;
+        terminalFailedFiles = files.map((file) => file.name);
+      }
+    } else {
+      // Normal composer partial success is bounded by the 32-object manifest.
+      // Every file has its own operation and consumes exactly one new revision;
+      // a failed reservation is abandoned and can never be revived by a later id.
+      for (const [index, upload] of uploads.entries()) {
+        const addition = await commitRecordMediaRevision(
+          workspace,
           finalRecord,
-          workspace.coupleId,
-          workspace.userId,
-          {
-            kind: 'update',
-            expectedRevision: finalRecord.contentRevision ?? 1,
-          },
+          finalRecord,
+          [upload],
         );
-        // Deliberately NOT reclaiming uploads here: the patch has already been
-        // issued, so whether the row now references these objects is unknown.
-        // Deleting them could strip a successfully patched record's attachments,
-        // which is worse than leaving objects an operator can sweep.
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        if (!patched.ok) {
-          const reason = recordSaveFailureReason(patched);
-          if (!await reconcileAttachmentPatch(reason)) {
-            // The UPDATE may have committed even when its response was lost. Once
-            // issued, deleting uploads can break a live row; leave uncertain bytes
-            // for a later orphan sweep instead of risking user-visible data loss.
-            if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-              try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-            }
-            failedFiles.push(...files.map((file) => file.name));
-            finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
-          }
+        if (addition.ok) {
+          finalRecord = addition.record;
+        } else if (addition.phase === 'upload') {
+          rememberUploadFailure(addition, [index]);
         } else {
-          finalRecord = { ...finalRecord, contentRevision: patched.contentRevision };
-        }
-      } catch (error) {
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        console.error('[gomsinlog] Failed to attach media to record.');
-        const reason = classifyServerError(error).kind;
-        if (!await reconcileAttachmentPatch(reason)) {
-          if (!isCurrentLinkedCouple(workspace)) return staleResult;
-          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-            try { await removeRecordMedia(uploadedPaths); } catch { /* best-effort cleanup */ }
-          }
-          failedFiles.push(...files.map((file) => file.name));
-          finalRecord = { ...savedRecord, attachments: savedRecord.attachments || [] };
+          terminalFailure = addition;
+          terminalFailedFiles = [
+            ...addition.failedFiles,
+            ...uploads.slice(index + 1).map(({ file }) => file.name),
+          ];
+          break;
         }
       }
     }
+
+    if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
     if (finalRecord.attachments?.length) {
       finalRecord = {
@@ -2805,14 +3875,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
 
     const recordToCommit = finalRecord;
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-        ? { ...current, records: [...current.records, recordToCommit] }
-        : current,
+          ? { ...current, records: mergeCreatedRecordSnapshot(current.records, recordToCommit) }
+          : current,
     );
+    if (terminalFailure) {
+      // The INSERT is already authoritative. Report a media-only partial result
+      // so profile retry attaches to this exact row instead of creating a
+      // duplicate. A staged all-or-nothing post remains private here.
+      return {
+        ok: true,
+        failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        ...(retryableFailedFileIndexes.length > 0
+          ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+          : {}),
+        error: terminalFailure.error,
+        reason: terminalFailure.reason,
+        recordId,
+      };
+    }
     return isCurrentLinkedCouple(workspace)
-      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)), recordId }
+      ? {
+          ok: true,
+          failedFiles: Array.from(new Set(
+            options?.allOrNothingMedia && failedFiles.length > 0
+              ? files.map((file) => file.name)
+              : failedFiles,
+          )),
+          ...(retryableFailedFileIndexes.length > 0
+            ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+            : {}),
+          ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
+          ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
+          recordId,
+        }
       : staleResult;
+      },
+    );
   };
 
   /**
@@ -2839,19 +3940,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!workspace) {
       return { queued: false, error: recordFailureMessage('workspace_unresolved') };
     }
-    try {
-      await enqueueRecord(persistence, {
-        id: crypto.randomUUID(),
-        userId: workspace.userId,
-        coupleId: workspace.coupleId,
-        record,
-        files,
-      });
-    } catch (error) {
+    const queued = await enqueueRecordWithDeletionBarrier(persistence, workspace, {
+      id: crypto.randomUUID(),
+      userId: workspace.userId,
+      coupleId: workspace.coupleId,
+      record,
+      files,
+    });
+    if (queued === 'deletion_pending') {
+      return { queued: false, error: recordFailureMessage('deletion_pending') };
+    }
+    if (queued !== 'queued') {
       console.error('[gomsinlog] Failed to queue record for later delivery.');
       return { queued: false, error: recordFailureMessage('unknown') };
     }
-    setOutboxCounts(await countOutbox(persistence, workspace.userId));
     return { queued: true };
   };
 
@@ -2873,29 +3975,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const identity = captureActiveIdentity();
     const result = { delivered: 0, requeued: 0, blocked: 0 };
     if (!persistence || !identity || flushInFlightRef.current) return result;
+    // Marker check precedes even the queue read. A pending account's encrypted
+    // payload and attached Files remain untouched for recovery.
+    if (readRecoveryMarker(identity.userId) === 'active') return result;
     flushInFlightRef.current = true;
     try {
-      const entries = await deliverableForAccount(persistence, identity.userId);
-      for (const entry of entries) {
+      const locked = await withAccountDeletionLock(identity.userId, async (deletionLease) => {
+        const canApplyDisposition = () =>
+          accountDeletionLockLeaseMatchesUser(deletionLease, identity.userId)
+          && isCurrentIdentity(identity)
+          && readRecoveryMarker(identity.userId) === 'absent';
+        const applyAndCountDisposition = async (
+          entry: QueuedRecord,
+          outcome: { ok: true } | { ok: false; reason: string; message: string },
+        ): Promise<boolean> => {
+          const disposition = await applyDeliveryOutcome(
+            persistence,
+            entry,
+            outcome,
+            canApplyDisposition,
+          );
+          if (disposition === 'preserved') return false;
+          if (disposition === 'delivered') result.delivered += 1;
+          else if (disposition === 'requeued') result.requeued += 1;
+          else result.blocked += 1;
+          return true;
+        };
+        if (!isCurrentIdentity(identity)
+          || readRecoveryMarker(identity.userId) === 'active') return;
+        const entries = await deliverableForAccount(persistence, identity.userId);
+        if (!isCurrentIdentity(identity)
+          || readRecoveryMarker(identity.userId) === 'active') return;
+        for (const entry of entries) {
         // The account changed mid-flush: stop rather than write one person's queue
         // into another's session.
         if (!isCurrentIdentity(identity)) break;
+        if (readRecoveryMarker(identity.userId) === 'active') break;
 
         // Couple identity is part of the queue's authority boundary. Check it
         // before opening sealed content so an old-couple entry remains opaque
         // and blocked after unlink/re-pair instead of being sent to the new one.
         const currentWorkspace = captureLinkedCouple();
         if (!currentWorkspace || entry.coupleId !== currentWorkspace.coupleId) {
-          const disposition = await applyDeliveryOutcome(persistence, entry, {
+          if (readRecoveryMarker(identity.userId) === 'active') break;
+          const applied = await applyAndCountDisposition(entry, {
             ok: false,
             reason: 'couple_changed',
             message: recordFailureMessage('couple_changed'),
           });
-          if (disposition === 'delivered') result.delivered += 1;
-          else if (disposition === 'requeued') result.requeued += 1;
-          else result.blocked += 1;
+          if (!applied) break;
           continue;
         }
+
+        let deliveryEntry = entry;
+        let mediaPlanWasCreated = false;
+
+        // Consult the authoritative deletion fence before opening queued user
+        // content or changing queue metadata. The flush owns an exclusive lease,
+        // so a server-only pending verdict can also persist its recovery marker
+        // atomically before this callback returns.
+        const replayAdmission = await ensureNotPendingBeforeServerCall(deletionLease, identity);
+        if (blocksServerCall(replayAdmission)
+          || !isCurrentLinkedCouple(currentWorkspace)) break;
 
         /**
          * Open the queued payload. Entries are sealed at rest under the device's
@@ -2909,18 +4050,47 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
          */
         let queuedRecord;
         try {
-          queuedRecord = await readQueuedRecord(entry);
+          if (readRecoveryMarker(identity.userId) === 'active') break;
+          queuedRecord = await readQueuedRecord(deliveryEntry);
         } catch (error) {
           console.error('[gomsinlog] Queued record could not be opened.');
-          const disposition = await applyDeliveryOutcome(persistence, entry, {
+          if (readRecoveryMarker(identity.userId) === 'active') break;
+          const applied = await applyAndCountDisposition(deliveryEntry, {
             ok: false,
             reason: 'unreadable_queue_entry',
             message: '임시 보관된 기록을 열 수 없어요. 다시 작성해 주세요.',
           });
-          if (disposition === 'delivered') result.delivered += 1;
-          else if (disposition === 'requeued') result.requeued += 1;
-          else result.blocked += 1;
+          if (!applied) break;
           continue;
+        }
+        // Decryption yields across auth events. Bind the plaintext to the exact
+        // user, session generation and couple captured before it was opened;
+        // sharing the same couple id does not authorize account B to send A's text.
+        if (!isCurrentLinkedCouple(currentWorkspace)
+          || readRecoveryMarker(identity.userId) === 'active') break;
+
+        // Persist the exact file -> Storage object mapping before the first
+        // upload. A crash, timeout or lost response can then retry the same path
+        // and reconcile a 409 duplicate instead of creating a second object.
+        if (entry.files.length > 0) {
+          const planned = await ensureQueuedMediaPlan(
+            persistence,
+            entry,
+            canApplyDisposition,
+          );
+          if (!isCurrentIdentity(identity)
+            || readRecoveryMarker(identity.userId) === 'active') break;
+          if (planned.kind === 'invalid') {
+            const applied = await applyAndCountDisposition(entry, {
+              ok: false,
+              reason: 'invalid_media_plan',
+              message: '임시 보관된 사진 정보를 확인할 수 없어요. 기록을 다시 확인해 주세요.',
+            });
+            if (!applied) break;
+            continue;
+          }
+          deliveryEntry = planned.entry;
+          mediaPlanWasCreated = planned.created;
         }
 
         let deliveryOutcome: { ok: true } | { ok: false; reason: string; message: string } = {
@@ -2928,99 +4098,223 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           reason: 'unknown',
           message: '게시물 재전송 결과를 확인하지 못했어요.',
         };
-        const existingPost = entry.allOrNothingMedia
-          ? stateRef.current.records.find((record) => record.id === entry.id)
+        const mediaPlan = deliveryEntry.files.length > 0
+          ? deliveryEntry.mediaPlan
           : undefined;
+        let existingRecord = stateRef.current.records.find((record) => record.id === deliveryEntry.id);
 
-        if (entry.allOrNothingMedia && existingPost) {
-          if (existingPost.userId !== identity.userId) {
+        // A prior INSERT or attachment UPDATE may have committed even though its
+        // response never arrived. On retries, refresh before issuing another
+        // mutation so the server row can prove which stable media objects are
+        // already attached.
+        const localMediaIncomplete = mediaPlan && existingRecord
+          ? !plannedMediaIsComplete(
+              existingRecord.attachments || [],
+              mediaPlan,
+              deliveryEntry.coupleId,
+              deliveryEntry.id,
+            )
+          : false;
+        if (deliveryEntry.attempts > 0 && (!existingRecord || localMediaIncomplete)) {
+          try {
+            const remote = await fetchRecordsResultFromDB(deliveryEntry.coupleId);
+            if (!isCurrentLinkedCouple(currentWorkspace)) break;
+            const candidate = remote.ok
+              ? remote.records.find((record) => record.id === deliveryEntry.id)
+              : undefined;
+            if (candidate) {
+              existingRecord = candidate;
+              updateStateImmediately((current) => (
+                isCurrentLinkedCouple(currentWorkspace)
+                  && stateMatchesLinkedCouple(current, currentWorkspace)
+                  ? {
+                      ...current,
+                      records: current.records.some((record) => record.id === candidate.id)
+                        ? current.records.map((record) => (
+                            record.id === candidate.id
+                              && (candidate.contentRevision ?? 1) >= (record.contentRevision ?? 1)
+                              ? candidate
+                              : record
+                          ))
+                        : [...current.records, candidate],
+                    }
+                  : current
+              ));
+            }
+          } catch {
+            // A failed reconciliation read is not authority to discard the queue.
+            // Continue with the local snapshot; the stable ids keep retries safe.
+          }
+        }
+
+        if (existingRecord) {
+          if (!existingRecordMatchesQueuedCore(
+            existingRecord,
+            queuedRecord,
+            identity.userId,
+            deliveryEntry.allOrNothingMedia === true,
+          )) {
             deliveryOutcome = {
               ok: false,
-              reason: 'not_owner',
-              message: recordFailureMessage('not_owner'),
+              reason: 'record_id_conflict',
+              message: '임시 보관 기록과 서버 기록이 달라 자동 전송하지 않았어요.',
+            };
+          } else if (
+            mediaPlan
+            && mediaPlanWasCreated
+            && legacyExistingMediaIsAmbiguous(
+              existingRecord.attachments || [],
+              queuedRecord.attachments || [],
+            )
+          ) {
+            // Old app versions had no immutable object mapping. If such an entry
+            // already has extra server media, guessing which File produced which
+            // object can duplicate or reorder a user's photos.
+            deliveryOutcome = {
+              ok: false,
+              reason: 'legacy_media_state_ambiguous',
+              message: '이전 사진 전송 상태를 안전하게 확인할 수 없어 자동 전송하지 않았어요.',
             };
           } else {
-            const expectedNames = entry.files.map((file) => file.name);
-            const currentNames = (existingPost.attachments || []).map((attachment) => attachment.name);
-            let mediaReady = currentNames.length === expectedNames.length
-              && currentNames.every((name, index) => name === expectedNames[index]);
+            let mediaFailure: { reason: string; message: string } | null = null;
+            if (mediaPlan) {
+              const currentAttachments = existingRecord.attachments || [];
+              const missingSlots = mediaPlan.slots.filter((slot) => !currentAttachments.some(
+                (attachment) => attachmentMatchesPlannedObject(
+                  attachment,
+                  deliveryEntry.coupleId,
+                  deliveryEntry.id,
+                  slot.objectId,
+                ),
+              ));
+              if (missingSlots.length > 0) {
+                const media = await updateRecordMedia(deliveryEntry.id, {
+                  addFiles: missingSlots.map((slot) => deliveryEntry.files[slot.fileIndex]),
+                  mediaObjectIds: missingSlots.map((slot) => slot.objectId),
+                  allOrNothing: deliveryEntry.allOrNothingMedia === true,
+                }, { deletionLease });
+                if (!isCurrentLinkedCouple(currentWorkspace)
+                  || readRecoveryMarker(identity.userId) === 'active') break;
+                if (!media.ok) {
+                  mediaFailure = {
+                    reason: media.reason ?? 'unknown',
+                    message: media.error || '임시 보관 사진을 다시 올리지 못했어요.',
+                  };
+                } else if (media.failedFiles.length > 0) {
+                  mediaFailure = {
+                    reason: media.reason ?? 'unknown',
+                    message: media.error || '임시 보관 사진을 다시 올리지 못했어요.',
+                  };
+                }
+              }
 
-            if (!mediaReady) {
-              const media = await updateRecordMedia(entry.id, {
-                addFiles: entry.files,
-                allOrNothing: true,
-              });
-              if (!media.ok) {
-                deliveryOutcome = {
-                  ok: false,
-                  reason: media.reason ?? 'unknown',
-                  message: media.error || '게시물 사진을 다시 올리지 못했어요.',
-                };
-              } else if (media.failedFiles.length > 0) {
-                deliveryOutcome = {
-                  ok: false,
+              const refreshed = stateRef.current.records.find(
+                (record) => record.id === deliveryEntry.id,
+              );
+              if (!mediaFailure && (!refreshed || !plannedMediaIsComplete(
+                refreshed.attachments || [],
+                mediaPlan,
+                deliveryEntry.coupleId,
+                deliveryEntry.id,
+              ))) {
+                mediaFailure = {
                   reason: 'unreachable',
-                  message: '게시물 사진을 모두 올리지 못해 다시 시도할게요.',
+                  message: '사진을 모두 확인하지 못해 연결되면 다시 시도할게요.',
                 };
-              } else {
-                mediaReady = true;
               }
-            }
 
-            if (mediaReady) {
-              const refreshedPost = stateRef.current.records.find((record) => record.id === entry.id);
-              if (!refreshedPost) {
-                deliveryOutcome = {
-                  ok: false,
-                  reason: 'post_staging_missing',
-                  message: '임시 보관한 게시물을 확인하지 못했어요.',
-                };
-              } else if (
-                refreshedPost.isPrivate !== queuedRecord.isPrivate
-                || refreshedPost.isProfilePost !== queuedRecord.isProfilePost
-              ) {
-                const publication = await updateRecord(entry.id, {
-                  isPrivate: queuedRecord.isPrivate,
-                  ...(queuedRecord.isProfilePost !== undefined
-                    ? { isProfilePost: queuedRecord.isProfilePost }
-                    : {}),
-                });
-                deliveryOutcome = publication.ok
-                  ? { ok: true }
-                  : { ok: false, reason: publication.reason, message: publication.error };
-              } else {
-                deliveryOutcome = { ok: true };
+              if (!mediaFailure && refreshed) {
+                const ordered = orderedAttachmentsForQueuedMedia(
+                  refreshed.attachments || [],
+                  queuedRecord.attachments || [],
+                  mediaPlan,
+                  deliveryEntry.coupleId,
+                  deliveryEntry.id,
+                );
+                if (!ordered) {
+                  mediaFailure = {
+                    reason: 'queued_base_media_missing',
+                    message: '임시 보관 기록의 기존 사진을 확인할 수 없어 자동 전송하지 않았어요.',
+                  };
+                } else {
+                  const updates: Partial<DailyRecord> = {};
+                  if (!hasSameAttachmentOrder(refreshed.attachments || [], ordered)) {
+                    updates.attachments = ordered;
+                  }
+                  if (deliveryEntry.allOrNothingMedia) {
+                    if (refreshed.isPrivate !== queuedRecord.isPrivate) {
+                      updates.isPrivate = queuedRecord.isPrivate;
+                    }
+                    if (queuedRecord.isProfilePost !== undefined
+                      && refreshed.isProfilePost !== queuedRecord.isProfilePost) {
+                      updates.isProfilePost = queuedRecord.isProfilePost;
+                    }
+                  }
+                  if (Object.keys(updates).length > 0) {
+                    const finalized = await updateRecord(
+                      deliveryEntry.id,
+                      updates,
+                      { deletionLease },
+                    );
+                    if (!isCurrentLinkedCouple(currentWorkspace)
+                      || readRecoveryMarker(identity.userId) === 'active') break;
+                    if (!finalized.ok) {
+                      mediaFailure = {
+                        reason: finalized.reason,
+                        message: finalized.error,
+                      };
+                    }
+                  }
+                }
               }
             }
+            deliveryOutcome = mediaFailure
+              ? { ok: false, ...mediaFailure }
+              : { ok: true };
           }
         } else {
-          const attempt = await addRecordWithMedia(queuedRecord, entry.files, {
-            recordId: entry.id,
+          const mediaObjectIds = mediaPlan
+            ? [...mediaPlan.slots]
+                .sort((a, b) => a.fileIndex - b.fileIndex)
+                .map((slot) => slot.objectId)
+            : undefined;
+          const attempt = await addRecordWithMedia(queuedRecord, deliveryEntry.files, {
+            recordId: deliveryEntry.id,
             allowQueue: false,
-            expectedCoupleId: entry.coupleId,
-            allOrNothingMedia: entry.allOrNothingMedia === true,
+            expectedCoupleId: deliveryEntry.coupleId,
+            allOrNothingMedia: deliveryEntry.allOrNothingMedia === true,
+            mediaObjectIds,
+            deletionLease,
           });
-          deliveryOutcome = attempt.ok
-            && (!entry.allOrNothingMedia || attempt.failedFiles.length === 0)
+          if (!isCurrentLinkedCouple(currentWorkspace)
+            || readRecoveryMarker(identity.userId) === 'active') break;
+          const created = stateRef.current.records.find((record) => record.id === deliveryEntry.id);
+          const exactMediaComplete = !mediaPlan || (created && plannedMediaIsComplete(
+            created.attachments || [],
+            mediaPlan,
+            deliveryEntry.coupleId,
+            deliveryEntry.id,
+          ));
+          deliveryOutcome = attempt.ok && exactMediaComplete
             ? { ok: true }
             : {
                 ok: false,
-                reason: attempt.ok ? 'unreachable' : attempt.reason ?? 'unknown',
-                message: attempt.ok
-                  ? '게시물 사진을 모두 올리지 못해 다시 시도할게요.'
-                  : attempt.error ?? '',
+                reason: attempt.reason ?? (attempt.ok ? 'unreachable' : 'unknown'),
+                message: attempt.error ?? (attempt.ok
+                  ? '사진을 모두 확인하지 못해 연결되면 다시 시도할게요.'
+                  : ''),
               };
         }
-        const disposition = await applyDeliveryOutcome(
-          persistence,
-          entry,
-          deliveryOutcome,
-        );
-        if (disposition === 'delivered') result.delivered += 1;
-        else if (disposition === 'requeued') result.requeued += 1;
-        else result.blocked += 1;
+        if (readRecoveryMarker(identity.userId) === 'active') break;
+        if (!await applyAndCountDisposition(deliveryEntry, deliveryOutcome)) break;
       }
-      setOutboxCounts(await countOutbox(persistence, identity.userId));
+        if (!isCurrentIdentity(identity)
+          || readRecoveryMarker(identity.userId) === 'active') return;
+        const counts = await countOutbox(persistence, identity.userId);
+        if (isCurrentIdentity(identity)
+          && readRecoveryMarker(identity.userId) === 'absent') setOutboxCounts(counts);
+      }, { ifAvailable: true });
+      if (locked.kind === 'unavailable') return result;
     } catch (error) {
       console.error('[gomsinlog] Outbox flush failed.');
     } finally {
@@ -3034,12 +4328,33 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const persistence = outboxRef.current;
     const identity = captureActiveIdentity();
     if (!persistence || !identity) return 0;
-    const pending = await pendingForAccount(persistence, identity.userId);
-    const blocked = pending.filter((entry) => entry.blocked);
-    for (const entry of blocked) await unblockEntry(persistence, entry);
-    setOutboxCounts(await countOutbox(persistence, identity.userId));
-    await flushOutbox();
-    return blocked.length;
+    const locked = await withAccountDeletionLock(identity.userId, async () => {
+      const barrierClosed = () => !isCurrentIdentity(identity)
+        || readRecoveryMarker(identity.userId) === 'active';
+      if (barrierClosed()) return 0;
+      const pending = await pendingForAccount(persistence, identity.userId);
+      if (barrierClosed()) return 0;
+      const blocked = pending.filter((entry) => entry.blocked);
+      try {
+        if (barrierClosed()) return 0;
+        const unblocked = blocked.map((entry) => {
+          const next: QueuedRecord = { ...entry, attempts: 0 };
+          delete next.blocked;
+          return next;
+        });
+        await persistence.putMany(unblocked);
+        const counts = await countOutbox(persistence, identity.userId);
+        if (barrierClosed()) return 0;
+        setOutboxCounts(counts);
+        return blocked.length;
+      } catch {
+        return 0;
+      }
+    }, { ifAvailable: true });
+    if (locked.kind !== 'acquired') return 0;
+    // Release the account lock before replay: flush acquires the same lock.
+    if (locked.value > 0) await flushOutbox();
+    return locked.value;
   };
 
   /** Throw away everything queued for this account, at the user's explicit request. */
@@ -3047,10 +4362,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const persistence = outboxRef.current;
     const identity = captureActiveIdentity();
     if (!persistence || !identity) return 0;
-    const pending = await pendingForAccount(persistence, identity.userId);
-    for (const entry of pending) await discardOutboxEntry(persistence, entry.id);
-    setOutboxCounts({ waiting: 0, blocked: 0 });
-    return pending.length;
+    const locked = await withAccountDeletionLock(identity.userId, async () => {
+      const barrierClosed = () => !isCurrentIdentity(identity)
+        || readRecoveryMarker(identity.userId) === 'active';
+      if (barrierClosed()) return 0;
+      const pending = await pendingForAccount(persistence, identity.userId);
+      if (barrierClosed()) return 0;
+      try {
+        if (barrierClosed()) return 0;
+        await persistence.removeMany(pending.map((entry) => entry.id));
+        const counts = await countOutbox(persistence, identity.userId);
+        if (barrierClosed()) return 0;
+        setOutboxCounts(counts);
+        return pending.length;
+      } catch {
+        return 0;
+      }
+    }, { ifAvailable: true });
+    return locked.kind === 'acquired' ? locked.value : 0;
   };
 
   flushOutboxRef.current = flushOutbox;
@@ -3068,9 +4397,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setOutboxCounts({ waiting: 0, blocked: 0 });
       return;
     }
+    if (readRecoveryMarker(userId) === 'active') {
+      setOutboxCounts({ waiting: 0, blocked: 0 });
+      return;
+    }
     let cancelled = false;
     void countOutbox(persistence, userId).then((counts) => {
-      if (!cancelled) setOutboxCounts(counts);
+      if (!cancelled
+        && sessionUserIdRef.current === userId
+        && readRecoveryMarker(userId) === 'absent') setOutboxCounts(counts);
     }).catch(() => { /* an unreadable queue is reported as empty, never as an error toast */ });
     return () => { cancelled = true; };
   }, [state.authenticatedUser?.id]);
@@ -3121,6 +4456,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const flush = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void flushOutboxRef.current?.();
+      void reconcileMediaOperationsRef.current?.();
     };
 
     /*
@@ -3146,6 +4482,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const updateRecord = async (
     id: string,
     updates: Partial<DailyRecord>,
+    internal?: { deletionLease?: AccountDeletionLockLease },
   ): Promise<RecordMutationResult> => {
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
@@ -3163,10 +4500,62 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const workspace = captureLinkedCouple();
     if (!workspace) return recordFailure('workspace_unresolved');
     if (existing.userId !== workspace.userId) return recordFailure('not_owner');
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
-      return recordFailure('deletion_pending');
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentLinkedCouple(workspace),
+      internal?.deletionLease,
+      () => recordFailure('deletion_pending'),
+      async () => {
+    const baseRevision = existing.contentRevision ?? 1;
+    const mediaOperationId = crypto.randomUUID();
+    const mediaIdentity = {
+      operationId: mediaOperationId,
+      recordId: id,
+      userId: workspace.userId,
+      coupleId: workspace.coupleId,
+    };
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!ownerToken || !writeRecordMediaMutationJournalEntry(mediaIdentity, ownerToken)) {
+      return recordFailure('unknown');
     }
-    let authoritativeRevision = existing.contentRevision ?? 1;
+    activeMediaOperationIdsRef.current.add(mediaOperationId);
+    try {
+    const manifestPaths = Array.from(new Set(
+      (updated.attachments || [])
+        .map((attachment) => attachment.path)
+        .filter((path): path is string =>
+          isCanonicalRecordMediaPath(path, workspace.coupleId, id)),
+    ));
+    let begun = await beginRecordMediaMutation({
+      ...mediaIdentity,
+      baseContentRevision: baseRevision,
+      existingPaths: manifestPaths,
+      newMediaIds: [],
+    });
+    if (!begun.ok && RECORD_UPDATE_READ_BACK_REASONS.has(begun.reason)) {
+      const recovered = await getRecordMediaMutationStatus(mediaIdentity);
+      if (recovered.ok && recovered.state === 'pending') begun = recovered;
+    }
+    if (!begun.ok || begun.state !== 'pending') {
+      const reason = begun.ok ? 'server' : begun.reason;
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        clearRecordMediaMutationJournalEntry(mediaIdentity);
+      }
+      if (reason === 'auth_expired') void handleAuthExpired();
+      return recordFailure(reason);
+    }
+    const abandonPending = async () => {
+      const abandoned = await abandonRecordMediaMutation(mediaIdentity);
+      if (abandoned.ok && ['abandoned', 'committed'].includes(abandoned.state)) {
+        clearRecordMediaMutationJournalEntry(mediaIdentity);
+      }
+    };
+    if (!isCurrentLinkedCouple(workspace)) {
+      await abandonPending();
+      return recordFailure('stale');
+    }
+
+    let authoritativeRevision = baseRevision;
     let reconciledRecord: DailyRecord | null = null;
     const reconcileRecordUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
       if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) return null;
@@ -3190,31 +4579,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         updated,
         workspace.coupleId,
         workspace.userId,
-        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+        {
+          kind: 'update',
+          expectedRevision: baseRevision,
+          mediaOperationId,
+        },
       );
-      if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
+      if (!isCurrentLinkedCouple(workspace)) {
+        const status = await getRecordMediaMutationStatus(mediaIdentity);
+        if (status.ok && status.state === 'pending') await abandonPending();
+        return recordFailure('stale');
+      }
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
         const reason = recordSaveFailureReason(saved);
-        reconciledRecord = await reconcileRecordUpdate(reason);
-        if (!reconciledRecord) return recordFailure(reason);
-        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+        const status = RECORD_UPDATE_READ_BACK_REASONS.has(reason)
+          ? await getRecordMediaMutationStatus(mediaIdentity)
+          : null;
+        if (status?.ok && status.state === 'committed') {
+          reconciledRecord = await reconcileRecordUpdate(reason);
+          authoritativeRevision = reconciledRecord?.contentRevision
+            ?? status.targetContentRevision
+            ?? baseRevision + 1;
+        } else {
+          if (status?.ok && status.state === 'pending') await abandonPending();
+          else if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) await abandonPending();
+          return recordFailure(reason);
+        }
       } else {
-        authoritativeRevision = saved.contentRevision;
+        authoritativeRevision = saved.contentRevision ?? baseRevision + 1;
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       console.error('[gomsinlog] Failed to update record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      reconciledRecord = await reconcileRecordUpdate(reason);
-      if (!reconciledRecord) return recordFailure(reason);
-      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      const status = await getRecordMediaMutationStatus(mediaIdentity);
+      if (status.ok && status.state === 'committed') {
+        reconciledRecord = await reconcileRecordUpdate(reason);
+        authoritativeRevision = reconciledRecord?.contentRevision
+          ?? status.targetContentRevision
+          ?? baseRevision + 1;
+      } else {
+        if (status.ok && status.state === 'pending') await abandonPending();
+        return recordFailure(reason);
+      }
     }
 
+    clearRecordMediaMutationJournalEntry(mediaIdentity);
     let recordToCommit: DailyRecord = {
       ...(reconciledRecord ?? updated),
       contentRevision: authoritativeRevision,
+      mediaContractVersion: 1,
+      mediaManifestRevision: authoritativeRevision,
+      lastMediaOperationId: mediaOperationId,
     };
     const attachmentsToResolve = reconciledRecord
       ? reconciledRecord.attachments
@@ -3231,6 +4649,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
     }
 
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? {
@@ -3246,6 +4665,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : current,
     );
     return isCurrentLinkedCouple(workspace) ? { ok: true } : recordFailure('stale');
+    } finally {
+      activeMediaOperationIdsRef.current.delete(mediaOperationId);
+    }
+      },
+    );
   };
 
   const deleteRecord = async (id: string): Promise<RecordMutationResult> => {
@@ -3256,30 +4680,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const workspace = captureLinkedCouple();
     if (!workspace) return recordFailure('workspace_unresolved');
     if (existing.userId !== workspace.userId) return recordFailure('not_owner');
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
-      return recordFailure('deletion_pending');
-    }
-
-    // Storage cleanup: remove owned media objects BEFORE deleting the DB row.
-    // Fail closed: if cleanup fails, abort the delete rather than orphaning
-    // storage objects that can no longer be traced back to a record.
-    const attachmentPaths = (existing.attachments || [])
-      .map((a) => a.path)
-      .filter((p): p is string =>
-        isCanonicalRecordMediaPath(p, workspace.coupleId, id),
-      );
-
-    if (attachmentPaths.length > 0) {
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentLinkedCouple(workspace),
+      undefined,
+      () => recordFailure('deletion_pending'),
+      async () => {
+    const reconcileAmbiguousDelete = async (reason: RecordMutationReason): Promise<boolean> => {
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) return false;
       try {
-        await removeRecordMedia(attachmentPaths);
-        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-      } catch (error) {
-        if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
-        console.error('[gomsinlog] Storage cleanup failed, aborting delete.');
-        return recordFailure(classifyServerError(error).kind);
+        const remote = await fetchRecordsResultFromDB(workspace.coupleId);
+        if (!isCurrentLinkedCouple(workspace) || !remote.ok) return false;
+        // This read is already limited by authenticated record RLS. We only
+        // converge the caller's own locally-known row; the helper itself keeps
+        // collapsing missing, stale-couple, and non-owner targets to avoid an
+        // existence oracle for arbitrary record ids.
+        return !remote.records.some((candidate) => (
+          candidate.id === id && candidate.userId === workspace.userId
+        ));
+      } catch {
+        return false;
       }
-    }
-
+    };
     try {
       const deleted = await deleteRecordFromDB(
         id,
@@ -3289,50 +4711,63 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       if (!deleted.ok) {
         if (deleted.reason === 'auth_expired') void handleAuthExpired();
-        return recordFailure(deleted.reason);
+        if (!(await reconcileAmbiguousDelete(deleted.reason))) {
+          return recordFailure(deleted.reason);
+        }
       }
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) return recordFailure('stale');
       console.error('[gomsinlog] Failed to delete record.');
       const reason = classifyServerError(error).kind;
       if (reason === 'auth_expired') void handleAuthExpired();
-      return recordFailure(reason);
+      if (!(await reconcileAmbiguousDelete(reason))) return recordFailure(reason);
     }
 
+    recordsRefreshSequenceRef.current += 1;
     updateStateImmediately((current) =>
       isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
         ? { ...current, records: current.records.filter((record) => record.id !== id) }
         : current,
     );
     return isCurrentLinkedCouple(workspace) ? { ok: true } : recordFailure('stale');
+      },
+    );
   };
 
   /**
    * Add and/or remove media on an existing record.
    *
-   * Ordering is forced by storage RLS and by the no-orphans rule, and is the same
-   * shape `addRecordWithMedia` uses:
+   * Ordering is forced by Storage RLS and the durable lifecycle contract, and is
+   * the same shape `addRecordWithMedia` uses:
    *
-   *   gate -> verify ownership -> upload new objects -> patch the row -> commit the
-   *   guarded local snapshot -> delete only objects no longer referenced by it.
+   *   gate -> verify ownership -> begin exact manifest -> upload reserved objects
+   *   -> CAS patch (activate/retire) -> commit the guarded local snapshot.
    *
-   * If the patch fails, the freshly uploaded objects are deleted again and the row
-   * is left exactly as it was: no orphaned storage, no phantom success. Deleting
-   * the removed objects last is deliberate -- doing it first would destroy files
-   * that are still referenced by the row if the patch then failed.
+   * A failed pre-commit operation is abandoned into durable cleanup. Physical
+   * deletion is service-worker-only; the browser never reports that it completed.
    */
   const updateRecordMedia = async (
     id: string,
-    changes: { addFiles?: File[]; removePaths?: string[]; allOrNothing?: boolean },
-  ): Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    reason?: RecordMutationReason;
-  }> => {
+    changes: {
+      addFiles?: File[];
+      removePaths?: string[];
+      allOrNothing?: boolean;
+      /** Stable one-to-one Storage object ids supplied only by durable replay. */
+      mediaObjectIds?: string[];
+    },
+    internal?: { deletionLease?: AccountDeletionLockLease },
+  ): Promise<RecordMediaMutationResult> => {
     const addFiles = changes.addFiles || [];
     const removePaths = changes.removePaths || [];
     const allFileNames = addFiles.map((file) => file.name);
+    if (!validStableMediaObjectIds(addFiles, changes.mediaObjectIds)) {
+      return {
+        ok: false,
+        failedFiles: allFileNames,
+        error: '임시 보관된 사진 정보를 확인할 수 없어 업로드하지 않았어요.',
+        reason: 'unknown',
+      };
+    }
     const initial = stateRef.current;
     const existing = initial.records.find((record) => record.id === id);
     if (!existing) {
@@ -3387,168 +4822,158 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reason: 'stale' as const,
     };
 
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) {
-      return {
+    return withOrdinaryServerMutation<RecordMediaMutationResult>(
+      workspace,
+      () => isCurrentLinkedCouple(workspace),
+      internal?.deletionLease,
+      () => ({
         ok: false,
         failedFiles: allFileNames,
         error: recordFailureMessage('deletion_pending'),
-        reason: 'deletion_pending',
-      };
-    }
-    if (!isCurrentLinkedCouple(workspace)) return staleResult;
+        reason: 'deletion_pending' as const,
+      }),
+      async () => {
 
     const kept = (existing.attachments || []).filter(
       (attachment) => !attachment.path || !removePaths.includes(attachment.path),
     );
-    const uploadedPaths: string[] = [];
+    const mediaObjectIds = changes.mediaObjectIds ?? addFiles.map(() => crypto.randomUUID());
+    const uploads = addFiles.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
-    const added: Attachment[] = [];
+    const retryableFailedFileIndexes: number[] = [];
+    let mediaFailureReason: RecordMutationReason | undefined;
+    let mediaFailureMessage: string | undefined;
+    let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
+    let terminalFailedFiles: string[] = [];
+    let workingRecord = existing;
+    let committedAnyRevision = false;
 
-    for (const file of addFiles) {
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      const result = await uploadRecordMedia(file, workspace.coupleId, id);
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      if ('error' in result) {
-        failedFiles.push(file.name);
-        console.error('[gomsinlog] Attachment upload failed.');
-        continue;
-      }
-      added.push(result.attachment);
-      if (result.attachment.path) uploadedPaths.push(result.attachment.path);
-    }
-    const rollbackUploads = async () => {
-      if (uploadedPaths.length === 0) return;
-      try {
-        await removeRecordMedia(uploadedPaths);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to roll back uploaded media.');
-      }
+    const adoptCommit = (result: Extract<MediaRevisionCommitResult, { ok: true }>) => {
+      workingRecord = result.record;
+      committedAnyRevision = true;
+    };
+    const rememberUploadFailure = (
+      result: Extract<MediaRevisionCommitResult, { ok: false }>,
+      inputIndexes: number[],
+    ) => {
+      failedFiles.push(...result.failedFiles);
+      retryableFailedFileIndexes.push(...inputIndexes);
+      mediaFailureReason ??= result.reason;
+      mediaFailureMessage ??= result.error;
+      console.error('[gomsinlog] Attachment upload failed.');
     };
 
-    if (changes.allOrNothing && failedFiles.length > 0) {
-      await rollbackUploads();
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-      return { ok: true, failedFiles: allFileNames };
-    }
-
-    const patchedRecord: DailyRecord = { ...existing, attachments: [...kept, ...added] };
-
-    const reconcileMediaUpdate = async (reason: RecordMutationReason): Promise<DailyRecord | null> => {
-      if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') return null;
-      const remote = await fetchRecordsResultFromDB(workspace.coupleId);
-      if (!isCurrentLinkedCouple(workspace) || !remote.ok) return null;
-      const persisted = remote.records.find((candidate) =>
-        candidate.id === id && candidate.userId === workspace.userId);
-      return persisted && hasSamePersistedMedia(persisted, patchedRecord) ? persisted : null;
-    };
-
-    let authoritativeRevision = existing.contentRevision ?? 1;
-    let reconciledRecord: DailyRecord | null = null;
-    try {
-      const patched = await saveRecordToDB(
-        patchedRecord,
-        workspace.coupleId,
-        workspace.userId,
-        { kind: 'update', expectedRevision: existing.contentRevision ?? 1 },
+    if (changes.allOrNothing) {
+      const batch = await commitRecordMediaRevision(
+        workspace,
+        existing,
+        { ...existing, attachments: kept },
+        uploads,
       );
-      if (!patched.ok) {
-        if (patched.reason === 'auth_expired') void handleAuthExpired();
-        const reason = recordSaveFailureReason(patched);
-        reconciledRecord = await reconcileMediaUpdate(reason);
-        if (!reconciledRecord) {
-          // Do not delete uploaded objects after an issued UPDATE: a lost response
-          // is not proof that the row still lacks them.
-          if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-            await rollbackUploads();
-          }
-          return {
-            ok: false,
-            failedFiles: allFileNames,
-            error: recordFailureMessage(reason),
-            reason,
-          };
-        }
-        authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+      if (batch.ok) {
+        adoptCommit(batch);
+      } else if (batch.phase === 'upload') {
+        // The row was never updated. Abandon owns cleanup of every reservation,
+        // including uploads that succeeded earlier in this batch.
+        rememberUploadFailure(batch, addFiles.map((_, index) => index));
       } else {
-        authoritativeRevision = patched.contentRevision;
+        terminalFailure = batch;
+        terminalFailedFiles = allFileNames;
       }
-    } catch (error) {
-      console.error('[gomsinlog] Failed to patch record media.');
-      const reason = classifyServerError(error).kind;
-      if (reason === 'auth_expired') void handleAuthExpired();
-      reconciledRecord = await reconcileMediaUpdate(reason);
-      if (!reconciledRecord) {
-        if (!isCurrentLinkedCouple(workspace)) return staleResult;
-        if (reason !== 'offline' && reason !== 'unreachable' && reason !== 'server' && reason !== 'unknown') {
-          await rollbackUploads();
+    } else {
+      // Removal is one logical revision. Each later file gets a fresh operation
+      // and the revision produced by the preceding success. A failed file is
+      // abandoned and never appears as an existing path in another operation.
+      if (removePaths.length > 0) {
+        const removal = await commitRecordMediaRevision(
+          workspace,
+          workingRecord,
+          { ...workingRecord, attachments: kept },
+          [],
+        );
+        if (removal.ok) adoptCommit(removal);
+        else {
+          terminalFailure = removal;
+          terminalFailedFiles = allFileNames;
         }
-        return {
-          ok: false,
-          failedFiles: allFileNames,
-          error: recordFailureMessage(reason),
-          reason,
-        };
       }
-      authoritativeRevision = reconciledRecord.contentRevision ?? authoritativeRevision;
+
+      if (!terminalFailure) {
+        for (const [index, upload] of uploads.entries()) {
+          const addition = await commitRecordMediaRevision(
+            workspace,
+            workingRecord,
+            workingRecord,
+            [upload],
+          );
+          if (addition.ok) {
+            adoptCommit(addition);
+          } else if (addition.phase === 'upload') {
+            rememberUploadFailure(addition, [index]);
+          } else {
+            terminalFailure = addition;
+            terminalFailedFiles = [
+              ...addition.failedFiles,
+              ...uploads.slice(index + 1).map(({ file }) => file.name),
+            ];
+            break;
+          }
+        }
+      }
     }
 
     if (!isCurrentLinkedCouple(workspace)) return staleResult;
 
-    let committed: DailyRecord = {
-      ...(reconciledRecord ?? patchedRecord),
-      contentRevision: authoritativeRevision,
-    };
-    if (committed.attachments?.length) {
-      committed = {
-        ...committed,
-        attachments: await resolveAttachmentUrls(committed.attachments, workspace.coupleId, id),
-      };
-      if (!isCurrentLinkedCouple(workspace)) return staleResult;
-    }
-
-    // Commit the snapshot guard before any destructive Storage cleanup. A delayed
-    // media response may finish after a newer revision has reattached one of the
-    // requested paths; in that case the guard keeps the newer state and cleanup
-    // must be skipped rather than deleting an object that state still references.
-    const nextState = updateStateImmediately((current) =>
-      isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
-        ? {
-            ...current,
-            records: current.records.map((record) =>
-              record.id === id
-                ? shouldKeepCurrentRecordSnapshot(record, committed, existing, reconciledRecord !== null)
-                  ? record
-                  : committed
-                : record,
-            ),
-          }
-        : current,
-    );
-
-    const currentRecord = nextState.records.find((record) => record.id === id);
-    const committedLocally = currentRecord === committed;
-    const referencedPaths = new Set(
-      (currentRecord?.attachments || [])
-        .map((attachment) => attachment.path)
-        .filter((path): path is string => typeof path === 'string'),
-    );
-    const cleanupPaths = committedLocally
-      ? removePaths.filter((path) => !referencedPaths.has(path))
-      : [];
-
-    // A cleanup failure leaves unreferenced bytes behind, which is logged but
-    // must NOT fail the operation the user asked for. If the guard retained a
-    // newer snapshot, leaving all paths alone is the safe outcome.
-    if (cleanupPaths.length > 0) {
-      try {
-        await removeRecordMedia(cleanupPaths);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to clean up removed media objects.');
+    if (committedAnyRevision) {
+      let committed = workingRecord;
+      if (committed.attachments?.length) {
+        committed = {
+          ...committed,
+          attachments: await resolveAttachmentUrls(committed.attachments, workspace.coupleId, id),
+        };
+        if (!isCurrentLinkedCouple(workspace)) return staleResult;
       }
+      recordsRefreshSequenceRef.current += 1;
+      updateStateImmediately((current) =>
+        isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(current, workspace)
+          ? {
+              ...current,
+              records: current.records.map((record) =>
+                record.id === id
+                  ? shouldKeepCurrentRecordSnapshot(record, committed, existing, false)
+                    ? record
+                    : committed
+                  : record,
+              ),
+            }
+          : current,
+      );
     }
-    return isCurrentLinkedCouple(workspace)
-      ? { ok: true, failedFiles: Array.from(new Set(failedFiles)) }
-      : staleResult;
+
+    if (terminalFailure) {
+      return {
+        ok: committedAnyRevision,
+        failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        ...(retryableFailedFileIndexes.length > 0
+          ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+          : {}),
+        error: terminalFailure.error,
+        reason: terminalFailure.reason,
+      };
+    }
+    return {
+      ok: true,
+      failedFiles: Array.from(new Set(
+        changes.allOrNothing && failedFiles.length > 0 ? allFileNames : failedFiles,
+      )),
+      ...(retryableFailedFileIndexes.length > 0
+        ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+        : {}),
+      ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
+      ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
+    };
+      },
+    );
   };
 
   const addEvent = async (
@@ -3561,25 +4986,31 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       || event.coupleId !== workspace.coupleId
     ) return false;
 
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
+    return withOrdinaryServerMutation(
+      workspace,
+      () => isCurrentLinkedCouple(workspace),
+      undefined,
+      () => false,
+      async () => {
+        const newEvent: CoupleEvent = {
+          ...event,
+          id: crypto.randomUUID(),
+          createdAt: new Date().toISOString(),
+        };
 
-    const newEvent: CoupleEvent = {
-      ...event,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      const saved = await saveEventToDB(newEvent);
-      if (!isCurrentLinkedCouple(workspace) || !saved) return false;
-      updateStateImmediately((prev) => isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(prev, workspace)
-        ? { ...prev, events: [...prev.events, saved] }
-        : prev);
-      return true;
-    } catch (error) {
-      if (isCurrentLinkedCouple(workspace)) console.error('[gomsinlog] Failed to save event.');
-      return false;
-    }
+        try {
+          const saved = await saveEventToDB(newEvent);
+          if (!isCurrentLinkedCouple(workspace) || !saved) return false;
+          updateStateImmediately((prev) => isCurrentLinkedCouple(workspace) && stateMatchesLinkedCouple(prev, workspace)
+            ? { ...prev, events: [...prev.events, saved] }
+            : prev);
+          return true;
+        } catch (error) {
+          if (isCurrentLinkedCouple(workspace)) console.error('[gomsinlog] Failed to save event.');
+          return false;
+        }
+      },
+    );
   };
 
   const updateEvent = async (
@@ -3603,34 +5034,40 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const isCurrentScope = () => isCurrentIdentity(identity)
       && (remainsPrivate || (!!workspace && isCurrentWorkspace(workspace)));
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentScope()) return false;
-    const updated = { ...existing, ...updates };
-    updateStateImmediately((prev) => isCurrentScope()
-      ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
-      : prev);
-
-    try {
-      const saved = await updateEventInDB(updated);
-      if (!isCurrentScope()) return false;
-      if (!saved) {
+    return withOrdinaryServerMutation(
+      identity,
+      isCurrentScope,
+      undefined,
+      () => false,
+      async () => {
+        const updated = { ...existing, ...updates };
         updateStateImmediately((prev) => isCurrentScope()
-          ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
+          ? { ...prev, events: prev.events.map((event) => (event.id === id ? updated : event)) }
           : prev);
-        return false;
-      }
-      updateStateImmediately((prev) => isCurrentScope()
-        ? { ...prev, events: prev.events.map((event) => (event.id === id ? saved : event)) }
-        : prev);
-      return true;
-    } catch (error) {
-      if (!isCurrentScope()) return false;
-      console.error('[gomsinlog] Failed to update event.');
-      updateStateImmediately((prev) => isCurrentScope()
-        ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
-        : prev);
-      return false;
-    }
+
+        try {
+          const saved = await updateEventInDB(updated);
+          if (!isCurrentScope()) return false;
+          if (!saved) {
+            updateStateImmediately((prev) => isCurrentScope()
+              ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
+              : prev);
+            return false;
+          }
+          updateStateImmediately((prev) => isCurrentScope()
+            ? { ...prev, events: prev.events.map((event) => (event.id === id ? saved : event)) }
+            : prev);
+          return true;
+        } catch (error) {
+          if (!isCurrentScope()) return false;
+          console.error('[gomsinlog] Failed to update event.');
+          updateStateImmediately((prev) => isCurrentScope()
+            ? { ...prev, events: prev.events.map((event) => (event.id === id ? existing : event)) }
+            : prev);
+          return false;
+        }
+      },
+    );
   };
 
   const deleteEvent = async (id: string): Promise<boolean> => {
@@ -3649,22 +5086,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const isCurrentScope = () => isCurrentIdentity(identity)
       && (existing.isPrivate || (!!workspace && isCurrentWorkspace(workspace)));
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentScope()) return false;
-    try {
-      // The author is already verified above; passing it makes the predicate part
-      // of the request rather than an assumption about RLS.
-      const deleted = await deleteEventFromDB(id, identity.userId);
-      if (!isCurrentScope() || !deleted) return false;
-    } catch (error) {
-      if (isCurrentScope()) console.error('[gomsinlog] Failed to delete event.');
-      return false;
-    }
+    return withOrdinaryServerMutation(
+      identity,
+      isCurrentScope,
+      undefined,
+      () => false,
+      async () => {
+        try {
+          // The author is already verified above; passing it makes the predicate part
+          // of the request rather than an assumption about RLS.
+          const deleted = await deleteEventFromDB(id, identity.userId);
+          if (!isCurrentScope() || !deleted) return false;
+        } catch (error) {
+          if (isCurrentScope()) console.error('[gomsinlog] Failed to delete event.');
+          return false;
+        }
 
-    updateStateImmediately((prev) => isCurrentScope()
-      ? { ...prev, events: prev.events.filter((event) => event.id !== id) }
-      : prev);
-    return true;
+        updateStateImmediately((prev) => isCurrentScope()
+          ? { ...prev, events: prev.events.filter((event) => event.id !== id) }
+          : prev);
+        return true;
+      },
+    );
   };
 
   const reloadEvents = async (): Promise<{
@@ -3723,70 +5166,83 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const cancelPendingLink = async (): Promise<boolean> => {
     const pending = captureLinkedCouple();
     if (!pending || workspaceRefMatches(pendingDisconnectRef.current, pending)) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!isCurrentLinkedCouple(pending)) return false;
-    pendingDisconnectRef.current = pending;
-    const clearPendingDisconnect = () => {
-      if (workspaceRefMatches(pendingDisconnectRef.current, pending)) {
-        pendingDisconnectRef.current = null;
-      }
-    };
-    try {
-      const disconnected = await disconnectCoupleFromDB();
-      clearPendingDisconnect();
-      if (!disconnected || !isCurrentLinkedCouple(pending)) return false;
-      await markE2eeCoupleAuthorityUnlinked(pending.coupleId);
-      return purgeSharedAccess(pending);
-    } catch (error) {
-      clearPendingDisconnect();
-      console.error('[gomsinlog] Failed to cancel the pending couple link.');
-      return false;
-    }
+    return withOrdinaryServerMutation(
+      pending,
+      () => isCurrentLinkedCouple(pending),
+      undefined,
+      () => false,
+      async (deletionLease) => {
+        pendingDisconnectRef.current = pending;
+        const clearPendingDisconnect = () => {
+          if (workspaceRefMatches(pendingDisconnectRef.current, pending)) {
+            pendingDisconnectRef.current = null;
+          }
+        };
+        try {
+          const disconnected = await disconnectCoupleFromDB(deletionLease);
+          clearPendingDisconnect();
+          if (!disconnected || !isCurrentLinkedCouple(pending)) return false;
+          await markE2eeCoupleAuthorityUnlinked(pending.coupleId);
+          return purgeSharedAccess(pending);
+        } catch (error) {
+          clearPendingDisconnect();
+          console.error('[gomsinlog] Failed to cancel the pending couple link.');
+          return false;
+        }
+      },
+    );
   };
 
   const disconnect = async (): Promise<boolean> => {
     const workspace = captureActiveWorkspace();
     if (!workspace) return cancelPendingLink();
     if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) return false;
-    if (blocksServerCall(await ensureNotPendingBeforeServerCall())) return false;
-    if (!matchesCurrentWorkspace(workspace)) return false;
-    // Hide all shared content before the RPC leaves this turn. The couple id is
-    // retained so a failed request can be recovered authoritatively.
-    pendingDisconnectRef.current = workspace;
-    quarantineSharedAccess(workspace);
-    const clearPendingDisconnect = () => {
-      if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) {
-        pendingDisconnectRef.current = null;
-      }
-    };
+    return withOrdinaryServerMutation(
+      workspace,
+      () => matchesCurrentWorkspace(workspace),
+      undefined,
+      () => false,
+      async (deletionLease) => {
+        // Hide all shared content before the RPC leaves this turn. The couple id is
+        // retained so a failed request can be recovered authoritatively.
+        pendingDisconnectRef.current = workspace;
+        quarantineSharedAccess(workspace);
+        const clearPendingDisconnect = () => {
+          if (workspaceRefMatches(pendingDisconnectRef.current, workspace)) {
+            pendingDisconnectRef.current = null;
+          }
+        };
 
-    try {
-      const disconnected = await disconnectCoupleFromDB();
-      if (!matchesCurrentWorkspace(workspace)) {
-        clearPendingDisconnect();
-        return false;
-      }
-      clearPendingDisconnect();
-      if (disconnected) {
-        await markE2eeCoupleAuthorityUnlinked(workspace.coupleId);
-        return purgeSharedAccess(workspace);
-      }
-      await reconcileSharedAccess(workspace);
-      return false;
-    } catch (error) {
-      if (!matchesCurrentWorkspace(workspace)) {
-        clearPendingDisconnect();
-        return false;
-      }
-      console.error('[gomsinlog] Failed to disconnect.');
-      clearPendingDisconnect();
-      await reconcileSharedAccess(workspace);
-      return false;
-    }
+        try {
+          const disconnected = await disconnectCoupleFromDB(deletionLease);
+          if (!matchesCurrentWorkspace(workspace)) {
+            clearPendingDisconnect();
+            return false;
+          }
+          clearPendingDisconnect();
+          if (disconnected) {
+            await markE2eeCoupleAuthorityUnlinked(workspace.coupleId);
+            return purgeSharedAccess(workspace);
+          }
+          await reconcileSharedAccess(workspace, deletionLease);
+          return false;
+        } catch (error) {
+          if (!matchesCurrentWorkspace(workspace)) {
+            clearPendingDisconnect();
+            return false;
+          }
+          console.error('[gomsinlog] Failed to disconnect.');
+          clearPendingDisconnect();
+          await reconcileSharedAccess(workspace, deletionLease);
+          return false;
+        }
+      },
+    );
   };
 
   /**
-   * Drop every trace of the signed-in account from this device.
+   * Drop every trace of the signed-in account from this device on ordinary
+   * sign-out. Deletion completion uses its narrower user-scoped cleanup path.
    * Only device-level preferences (theme, widget layout) are kept.
    *
    * It removes exactly `STORE_KEY_V1` and `STORE_KEY`. It deliberately does NOT
@@ -3801,9 +5257,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     clearE2eeRuntime();
     hydratedUserIdRef.current = null;
     membershipReconciliationRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
     quarantinedWorkspaceRef.current = null;
     if (sessionUserIdRef.current !== null) sessionGenerationRef.current += 1;
     sessionUserIdRef.current = null;
+    setTalkAboutSyncStatus('ready');
     cachePurgedRef.current = true;
     localStorage.removeItem(STORE_KEY_V1);
     localStorage.removeItem(STORE_KEY);
@@ -3844,29 +5302,92 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Invalidate Apple before push revocation or any other awaited cleanup.
+    const finishAppleSignOut = appleSessionGuard.beginSignOut();
     /*
-      Release the push tokens FIRST, while the session still authenticates.
+      START releasing push tokens first, while the session still authenticates.
 
       The order is not arbitrary and not interchangeable with the two lines
       below: `revoke_my_push_tokens()` reads `auth.uid()`, so after the session is
       gone it has no actor and refuses. Doing this after `authRepository.signOut()`
       would look identical and silently never work.
 
-      Awaited, but its result is ignored. Refusing to sign someone out because a
-      notification cleanup failed would be the wrong trade in every direction, and
-      the outcome §14.3 actually forbids -- a departed account receiving a device's
-      notifications -- is prevented by migration 048's handover DELETE regardless
-      of whether this call succeeds.
+      Local content is purged as soon as the authenticated RPC has been dispatched,
+      then the network cleanup gets a short bounded window before Auth sign-out.
+      A hung network can therefore delay neither privacy on this device nor logout
+      indefinitely. Migration 048's handover DELETE remains the durable boundary.
     */
-    await revokeOwnPushTokens();
-    // Purge locally first: even if the network call fails, this device must not
-    // keep the previous account's records readable.
-    purgeLocalAccountData();
     try {
-      await authRepository.signOut();
-    } catch {
-      console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway.');
+      const pushRevocation = revokeOwnPushTokens();
+      // Purge immediately: even if the RPC hangs, this device must not keep the
+      // previous account's records readable.
+      purgeLocalAccountData();
+      await withTimeout(pushRevocation, PUSH_TOKEN_REVOKE_TIMEOUT_MS, { ok: false });
+      try {
+        await authRepository.signOut();
+      } catch {
+        console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway.');
+      }
+    } finally {
+      finishAppleSignOut();
     }
+  };
+
+  const teardownDeletedCurrentAccount = (identity: ActiveIdentity): boolean => {
+    if (!isCurrentIdentity(identity)) return false;
+    const current = stateRef.current;
+    clearE2eeRuntime();
+    hydratedUserIdRef.current = null;
+    membershipReconciliationRef.current += 1;
+    recordsRefreshSequenceRef.current += 1;
+    talkAboutRefreshSequenceRef.current += 1;
+    sessionGenerationRef.current += 1;
+    sessionUserIdRef.current = null;
+    quarantinedWorkspaceRef.current = null;
+    pendingDisconnectRef.current = null;
+    retrySharedAccessRef.current = null;
+    setOutboxCounts({ waiting: 0, blocked: 0 });
+    setAccountDeletionRecovery(null);
+    applyDeletionStatus({ kind: 'clear' });
+    replaceStateImmediately({ ...DEFAULT_STATE, ...carryOverDevicePrefs(current) });
+    return true;
+  };
+
+  /** Finish only the exact account whose marker already authorizes local cleanup. */
+  const finishDeletedAccountLocally = async (
+    identity: ActiveIdentity,
+    warnings: string[],
+    cleanupMarker: RecoveryMarkerV2,
+  ): Promise<AccountDeletionOutcome> => {
+    const beforeCleanup = inspectRecoveryMarker(cleanupMarker.userId);
+    if (cleanupMarker.phase !== 'local_cleanup'
+      || beforeCleanup.kind !== 'v2'
+      || beforeCleanup.phase !== 'local_cleanup'
+      || beforeCleanup.marker.attemptId !== cleanupMarker.attemptId) {
+      return { status: 'partially_deleted', dataRemoved: true, warnings };
+    }
+    if (isCurrentIdentity(identity)) cancelDeferredSyncRef.current?.();
+
+    if (!await purgeDeletionArtifactsForUser(identity.userId)
+      || !clearFinishedCleanupMarker(cleanupMarker)) {
+      const nextWarnings = [...new Set([...warnings, LOCAL_DELETION_CLEANUP_WARNING])];
+      if (isCurrentIdentity(identity)) {
+        setAccountDeletionRecovery({ warnings: nextWarnings });
+        applyDeletionStatus({ kind: 'pending' });
+      }
+      return { status: 'partially_deleted', dataRemoved: true, warnings: nextWarnings };
+    }
+
+    // A late completion for A still cleans A, but B's state, E2EE runtime and
+    // authenticated session are not touched.
+    if (teardownDeletedCurrentAccount(identity)) {
+      try {
+        await authRepository.signOut();
+      } catch {
+        console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared.');
+      }
+    }
+    return { status: 'deleted', dataRemoved: true, warnings };
   };
 
   /**
@@ -3879,58 +5400,168 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const deleteAccount = async (): Promise<AccountDeletionOutcome> => {
     const identity = captureActiveIdentity();
     if (!identity) return { status: 'failed', dataRemoved: false, warnings: [] };
-    const outcome = await deleteAccountFromDB();
-    // Account A's completion must never clear a session that has switched to B.
-    if (!isCurrentIdentity(identity)) {
-      return { status: 'failed', dataRemoved: false, warnings: outcome.warnings };
-    }
+    const existingFlight = deletionFlightsRef.current.get(identity.userId);
+    if (existingFlight) return existingFlight;
 
-    // No purge, no recovery and NO MARKER: the account is fully intact.
-    if (outcome.status === 'failed') return outcome;
+    const runDeletionAsIntentWinner = async (): Promise<AccountDeletionOutcome> => {
+      // The intent winner waits for any already-running ordinary write. New
+      // ordinary writes fail their try-lock while this request is queued, so
+      // deletion begins only after the prior write has reached a settled state.
+      const locked = await withAccountDeletionLock(identity.userId, async () => {
+        // The request may have waited for another same-origin operation. Neither
+        // its captured identity nor its marker snapshot is authority after that.
+        if (!isCurrentIdentity(identity)) {
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
+        const inspected = inspectRecoveryMarker(identity.userId);
+        if (inspected.kind === 'v2' && inspected.phase === 'local_cleanup') {
+          return finishDeletedAccountLocally(identity, [], inspected.marker);
+        }
+        if (inspected.kind !== 'absent' && inspected.kind !== 'v2') {
+          abortForPendingDeletion(identity);
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
 
-    if (outcome.status === 'partially_deleted') {
-      // Marker FIRST, so a reload cannot escape recovery, then contain the
-      // exposure while keeping the session so the deletion can be finished.
-      markRecoveryPending(identity.userId);
-      revokeCycleSensitiveConsent(identity.userId);
-      if (!purgeLocalContentRetainingIdentity(identity)) return outcome;
-      setAccountDeletionRecovery({ warnings: outcome.warnings });
-      applyDeletionStatus({ kind: 'pending' });
-      cancelDeferredSyncRef.current?.();
-      return outcome;
-    }
+        // This durable write and exact read-back happen inside the same-origin
+        // critical section and precede the first remote deletion call.
+        const attempt = markRecoveryPending(identity.userId);
+        if (!attempt) {
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
+        abortForPendingDeletion(identity);
+        const beforeRequest = inspectRecoveryMarker(identity.userId);
+        if (!isCurrentIdentity(identity)
+          || beforeRequest.kind !== 'v2'
+          || beforeRequest.phase !== 'pending'
+          || beforeRequest.marker.attemptId !== attempt.attemptId) {
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
 
-    // `deleted`: the Auth user is gone, which is the ONLY confirmation that
-    // permits clearing the marker.
-    if (!purgeLocalAccountData(identity)) return outcome;
-    revokeCycleSensitiveConsent(identity.userId);
-    // The queue is deliberately kept across sign-out, so deletion is the one place
-    // it must be removed: this account will never sign in again, and leaving its
-    // unsent records on the device would outlive the account they belong to.
-    if (outboxRef.current) {
-      try {
-        await purgeOutboxAccount(outboxRef.current, identity.userId);
-      } catch (error) {
-        console.error('[gomsinlog] Failed to purge the outbox after deletion.');
+        let outcome: AccountDeletionOutcome;
+        try {
+          // The exclusive lock intentionally spans the network request and all
+          // attempt-bound transition/clear handling below.
+          outcome = await deleteAccountFromDB();
+        } catch {
+          outcome = { status: 'failed', dataRemoved: false, warnings: [] };
+        }
+
+        // A non-cooperative writer can still replace localStorage directly.
+        // Exact attempt comparison prevents that stale response from gaining
+        // transition or clear authority even while this lock is held.
+        const current = inspectRecoveryMarker(identity.userId);
+        const isSamePendingAttempt = current.kind === 'v2'
+          && current.phase === 'pending'
+          && current.marker.attemptId === attempt.attemptId;
+        if (!isSamePendingAttempt) return outcome;
+
+        if (outcome.status === 'cancelled') {
+          if (clearRecoveryMarkerForAttempt(attempt, 'pending') && isCurrentIdentity(identity)) {
+            setAccountDeletionRecovery(null);
+            applyDeletionStatus({ kind: 'clear' });
+          }
+          return outcome;
+        }
+
+        if (outcome.status !== 'deleted') {
+          if (isCurrentIdentity(identity)) {
+            setAccountDeletionRecovery({ warnings: outcome.warnings });
+            applyDeletionStatus({ kind: 'pending' });
+            cancelDeferredSyncRef.current?.();
+          }
+          return outcome;
+        }
+
+        if (!advanceRecoveryMarkerToLocalCleanup(attempt)) {
+          return {
+            status: 'partially_deleted',
+            dataRemoved: true,
+            warnings: [...new Set([...outcome.warnings, LOCAL_DELETION_CLEANUP_WARNING])],
+          } as AccountDeletionOutcome;
+        }
+        const cleanup = inspectRecoveryMarker(identity.userId);
+        if (cleanup.kind !== 'v2'
+          || cleanup.phase !== 'local_cleanup'
+          || cleanup.marker.attemptId !== attempt.attemptId) return outcome;
+        return finishDeletedAccountLocally(identity, outcome.warnings, cleanup.marker);
+      });
+      return locked.kind === 'acquired'
+        ? locked.value
+        : { status: 'failed', dataRemoved: false, warnings: [] };
+    };
+
+    const reconcileAfterCompetingDeletion = async (): Promise<AccountDeletionOutcome> => {
+      const joined = await withAccountDeletionLock(identity.userId, async (deletionLease) => {
+        const currentMarker = inspectRecoveryMarker(identity.userId);
+        if (currentMarker.kind !== 'absent') {
+          if (isCurrentIdentity(identity)) abortForPendingDeletion(identity);
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
+        if (!isCurrentIdentity(identity)) {
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
+        const status = await verifyDeletionStatus(identity.userId, { lease: deletionLease });
+        if (!isCurrentIdentity(identity)) {
+          return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+        }
+        if (status.kind === 'pending' || readRecoveryMarker(identity.userId) === 'active') {
+          abortForPendingDeletion(identity);
+        } else if (status.kind === 'clear') {
+          setAccountDeletionRecovery(null);
+          applyDeletionStatus({ kind: 'clear' });
+        }
+        return { status: 'failed', dataRemoved: false, warnings: [] } as AccountDeletionOutcome;
+      });
+      return joined.kind === 'acquired'
+        ? joined.value
+        : { status: 'failed', dataRemoved: false, warnings: [] };
+    };
+
+    const promise = (async (): Promise<AccountDeletionOutcome> => {
+      const admitted = await withAccountDeletionIntentLock(
+        identity.userId,
+        runDeletionAsIntentWinner,
+        { ifAvailable: true },
+      );
+      if (admitted.kind === 'acquired') return admitted.value;
+      if (admitted.reason !== 'contended') {
+        const marker = inspectRecoveryMarker(identity.userId);
+        if (marker.kind !== 'absent' && isCurrentIdentity(identity)) {
+          abortForPendingDeletion(identity);
+        }
+        return { status: 'failed', dataRemoved: false, warnings: [] };
       }
-    }
-    setAccountDeletionRecovery(null);
-    applyDeletionStatus({ kind: 'clear' });
-    try {
-      await authRepository.signOut();
-    } catch {
-      console.error('[gomsinlog] Sign-out after deletion failed; local data was cleared.');
-    }
-    clearRecoveryMarker(identity.userId);
-    return outcome;
+
+      // Another deletion intent already owns admission. Join only the intent
+      // lock, then reconcile under the account lock; never issue a second
+      // deletion request after the winner cancels, fails or completes.
+      const joinedIntent = await withAccountDeletionIntentLock(
+        identity.userId,
+        reconcileAfterCompetingDeletion,
+      );
+      return joinedIntent.kind === 'acquired'
+        ? joinedIntent.value
+        : { status: 'failed', dataRemoved: false, warnings: [] };
+    })();
+
+    deletionFlightsRef.current.set(identity.userId, promise);
+    const releaseFlight = () => {
+      const flight = deletionFlightsRef.current.get(identity.userId);
+      if (flight === promise) deletionFlightsRef.current.delete(identity.userId);
+    };
+    void promise.then(releaseFlight, releaseFlight);
+    return promise;
   };
 
   /**
-   * Retry from the recovery screen. Re-invokes the Edge Function, which
-   * re-writes the same `true` pending flag idempotently.
+   * Retry from the recovery screen. Re-invokes the Edge Function while server
+   * deletion is incomplete; after confirmed Auth deletion it retries only the
+   * device-local outbox cleanup recorded by the `local_cleanup` marker.
    *
-   * A `partially_deleted` or `failed` retry stays in recovery, LEAVES THE MARKER
-   * IN PLACE and re-fetches nothing.
+   * A `partially_deleted`, `recovery_required` or ordinary failed retry stays in
+   * recovery. A server-confirmed cancellation is the only non-deletion result
+   * permitted to clear the marker, and it ends the local session so the next
+   * sign-in goes through full hydration.
    */
   const retryAccountDeletion = async (): Promise<AccountDeletionOutcome> =>
     deleteAccount();
@@ -3939,9 +5570,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     updateStateImmediately((prev) => ({ ...prev, setupComplete: complete }));
   };
 
-  const setOnboardingStep = (step: number) => {
-    updateStateImmediately((prev) => ({ ...prev, onboardingStep: step }));
-  };
+  const setOnboardingStep = useCallback((step: number) => {
+    updateStateImmediately((prev) => (
+      prev.onboardingStep === step
+        ? prev
+        : { ...prev, onboardingStep: step }
+    ));
+  }, [updateStateImmediately]);
 
   const setHighlightedRecordId = (id?: string) => {
     updateStateImmediately((prev) => ({ ...prev, highlightedRecordId: id }));
@@ -3956,24 +5591,36 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * place that knows the authoritative `created_at` -- so a refetch is both
    * cheaper to reason about and the only way the two clients converge.
    */
-  const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<void> => {
-    const coupleId = stateRef.current.profile.couple.coupleId;
-    const userId = stateRef.current.authenticatedUser?.id || stateRef.current.profile.id;
-    const workspace: ActiveWorkspace | null = coupleId && userId
-      ? { coupleId, userId, generation: sessionGenerationRef.current }
-      : null;
-    if (!workspace || (expected && !workspaceRefMatches(workspace, expected))) return;
-    const result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
-    if (!workspaceRefMatches({
-      coupleId: stateRef.current.profile.couple.coupleId || '',
-      userId: stateRef.current.authenticatedUser?.id || stateRef.current.profile.id || '',
-      generation: sessionGenerationRef.current,
-    }, workspace)) return;
-    if (!result.ok) return;
-    updateStateImmediately((prev) => ({ ...prev, talkAboutMarks: result.marks }));
+  const refreshTalkAboutMarks = async (expected?: ActiveWorkspace): Promise<boolean> => {
+    const workspace = expected ?? captureActiveWorkspace();
+    if (!workspace || !isCurrentWorkspace(workspace)) return false;
+    const authorizationRevision = membershipReconciliationRef.current;
+    const requestSequence = ++talkAboutRefreshSequenceRef.current;
+    const canCommit = () => isCurrentWorkspace(workspace)
+      && membershipReconciliationRef.current === authorizationRevision
+      && talkAboutRefreshSequenceRef.current === requestSequence;
+    let result;
+    try {
+      result = await fetchTalkAboutMarksResultFromDB(workspace.coupleId);
+    } catch {
+      if (canCommit()) setTalkAboutSyncStatus('unavailable');
+      console.error('[gomsinlog] Failed to reconcile talk-about marks.');
+      return false;
+    }
+    if (!canCommit()) return false;
+    if (!result.ok) {
+      setTalkAboutSyncStatus('unavailable');
+      return false;
+    }
+    setTalkAboutSyncStatus('ready');
+    updateStateImmediately((prev) => canCommit()
+      ? { ...prev, talkAboutMarks: result.marks }
+      : prev);
+    if (!canCommit()) return false;
+    return true;
   };
 
-  const markTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const markTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const coupleId = current.profile.couple.coupleId;
     const userId = current.authenticatedUser?.id || current.profile.id;
@@ -3981,39 +5628,104 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: '커플 연결이 확인되지 않아 표시할 수 없어요.' };
     }
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    const result = await markTalkAboutInDB(recordId, coupleId, userId);
-    if (result.ok) {
-      // Conversation intent. Paired with `talk_about_resolved`, the two say
-      // whether marking something leads to talking about it -- which is the
-      // question the whole 이따 이야기하기 feature exists to answer.
-      void recordProductEvent({ kind: 'talk_about_marked', subjectId: recordId });
-      await refreshTalkAboutMarks(workspace);
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
     }
-    return result;
+    return withOrdinaryServerMutation<TalkAboutMutationResult>(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => ({ ok: false, error: '계정 삭제가 진행 중이라 표시할 수 없어요.' }),
+      async (deletionLease) => {
+        const result = await markTalkAboutInDB(recordId, coupleId, userId, deletionLease);
+        if (!isCurrentWorkspace(workspace)) {
+          return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+        }
+        if (result.ok) {
+          // Conversation intent. Paired with `talk_about_resolved`, the two say
+          // whether marking something leads to talking about it -- which is the
+          // question the whole 이따 이야기하기 feature exists to answer.
+          await recordProductEvent(
+            { kind: 'talk_about_marked', subjectId: recordId },
+            { expectedUserId: workspace.userId, deletionLease },
+          );
+          const reconciled = await refreshTalkAboutMarks(workspace);
+          return reconciled ? result : { ...result, syncPending: true };
+        }
+        return result;
+      },
+    );
   };
 
   /** Withdraw only your own flag; the partner's stays. */
-  const unmarkTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const unmarkTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const userId = current.authenticatedUser?.id || current.profile.id;
     const coupleId = current.profile.couple.coupleId;
     if (!userId || !coupleId) return { ok: false, error: '해제할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    const result = await unmarkTalkAboutInDB(recordId, userId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
-    return result;
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
+    }
+    return withOrdinaryServerMutation<TalkAboutMutationResult>(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => ({ ok: false, error: '계정 삭제가 진행 중이라 해제할 수 없어요.' }),
+      async (deletionLease) => {
+        const result = await unmarkTalkAboutInDB(recordId, userId, deletionLease);
+        if (!isCurrentWorkspace(workspace)) {
+          return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+        }
+        if (result.ok) {
+          const reconciled = await refreshTalkAboutMarks(workspace);
+          return reconciled ? result : { ...result, syncPending: true };
+        }
+        return result;
+      },
+    );
   };
 
   /** 이야기했어요 — the conversation happened, so clear it for both. */
-  const resolveTalkAbout = async (recordId: string): Promise<{ ok: boolean; error?: string }> => {
+  const resolveTalkAbout = async (recordId: string): Promise<TalkAboutMutationResult> => {
     const current = stateRef.current;
     const coupleId = current.profile.couple.coupleId;
     const userId = current.authenticatedUser?.id || current.profile.id;
     if (!coupleId || !userId) return { ok: false, error: '커플 연결이 확인되지 않아 처리할 수 없어요.' };
     const workspace: ActiveWorkspace = { coupleId, userId, generation: sessionGenerationRef.current };
-    const result = await resolveTalkAboutInDB(recordId, coupleId);
-    if (result.ok) await refreshTalkAboutMarks(workspace);
-    return result;
+    if (!isCurrentWorkspace(workspace) || talkAboutSyncStatusRef.current === 'unavailable') {
+      return { ok: false, error: '책갈피 목록을 확인한 뒤 다시 시도해 주세요.' };
+    }
+    return withOrdinaryServerMutation<TalkAboutMutationResult>(
+      workspace,
+      () => isCurrentWorkspace(workspace),
+      undefined,
+      () => ({ ok: false, error: '계정 삭제가 진행 중이라 처리할 수 없어요.' }),
+      async (deletionLease) => {
+        const result = await resolveTalkAboutInDB(recordId, coupleId, deletionLease);
+        if (!isCurrentWorkspace(workspace)) {
+          return { ok: false, error: '계정이나 커플 연결이 바뀌어 결과를 반영하지 않았어요.' };
+        }
+        if (result.ok) {
+          const reconciled = await refreshTalkAboutMarks(workspace);
+          if (!reconciled) {
+            return result.changed === false
+              ? { ok: false, error: '이야기거리 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.' }
+              : { ...result, syncPending: true };
+          }
+          if (
+            result.changed === false
+            && stateRef.current.talkAboutMarks.some(
+              (mark) => mark.recordId === recordId && !mark.isCompleted,
+            )
+          ) {
+            return { ok: false, error: '이야기거리를 정리하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+          }
+          return result;
+        }
+        return result;
+      },
+    );
   };
 
   const setAuthenticatedUser = (user: AuthUser | null) => {
@@ -4032,6 +5744,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setTheme = (theme: 'light' | 'dark') => {
     updateStateImmediately((prev) => ({ ...prev, theme }));
+  };
+
+  const setLocale = (locale: AppLocale) => {
+    const nextLocale = normalizeAppLocale(locale);
+    updateStateImmediately((prev) => ({ ...prev, locale: nextLocale }));
   };
 
   /**
@@ -4055,6 +5772,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         authSyncReason,
         authSyncStage,
         sharedSyncStatus,
+        talkAboutSyncStatus: talkAboutSyncStatusState,
         coupleLifecycle,
         invitationExpiresAt,
         refreshCoupleLifecycle,
@@ -4097,6 +5815,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setWidgetLayout,
         setHasSeenInstallPrompt,
         setTheme,
+        setLocale,
       }}
     >
       {children}

@@ -11,13 +11,19 @@ export function ProfileCaptionEditor({
   dateType,
   onCaptionChange,
   onDateTypeChange,
+  allowDischarge = true,
 }: {
   caption: string;
   dateType: ProfileDateType | '';
   onCaptionChange: (value: string) => void;
   onDateTypeChange: (value: ProfileDateType | '') => void;
+  allowDischarge?: boolean;
 }) {
-  const selected = DATE_OPTIONS.find((option) => option.value === dateType);
+  const availableOptions = allowDischarge
+    ? DATE_OPTIONS
+    : DATE_OPTIONS.filter((option) => option.value !== 'discharge');
+  const effectiveDateType = allowDischarge || dateType !== 'discharge' ? dateType : '';
+  const selected = availableOptions.find((option) => option.value === effectiveDateType);
 
   return (
     <div className="space-y-2">
@@ -39,12 +45,12 @@ export function ProfileCaptionEditor({
         </label>
         <select
           id="edit-profile-date-type"
-          value={dateType}
+          value={effectiveDateType}
           onChange={(event) => onDateTypeChange(event.target.value as ProfileDateType | '')}
           className="min-h-11 flex-1 px-3 rounded-control bg-muted border border-border text-body text-foreground"
         >
           <option value="">선택 안 함</option>
-          {DATE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {availableOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
         <button
           type="button"

@@ -1,23 +1,33 @@
 # @gomsinlog/capacitor-on-device-summary
 
-iOS-only, on-device rewriting of daily summary lines that the app has **already
-computed deterministically**.
+iOS-only, on-device extraction of daily-record excerpts that the app has
+**already selected deterministically**.
 
 ## What crosses the bridge
 
-An ordinal `index` and a whitespace-collapsed line of `text`, 40 characters or
-fewer. Nothing else — no `recordId`, no `userId`, no date, no time, no attachment
-reference. The TypeScript side rejoins the returned index to the original record
-id itself, so the model cannot make a summary line point at a different record.
+An ordinal `index` and a whitespace-collapsed complete record body of `text`,
+41–120 UTF-16 units. Sources longer than 120 units are rejected before the
+bridge; their full NFC-normalised text remains local memory only for validation
+and stale-result invalidation. Nothing else — no `recordId`, no `userId`, no date, no time, no
+attachment reference. The TypeScript side rejoins the returned index to the
+original record id itself, so the model cannot make a summary line point at a
+different record.
 
 ## What the model is not allowed to do
 
 Add, drop or reorder items; return an index outside the request; repeat an index;
-exceed the line-length bound; or infer emotion, mood, health, pain, cycle or
-relationship state. The instructions say so, and
+rewrite, paraphrase, fabricate, infer, or return a word fragment; exceed the
+40-UTF-16-unit excerpt bound; or infer emotion, mood, health, pain, cycle or
+relationship state. For a long source, the output must be a non-empty exact
+suffix containing one or more complete trailing sentences, with safe sentence,
+quote/bracket, word, and extended-grapheme boundaries. Long-source cores are
+limited to 8–38 units. JavaScript adds the visible leading ellipsis and rejects a
+decorated display over 40 units. A missing segmenter, unsafe Unicode, broken
+quote/bracket pair, or source truncation keeps the entire day's deterministic rows.
 `src/lib/dailySummary/verify.ts` does not trust the instructions: it checks count,
-order, index identity and length, and discards the whole batch on any violation.
-A discarded batch means the screen keeps the deterministic text it already had.
+order, index identity, source provenance and length, and discards the whole batch
+on any violation. A discarded batch means the screen keeps the deterministic text
+it already had.
 
 ## Why there is no Android or web implementation
 
@@ -30,8 +40,8 @@ stop being answerable. `package.json` declares only `capacitor.ios`, so
 ## No network, no storage, no logging
 
 A fresh `LanguageModelSession` per request, no tools, no transcript rehydration
-or serialisation, no feedback attachment, and no `print` of input or output
-anywhere in the Swift sources.
+or serialisation, no feedback attachment, no network/cloud fallback, and no
+`print` of input or output anywhere in the Swift sources.
 
 ## Deployment target
 
@@ -47,3 +57,9 @@ Intelligence, so a successful simulator build is evidence of compilation and
 wiring only. Confirming that the system model is reachable, that it supports
 `ko_KR` on the device in question, and that its output survives verification
 requires an Apple-Intelligence-eligible physical iPhone.
+
+The trailing-sentence rule mitigates the observed negation, clarification,
+condition, and correction tail failures. It is not a proof of arbitrary Korean
+semantic equivalence: omitted prefixes can still carry speaker, irony,
+condition, or pronoun context. The feature therefore remains default OFF until
+the physical-device quality gate is completed.

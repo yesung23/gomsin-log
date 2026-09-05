@@ -66,6 +66,7 @@ export function PartnerDayTimelineWidget() {
   const { state, sharedSyncStatus, setHighlightedRecordId } = useStore();
   const navigate = useNavigate();
   const { profile } = state;
+  const viewerUserId = state.authenticatedUser?.id || profile.id;
   const partnerName = profile.couple.partnerName || '상대방';
 
   /**
@@ -108,11 +109,13 @@ export function PartnerDayTimelineWidget() {
 
   const openRecord = (record: DailyRecord) => {
     // The same measurement as the briefing widget: summary to exact original.
-    void recordProductEvent({
-      kind: 'briefing_to_original',
-      screen: 'home',
-      subjectId: record.id,
-    });
+    if (viewerUserId) {
+      void recordProductEvent({
+        kind: 'briefing_to_original',
+        screen: 'home',
+        subjectId: record.id,
+      }, { expectedUserId: viewerUserId });
+    }
     setHighlightedRecordId(record.id);
     navigate(`/record?record=${record.id}`);
   };

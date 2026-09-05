@@ -108,6 +108,34 @@ jobs:
       - name: Install the locked dependency graph
         run: npm ci
 
+      - name: Install the PostgreSQL 17 harness runtime
+        # PostgreSQL integration tests require 17. Install that exact server
+        # package rather than assuming the Ubuntu 24.04 runner's PostgreSQL 16.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ca-certificates curl
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          sudo curl --fail --show-error --silent --location \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null <<EOF
+          Types: deb
+          URIs: https://apt.postgresql.org/pub/repos/apt
+          Suites: ${VERSION_CODENAME}-pgdg
+          Architectures: $(dpkg --print-architecture)
+          Components: main
+          Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          EOF
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-17 postgresql-client-17
+          bindir='/usr/lib/postgresql/17/bin'
+          if [ ! -x "$bindir/postgres" ] || ! "$bindir/postgres" --version | grep -E '^postgres \(PostgreSQL\) 17([.]|$)'; then
+            echo "PostgreSQL 17 server binaries are not installed on this runner." >&2
+            exit 1
+          fi
+          echo "$bindir" >> "$GITHUB_PATH"
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -294,6 +322,22 @@ jobs:
 
       - name: Fresh migration chain, RLS and authorization contracts
         run: npm run test:phase0
+
+      - name: Record media real-chain compatibility through migration 084
+        run: npm run test:record-media-chain
+
+      - name: Record media actor and concurrency contracts
+        run: npm run test:record-media-cleanup
+
+      - name: Photo rendition fresh chain and legacy cleanup compatibility
+        # Both modes must isolate inherited libpq settings before opening their
+        # private Unix socket. Poison defaults fail safely if the fence regresses.
+        env:
+          PGSERVICE: gomsin_harness_missing_service
+          PGSERVICEFILE: /dev/null
+          PGHOSTADDR: invalid-address
+          PGOPTIONS: invalid-options
+        run: npm run test:record-photo-renditions
 
       - name: E2EE pairing and partner-visibility contracts
         run: npm run test:p5

@@ -1,0 +1,23 @@
+{
+  "identifier" : "GOMSINLOG-IAP-V5",
+  "nonRenewingSubscriptions" : [],
+  "products" : [
+    { "displayPrice" : "1.99", "familyShareable" : false, "internalID" : "GARDEN-ACCESSORY-V1", "localizations" : [{ "description" : "정원 친구에게 입히는 오리지널 액세서리", "displayName" : "정원 액세서리 묶음", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.garden.accessory.starter.v1", "referenceName" : "Garden Accessory Starter V1", "type" : "NonConsumable" },
+    { "displayPrice" : "3.99", "familyShareable" : false, "internalID" : "GARDEN-BUILDING-V1", "localizations" : [{ "description" : "두 친구가 함께 반응하는 정원 건물", "displayName" : "정원 상호작용 건물", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.garden.building.starter.v1", "referenceName" : "Garden Building Starter V1", "type" : "NonConsumable" },
+    { "displayPrice" : "2.99", "familyShareable" : false, "internalID" : "PAPER-SEASON-V1", "localizations" : [{ "description" : "일기장과 Book Studio에서 쓰는 계절 종이", "displayName" : "계절 종이 묶음", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.paper.season.spring.v1", "referenceName" : "Paper Season Spring V1", "type" : "NonConsumable" },
+    { "displayPrice" : "0.99", "familyShareable" : false, "internalID" : "BOOK-EXPORT-CREDIT-1", "localizations" : [{ "description" : "디지털 책 최종 내보내기 1회", "displayName" : "디지털 책 내보내기 1회", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.book.export.credit.1", "referenceName" : "Digital Book Export Credit 1", "type" : "Consumable" }
+  ],
+  "settings" : { "_syncWithAppStoreConnect" : false },
+  "subscriptionGroups" : [
+    {
+      "id" : "GOMSINLOG-PLUS",
+      "localizations" : [],
+      "name" : "GomsinLog Plus",
+      "subscriptions" : [
+        { "adHocOffers" : [], "codeOffers" : [], "displayPrice" : "4.99", "familyShareable" : false, "groupNumber" : 2, "internalID" : "PLUS-MONTHLY", "introductoryOffer" : null, "localizations" : [{ "description" : "계속 갱신되는 편집 라이브러리와 고급 조판", "displayName" : "곰신로그 Plus 월간", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.plus.monthly", "recurringSubscriptionPeriod" : "P1M", "referenceName" : "GomsinLog Plus Monthly", "subscriptionGroupID" : "GOMSINLOG-PLUS", "type" : "RecurringSubscription" },
+        { "adHocOffers" : [], "codeOffers" : [], "displayPrice" : "39.99", "familyShareable" : false, "groupNumber" : 1, "internalID" : "PLUS-ANNUAL", "introductoryOffer" : null, "localizations" : [{ "description" : "계속 갱신되는 편집 라이브러리와 고급 조판", "displayName" : "곰신로그 Plus 연간", "locale" : "ko_KR" }], "productID" : "app.gomsinlog.plus.annual", "recurringSubscriptionPeriod" : "P1Y", "referenceName" : "GomsinLog Plus Annual", "subscriptionGroupID" : "GOMSINLOG-PLUS", "type" : "RecurringSubscription" }
+      ]
+    }
+  ],
+  "version" : { "major" : 3, "minor" : 0 }
+}

@@ -1,4 +1,5 @@
 import type { AppState } from '@/types';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 /**
  * Build a portable snapshot containing only data authored by the requesting
@@ -9,16 +10,24 @@ export function buildPersonalExport(state: AppState, userId: string, exportedAt 
   const ownRecords = state.records.filter((record) => record.userId === userId);
   const ownEvents = state.events.filter((event) => event.createdBy === userId);
   const ownTrips = state.trips.filter((trip) => trip.createdBy === userId);
+  const relationshipContext = resolveRelationshipContext(
+    state.profile.couple.relationshipContext,
+  );
+  const isMilitaryRelationship = relationshipContext === 'military';
 
   return {
     exportedAt,
     app: 'gomsinlog',
-    schemaVersion: 2,
+    schemaVersion: 3,
     profile: {
       myName: state.profile.myName,
       role: state.profile.role,
+      relationshipContext: relationshipContext ?? null,
+      genderIdentity: state.profile.genderIdentity ?? null,
       anniversaryDate: state.profile.couple.anniversaryDate ?? null,
-      military: state.profile.role === 'soldier' ? state.profile.military : null,
+      military: isMilitaryRelationship && state.profile.role === 'soldier'
+        ? state.profile.military
+        : null,
     },
     records: ownRecords.map((record) => ({
       date: record.date,

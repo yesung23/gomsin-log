@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { HeartPulse, Loader2, Lock, Settings2 } from 'lucide-react';
+import { App } from '@capacitor/app';
 import { toast } from 'sonner';
 import {
   activePeriodOnDate,
@@ -9,7 +10,6 @@ import {
   fetchCycleDailyLogsResultFromDB,
   fetchCyclePeriodsResultFromDB,
   fetchCycleSettingsResultFromDB,
-  fetchCycleSharingPreferencesFromDB,
   localToday,
   saveCycleDailyLogToDB,
   saveCyclePeriodToDB,
@@ -24,16 +24,20 @@ import { predictCycle, predictionOccursOnDate } from '@/lib/cyclePrediction';
 import { ErrorNote } from '@/components/ui/ErrorNote';
 import { classifyServerError, serverErrorMessage } from '@/lib/serverErrors';
 import {
+  clearPendingCycleConsentRevocation,
   grantCycleConsentInDB,
+  grantCycleSensitiveConsent,
   hasCycleSensitiveConsent,
+  hasPendingCycleConsentRevocation,
+  markCycleConsentRevocationPending,
   revokeCycleConsentInDB,
+  revokeCycleSensitiveConsent,
   syncCycleConsentWithDB,
 } from '@/lib/sensitiveConsent';
 import { Button } from '@/components/ui/Button';
 import type {
   CycleDailyLog,
   CyclePeriod,
-  CycleSharingPreferences,
   CycleSymptom,
 } from '@/types';
 import { CycleCalendar } from '@/components/cycle/CycleCalendar';
@@ -47,9 +51,27 @@ import { CycleStatusHero } from '@/components/cycle/CycleStatusHero';
 import { CycleSummary } from '@/components/cycle/CycleSummary';
 import { formatKoreanDate } from '@/components/cycle/cycleFormatting';
 import { Card } from '@/components/ui/Card';
+import { isNativePlatform } from '@/lib/platform';
 
 type LoadState = 'loading' | 'ready' | CycleFetchFailureReason;
-type ShareKey = 'shareCurrentPeriod' | 'sharePredictionWindow' | 'shareFertilityWindow';
+type ConsentAuthorityPhase =
+  | 'checking'
+  | 'granted'
+  | 'locked'
+  | 'granting'
+  | 'revoking'
+  | 'locked_error';
+
+interface ConsentAuthorityToken {
+  userId: string;
+  accountGeneration: number;
+  operation: number;
+  revision: number;
+}
+
+interface ConsentAuthorityState extends ConsentAuthorityToken {
+  phase: ConsentAuthorityPhase;
+}
 
 /** Which sheet, if any, is on screen. Only one at a time by construction. */
 type OpenSheet =
@@ -58,13 +80,6 @@ type OpenSheet =
   | { kind: 'dailyLog'; date: string }
   | { kind: 'period'; period: CyclePeriod }
   | { kind: 'settings' };
-
-const EMPTY_PREFERENCES: CycleSharingPreferences = {
-  userId: '',
-  shareCurrentPeriod: false,
-  sharePredictionWindow: false,
-  shareFertilityWindow: false,
-};
 
 function failureMessage(
   state: Extract<LoadState, 'unauthenticated' | 'forbidden' | 'not_deployed' | 'error'>,
@@ -93,8 +108,9 @@ function failureMessage(
  * read or write `cycle_entries`; `src/components/cycleV3DataPath.test.tsx`
  * enforces that with a source guard so the regression cannot come back quietly.
  *
- * Screen order is Hero -> Calendar -> Quick log -> Summary. Settings, sharing and
- * consent live behind a single header action.
+ * Screen order is Hero -> Calendar -> Quick log -> Summary. Settings and consent
+ * live behind one header action. Partner care is a separate deliberate signal;
+ * no value is derived automatically from this private tracker.
  */
 export function CycleTrackerSection({ userId }: { userId?: string }) {
   const today = localToday();
@@ -109,45 +125,115 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
    */
   const identityRef = useRef(userId);
   const generationRef = useRef(0);
+  const authorityOperationRef = useRef(0);
+  const authorityRef = useRef<ConsentAuthorityState>({
+    userId: userId || '',
+    accountGeneration: 0,
+    operation: 0,
+    revision: 0,
+    phase: userId ? 'checking' : 'locked',
+  });
   if (identityRef.current !== userId) {
     identityRef.current = userId;
     generationRef.current += 1;
+    authorityOperationRef.current += 1;
+    authorityRef.current = {
+      userId: userId || '',
+      accountGeneration: generationRef.current,
+      operation: authorityOperationRef.current,
+      revision: 0,
+      phase: userId ? 'checking' : 'locked',
+    };
   }
-  const captureIdentity = useCallback(
-    () => ({ userId, generation: generationRef.current }),
-    [userId],
-  );
-  const isCurrentIdentity = useCallback(
-    (identity: { userId?: string; generation: number }) =>
-      identity.userId === identityRef.current && identity.generation === generationRef.current,
-    [],
-  );
-
   const [loadState, setLoadState] = useState<LoadState>(userId ? 'loading' : 'unauthenticated');
   /**
-   * Consent verdict, tagged with the account it belongs to.
+   * Server consent is a small authority state machine, not a boolean.
    *
-   * A bare boolean survived an account switch for one render, so the load effect
-   * could fire for the NEW account while still holding the PREVIOUS account's
-   * "granted". Pairing the verdict with its owner makes that impossible to read
-   * as consent: the id must match before anything is fetched.
+   * `accountGeneration` invalidates the previous signed-in account. `operation`
+   * orders checks, grants and revokes inside one account. A response may update
+   * UI or cache only when both still match, so an older foreground check cannot
+   * reopen a revoke and an old account cannot paint health data onto a new one.
    */
-  const [consentVerdict, setConsentVerdict] = useState<{ userId: string; granted: boolean } | null>(null);
-  const consentGranted = !!consentVerdict
-    && !!userId
-    && consentVerdict.userId === userId
-    && consentVerdict.granted;
-  const [consentChecking, setConsentChecking] = useState(!!userId);
+  const [consentAuthority, setConsentAuthority] = useState<ConsentAuthorityState>(
+    authorityRef.current,
+  );
+  const authorityForCurrentUser = !!userId
+    && consentAuthority.userId === userId
+    && consentAuthority.accountGeneration === generationRef.current;
+  const consentPhase: ConsentAuthorityPhase = authorityForCurrentUser
+    ? consentAuthority.phase
+    : userId ? 'checking' : 'locked';
+  const consentGranted = consentPhase === 'granted';
+  const consentChecking = consentPhase === 'checking';
+  const consentPending = consentPhase === 'granting' || consentPhase === 'revoking';
   const [consentChecked, setConsentChecked] = useState(false);
-  const [consentPending, setConsentPending] = useState(false);
   const [consentError, setConsentError] = useState<string | null>(null);
+
+  const beginAuthorityOperation = useCallback((phase: ConsentAuthorityPhase) => {
+    const currentUserId = identityRef.current;
+    if (!currentUserId) return null;
+    authorityOperationRef.current += 1;
+    const next: ConsentAuthorityState = {
+      userId: currentUserId,
+      accountGeneration: generationRef.current,
+      operation: authorityOperationRef.current,
+      revision: authorityRef.current.userId === currentUserId
+        && authorityRef.current.accountGeneration === generationRef.current
+        ? authorityRef.current.revision
+        : 0,
+      phase,
+    };
+    authorityRef.current = next;
+    setConsentAuthority(next);
+    return next;
+  }, []);
+
+  const isCurrentAuthority = useCallback((token: ConsentAuthorityToken) => {
+    const current = authorityRef.current;
+    return token.userId === identityRef.current
+      && token.userId === current.userId
+      && token.accountGeneration === generationRef.current
+      && token.accountGeneration === current.accountGeneration
+      && token.operation === current.operation;
+  }, []);
+
+  const commitAuthority = useCallback((
+    token: ConsentAuthorityToken,
+    phase: ConsentAuthorityPhase,
+    revision = token.revision,
+  ) => {
+    if (!isCurrentAuthority(token)) return false;
+    const next: ConsentAuthorityState = { ...token, revision, phase };
+    authorityRef.current = next;
+    setConsentAuthority(next);
+    return true;
+  }, [isCurrentAuthority]);
+
+  const captureGrantedAuthority = useCallback((): ConsentAuthorityToken | null => {
+    const current = authorityRef.current;
+    if (current.phase !== 'granted'
+      || !current.userId
+      || current.userId !== identityRef.current
+      || current.accountGeneration !== generationRef.current) return null;
+    return {
+      userId: current.userId,
+      accountGeneration: current.accountGeneration,
+      operation: current.operation,
+      revision: current.revision,
+    };
+  }, []);
+
+  const isCurrentGrantedAuthority = useCallback(
+    (token: ConsentAuthorityToken) =>
+      isCurrentAuthority(token) && authorityRef.current.phase === 'granted',
+    [isCurrentAuthority],
+  );
 
   // V3 server state. Periods and daily logs are separate arrays, never merged.
   const [periods, setPeriods] = useState<CyclePeriod[]>([]);
   const [dailyLogs, setDailyLogs] = useState<CycleDailyLog[]>([]);
   const [cycleLength, setCycleLength] = useState(28);
   const [periodLength, setPeriodLength] = useState(5);
-  const [preferences, setPreferences] = useState<CycleSharingPreferences>(EMPTY_PREFERENCES);
 
   const [viewYear, setViewYear] = useState(initialYear);
   const [viewMonth, setViewMonth] = useState(initialMonthNumber - 1);
@@ -165,8 +251,32 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   const [dailyLogError, setDailyLogError] = useState<string | null>(null);
   const [settingsPending, setSettingsPending] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
-  const [sharingPendingKey, setSharingPendingKey] = useState<ShareKey | null>(null);
-  const [sharingError, setSharingError] = useState<string | null>(null);
+
+  /**
+   * Remove every health-derived value before consent is rechecked.
+   *
+   * A foreground/reconnect check can discover a revoke made on another device.
+   * Keeping the old values painted while that authority check runs would expose
+   * data after its permission became uncertain, so uncertainty immediately
+   * returns this component to an empty, locked state.
+   */
+  const clearSensitiveState = useCallback(() => {
+    setLoadState('loading');
+    setPeriods([]);
+    setDailyLogs([]);
+    setCycleLength(28);
+    setPeriodLength(5);
+    setSheet({ kind: 'none' });
+    setPeriodPending(false);
+    setPeriodDeletePending(false);
+    setPeriodError(null);
+    setQuickSymptomPending(null);
+    setDailyLogPending(false);
+    setDailyLogDeletePending(false);
+    setDailyLogError(null);
+    setSettingsPending(false);
+    setSettingsError(null);
+  }, []);
 
   /*
    * Daily-log writes are serialised through this promise chain.
@@ -193,18 +303,27 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     promise: Promise<void>;
   } | null>(null);
 
+  const consentCoordinatorRef = useRef<{
+    key: string;
+    queued: boolean;
+    promise: Promise<boolean>;
+  } | null>(null);
+
   useLayoutEffect(() => {
     setLoadState(userId ? 'loading' : 'unauthenticated');
-    setConsentVerdict(null);
-    setConsentChecking(!!userId);
+    setConsentAuthority({
+      userId: userId || '',
+      accountGeneration: generationRef.current,
+      operation: authorityOperationRef.current,
+      revision: 0,
+      phase: userId ? 'checking' : 'locked',
+    });
     setConsentChecked(false);
-    setConsentPending(false);
     setConsentError(null);
     setPeriods([]);
     setDailyLogs([]);
     setCycleLength(28);
     setPeriodLength(5);
-    setPreferences(EMPTY_PREFERENCES);
     setSelectedDate(today);
     setSheet({ kind: 'none' });
     setPeriodPending(false);
@@ -216,48 +335,134 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setDailyLogError(null);
     setSettingsPending(false);
     setSettingsError(null);
-    setSharingPendingKey(null);
-    setSharingError(null);
   }, [today, userId]);
 
   /*
    * Consent is verified against the SERVER before any cycle data is fetched.
    *
-   * A cached `localStorage` flag is not sufficient authority to read health data:
-   * consent revoked on another device, or a row that never persisted, must both
-   * keep the feature locked here.
+   * A check starts a new authority operation, invalidating older loads and
+   * writes without changing the account generation. Cache is updated only after
+   * this exact operation receives a server verdict.
    */
-  useEffect(() => {
-    if (!userId) return;
-    const identity = captureIdentity();
-    let cancelled = false;
-    setConsentChecking(true);
-    void syncCycleConsentWithDB(userId).then((result) => {
-      if (cancelled || !isCurrentIdentity(identity)) return;
+  const performConsentCheck = useCallback(async (): Promise<boolean> => {
+    // A native/browser lifecycle callback can fire once after its effect was
+    // removed. Refuse it before reading per-user pending state or opening a new
+    // authority operation, otherwise A's stale callback could lock B's screen.
+    if (!userId || identityRef.current !== userId) {
+      return false;
+    }
+
+    // A failed revoke survives process restarts. Do not let the server's older
+    // positive row reopen this device before the user retries the stop request.
+    if (hasPendingCycleConsentRevocation(userId)) {
+      const pending = beginAuthorityOperation('locked_error');
+      if (!pending) return false;
+      revokeCycleSensitiveConsent(pending.userId);
+      clearSensitiveState();
+      setConsentError('이전에 요청한 동의 철회를 완료하려면 다시 시도해 주세요.');
+      return false;
+    }
+
+    // Server consent proves the account-level legal state; this local proof
+    // proves that this particular device did not previously ask to stop. Both
+    // are required. This also keeps a failed revoke closed after restart when a
+    // quota error prevented the separate pending marker from being written.
+    const hadDeviceConsent = hasCycleSensitiveConsent(userId);
+    const authority = beginAuthorityOperation('checking');
+    if (!authority) return false;
+    setConsentError(null);
+    clearSensitiveState();
+
+    try {
+      const result = await syncCycleConsentWithDB(authority.userId);
+      if (!isCurrentAuthority(authority)) return false;
+
       if (!result.ok) {
-        // Could not reach the authority. Fall back to the cached answer rather
-        // than inventing consent, and surface the reason.
-        setConsentVerdict({ userId, granted: hasCycleSensitiveConsent(userId) });
+        revokeCycleSensitiveConsent(authority.userId);
+        commitAuthority(authority, 'locked');
         setConsentError(serverErrorMessage(result.reason));
-      } else {
-        setConsentVerdict({ userId, granted: result.granted });
+        return false;
       }
-      setConsentChecking(false);
+
+      if (result.granted && hadDeviceConsent) {
+        commitAuthority(authority, 'granted', result.revision);
+      } else {
+        revokeCycleSensitiveConsent(authority.userId);
+        commitAuthority(authority, 'locked', result.revision);
+        if (result.granted) {
+          setConsentError('이 기기에서는 민감정보 동의를 다시 확인해야 해요.');
+        }
+      }
+      return result.granted && hadDeviceConsent;
+    } catch (error) {
+      if (!isCurrentAuthority(authority)) return false;
+      revokeCycleSensitiveConsent(authority.userId);
+      commitAuthority(authority, 'locked');
+      setConsentError(classifyServerError(error).message);
+      return false;
+    }
+  }, [
+    beginAuthorityOperation,
+    clearSensitiveState,
+    commitAuthority,
+    isCurrentAuthority,
+    userId,
+  ]);
+
+  const verifyConsent = useCallback((): Promise<boolean> => {
+    const key = userId || '';
+    if (!key) return Promise.resolve(false);
+
+    // Explicit grant/revoke owns authority until it settles. Foreground and
+    // reconnect signals may not supersede it, and a failed revoke is retried
+    // only through the explicit recovery button.
+    if (authorityRef.current.userId === key
+      && ['granting', 'revoking', 'locked_error'].includes(authorityRef.current.phase)) {
+      return Promise.resolve(false);
+    }
+
+    const active = consentCoordinatorRef.current;
+    if (active?.key === key) {
+      active.queued = true;
+      return active.promise;
+    }
+
+    const coordinator = { key, queued: false, promise: Promise.resolve(false) };
+    const run = async () => {
+      let granted = false;
+      do {
+        coordinator.queued = false;
+        granted = await performConsentCheck();
+      } while (coordinator.queued
+        && identityRef.current === userId
+        && !['granting', 'revoking', 'locked_error'].includes(authorityRef.current.phase));
+      return granted;
+    };
+    coordinator.promise = run().finally(() => {
+      if (consentCoordinatorRef.current === coordinator) {
+        consentCoordinatorRef.current = null;
+      }
     });
-    return () => { cancelled = true; };
-  }, [captureIdentity, isCurrentIdentity, userId]);
+    consentCoordinatorRef.current = coordinator;
+    return coordinator.promise;
+  }, [performConsentCheck, userId]);
+
+  useEffect(() => {
+    void verifyConsent();
+  }, [verifyConsent]);
 
   const performLoad = useCallback(async () => {
-    const identity = captureIdentity();
-    if (!userId || !consentGranted) return;
+    const authority = captureGrantedAuthority();
+    if (!userId || !consentGranted || !authority) return;
     setLoadState('loading');
     try {
+      if (!isCurrentGrantedAuthority(authority)) return;
       const [periodResult, logResult, settingResult] = await Promise.all([
-        fetchCyclePeriodsResultFromDB(),
-        fetchCycleDailyLogsResultFromDB(),
-        fetchCycleSettingsResultFromDB(),
+        fetchCyclePeriodsResultFromDB(authority.userId),
+        fetchCycleDailyLogsResultFromDB(authority.userId),
+        fetchCycleSettingsResultFromDB(authority.userId),
       ]);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
 
       if (!periodResult.ok || !logResult.ok || !settingResult.ok) {
         const reasons = [
@@ -282,19 +487,15 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setCycleLength(settingResult.settings?.averageCycleLength ?? 28);
       setPeriodLength(settingResult.settings?.averagePeriodLength ?? 5);
       setLoadState('ready');
-
-      const nextPreferences = await fetchCycleSharingPreferencesFromDB();
-      if (!isCurrentIdentity(identity)) return;
-      setPreferences(nextPreferences);
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to load private cycle data.');
       setLoadState('error');
     }
-  }, [captureIdentity, consentGranted, isCurrentIdentity, userId]);
+  }, [captureGrantedAuthority, consentGranted, isCurrentGrantedAuthority, userId]);
 
   const load = useCallback((): Promise<void> => {
-    const key = `${userId || ''}:${consentGranted ? '1' : '0'}`;
+    const key = `${userId || ''}:${consentAuthority.operation}:${consentGranted ? '1' : '0'}`;
     const active = loadCoordinatorRef.current;
     if (active?.key === key) {
       // A load for this exact identity is already running; ask it to repeat once
@@ -315,7 +516,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     });
     loadCoordinatorRef.current = coordinator;
     return coordinator.promise;
-  }, [consentGranted, performLoad, userId]);
+  }, [consentAuthority.operation, consentGranted, performLoad, userId]);
 
   useEffect(() => {
     void load();
@@ -323,16 +524,32 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
 
   useEffect(() => {
     const recoverVisible = () => {
-      if (document.visibilityState === 'visible') void load();
+      if (document.visibilityState === 'visible') void verifyConsent();
     };
-    const recoverOnline = () => void load();
+    const recoverOnline = () => void verifyConsent();
+    let disposed = false;
+    let removeNativeListener: (() => Promise<void>) | null = null;
+
     document.addEventListener('visibilitychange', recoverVisible);
     window.addEventListener('online', recoverOnline);
+    if (isNativePlatform()) {
+      void App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) void verifyConsent();
+      }).then((handle) => {
+        if (disposed) void handle.remove();
+        else removeNativeListener = () => handle.remove();
+      }).catch(() => {
+        console.error('[gomsinlog] Could not observe native app state for consent recovery.');
+      });
+    }
+
     return () => {
+      disposed = true;
       document.removeEventListener('visibilitychange', recoverVisible);
       window.removeEventListener('online', recoverOnline);
+      if (removeNativeListener) void removeNativeListener();
     };
-  }, [load]);
+  }, [verifyConsent]);
 
   /*
    * Prediction reads `periods` ONLY.
@@ -375,16 +592,17 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   // ---------------------------------------------------------------
 
   const startPeriodToday = async () => {
-    const identity = captureIdentity();
-    if (!identity.userId || periodPending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || periodPending) return;
     // A second concurrent period is not a thing; the UI also hides this action
     // while one is active, and this is the race-safe backstop.
     if (activePeriod) return;
     setPeriodPending(true);
     setPeriodError(null);
     try {
-      const result = await saveCyclePeriodToDB(today);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await saveCyclePeriodToDB(today, undefined, authority.userId);
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         toast.error(serverErrorMessage(result.reason));
         return;
@@ -396,17 +614,17 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       ].sort((a, b) => b.startDate.localeCompare(a.startDate)));
       toast.success('오늘부터 생리로 기록했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to start cycle period.');
       toast.error(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setPeriodPending(false);
+      if (isCurrentGrantedAuthority(authority)) setPeriodPending(false);
     }
   };
 
   const endPeriodToday = async () => {
-    const identity = captureIdentity();
-    if (!identity.userId || periodPending || !activePeriod) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || periodPending || !activePeriod) return;
     // Already ended today: the write would set the identical end date, which
     // succeeds and changes nothing, so a stale render cannot make it look like
     // the tap did something. The Hero hides the button in this state; this is
@@ -415,8 +633,14 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setPeriodPending(true);
     setPeriodError(null);
     try {
-      const result = await updateCyclePeriodInDB(activePeriod.id, activePeriod.startDate, today);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await updateCyclePeriodInDB(
+        activePeriod.id,
+        activePeriod.startDate,
+        today,
+        authority.userId,
+      );
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         toast.error(serverErrorMessage(result.reason));
         return;
@@ -425,22 +649,28 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setPeriods((current) => current.map((period) => (period.id === saved.id ? saved : period)));
       toast.success('오늘 종료로 기록했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to end cycle period.');
       toast.error(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setPeriodPending(false);
+      if (isCurrentGrantedAuthority(authority)) setPeriodPending(false);
     }
   };
 
   const savePeriodEdit = async (period: CyclePeriod, draft: CyclePeriodDraft) => {
-    const identity = captureIdentity();
-    if (!identity.userId || periodPending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || periodPending) return;
     setPeriodPending(true);
     setPeriodError(null);
     try {
-      const result = await updateCyclePeriodInDB(period.id, draft.startDate, draft.endDate);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await updateCyclePeriodInDB(
+        period.id,
+        draft.startDate,
+        draft.endDate,
+        authority.userId,
+      );
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         setPeriodError(serverErrorMessage(result.reason));
         return;
@@ -452,22 +682,23 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setSheet({ kind: 'none' });
       toast.success('생리 기간을 수정했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to update cycle period.');
       setPeriodError(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setPeriodPending(false);
+      if (isCurrentGrantedAuthority(authority)) setPeriodPending(false);
     }
   };
 
   const deletePeriod = async (period: CyclePeriod) => {
-    const identity = captureIdentity();
-    if (!identity.userId || periodDeletePending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || periodDeletePending) return;
     setPeriodDeletePending(true);
     setPeriodError(null);
     try {
-      const result = await deleteCyclePeriodFromDB(period.id);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await deleteCyclePeriodFromDB(period.id, authority.userId);
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         setPeriodError(serverErrorMessage(result.reason));
         return;
@@ -478,11 +709,11 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setSheet({ kind: 'none' });
       toast.info('생리 기록을 삭제했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to delete cycle period.');
       setPeriodError(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setPeriodDeletePending(false);
+      if (isCurrentGrantedAuthority(authority)) setPeriodDeletePending(false);
     }
   };
 
@@ -491,8 +722,8 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   // ---------------------------------------------------------------
 
   const toggleQuickSymptom = (symptom: CycleSymptom) => {
-    const identity = captureIdentity();
-    if (!identity.userId || quickSymptomPending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || quickSymptomPending) return;
     const targetDate = selectedDate || today;
     setQuickSymptomPending(symptom);
     setDailyLogError(null);
@@ -500,6 +731,9 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     // Serialised so a burst of taps cannot overwrite each other's symptom array.
     dailyLogQueueRef.current = dailyLogQueueRef.current.then(async () => {
       try {
+        // A consent recheck advances the generation before clearing the UI. Do
+        // not let a queued tap cross that boundary and issue a late health write.
+        if (!isCurrentGrantedAuthority(authority)) return;
         // Re-read from the latest state inside the queue, not from the closure.
         const existing = dailyLogOnDate(dailyLogsRef.current, targetDate);
         const nextSymptoms = existing?.symptoms.includes(symptom)
@@ -511,36 +745,37 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           painLevel: existing?.painLevel,
           mood: existing?.mood,
           note: existing?.note,
-        });
-        if (!isCurrentIdentity(identity)) return;
+        }, authority.userId);
+        if (!isCurrentGrantedAuthority(authority)) return;
         if (!result.ok) {
           toast.error(serverErrorMessage(result.reason));
           return;
         }
         mergeDailyLog(result.log);
       } catch (error) {
-        if (!isCurrentIdentity(identity)) return;
+        if (!isCurrentGrantedAuthority(authority)) return;
         console.error('[gomsinlog] Failed to save cycle daily log.');
         toast.error(classifyServerError(error).message);
       } finally {
-        if (isCurrentIdentity(identity)) setQuickSymptomPending(null);
+        if (isCurrentGrantedAuthority(authority)) setQuickSymptomPending(null);
       }
     });
   };
 
   const saveDailyLog = async (draft: CycleDailyLogDraft) => {
-    const identity = captureIdentity();
-    if (!identity.userId || dailyLogPending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || dailyLogPending) return;
     setDailyLogPending(true);
     setDailyLogError(null);
     try {
+      if (!isCurrentGrantedAuthority(authority)) return;
       const result = await saveCycleDailyLogToDB(draft.logDate, draft.symptoms, {
         flow: draft.flow,
         painLevel: draft.painLevel,
         mood: draft.mood,
         note: draft.note,
-      });
-      if (!isCurrentIdentity(identity)) return;
+      }, authority.userId);
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         // The sheet stays open, so the note the user typed survives a refusal.
         setDailyLogError(serverErrorMessage(result.reason));
@@ -550,22 +785,23 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setSheet({ kind: 'none' });
       toast.success('오늘의 컨디션을 기록했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to save cycle daily log.');
       setDailyLogError(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setDailyLogPending(false);
+      if (isCurrentGrantedAuthority(authority)) setDailyLogPending(false);
     }
   };
 
   const deleteDailyLog = async (log: CycleDailyLog) => {
-    const identity = captureIdentity();
-    if (!identity.userId || dailyLogDeletePending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || dailyLogDeletePending) return;
     setDailyLogDeletePending(true);
     setDailyLogError(null);
     try {
-      const result = await deleteCycleDailyLogFromDB(log.id);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await deleteCycleDailyLogFromDB(log.id, authority.userId);
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         setDailyLogError(serverErrorMessage(result.reason));
         return;
@@ -574,11 +810,11 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setSheet({ kind: 'none' });
       toast.info('이 날의 컨디션 기록을 삭제했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to delete cycle daily log.');
       setDailyLogError(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setDailyLogDeletePending(false);
+      if (isCurrentGrantedAuthority(authority)) setDailyLogDeletePending(false);
     }
   };
 
@@ -587,8 +823,8 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
   // ---------------------------------------------------------------
 
   const saveLengths = async (nextCycleLength: number, nextPeriodLength: number) => {
-    const identity = captureIdentity();
-    if (!identity.userId || settingsPending) return;
+    const authority = captureGrantedAuthority();
+    if (!authority || settingsPending) return;
     const validation = validateCycleSettings(nextCycleLength, nextPeriodLength);
     if (validation) {
       setSettingsError(validation);
@@ -597,8 +833,13 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
     setSettingsPending(true);
     setSettingsError(null);
     try {
-      const result = await saveCycleSettingsToDB(nextCycleLength, nextPeriodLength);
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
+      const result = await saveCycleSettingsToDB(
+        nextCycleLength,
+        nextPeriodLength,
+        authority.userId,
+      );
+      if (!isCurrentGrantedAuthority(authority)) return;
       if (!result.ok) {
         setSettingsError(serverErrorMessage(result.reason));
         return;
@@ -607,106 +848,121 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
       setPeriodLength(result.settings.averagePeriodLength);
       toast.success('주기 설정을 저장했어요.');
     } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
+      if (!isCurrentGrantedAuthority(authority)) return;
       console.error('[gomsinlog] Failed to save cycle settings.');
       setSettingsError(classifyServerError(error).message);
     } finally {
-      if (isCurrentIdentity(identity)) setSettingsPending(false);
-    }
-  };
-
-  const toggleSharing = async (key: ShareKey, next: boolean) => {
-    const identity = captureIdentity();
-    if (!identity.userId || sharingPendingKey) return;
-    setSharingPendingKey(key);
-    setSharingError(null);
-    try {
-      const result = await saveCycleSharingPreferencesToDB({ [key]: next });
-      if (!isCurrentIdentity(identity)) return;
-      if (!result.ok) {
-        // No optimistic flip: an unsaved preference must never look saved, because
-        // the user would believe they had shared (or stopped sharing) something.
-        setSharingError(serverErrorMessage(result.reason));
-        return;
-      }
-      setPreferences(result.preferences);
-    } catch (error) {
-      if (!isCurrentIdentity(identity)) return;
-      console.error('[gomsinlog] Failed to save cycle sharing preferences.');
-      setSharingError(classifyServerError(error).message);
-    } finally {
-      if (isCurrentIdentity(identity)) setSharingPendingKey(null);
+      if (isCurrentGrantedAuthority(authority)) setSettingsPending(false);
     }
   };
 
   const acceptConsent = async () => {
-    const identity = captureIdentity();
-    if (!identity.userId || !consentChecked || consentPending) return;
-    setConsentPending(true);
+    const current = authorityRef.current;
+    if (!userId
+      || current.userId !== userId
+      || current.phase !== 'locked'
+      || !consentChecked) return;
+    const authority = beginAuthorityOperation('granting');
+    if (!authority) return;
     setConsentError(null);
+    revokeCycleSensitiveConsent(authority.userId);
+    clearSensitiveState();
     try {
-      // Server first, cache second, unlock last.
-      const result = await grantCycleConsentInDB(identity.userId);
-      if (!isCurrentIdentity(identity)) return;
+      // A previous consent period must never silently reactivate old partner
+      // sharing. All-false is permitted while locked by migration 070.
+      const resetSharing = await saveCycleSharingPreferencesToDB({
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      }, authority.userId);
+      if (!isCurrentAuthority(authority)) return;
+      if (!resetSharing.ok) {
+        commitAuthority(authority, 'locked');
+        setConsentError(serverErrorMessage(resetSharing.reason));
+        return;
+      }
+
+      const result = await grantCycleConsentInDB(authority.userId, authority.revision);
+      if (!isCurrentAuthority(authority)) return;
       if (!result.ok) {
+        commitAuthority(authority, 'locked');
         setConsentError(serverErrorMessage(result.reason));
         return;
       }
-      setConsentVerdict({ userId: identity.userId, granted: true });
-    } finally {
-      if (isCurrentIdentity(identity)) setConsentPending(false);
+      if (!result.applied || !result.granted) {
+        commitAuthority(authority, 'locked', result.revision);
+        setConsentChecked(false);
+        setConsentError('동의 상태가 다른 기기에서 바뀌었어요. 내용을 다시 확인해 주세요.');
+        return;
+      }
+      if (!grantCycleSensitiveConsent(authority.userId)) {
+        commitAuthority(authority, 'locked', result.revision);
+        setConsentError('이 기기에 민감정보 동의 상태를 안전하게 저장하지 못했어요.');
+        return;
+      }
+      commitAuthority(authority, 'granted', result.revision);
+      setConsentChecked(false);
+    } catch (error) {
+      if (!isCurrentAuthority(authority)) return;
+      commitAuthority(authority, 'locked');
+      setConsentError(classifyServerError(error).message);
     }
   };
 
   const revokeConsent = async () => {
-    const identity = captureIdentity();
-    if (!identity.userId || consentPending) return;
-    setConsentPending(true);
-    setConsentError(null);
-    try {
-      /*
-       * Turn partner sharing off BEFORE revoking, not after.
-       *
-       * Revoking means "stop using this data this way", and sharing it with a
-       * partner is one of those ways. Doing it in this order means a failure
-       * anywhere leaves the stricter state: if the sharing write fails we stop
-       * and keep consent, so the user is never told sharing ended while it
-       * continued. The server enforces the same rule independently (migration
-       * 026), because this write can fail or the revoke can happen on another
-       * device.
-       */
-      if (preferences.shareCurrentPeriod
-        || preferences.sharePredictionWindow
-        || preferences.shareFertilityWindow) {
-        const stopSharing = await saveCycleSharingPreferencesToDB({
-          shareCurrentPeriod: false,
-          sharePredictionWindow: false,
-          shareFertilityWindow: false,
-        });
-        if (!isCurrentIdentity(identity)) return;
-        if (!stopSharing.ok) {
-          setConsentError(serverErrorMessage(stopSharing.reason));
-          return;
-        }
-        setPreferences(stopSharing.preferences);
-      }
+    const current = authorityRef.current;
+    if (!userId
+      || current.userId !== userId
+      || (current.phase !== 'granted' && current.phase !== 'locked_error')) return;
+    const authority = beginAuthorityOperation('revoking');
+    if (!authority) return;
 
-      const result = await revokeCycleConsentInDB(identity.userId);
-      if (!isCurrentIdentity(identity)) return;
+    // The user's explicit stop request wins locally at once. Server failure does
+    // not reopen cached health data; it enters a retry-only fail-closed state.
+    markCycleConsentRevocationPending(authority.userId);
+    revokeCycleSensitiveConsent(authority.userId);
+    setConsentError(null);
+    clearSensitiveState();
+    try {
+      // Revoke first. The server projection is consent-gated, so this is the
+      // shortest path to stopping every partner projection even when preference
+      // cleanup later fails.
+      const result = await revokeCycleConsentInDB(authority.userId);
+      if (!isCurrentAuthority(authority)) return;
       if (!result.ok) {
-        // Never report a refused revoke as done.
+        commitAuthority(authority, 'locked_error');
         setConsentError(serverErrorMessage(result.reason));
         return;
       }
-      setConsentVerdict({ userId: identity.userId, granted: false });
+
+      if (!result.applied || result.granted) {
+        commitAuthority(authority, 'locked_error', result.revision);
+        setConsentError('민감정보 동의 철회 상태를 확인하지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
+
+      clearPendingCycleConsentRevocation(authority.userId);
+      commitAuthority(authority, 'locked', result.revision);
       setConsentChecked(false);
-      setPeriods([]);
-      setDailyLogs([]);
-      setPreferences(EMPTY_PREFERENCES);
-      setSheet({ kind: 'none' });
       toast.info('민감정보 동의를 철회했어요.');
-    } finally {
-      if (isCurrentIdentity(identity)) setConsentPending(false);
+
+      // Automatic partner projection is disabled. Keep the legacy row all-false
+      // for older clients after the consent authority has been removed.
+      void saveCycleSharingPreferencesToDB({
+        shareCurrentPeriod: false,
+        sharePredictionWindow: false,
+        shareFertilityWindow: false,
+      }, authority.userId).then((stopSharing) => {
+        if (!stopSharing.ok) {
+          console.error('[gomsinlog] Could not reset cycle sharing after consent revoke.');
+        }
+      }).catch(() => {
+        console.error('[gomsinlog] Could not reset cycle sharing after consent revoke.');
+      });
+    } catch (error) {
+      if (!isCurrentAuthority(authority)) return;
+      commitAuthority(authority, 'locked_error');
+      setConsentError(classifyServerError(error).message);
     }
   };
 
@@ -738,6 +994,40 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
           동의 상태를 확인하는 중이에요.
         </div>
+      </Card>
+    );
+  }
+
+  if (consentPhase === 'revoking') {
+    return (
+      <Card>
+        <div
+          className="py-6 flex items-center justify-center gap-2 text-caption text-muted-foreground"
+          role="status"
+        >
+          <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+          민감정보 동의를 철회하는 중이에요.
+        </div>
+      </Card>
+    );
+  }
+
+  if (consentPhase === 'locked_error') {
+    return (
+      <Card className="space-y-4" aria-labelledby="cycle-revoke-recovery-title">
+        <div className="flex items-center gap-2">
+          <Lock className="w-5 h-5 text-destructive" aria-hidden="true" />
+          <h3 id="cycle-revoke-recovery-title" className="text-heading text-foreground">
+            주기 기능을 잠갔어요
+          </h3>
+        </div>
+        <p className="text-caption text-muted-foreground leading-relaxed">
+          기기에서는 기록을 모두 숨겼어요. 서버의 동의 철회를 완료하려면 다시 시도해 주세요.
+        </p>
+        {consentError && <ErrorNote>{consentError}</ErrorNote>}
+        <Button variant="primary" size="md" full onClick={() => void revokeConsent()}>
+          철회 다시 시도
+        </Button>
       </Card>
     );
   }
@@ -868,7 +1158,7 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           {loadState === 'error' && (
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => void verifyConsent()}
               className="press-response min-h-11 px-4 rounded-control bg-foreground text-background text-label font-bold"
             >
               다시 시도
@@ -974,20 +1264,14 @@ export function CycleTrackerSection({ userId }: { userId?: string }) {
           cycleLength={cycleLength}
           periodLength={periodLength}
           prediction={prediction}
-          periodActive={!!activePeriod}
-          preferences={preferences}
-          sharingPendingKey={sharingPendingKey}
-          sharingError={sharingError}
           settingsPending={settingsPending}
           settingsError={settingsError}
           consentPending={consentPending}
           consentError={consentError}
           onSaveLengths={(nextCycle, nextPeriod) => void saveLengths(nextCycle, nextPeriod)}
-          onToggleSharing={(key, next) => void toggleSharing(key, next)}
           onRevokeConsent={() => void revokeConsent()}
           onClose={() => {
             setSettingsError(null);
-            setSharingError(null);
             setSheet({ kind: 'none' });
           }}
         />

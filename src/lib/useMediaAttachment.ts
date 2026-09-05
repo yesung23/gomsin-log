@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { resolveAttachmentUrls } from '@/lib/records';
 import type { Attachment, ServerErrorKind } from '@/types';
 
@@ -38,38 +38,113 @@ export type MediaAttachmentState = {
   reportLoadFailure: () => void;
 };
 
+export type MediaAttachmentVariant = 'master' | 'thumbnail';
+
+type ActiveMediaSource = {
+  kind: MediaAttachmentVariant;
+  attachment: Attachment;
+};
+
+function initialMediaSource(
+  attachment: Attachment,
+  variant: MediaAttachmentVariant,
+): ActiveMediaSource {
+  if (attachment.photoMetadataUnavailable) {
+    return {
+      kind: 'master',
+      attachment: {
+        ...attachment,
+        url: undefined,
+        urlUnavailable: attachment.photoMetadataUnavailable,
+      },
+    };
+  }
+  const thumbnail = variant === 'thumbnail' ? attachment.photoRendition?.thumbnail : undefined;
+  if (!thumbnail) return { kind: 'master', attachment };
+  const thumbnailAttachment: Attachment = {
+    type: 'photo',
+    name: attachment.name,
+    path: thumbnail.path,
+    url: thumbnail.url,
+    urlUnavailable: thumbnail.urlUnavailable,
+  };
+  return { kind: 'thumbnail', attachment: thumbnailAttachment };
+}
+
 export function useMediaAttachment(
   attachment: Attachment,
   coupleId: string | undefined,
   recordId: string,
+  variant: MediaAttachmentVariant = 'master',
 ): MediaAttachmentState {
-  const [url, setUrl] = useState(attachment.url);
-  const [unavailable, setUnavailable] = useState(attachment.urlUnavailable);
+  const initialSource = initialMediaSource(attachment, variant);
+  const [url, setUrl] = useState(initialSource.attachment.url);
+  const [unavailable, setUnavailable] = useState(initialSource.attachment.urlUnavailable);
+  const [sourceKind, setSourceKind] = useState(initialSource.kind);
   const [refreshing, setRefreshing] = useState(false);
   /** URLs already retried, so a second failure of the same URL gives up. */
   const retried = useRef(new Set<string>());
   const mounted = useRef(true);
+  const generation = useRef(0);
+  const sourceKey = JSON.stringify([
+    coupleId,
+    recordId,
+    variant,
+    attachment.type,
+    attachment.path,
+    attachment.url,
+    attachment.urlUnavailable,
+    attachment.photoMetadataUnavailable,
+    attachment.photoRendition?.sourceRevision,
+    attachment.photoRendition?.screenMaster.mediaObjectId,
+    attachment.photoRendition?.thumbnail.mediaObjectId,
+    attachment.photoRendition?.thumbnail.path,
+    attachment.photoRendition?.thumbnail.url,
+    attachment.photoRendition?.thumbnail.urlUnavailable,
+  ]);
+  const activeKey = useRef(sourceKey);
 
-  useEffect(() => () => { mounted.current = false; }, []);
-
-  // A fresh fetch (realtime patch, reload, navigation) supersedes local state.
-  useEffect(() => {
-    setUrl(attachment.url);
-    setUnavailable(attachment.urlUnavailable);
-  }, [attachment.url, attachment.urlUnavailable]);
+  // Invalidate old work before paint, including StrictMode setup/cleanup replay.
+  // Neither an old success nor failure may replace a newer source/denial.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    activeKey.current = sourceKey;
+    generation.current += 1;
+    retried.current.clear();
+    setUrl(initialSource.attachment.url);
+    setUnavailable(initialSource.attachment.urlUnavailable);
+    setSourceKind(initialSource.kind);
+    setRefreshing(false);
+    return () => { mounted.current = false; generation.current += 1; };
+  }, [sourceKey, initialSource.attachment.url, initialSource.attachment.urlUnavailable, initialSource.kind]);
 
   const reportLoadFailure = useCallback(() => {
+    if (!mounted.current || activeKey.current !== sourceKey) return;
+    // Metadata is the authority for a contract-v1 plaintext photo pair. Storage
+    // signing can refresh transport URLs, but it cannot overrule that authority.
+    if (attachment.photoMetadataUnavailable) return;
     const failedUrl = url;
+    const currentSource = sourceKind === 'thumbnail' && attachment.photoRendition
+      ? {
+          type: 'photo' as const,
+          name: attachment.name,
+          path: attachment.photoRendition.thumbnail.path,
+          url,
+          urlUnavailable: unavailable,
+        }
+      : { ...attachment, url, urlUnavailable: unavailable };
     // Without a storage path there is nothing to re-sign: a temporary local blob
     // URL or a legacy attachment saved before paths were durable.
-    if (!failedUrl || !attachment.path || !coupleId) return;
+    if (!failedUrl || !currentSource.path || !coupleId) return;
     if (retried.current.has(failedUrl)) return;
     retried.current.add(failedUrl);
+    const requestGeneration = generation.current;
+    const isCurrent = () => mounted.current && generation.current === requestGeneration;
     setRefreshing(true);
     void (async () => {
       try {
-        const [signed] = await resolveAttachmentUrls([attachment], coupleId, recordId);
-        if (!mounted.current) return;
+        const [signed] = await resolveAttachmentUrls([currentSource], coupleId, recordId);
+        if (!isCurrent()) return;
         if (signed?.url && signed.url !== failedUrl) {
           setUrl(signed.url);
           setUnavailable(undefined);
@@ -79,14 +154,23 @@ export function useMediaAttachment(
         setUrl(undefined);
         setUnavailable(signed?.urlUnavailable ?? 'unknown');
       } catch {
-        if (!mounted.current) return;
+        if (!isCurrent()) return;
         setUrl(undefined);
         setUnavailable('unknown');
       } finally {
-        if (mounted.current) setRefreshing(false);
+        if (isCurrent()) setRefreshing(false);
       }
     })();
-  }, [attachment, coupleId, recordId, url]);
+  }, [attachment, coupleId, recordId, sourceKey, sourceKind, unavailable, url]);
 
-  return { url, unavailable, refreshing, reportLoadFailure };
+  // Render the new props immediately; do not hand a previous source URL to an
+  // <img> for even the commit preceding the layout-effect state reset.
+  return activeKey.current === sourceKey
+    ? { url, unavailable, refreshing, reportLoadFailure }
+    : {
+        url: initialSource.attachment.url,
+        unavailable: initialSource.attachment.urlUnavailable,
+        refreshing: false,
+        reportLoadFailure,
+      };
 }

@@ -27,7 +27,14 @@ import org.xml.sax.SAXException;
  * These run in `./gradlew :app:testDebugUnitTest`, need no device or emulator,
  * and are the Android-side twin of src/lib/nativeConfig.test.ts. They read the
  * real source manifest rather than a copy, so a hand edit that widens the deep
- * link or adds a permission fails the build.
+ * link or adds a permission of the app's own fails the build.
+ *
+ * SCOPE: `src/main/AndroidManifest.xml` is an INPUT to the manifest merger, not the
+ * manifest that ships. A permission merged in from a library manifest is invisible
+ * here and in the TypeScript twin -- the two are independent implementations of the
+ * same blind spot. The shipped set is checked against the generated merged manifest
+ * in src/lib/nativeConfig.test.ts ("the merged manifest carries more than the app
+ * declares"), which skips rather than passes when no build artifact exists.
  */
 public class NativeConfigTest {
 
@@ -50,8 +57,17 @@ public class NativeConfigTest {
         return parse("src/main/AndroidManifest.xml");
     }
 
+    /**
+     * The app's OWN permission declarations, in the merger's input file.
+     *
+     * Deliberately NOT named "the permissions the app ships with": the built APK
+     * additionally carries WAKE_LOCK, com.google.android.c2dm.permission.RECEIVE,
+     * app.gomsinlog.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION and
+     * com.google.android.apps.aicore.service.BIND_SERVICE, merged in from the
+     * messaging and ML Kit GenAI library manifests. This test cannot see any of them.
+     */
     @Test
-    public void declaresOnlyThePermissionsTheCodeProves() throws Exception {
+    public void declaresOnlyItsOwnPermissionsInTheSourceManifest() throws Exception {
         NodeList nodes = manifest().getElementsByTagName("uses-permission");
         List<String> declared = new ArrayList<>();
         for (int i = 0; i < nodes.getLength(); i++) {
@@ -59,8 +75,9 @@ public class NativeConfigTest {
         }
         java.util.Collections.sort(declared);
 
-        // Sorted, and an EXACT set: a new permission must be added here
-        // deliberately, which is the whole point of the assertion.
+        // Sorted, and an EXACT set of the app's OWN declarations: a new permission
+        // written into THIS file must be added here deliberately, which is the whole
+        // point of the assertion. A library-merged permission never reaches this list.
         //
         // ACCESS_NETWORK_STATE was added to the manifest so that
         // `navigator.onLine` is not permanently false inside the WebView -- without

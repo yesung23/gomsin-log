@@ -82,6 +82,11 @@
  */
 @import "../fonts/hand/hand.css";
 
+/* The face scales its glyphs by 120%: browser measurement at a 17px em found
+ * Korean ink height of 12.78px versus Pretendard's 15.23px. Keep this optical
+ * correction in the face, so named sizes, line spacing and the sans fallback
+ * stay unchanged. scripts/fonts/build_hand_font.py preserves it on rebuild. */
+
 /* 노트에 그린 인스타그램의 표면. 옛 토큰을 지우지 않고 더해지는 층이다. */
 @import "./paper.css";
 
@@ -297,6 +302,11 @@
    */
   --card: oklch(1 0 0);
   --card-foreground: var(--navy);
+  --garden-surface: #ffffff;
+  --garden-ink: #2a2723;
+  --garden-ink-soft: #746e64;
+  --garden-character-paper: #f4edda;
+  --garden-character-outline: #555149;
   --muted: oklch(0.96 0.009 18);
   --muted-foreground: oklch(0.55 0.03 260);
   /* Hairlines carry the same hue: a neutral grey rule on a warm page reads dirty. */
@@ -463,6 +473,7 @@
   --foreground: var(--ink);
   --card: oklch(0.21 0.018 265);
   --card-foreground: var(--foreground);
+  --garden-surface: #ffffff;
   --muted: oklch(0.25 0.016 265);
   --muted-foreground: oklch(0.71 0.018 255);
   --border: oklch(0.31 0.018 265);
@@ -989,50 +1000,371 @@ input[type='range']::-webkit-slider-thumb {
   transition-duration: 0.06s;
 }
 
-/* Companion garden: the scene position glides; the little body bobs separately. */
+/* Companion garden: subtle body bob and opposing limb swing during walk; independent limb flail during pickup without body shake */
 @keyframes garden-walk-bob {
-  0% { transform: translateY(0) rotate(-1deg); }
-  50% { transform: translateY(-3px) rotate(1deg); }
-  100% { transform: translateY(0) rotate(-1deg); }
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
 }
 
-.garden-companion-walking {
+@keyframes garden-walk-arm-left {
+  0%, 100% {
+    transform: rotate(-22deg);
+  }
+  50% {
+    transform: rotate(22deg);
+  }
+}
+
+@keyframes garden-walk-arm-right {
+  0%, 100% {
+    transform: rotate(22deg);
+  }
+  50% {
+    transform: rotate(-22deg);
+  }
+}
+
+@keyframes garden-walk-leg-left {
+  0%, 100% {
+    transform: rotate(18deg);
+  }
+  50% {
+    transform: rotate(-18deg);
+  }
+}
+
+@keyframes garden-walk-leg-right {
+  0%, 100% {
+    transform: rotate(-18deg);
+  }
+  50% {
+    transform: rotate(18deg);
+  }
+}
+
+@keyframes garden-run {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(-3px) scaleY(0.97); }
+}
+
+@keyframes garden-run-arm-left {
+  0%, 100% { transform: rotate(-42deg); }
+  50% { transform: rotate(42deg); }
+}
+
+@keyframes garden-run-arm-right {
+  0%, 100% { transform: rotate(42deg); }
+  50% { transform: rotate(-42deg); }
+}
+
+@keyframes garden-run-leg-left {
+  0%, 100% { transform: rotate(36deg); }
+  50% { transform: rotate(-36deg); }
+}
+
+@keyframes garden-run-leg-right {
+  0%, 100% { transform: rotate(-36deg); }
+  50% { transform: rotate(36deg); }
+}
+
+@keyframes garden-shy {
+  0%, 100% { transform: translateY(0) scaleY(1); }
+  50% { transform: translateY(3px) scaleY(0.92); }
+}
+
+@keyframes garden-shy-arm-left {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(58deg) translateY(-2px); }
+}
+
+@keyframes garden-shy-arm-right {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-58deg) translateY(-2px); }
+}
+
+@keyframes garden-flail-arm-left {
+  0%, 100% { transform: rotate(-35deg) scaleY(1); }
+  25% { transform: rotate(40deg) scaleY(0.92); }
+  50% { transform: rotate(-20deg) scaleY(1.05); }
+  75% { transform: rotate(50deg) scaleY(0.96); }
+}
+
+@keyframes garden-flail-arm-right {
+  0%, 100% { transform: rotate(38deg) scaleY(0.95); }
+  30% { transform: rotate(-42deg) scaleY(1.04); }
+  60% { transform: rotate(25deg) scaleY(0.9); }
+  85% { transform: rotate(-30deg) scaleY(1); }
+}
+
+@keyframes garden-flail-leg-left {
+  0%, 100% { transform: rotate(28deg) scaleX(0.95); }
+  35% { transform: rotate(-32deg) scaleX(1.05); }
+  70% { transform: rotate(35deg) scaleX(0.9); }
+}
+
+@keyframes garden-flail-leg-right {
+  0%, 100% { transform: rotate(-30deg) scaleX(1.02); }
+  40% { transform: rotate(26deg) scaleX(0.92); }
+  75% { transform: rotate(-22deg) scaleX(1.04); }
+}
+
+@keyframes garden-care-pet {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  30% { transform: translateY(-1px) rotate(-5deg); }
+  70% { transform: translateY(-1px) rotate(5deg); }
+}
+
+@keyframes garden-care-wave-arm {
+  0%, 100% { transform: rotate(20deg); }
+  50% { transform: rotate(-70deg); }
+}
+
+@keyframes garden-care-play {
+  0%, 100% { transform: translateY(0) scale(1); }
+  45% { transform: translateY(-5px) scale(1.04); }
+}
+
+.garden-surface {
+  background-color: var(--garden-surface);
+}
+
+.garden-shell-surface {
+  background-color: var(--garden-surface);
+  background-image: none;
+}
+
+.garden-header {
+  background-image: none;
+  color: var(--garden-ink);
+}
+
+.garden-header .pen-icon {
+  color: var(--garden-ink);
+}
+
+.garden-ink {
+  color: var(--garden-ink);
+}
+
+.garden-ink-muted {
+  color: var(--garden-ink-soft);
+}
+
+.garden-character-frame {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.garden-companion-art {
+  position: relative;
+}
+
+.garden-pixel-limb {
+  transform-box: fill-box;
+  transform-origin: center center;
+  pointer-events: none;
+}
+
+.garden-pixel-limb-arm-left {
+  transform-origin: 100% 52%;
+}
+
+.garden-pixel-limb-arm-right {
+  transform-origin: 0% 52%;
+}
+
+.garden-pixel-limb-leg-left,
+.garden-pixel-limb-leg-right {
+  transform-origin: 50% 0%;
+}
+
+.garden-motion-walk .garden-companion-body,
+.garden-companion-walking .garden-companion-body {
   animation: garden-walk-bob 0.38s ease-in-out infinite;
-  transform-origin: 50% 100%;
 }
 
-/*
- * A picked-up companion rises first, then squirms left/right before settling.
- * Position movement lives on the outer wrapper, so this transform never fights the wander transition.
- */
-@keyframes garden-lift-wriggle {
-  0% { transform: translateY(0) rotate(0deg); }
-  14% { transform: translateY(-22px) rotate(-8deg); }
-  28% { transform: translateY(-25px) rotate(9deg); }
-  42% { transform: translateY(-23px) rotate(-7deg); }
-  56% { transform: translateY(-24px) rotate(8deg); }
-  72% { transform: translateY(-18px) rotate(-4deg); }
-  86% { transform: translateY(-8px) rotate(2deg); }
-  100% { transform: translateY(0) rotate(0deg); }
+.garden-motion-walk .garden-pixel-limb-arm-left,
+.garden-companion-walking .garden-pixel-limb-arm-left {
+  animation: garden-walk-arm-left 0.38s ease-in-out infinite;
+}
+
+.garden-motion-walk .garden-pixel-limb-arm-right,
+.garden-companion-walking .garden-pixel-limb-arm-right {
+  animation: garden-walk-arm-right 0.38s ease-in-out infinite;
+}
+
+.garden-motion-walk .garden-pixel-limb-leg-left,
+.garden-companion-walking .garden-pixel-limb-leg-left {
+  animation: garden-walk-leg-left 0.38s ease-in-out infinite;
+}
+
+.garden-motion-walk .garden-pixel-limb-leg-right,
+.garden-companion-walking .garden-pixel-limb-leg-right {
+  animation: garden-walk-leg-right 0.38s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-companion-body {
+  animation: garden-run 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-arm-left {
+  animation: garden-run-arm-left 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-arm-right {
+  animation: garden-run-arm-right 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-leg-left {
+  animation: garden-run-leg-left 0.22s ease-in-out infinite;
+}
+
+.garden-motion-run .garden-pixel-limb-leg-right {
+  animation: garden-run-leg-right 0.22s ease-in-out infinite;
+}
+
+.garden-motion-shy .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
+}
+
+.garden-motion-shy .garden-pixel-limb-arm-left {
+  animation: garden-shy-arm-left 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy .garden-pixel-limb-arm-right {
+  animation: garden-shy-arm-right 0.34s ease-in-out 2 alternate;
+}
+
+.garden-companion-control {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.garden-companion-pressed {
+  filter: brightness(0.96);
+  transition: filter 90ms ease-out;
 }
 
 .garden-companion-lifted {
-  animation: garden-lift-wriggle 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  transform-origin: 50% 85%;
   z-index: 2;
 }
 
+.garden-motion-held .garden-pixel-limb-arm-left,
+.garden-companion-lifted .garden-pixel-limb-arm-left {
+  animation: garden-flail-arm-left 0.28s ease-in-out infinite;
+}
+
+.garden-motion-held .garden-pixel-limb-arm-right,
+.garden-companion-lifted .garden-pixel-limb-arm-right {
+  animation: garden-flail-arm-right 0.32s ease-in-out infinite;
+}
+
+.garden-motion-held .garden-pixel-limb-leg-left,
+.garden-companion-lifted .garden-pixel-limb-leg-left {
+  animation: garden-flail-leg-left 0.24s ease-in-out infinite;
+}
+
+.garden-motion-held .garden-pixel-limb-leg-right,
+.garden-companion-lifted .garden-pixel-limb-leg-right {
+  animation: garden-flail-leg-right 0.26s ease-in-out infinite;
+}
+
+.garden-care-pet .garden-companion-body {
+  animation: garden-care-pet 0.46s ease-in-out 3;
+}
+
+.garden-care-wave .garden-pixel-limb-arm-right {
+  animation: garden-care-wave-arm 0.28s ease-in-out 5;
+}
+
+.garden-care-play .garden-companion-body {
+  animation: garden-care-play 0.45s ease-in-out 3;
+}
+
+.garden-care-play .garden-pixel-limb-arm-left,
+.garden-care-play .garden-pixel-limb-arm-right {
+  animation: garden-care-wave-arm 0.34s ease-in-out 4 alternate;
+}
+
+/* Care enters the same shy state before the short safe run. The semantic
+ * motion state owns the source-pixel pose even while the care token is live. */
+.garden-motion-shy.garden-care-pet .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
+}
+
+.garden-motion-shy.garden-care-wave .garden-pixel-limb-arm-left,
+.garden-motion-shy.garden-care-play .garden-pixel-limb-arm-left {
+  animation: garden-shy-arm-left 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy.garden-care-wave .garden-pixel-limb-arm-right,
+.garden-motion-shy.garden-care-play .garden-pixel-limb-arm-right {
+  animation: garden-shy-arm-right 0.34s ease-in-out 2 alternate;
+}
+
+.garden-motion-shy.garden-care-play .garden-companion-body {
+  animation: garden-shy 0.34s ease-in-out 2;
+}
+
+/* Keep the full sprite usable in the short landscape content viewport. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .garden-landscape-scene {
+    min-height: 116px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .garden-companion-position {
+  .garden-motion-walk .garden-companion-body,
+  .garden-motion-walk .garden-pixel-limb,
+  .garden-motion-run .garden-companion-body,
+  .garden-motion-run .garden-pixel-limb,
+  .garden-motion-shy .garden-companion-body,
+  .garden-motion-shy .garden-pixel-limb,
+  .garden-motion-held .garden-pixel-limb,
+  .garden-companion-walking .garden-companion-body,
+  .garden-companion-walking .garden-pixel-limb,
+  .garden-companion-lifted .garden-pixel-limb,
+  .garden-care-pet .garden-companion-body,
+  .garden-care-wave .garden-pixel-limb-arm-right,
+  .garden-care-play .garden-companion-body,
+  .garden-care-play .garden-pixel-limb {
+    animation: none !important;
+  }
+
+  .garden-companion-pressed {
     transition: none !important;
   }
 
-  .garden-companion-walking {
-    animation: none !important;
+  .garden-motion-shy .garden-companion-body {
+    transform: translateY(2px) scaleY(0.95);
   }
 
-  .garden-companion-lifted {
-    animation: none !important;
-    transform: translateY(-6px);
+  .garden-motion-shy .garden-pixel-limb-arm-left {
+    transform: rotate(42deg) translateY(-1px);
+  }
+
+  .garden-motion-shy .garden-pixel-limb-arm-right {
+    transform: rotate(-42deg) translateY(-1px);
+  }
+
+  .garden-motion-held .garden-pixel-limb-arm-left {
+    transform: rotate(34deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-arm-right {
+    transform: rotate(-34deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-leg-left {
+    transform: rotate(-22deg);
+  }
+
+  .garden-motion-held .garden-pixel-limb-leg-right {
+    transform: rotate(22deg);
   }
 }

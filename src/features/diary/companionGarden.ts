@@ -57,6 +57,31 @@ export const COMPANION_GARDEN_STAGES: readonly CompanionGardenStageInfo[] = [
   },
 ] as const;
 
+function interpolateTreeHeight(
+  days: number,
+  startDay: number,
+  endDay: number,
+  startHeight: number,
+  endHeight: number,
+): number {
+  const progress = Math.max(0, Math.min(1, (days - startDay) / (endDay - startDay)));
+  return Math.round(startHeight + (endHeight - startHeight) * progress);
+}
+
+/**
+ * The illustration changes at four meaningful milestones, while its visual
+ * height grows a little every day inside each stage. Height, rather than width,
+ * is the contract because the four original assets have different aspect
+ * ratios; a width-only scale could make the one-year tree look shorter.
+ */
+export function getCompanionGardenTreeHeightPx(togetherDays: number): number {
+  const days = Number.isFinite(togetherDays) ? Math.max(1, Math.floor(togetherDays)) : 1;
+  if (days <= 29) return interpolateTreeHeight(days, 1, 29, 85, 100);
+  if (days <= 99) return interpolateTreeHeight(days, 30, 99, 185, 227);
+  if (days <= 364) return interpolateTreeHeight(days, 100, 364, 237, 281);
+  return interpolateTreeHeight(days, 365, 730, 284, 304);
+}
+
 export function deriveCompanionGardenState(
   togetherDays: number | null | undefined,
 ): CompanionGardenState {

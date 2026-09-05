@@ -1,19 +1,18 @@
 # 곰신로그 CURRENT STATE — 저장소 현실
 
 > **이 문서는 현시점의 저장소 현실을 기술한다.** `PRODUCT_V3.md`는 2026-08-24
-> 제품 오너 결정으로 legacy가 되었고, 활성 제품 방향은 최신 사용자 승인 요청과
+> 제품 오너 결정으로 legacy가 되었고, 활성 제품 방향은 최신 사용자 승인과
+> [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md), 현재 V4 화면 사실은
 > [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다. 구현 순서는
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md)가 소유한다.
 >
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 조사 기준: default branch `master`와 GitHub live state, 2026-08-18. §1의 branch
-  consolidation checkpoint는 2026-08-20 전수 감사 기준이다
-- 조사 방식: 저장소와 GitHub PR metadata/body 대조
-- remote Supabase/Auth/Vercel과 최신 iPhone package 상태: 2026-08-28 §0B에서 live 갱신.
-  signed Archive와 App Store Connect IPA export는 PASS지만 실제 화면·인증 사용자 경로·두 계정·
-  TestFlight 업로드/설치는 여전히 **UNVERIFIED**
+- 현재 검증 기준은 §0의 격리 worktree와 실행 결과다. GitHub·Supabase inventory는
+  2026-09-05 live 조회 결과를 아래에 구분했다. 실기기·App Store·전체 원격 actor 검증은 **UNVERIFIED**다.
+- §0 아래의 2026-08 역사 기록은 당시 증거와 의사결정 추적용이며 현재 branch·HEAD·배포 상태로
+  사용하지 않는다.
 
 분류:
 
@@ -26,7 +25,245 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
-## 0A. Active working checkpoint — 2026-08-25
+## 0. Current V5 control-tower checkpoint — 2026-09-05
+
+- **2026-09-06 PR #93 checkpoint (기존 작업 통합 중):** `codex/rc-v5-final-fixes`
+  `065592f`를 origin에 실제 push하고 master 대상 PR #93을 열었다. master merge는 아직 아니다.
+  첫 GitHub 실행에서 Vitest 6177 PASS / 3 FAIL / 3 SKIP, browser 188 PASS / 7 FAIL.
+  DB fresh-chain, Android, Capacitor sync, dependency audit, diff integrity는 통과했다.
+  Deno cold dependency 설치, Apple source 검사 목록, PG17 선택, 옛 entitlement/scanner 기대값을
+  수정 중이며 브라우저 실패는 별도로 재현한다. 아래 로컬 PASS를 이 GitHub 실패보다 최신
+  통합 판정으로 사용하지 않는다. 승인된 notebook Home은 아직 구현 전이다.
+  운영 catalog 재조회: 계정삭제 v2 열과 media ledger/photo metadata/Apple custody 구조 부재.
+  필요한 의존 체인과 기존 RPC 호환성, 백업 복원 rehearsal이 선행돼야 하므로 전체 migration
+  replay와 운영 배포는 수행하지 않는다. Book Studio에는 별도 책 북마크 연계 요구를 전달했다.
+
+- **2026-09-06 배포 승인 이후:** 이전 자동배포 승인 대기는 해소됐다. Vercel gomsin-log만
+  Ignored Build Step `Don't build anything` / `exit 0`로 저장·재조회 확인했다. 서버 호환성 준비 중
+  기존 served artifact를 유지하기 위한 임시 조치이며, 준비 후 Automatic 복원이 필요하다.
+  App Store Connect iOS 앱 **곰신로그 (`6809005110`, `app.gomsinlog`)** 생성·목록 확인 완료.
+  빌드 업로드/베타 초대/심사 제출은 하지 않았다. remote master는 여전히 `bd4a9f3`, DB의 최신
+  사진 함수·private tables 부재와 복구 가능한 제공업체 백업 없음이 live 재확인됐다.
+  [배포 재개 증거 및 남은 gate](../control-tower/reports/codex/2026-09-06_deployment-resumed_codex.md).
+
+- **2026-09-06 추가 checkpoint:** 아래 과거 개별 검토 상태보다 이 항목이 최신이다.
+  photo SliceB 및 권한 보완 round2는 독립 Terra Max Spec/Quality PASS(C/H/M/L0),
+  현재 build 브라우저8PASS 후 사진15파일을 `7d8805db87bc060c455e576ff13057f8c28b0384`로 커밋했다.
+  Apple 관련 cors test는 별도 WIP로 보존했다. 부모 전체 Vitest는363파일/6181PASS/2SKIP/0FAIL,
+  전체 ESLint PASS다. 이후 변경은 Apple caller-lifecycle4파일로 한정됐다.
+  Apple 재검토에서 이전 호출의 완료가 새 lifecycle terminal로 해석될 수 있는 M1이 발견돼
+  호출 당시 lifecycle 전달 및 exact completing-lease proof를 보완했다. 수정자 동결 후 부모 실제
+  PG180assertions/Edge39tests PASS; Boyle Sol Max 재검토 **PASS, M1 CLOSED, C/H/M/L0**다.
+  검증된 DB2파일은 `c278569`, 서버/복구13파일은 `abd5909`로 나눠 커밋했다. 현재 HEAD는
+  `abd5909bdd9508a4e46f8ecc4d47a510957b2f47`이다. 소스 bytes 변경 없이 검토된 파일을 커밋했다.
+  이 결과를 Apple 실제 활성화나 전체 RC 완료로 해석하지 않는다. master와 새 notebook Home은 아직 변경하지 않았다.
+  Vercel Git 자동 배포 연결·필수 Supabase 사진/프로필 함수 부재를 재확인했으므로
+  코드 통합과 운영 배포를 구분한다. 공개 운영 정보2개는 설정에만 저장됐고 재배포하지 않았다.
+  자동배포 일시중단은 사용자 선택 대기이며 설정은 미변경이다.
+  [통합 증거](../control-tower/reports/codex/2026-09-06_frozen-integration-verification_codex.md),
+  [Apple 재검토](../control-tower/reports/codex/2026-09-06_apple-caller-lifecycle-hold_codex.md).
+- **이전 native checkpoint `676eda2`:** Apple native entitlement/target capability와
+  실제 plist 테스트 세 파일을 별도 커밋했다. parent focused75PASS2SKIP/plutil두파일PASS.
+  서명 profile·signed binary·실기기 로그인 증거는 아니다. 이전 identity test commit은88d8f53.
+- **최신 기기 재조회:** 전체 Vitest 종료 후 `xcrun devicectl list devices`에서 실물
+  iPhone16Pro는 다시 unavailable이다. 이전 available 관찰을 현재 상태로 사용하지 않는다.
+  `xcodebuild -version`은26.6/17F113, Data 볼륨 가용12GiB. Xcode27 beta와 기기 검증은
+  아직 미완료이며, 공간 확보를 이유로 사용자 파일/백업을 삭제하지 않았다.
+- **전체 Vitest 최신 실행:** root CLI,363files/6122PASS2SKIP,314.06s,exit0.
+  이전 CORS fixture1FAIL은 이 실행에서 해소됐다. 실행 중 native 변경은 별도 최종 focused
+  검증으로 보완했으므로 clean exact-commit 전체 gate로 표현하지 않는다. Deno/PG/실기기/
+  Production과 독립 보안 검토는 별도다.
+  [전체 테스트 증거](../control-tower/reports/codex/2026-09-05_full-vitest-regression_codex.md).
+- **Apple server 재검토 HOLD(C0/H1/M2/L2):** Hubble SolMax가 이전HIGH3 수정은 확인했으나,
+  겹친 탈퇴 요청에서 live revoke lease를 건너뛰고 revoked를 확정하는 새HIGH를 실제PG로 재현했다.
+  provider unknown 오판·운영증빙 reference 미저장·cancel deadline·metadata 손실도 남았다.
+  parent가 실제 분기를 대조했고 Hubble은 좁은 수정 Architect 후속 중이다. 기존 녹색 테스트는
+  전체 안전 승인으로 사용하지 않는다. [재검토 근거](../control-tower/reports/codex/2026-09-05_apple-server-round2-hold_codex.md).
+  사진 SliceB는 준비조사 종료 후 Archimedes 유일writer가 구현 중이다. 서버 fix는 그 반환 뒤
+  배정하며, 등록·삭제 안내 client도 미완료다. 서버/remote 통합 HOLD 유지.
+
+- **Apple identity 테스트 독립검토:** 기존 test-only WIP는 SolMax에서 승인되지 않았다.
+  실제 `SIGNED_IN` 대신 `USER_UPDATED`를 쓰고, write/setup·전환중couple/setup 격리 증거가
+  부족하며 대상파일 TypeScript 진단7개가 보고됐다. 기본 typecheck는 테스트파일을 제외한다.
+  parent는 기존 `SIGNED_IN`의 최신 탈퇴상태 확인/데이터 재조회를 우회하지 않는 수정계획으로
+  정정했다. Aquinas가 identity와 공통 matcher 수정을 반환했다(대표90PASS, 전체6108PASS/
+  CORS fixture1FAIL/2skip). Anscombe SolMax 독립 DELTA는 Spec/Quality PASS(C/H/M/L0),
+  identity8PASS/test-inclusiveTS0/scopedlint로 종결했다. parent는 검토diff 동일성을 확인해
+  두 테스트파일만 `88d8f53`으로 커밋했다. 실제 로그인/전체RC 승인은 아니다. 서버는
+  Franklin 독립검토 HIGH3/MEDIUM3/LOW1로 HOLD였으며 수정 반환 후 위 Hubble 재검토 단계다.
+  parent의 이전 focused DOM matcher7FAIL은 수정 전 기록이다.
+  [검토 결과와 수정 경계](../control-tower/reports/codex/2026-09-05_1949_identity-review-hold_codex.md).
+  [현재 수정 배정·실기기/서명 preflight](../control-tower/reports/codex/2026-09-05_2105_rc-fix-dispatch_codex.md).
+  [identity 테스트 gate 종결](../control-tower/reports/codex/2026-09-05_identity-test-gate-closed_codex.md).
+- **Apple Developer 설정 실제 적용(19:28KST):** 사용자에게 서명 profile 무효화/갱신 영향을
+  알리고 명시적인 `해줘` 승인을 받은 뒤, 기존 App ID `app.gomsinlog`의 Sign In with Apple을
+  primary App ID로 활성화했다. 저장·Confirm 후 목록에서 다시 열어 체크 ON/Save disabled를
+  확인했다. Data Protection의 Complete Protection과 기존 In-App Purchase는 유지됐다.
+  **Apple portal capability만 APPLIED**다. 키 생성·다운로드, notification endpoint,
+  Supabase provider, 앱 feature flag, provisioning 재생성·서명·실기기 로그인은 변경/실행하지 않았다.
+  [적용 범위·확인·남은 gate](../control-tower/reports/codex/2026-09-05_1929_apple-capability-enabled_codex.md).
+- **최신 live 원격 확인(17:20–17:40KST):** master `bd4a9f3`, RC branch 원격 미존재.
+  과거 master CI/Production deployment는 해당SHA의 success이며 최신 RC 증거가 아니다.
+  Supabase project healthy, Google ON/Apple OFF. 최신 app media/avatars/IAP 테이블·Edge 없음,
+  14개 Book migration tracking만 존재하나 legacy app schema는 있으므로 전체001..090재적용 금지.
+  backups:null/PITRfalse, Book 담당도 DB restore증거 미확보. 명확한 복구 gate 없이 DDL/merge 금지.
+  추가 metadata 점검에서 8/26·8/27 백업 폴더에 각각5/4파일이 남아 있었고 문서상 delete-by는
+  지났다. 내용/키는 읽지 않았고 삭제하지 않았다. 보관기한 문구 충돌과 복구 의존성 해결 전
+  운영 배포 HOLD. [백업 점검](../control-tower/reports/codex/2026-09-05_backup-retention-preflight_codex.md).
+  anon 기록/건강 query거절과 UID없는authenticated 0행은 live확인; 전체권한승인은 아님.
+  [세부 근거·실패/교정·공유 DB 경계](../control-tower/reports/codex/2026-09-05_1730_live-remote-baseline_codex.md).
+- **최신 복무 변경 `206ebb0` → `ac6ea50`:** 시간당1레벨·초당10EXP·왕고/말년칭호.
+  동일 날짜의 계정 전환 배너, 역할별 fixture, 밀리초 계급 경계를 수정했다. 최종 worker90tests/
+  typecheck/lint PASS, parent rebuild/builtbrowser4PASS, 독립 Sol Max DELTA C/H/M/L0 PASS
+  (선택34PASS/56의도적제외). **복무 local gate 종결**, 전체 앱·실기기·Production 승인이 아니다.
+  [현재 결과](../control-tower/reports/codex/2026-09-05_hourly-growth-rc-closure_codex.md).
+- **Summary M1 `2a420b2` 종결:** 원문 절단 여부를 후보 길이 필터보다 먼저 검사한다.
+  독립 Sol Max67tests + pending취소1probe PASS, C/H/M/L0. AI flag OFF 유지.
+  18:09KST CoreDevice에서 실물 iPhone이 unavailable이므로 실제 모델 성능/발열은 미검증이다.
+- **Apple 계정 정책 후속 승인(2026-09-05):** 동일한 본인확인 이메일의 Apple·Google 로그인을
+  Supabase가 기존 UID에 연결하도록 사용자가 승인했다. V5§11/로드맵을 개정해 과거 정책 충돌을
+  해소했다. 앱의 별도 계정 병합이나 manual-linking 설정 변경은 없다.
+  이번 live Dashboard에서도 Google Enabled/Apple Disabled, Confirm email ON/manual linking OFF를
+  확인했다. 실제 양방향 로그인 UID 유지·relay 분리는 아직 UNVERIFIED다.
+  과거 독립 활성화 검토의 나머지 항목(삭제 token revoke, signed native build, web Apple 경로)은
+  미완료다. Apple portal capability는 위19:28 적용과 구분한다. 기존 auth race PASS와
+  실제 Apple 활성화 준비를 구분하며 Supabase provider/앱 flag OFF를 유지한다.
+  이번 Apple Developer Keys 목록은 등록 키가 없는 시작 안내였으며 키를 생성·다운로드하지 않았다.
+  이번 `xcrun devicectl list devices` 조회는 실물 iPhone16Pro **available(paired)**를 반환했다.
+  이전18:09 unavailable에서 상태가 달라졌지만 signed Apple 로그인·실제 AI 실행 증거는 아니다.
+
+- Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
+  `codex/rc-v5-final-fixes`, service checkpoint `ac6ea50` (hourly `206ebb0`, summary `2a420b2`). 이 문서 이후에도
+  작업은 진행 중이므로 실행 전 live HEAD/status를 확인한다. master/Production에 통합됐다는 뜻은 아니다.
+- 찾기/복무 상세의 날짜·예상 계급·중립 사회복무/기타·일시정지/동작 줄이기·화면 밖 중지는 유지했다.
+  이전 Lv.1–200/1초1EXP는 최신 승인으로 대체됐다. 이전 `c6cddd8` 검증의 역사 근거는
+  [복무 여정 리포트](../control-tower/reports/codex/2026-09-05_service-journey_codex.md)에 보존한다.
+- My에서 새로 선택한 사진을 본인·파트너 Home story ring에 표시하는 실제 경로가 로컬에 구현됐다
+  (`c59f874`, `b6408e3`, `4b78ab7`). migration 089의 private 256px/64KiB JPEG,
+  버전 조건부 교체·삭제, 현재 커플·삭제 상태 확인, 메모리 전용 클라이언트 조회를 사용한다.
+  이전 기기 로컬 사진을 자동 업로드하지 않는다. 독립 리뷰의 MEDIUM 3건은 DELTA로 해결 확인.
+  로컬 PostgreSQL 75 assertions와 mock 2계정 browser가 통과했지만 **089 remote NOT APPLIED**다.
+- Apple native 경로는 OFF 상태로 준비됐다(`d0b110b`, `71e5746`). 실제 SDK의 저장 전
+  늦은 응답 차단 테스트는 통과했으나, 독립 리뷰에서 저장 후 늦은 SIGNED_IN 이벤트가
+  로그아웃 정리 중 Store에 재적용되는 **HIGH 1건**을 `d08519f`에서 수정했고 fresh 독립 DELTA PASS로 종결했다. Apple 로그인
+  실사용 가능/Release Gate 통과로 표시하지 않는다. provider·서명·2계정 자동연결·revoke·실기기는 HOLD/UNVERIFIED.
+- Home/Diary timestamp는 정확한 source record를 연다(`429b612`). 필기 폰트 광학 크기와
+  Diary의 200% 글자 설정을 조정했다(`2473591`). 최신 local browser **8 tests PASS**에는
+  375/402/430px 실제 앱 light/dark 6개, 2계정 사진 변경·삭제, 필기/200%/일반글꼴을 포함한다.
+  OS dark preference만 지정했던 예전 fixture는 앱 theme이 light였으므로 이전 dark 주장은
+  폐기하고 `de64abc`의 html data-theme 검증 결과로 대체한다. 실제 iPhone 증거는 아니다.
+- 일반 사진은 현재 긴 변 2048px JPEG .84이며 EXIF/원래 파일명 제거, 작은 사진 비확대다.
+  `70c16cd`는 decode/encode 대기 상한과 JPEG 결과 확인을 추가했다(관련 50 tests PASS).
+  합성 브라우저 실측과 비용 계산기는 [media-economics](operations/media-economics.md)에 있다.
+  `fb880ed`에 사진 pair 예약·metadata·구버전 호환 backend090이 로컬 구현됐다. 전체001..090
+  187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS.
+  **클라이언트 thumbnail 생성/업로드 SliceA는 `128736c`에 구현됐다**. 원본1회decode→2048/640
+  생성·해시·paired예약·업로드·master-only저장과 계정전환취소/응답유실복구를 포함한다.
+  worker259tests/lint/typecheck PASS, parent gate206+생성86+수정37=329PASS. **독립SolMax
+  exact128736c C/H/M/L0 Spec/LocalQualityPASS**,465focused+7memoryprobes+2mutant예상RED.
+  표시 SliceB는2026-09-06 위 checkpoint의 로컬 WIP 구현/독립검토 단계다.
+  인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현이다.
+  backend090 독립 Sol Max 리뷰는 exact `fb880ed`에서 **C/H/M/L 0, PASS**다.
+  001..090187/기존회귀520/보안형태209를 독립 재실행했다. remote NOT APPLIED다.
+- 유료 가치는 권리가 확인된 정원/종이 상품, 책 제작, 지속 가치가 실제 제공되는 선택형 Plus다.
+  무료 기록·정상 사진·보안을 유료로 막지 않는다. 6종 IAP catalog와 서버 원장은 코드에 있지만
+  판매 OFF, 실제 승인·가격·Sandbox·소비 증빙 caller·운영 통합은 별도 gate다.
+- 이전 scoped app 검증 274 tests PASS 후 Apple 이벤트 fix의 worker 475 PASS, parent 47 focused PASS,
+  typecheck/lint PASS. `47f5d07` media hook의 stale source 방어 38 tests PASS, narrow independent PASS.
+  독립 검토자는 인증 86+추가 경합2, 미디어17+추가 경합1을 직접 검증했고 C/H/M/L finding0이다.
+  `02522ca`와 같은 production source의 `npm run build` PASS(placeholder Supabase 환경, 2581 modules).
+  505KB chunk 경고가 남는다. 과거 전체 5683 PASS는 `fddb857`의 증거이며 최신 전체 suite를 대신하지 않는다.
+- 기록 미디어 삭제 086–088의 변경 `a8113b7`, `85be85b`는 `fb880ed`에서 누적 독립 Sol Max
+  보안 리뷰 PASS다. 기존PG518, 083–088 tests62, Edge33을 독립 확인했다. Edge 첫 실행의
+  권한 제한8FAIL은 선언된 권한 재실행33PASS와 구분한다. 새 client가 이 계약을 우회하면 안 된다.
+- 이번 checkpoint의 Apple portal capability: 위19:28 **APPLIED**.
+  Supabase·Apple key/서명 profile·배포·master 변경: **NOT APPLIED**.
+  원격 catalog는 위 live inventory 참조. 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
+- 온디바이스 `d01793a`는 관찰된 HIGH2 반례를 수정했고 독립 Sol Max에서 해당 반례 종결을 확인했다.
+  전체 원문 보존/결과 무효화, 총20 상한, 완전한 마지막 문장 발췌, 원문 편집 뒤 새 수동 요청,
+  Story test 수집을 고쳤다. 이후 발견된 M1(절단 prefix의 후보 필터 누락)은 **`2a420b2`에서
+  수정하고 독립Max C/H/M/L0 PASS로 종결**했다. 일반 의미 동등성/활성화는 여전히 HOLD.
+  iOS15 target의 Swift 소스 typecheck는 PASS지만 실기기 모델 실행은 UNVERIFIED이며,
+  최신 CoreDevice 상태는 unavailable이다. Mac availability는 Apple Intelligence OFF였다.
+  [초기 반례](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md),
+  [현재 수정·검토·CI/브라우저 결과](../control-tower/reports/codex/2026-09-05_1625_summary-ci-closure_codex.md).
+- `e35ff9d`의 이전 브라우저17/18 중 실패한 오류 fixture는 **`4800fcf`에서 해결**했다.
+  malformed 기록의 fail-closed 복구를 그대로 검증하고, 실제 복구 화면에 종이/ink/safe-area
+  표현을 맞췄다. UI source는 class3곳만 변경, 인증/데이터/콜백 불변이다.
+  parent6unit/lint/rebuildPASS, 실제 built-browser2PASS +정상응답재시도→Home이동추가1PASS.
+  그 외 이전17/18+별도2/2+UIcapture11/11 증거는 이전SHA의 검사임을 구분한다.
+  작은5탭 가로넘침, 정원13흐름, 기본원본펼침/이동, 설정키보드, 실제 dark 캡처를 확인했다.
+- 전체Vitest 사전검사(363files)는 6083중6018PASS/63FAIL/2skip이었다. `217c666`은
+  cleanup구버전3 fixture→현행4 + 잘못된버전/응답/throw8부정검사, outbox의 legacy사진
+  capability fixture를 맞췄다. source안전장치는 변경하지 않았고3관련suite97PASS/lintPASS다.
+  gate inventory3실패는 `128736c`에서 이미 교정됐다. **안정HEAD `217c666` 전체363files:
+  6092PASS/0FAIL/2skip**, typecheck/전체lint PASS. 2skip은 Android built merged-manifest
+  미존재 시의 검사이며 native 빌드 통과가 아니다. 전체RC/remote/실기기 판정을 대신하지 않는다.
+  스크린샷 수집은 기능 전체/VoiceOver/실기기/전체접근성 통과 증거가 아니다.
+- 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
+  복무/요약/사진SliceA의 구현자·독립Reviewer와 fixture Explorer가 결과를 반환하고 모두 종료했다.
+  사진 source WIP는128736c에 통합되어 남아 있지 않다. parent가 Task2B와 미충족 외부gate를
+  이어받으며, Apple 계정연결정책의 사용자 응답·실기기·복구 증거 없이 활성화하지 않는다.
+  신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
+  상세 근거는
+  [최신 Control Tower report](../control-tower/reports/codex/2026-09-05_photo-client-and-regression-closure_codex.md).
+
+## H0. Historical V5 control-tower checkpoint — 2026-09-03
+
+- Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 Garden application checkpoint는
+  `a96b0c4`다. 이 문서 작업은 해당 SHA 뒤의 미커밋
+  문서 변경이므로 다음 작업·검토는 application checkpoint와 docs HEAD를 모두 다시 확인한다. Production·remote Supabase·
+  TestFlight·App Store에는 이 workstream에서 아무 변경도 적용하지 않았다.
+- 제품 오너가 [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md)의 방향을
+  승인했다. 정원 액세서리·상호작용 건물·종이 IAP와 선택형 Plus, 앱 RC 다음 Book Studio는
+  승인된 미래 구현이지만 현재 V4 화면·StoreKit·remote entitlement에 구현·활성화됐다는
+  뜻은 아니다.
+- 로컬 commit `0f26bb3`부터 여행 OCR은 읽은 내용을 DB에 자동 저장하지 않고 review draft로
+  열며, 사용자가 `저장`을 눌러야 write한다. 온디바이스 요약은 정확한 feature flag `true`인
+  검증 빌드에서만 열린다.
+- 2026-09-03 Control Tower가 application checkpoint `a96b0c4` 직전 동일 staged tree에서
+  Garden focused **7 files / 167 tests PASS**, `npm run typecheck` PASS, 대상 ESLint와
+  `git diff --check` PASS를 확인했다. system Chrome의
+  `e2e/companionGarden.spec.ts`는 retry 없이 **12/12 PASS**했고, 390×844·320px·landscape·light/dark·
+  reduced motion·키보드·drag·pair gap·반복 돌보기와 Realtime 10초 subscribe 경계를 포함한다.
+  새 검증은 320px와 390px에서 364→365일 실제 나무 높이가 감소하지 않는 것도 포함한다.
+  `e2e/realUsability.spec.ts --grep "finite free Shop reveal stays usable"`의 320px·393px **2/2 PASS**는
+  Shop이 바뀌기 전 `27c0805`의 역사적 증거이며 이번 exact checkpoint에서는 재실행하지 않았다.
+  독립 Garden 리뷰는 width-only 성장에서 1주년 높이 감소 MEDIUM을 발견했고, failing test와
+  height-based rendering으로 수정했다. fresh exact-commit delta review는 아직 필요하다.
+  이는 로컬 production bundle + mock backend 증거이며 실제 RLS·Production·실기기 증거가 아니다.
+- 현재 사용 가능한 `/diary/garden`은 첫 진입에서 account-scoped local `나무 심기`를 요구하고,
+  성공 후 함께한 날에 따라 네 개의 완성형 투명 WebP 중앙 나무를 보여 준다. 단계 안에서도 매일
+  시각 높이가 자라지만 `함께한 N일`·단계·설명 문구는 노출하지 않는다. 원본
+  `paper-pair-v1.webp`에서 자른 72×76px `살구/초록` 캐릭터는 최소 44×44px 조작 영역 안에서
+  겹치거나 경계를 벗어나지 않고 걷고, 탭/가까운 만남에는 부끄러워한 뒤 달린다. 걷기·뛰기에는
+  반대 위상 팔다리, 500ms pickup에는 독립적인 네 팔다리 버둥이 적용된다. reduced-motion 전환은
+  이미 예약된 반응 timer도 취소한다. 점수·스트릭·배고픔·경험치·실패·관계 평가는 없다.
+- starter 장식 5종은 날짜 제한·마감·재화·결제 없이 미보유 항목만 남은 회전판에서 하나씩
+  공개된다. 소유권을 회전 전에 계정별 기기 로컬 저장소에 저장하고, 중복·storage failure·계정
+  전환을 fail-closed 처리한다. 향후 유료 catalog·StoreKit·server entitlement는 아직 구현되거나
+  활성화된 상태가 아니다.
+- Supabase Realtime 2.111.0은 Phoenix JSON 배열 wire format을 쓰지만 오래된 Playwright mock은
+  객체만 파싱해 10초 뒤 테스트 앱을 정상 보안 격리시키고 있었다. commit `27c0805`는 **테스트
+  하네스만** 현재 wire format으로 고쳤으며 앱의 Realtime·RLS·quarantine 의미는 바꾸지 않았다.
+- `3426e15`에서 기록된 전체 Vitest 293 files / 4,046 tests PASS는 그 SHA의 역사적 증거다.
+  Garden 이후 exact HEAD에서 전체 저장소 suite는 다시 실행하지 않았으므로 현재 전체 suite는
+  **UNVERIFIED**이고, 위 171개 focused + 실제 browser gate만 현재 증거다.
+- Apple provider의 실제 Production 설정, StoreKit 상품, App Store 계약/심사, Supabase 현재
+  migration catalog, 실물 지원 iPhone 동작은 **UNVERIFIED**다. 현재 코드는 GoTrue provider
+  응답이 Apple ON이면 iOS CTA를 표시하므로 독립적인 V5 build gate는 **NOT BUILT**다.
+  managed Supabase에서 검증된
+  동일 이메일 OAuth identity의 자동 연결을 안전하게 끄는 공식 설정도 확인되지 않았다.
+  따라서 Apple 경로는 default-OFF 준비만 허용하며 provider·CTA·V5-B 완료·App Store 제출은
+  staging 2계정 silent-merge negative test와 삭제 token revoke 검증 전까지 **HOLD**다.
+- 현재 worktree의 주기 V4는 실제 시작일만 사용하는 소유자 전용 참고 범위로 바뀌었고,
+  배란·가임·확률형 confidence와 자동 partner projection UI를 제거했다. migration 071은 legacy
+  공유 설정을 all-false로 잠그되 네 원본 건강 테이블의 exact snapshot을 보존한다. 로컬
+  Phase 0 actor harness는 old-client INSERT/UPDATE와 실제 UPSERT, owner/partner/unrelated/
+  former-partner/anon 경계를 PASS했다. **071 Production 적용은 NOT APPLIED / UNVERIFIED**다.
+- 아래 날짜별 checkpoint는 역사적 증거다. 서로 충돌할 때 이 절과 실제 코드가 우선한다.
+
+## H1. Historical working checkpoint — 2026-08-25
 
 - The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use
   that document to reactivate superseded navigation or product decisions.
@@ -70,9 +307,10 @@
   objects present while the migration ledger relation remains absent. Bulk
   `supabase db push` is still prohibited.
 
-## 0B. Active UI/profile-post and live release-gate checkpoint — 2026-08-28
+## H2. Historical UI/profile-post and release-gate checkpoint — 2026-08-28
 
 - **2026-09-01 product realignment candidate (base `origin/master` `d69b677`, isolated worktree):** Diary는 월 카드에서 날짜별 페이지로 들어가 기록 포함/제외·순서·종이 5종·3개 제한 레이아웃을 계정별 기기 로컬 메타데이터로 저장하고, 원본 `daily_records`는 복제하지 않는다. 기존 무료 스티커 12종/배치는 `기존 월 꾸미기`로 보존하며 로그아웃·계정 삭제 시 `gomsin.diary.*` 로컬 namespace를 정리한다. `/shop`은 `종이 보관함`으로 축소되어 유료 스티커·테마·Memory Product·결제 UI를 숨겼고 Book Studio는 FROZEN이다. Push는 기본 OFF이며 새 권한/등록/browser notification을 막는 동시에 과거 빌드가 남긴 token을 authenticated 상태에서 best-effort revoke하고 `clear_my_unseen`은 계속 유지한다. iOS Foundation Models 보조는 지원 native에서 default-ON으로 전환했지만 Story를 열 때 자동 실행하지 않고 `AI로 다듬기`를 눌렀을 때만 시작한다; 웹/Android/미지원/timeout/invalid output은 deterministic summary를 유지하고 `false|0|off`가 kill switch다. 현재 candidate 검증은 `npm run verify` 270 files / 3,809 tests, native 106/106, Edge 18/18, 영향 브라우저 30/30, `git diff --check`, Capacitor sync, Xcode 26.6 unsigned iOS Simulator build PASS다. 이 작업은 Supabase/Production/Vercel/TestFlight를 변경하지 않았고, 지원 **실물 iPhone**의 Foundation Models 한국어 품질·airplane mode·cold/warm latency·발열·배터리는 **UNVERIFIED**다.
+- **2026-09-02 Diary · Garden · Shop V2 reviewed candidate (branch `codex/diary-garden-shop-v2`, reviewed dirty tree above `7e515fe`, live `origin/master` `bd4a9f3`):** Tasks 1–3의 계정별 로컬 종이/보유품 기반 무료 상점 위에서 Task 4 정원을 완성했다. `/diary/garden`은 하단 5탭을 숨긴 전용 전체 콘텐츠 화면이며 헤더에서 `/shop`으로 이동한다. 캐릭터는 임시 SVG 재그림이 아니라 2026-08-30 C2PA 원본의 보존 파생물 `src/assets/characters/paper-pair-v1.webp`(1254×1254, SHA-256 `cac84b0179f4f0d05a655b4c41c03b644a7fdd67d3701c51a9de30c5f04ff856`)에서 앞모습 두 영역을 정확히 크롭한다. 두 친구는 전체 98×112 footprint가 경계 안에 있고 서로 겹치지 않게 독립 보행하며, 빠른 탭은 들지 않고 500ms 연속 길게 누르면 pointer-captured drag가 시작된다. release/cancel/lost-capture는 즉시 종료하고 Enter/Space와 assistive semantic click은 900ms 유한 등가 상호작용이다. reduced-motion에서는 자동 보행과 반복 버둥을 끄고 직접 조작 피드백만 남긴다. 짧은 430×180 landscape의 drag-to-other 부동소수점 경계도 0.1px 여유와 결정적 회귀 테스트로 닫았다. 꾸미기는 `none`과 이 계정이 무료 상점에서 실제 보유한 액세서리만 노출하고, 보유하지 않은 종이 preference는 app/shop/profile 진입에서 보유 기본값으로 복구한다. Settings의 중복 종이 선택기는 제거했으며 `/shop`은 전부 무료이고 결제 기능이 없다고 명시한다. 1.49MB 정원 시트는 route-lazy 별도 asset이며 initial HTML 및 service-worker precache에서 제외된다. 현재 exact-tree 검증은 focused **14 files / 148 tests PASS**, 나머지 전체 회귀 **277 files / 3,874 tests PASS**, rollback **17/17 PASS**, 변경 없는 날짜 의존 Search suite **26/27 PASS · 1 existing FAIL**, typecheck·ESLint·Garden Playwright **3/3**·native **106/106**·placeholder production build·`git diff --check` PASS다. 즉 총 **3,917 PASS / 1 existing unrelated FAIL**이다. Sol 최종 delta는 270개 추가 geometry 조합 실패 0, Terra 최종 delta는 flaky 반복 20/20과 focused 44/44 PASS로 새 Critical/Important 0건을 확인했다. Supabase/Production/Vercel/TestFlight/App Store/실기기 mutation은 **NOT APPLIED**이며 remote CI, 실기기 접근성/터치, 외부 C2PA 사용권 판단은 **UNVERIFIED**다.
 - **2026-09-01 interactive companion garden candidate (base `origin/master` `b7df5f6`, isolated worktree):** 과거 `codex/couple-garden-v1`의 정적 이미지/성장 단계만 통째로 merge하지 않고 현재 master에 `/diary/garden`을 재구현했다. 연결된 현재 커플·server lifecycle `connected`·유효한 비미래 anniversary date가 모두 확인될 때만 정원을 보이는 fail-closed 경계를 유지한다. 두 오리지널 캐릭터는 독립 랜덤 목적지/이동·휴식 타이머로 정원 경계 안을 걷고 최소 간격을 지키며, 탭/Enter 시 900ms 들어 올려져 버둥댄 뒤 복귀한다. reduced-motion에서는 자동 보행을 멈추고 작은 들림만 남긴다. `없음/모자/리본/목도리/꽃` 무료 액세서리는 친구별로 `gomsin.diary.garden.<userId>` 로컬 상태에 저장되고 logout/account-deletion purge에 포함된다. 점수·스트릭·먹이·미션·결제·AI·서버 저장은 추가하지 않았다. 검증은 app release validation PASS, 전체 Vitest 277 files / 3,877 tests, Playwright 133/133, native 106/106, Edge 18/18, `git diff --check` PASS다. Supabase/Production/Vercel/TestFlight mutation은 **NOT APPLIED**다.
 - **2026-09-01 local recovery delta:** branch `codex/profile-post-composer`, HEAD `a536f9b` 위 미커밋 Profile Post Composer 변경에서 publication-only retry, response-loss read-back, publication-close 삭제 방지와 realtime/local 경쟁 상태를 보강했다. 지연된 정상 성공과 read-back 모두 더 최신 record snapshot을 되돌리지 않으며 revision/attachments를 한 record 단위로 보존한다. 최종 scoped 검증은 8 files / 184 tests, typecheck, scoped lint, build, diff-check PASS; local P0/phase0/P5/write-floor/native 보안 하네스도 PASS했고 Terra 독립 재검토는 P2 **RESOLVED**, 새 P0/P1/P2 없음이다. 현재 Production write는 **NOT APPLIED**이고, 2026-09-01 anon read-only probe는 067 열 요청을 `401/42501`로 거부했지만 current authenticated remote actor/catalog·physical device·TestFlight는 여전히 **UNVERIFIED**다. 또한 linked Supabase CLI dry-run이 DB credential을 세션 출력에 노출해 **credential rotation이 운영 보안 종료 전 필수 manual blocker**다.
 - **2026-09-01 service-readiness closure:** Edge Function 네 곳의 platform logger를 bounded allow-list로 묶어 caller/device/challenge ID, token, path, message, content가 로그로 전달되지 않게 했고, 모든 console 인자를 검사하는 privacy AST guard와 회귀 테스트를 추가했다. 지연된 미디어 응답은 최신 record snapshot을 보존하며 오래된 attachment를 삭제하지 않는다. Terra exact-tree 최종 검토는 **PASS / 새 P0·P1·P2 없음**. 현재 트리 기준 `npm run verify`는 268 files / 3,807 tests PASS, Playwright 124/124, Edge 18/18, P0 76, phase0 420, P5 105, write-floor 39, rollback, native 106, audit 0 vulnerabilities가 PASS했다. Capacitor sync와 Xcode-27-Beta unsigned iOS Simulator build도 PASS했다. `npm run build:release`는 필요한 `sb_publishable_` 형식 키가 이 세션 환경에 없어 fail-closed로 중단되었으며, Production/Supabase mutation·CI 재실행·실기기 설치는 **NOT APPLIED / UNVERIFIED**다.
@@ -133,7 +371,7 @@
   Google/Apple PKCE 왕복을 별도 action-time gate로 진행하는 것이다. `supabase db push`, 066,
   Apple enable, Vercel Production deploy, TestFlight는 아직 실행하지 않았다.
 
-## 0. Default-branch reality
+## H3. Historical default-branch reality
 
 ### Latest live checkpoint — 2026-08-23
 
@@ -170,7 +408,7 @@ landing 완료 상태다. Production/Supabase/native physical-device evidence는
 gate이며 여전히 자동으로 충족되지 않는다. Chat foundation/UI는 여전히
 FROZEN / DEFERRED active draft asset이다.
 
-## 1. Active development checkpoint — 2026-08-18
+## H4. Historical development checkpoint — 2026-08-18
 
 아래 PR/HEAD는 live GitHub에서 확인한 volatile checkpoint다. 다음 세션은 작업 전에
 PR state, draft, mergeability, base/head, CI를 다시 확인한다.
@@ -374,7 +612,7 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 > 먼저 오고 구현(#79)이 나중에 오므로, 두 계보가 합쳐지는 지점에서 이 문장이 낡는다.
 > 저자 감사에서 발견해 정정했다.
 
-## 2. Active migration ledger facts
+## H5. Historical migration-ledger snapshot
 
 | migration | scope | production state for this docs task |
 |---|---|---|
@@ -399,7 +637,7 @@ Codex 독립 감사 직전에 **결합 트리**(#74→#79)를 대상으로 저�
 
 No remote Supabase mutation was performed by this documentation task.
 
-## 3. Default-branch product/security reality
+## H6. Historical default-branch product/security reality
 
 master에는 approved P5.5 security stack과 reviewed browser harness가 landing되었다.
 그러나 이것은 Production/Supabase 적용이나 실기기 검증 완료를 의미하지 않는다.
@@ -465,7 +703,8 @@ Beta gate B1 전에는 Storage policy catalog와 실제 signed-URL 동작을 모
 ## 7. 이 문서의 유지
 
 - 항목이 해소되면 삭제한다. 완료 이력을 여기에 쌓지 않는다.
-- 제품 의도는 최신 사용자 승인 V4 방향과 `V4_AS_BUILT.md`/`V4_BACKLOG.md`에 쓴다.
+- 제품 의도는 최신 사용자 승인과 `PRODUCT_V5_MASTER_DECISION.md`에, 현재 화면 사실과
+  미완료 항목은 `V4_AS_BUILT.md`/`V4_BACKLOG.md`에 쓴다.
   `PRODUCT_V3.md`는 legacy 역사 기록이다. 구현 순서는 `ENGINEERING_ROADMAP.md`에 쓴다.
 - remote 상태 주장은 날짜·증거 출처와 함께 적고, 확인할 수 없으면 `UNVERIFIED`다.
 - active PR/HEAD/CI는 checkpoint일 뿐이며 다음 세션에서 live 재검증한다.

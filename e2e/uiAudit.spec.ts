@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { installMockBackend, type Scenario } from './fixtures/mockBackend';
-import { CREATOR, PARTNER, NO_SPACE } from './scenarios';
+import { CREATOR, PARTNER, NO_SPACE, TODAY } from './scenarios';
 
 /**
  * Photograph the whole app from the real production bundle.
@@ -17,11 +17,21 @@ const OUT = process.env.SHOT_DIR || './e2e/.artifacts/audit';
 
 const TABS = [
   { path: '/home', name: 'home' },
-  { path: '/record', name: 'record' },
+  { path: '/search', name: 'search' },
+  { path: '/diary', name: 'diary' },
   { path: '/schedule', name: 'schedule' },
   { path: '/us', name: 'us' },
-  { path: '/my', name: 'my' },
 ];
+
+const IPHONE_16_PRO_VIEWPORT = { width: 402, height: 874 } as const;
+const SMALL_IPHONE_VIEWPORT = { width: 375, height: 667 } as const;
+
+function shiftCalendarDate(date: string, deltaDays: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const value = new Date(Date.UTC(year, month - 1, day));
+  value.setUTCDate(value.getUTCDate() + deltaDays);
+  return value.toISOString().slice(0, 10);
+}
 
 /**
  * A context with the backend mocked and a theme chosen, and only THEN a page.
@@ -37,7 +47,7 @@ async function boot(
   scenario: Scenario,
   theme: 'light' | 'dark' = 'light',
 ): Promise<Page> {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ viewport: IPHONE_16_PRO_VIEWPORT });
   await installMockBackend(context, scenario);
   await context.addInitScript((value) => {
     const key = 'gomsinlog.state.v2';
@@ -53,22 +63,22 @@ async function boot(
  *
  * The first version of this file waited a flat 500ms and captured the SIGN-IN
  * screen 37 times -- the store had not finished restoring the session yet, and a
- * fixed sleep is not a readiness signal. The tab bar only exists once `isReady` is
+ * fixed sleep is not a readiness signal. The bottom navigation only exists once `isReady` is
  * true and a real screen has rendered, so waiting for it is the honest gate.
  */
 async function ready(page: Page) {
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
-    (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
-    지나는 거의 모든 스펙이 한꺼번에 멈췄다.
-
-    이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
-    바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
+    이름이 아니라 **의미 구조**를 본다: `navigation` 안에 다섯 `link`가 있는가.
+    보이는 라벨을 없애더라도 한국어 접근성 이름과 링크 의미는 남아야 하며, 칸 하나가
+    사라지거나 링크 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
+  await expect(navigation).not.toHaveAttribute('role', 'tablist');
+  await expect(navigation.getByRole('tab')).toHaveCount(0);
 }
 
 async function shot(page: Page, name: string) {
@@ -145,10 +155,29 @@ test('degraded — no couple space, and a failing table', async ({ browser }) =>
     ...CREATOR,
     failures: { daily_records: { status: 500, code: 'PGRST500', message: 'boom' } },
   });
-  await page2.goto('/record');
+  await page2.goto('/diary');
   await page2.waitForTimeout(2000);
-  await shot(page2, 'error-record');
+  await shot(page2, 'error-diary');
   await page2.context().close();
+});
+
+/** Small iPhone: every primary tab must remain usable without horizontal overflow. */
+test('primary tabs — small iPhone viewport', async ({ browser }) => {
+  const page = await boot(browser, CREATOR);
+  await page.setViewportSize(SMALL_IPHONE_VIEWPORT);
+
+  for (const tab of TABS) {
+    await page.goto(tab.path);
+    await ready(page);
+    const overflow = await page.evaluate(() => {
+      const doc = document.documentElement;
+      return Math.max(0, doc.scrollWidth - doc.clientWidth);
+    });
+    expect(overflow, `${tab.path} should not overflow horizontally`).toBeLessThanOrEqual(1);
+    await shot(page, `${tab.name}-gomsin-light-small`);
+  }
+
+  await page.context().close();
 });
 
 /** The sub-screens that are not tabs. */
@@ -191,3 +220,80 @@ for (const width of [320, 390] as const) {
     await page.context().close();
   });
 }
+
+test('Home and My share the approved paper brand while onboarding keeps legal targets operable', async ({ browser }) => {
+  const signedInPage = await boot(browser, CREATOR);
+
+  await signedInPage.goto('/home');
+  await ready(signedInPage);
+  const homeMark = signedInPage.getByRole('img', { name: '곰신로그 브랜드 마크' });
+  await expect(homeMark).toBeVisible();
+  await expect(homeMark).toHaveAttribute('src', '/favicon.svg');
+  await shot(signedInPage, 'brand-home');
+
+  await signedInPage.goto('/us');
+  await ready(signedInPage);
+  const profileHeader = signedInPage.getByTestId('profile-sticky-header');
+  await expect(profileHeader).toHaveClass(/paper-texture-layer/);
+  await expect(profileHeader).toHaveClass(/sticky/);
+  await shot(signedInPage, 'paper-us-header');
+  await signedInPage.context().close();
+
+  const onboardingContext = await browser.newContext({ viewport: SMALL_IPHONE_VIEWPORT });
+  await installMockBackend(onboardingContext, NO_SPACE);
+  await onboardingContext.addInitScript(() => window.localStorage.clear());
+  const onboardingPage = await onboardingContext.newPage();
+  await onboardingPage.goto('/');
+
+  const onboardingMark = onboardingPage.getByRole('img', { name: '곰신로그 브랜드 마크' });
+  await expect(onboardingMark).toBeVisible({ timeout: 20_000 });
+  await expect(onboardingMark).toHaveAttribute('src', '/favicon.svg');
+  const onboardingFrame = onboardingMark.locator('xpath=ancestor::*[@data-astryx-theme="gomsin"]');
+  await expect(onboardingFrame).toHaveClass(/paper-texture-layer/);
+
+  const targetSizes = await onboardingPage
+    .getByRole('checkbox')
+    .evaluateAll((controls) => controls.map((control) => {
+      const bounds = control.getBoundingClientRect();
+      return { width: bounds.width, height: bounds.height };
+    }));
+  expect(targetSizes).toHaveLength(2);
+  for (const target of targetSizes) {
+    expect(target.width, 'each legal checkbox must keep a 44px-wide target').toBeGreaterThanOrEqual(44);
+    expect(target.height, 'each legal checkbox must keep a 44px-tall target').toBeGreaterThanOrEqual(44);
+  }
+
+  for (const documentName of ['서비스 이용약관', '개인정보 처리방침']) {
+    const documentAction = onboardingPage.getByRole('button', { name: documentName });
+    const bounds = await documentAction.boundingBox();
+    expect(bounds?.width ?? 0, `${documentName} must keep a 44px-wide target`).toBeGreaterThanOrEqual(44);
+    expect(bounds?.height ?? 0, `${documentName} must keep a 44px-tall target`).toBeGreaterThanOrEqual(44);
+  }
+
+  const overflow = await onboardingPage.evaluate(() => (
+    document.documentElement.scrollWidth - document.documentElement.clientWidth
+  ));
+  expect(overflow, 'onboarding must not overflow after expanding legal targets').toBeLessThanOrEqual(1);
+  await shot(onboardingPage, 'paper-onboarding-legal-targets');
+  await onboardingContext.close();
+});
+
+test('the living garden is visually captured with the planted shared tree and exact companions', async ({ browser }) => {
+  const gardenPage = await boot(browser, {
+    ...CREATOR,
+    anniversaryDate: shiftCalendarDate(TODAY, -99),
+  });
+
+  await gardenPage.goto('/diary/garden');
+  await expect(gardenPage.getByTestId('garden-scene')).toBeVisible({ timeout: 20_000 });
+  if (await gardenPage.getByRole('button', { name: '나무 심기' }).count()) {
+    await gardenPage.getByRole('button', { name: '나무 심기' }).click();
+  }
+
+  await expect(gardenPage.getByTestId('garden-tree-stage-3')).toBeVisible();
+  await expect(gardenPage.getByTestId('garden-exact-character-peach')).toBeVisible();
+  await expect(gardenPage.getByTestId('garden-exact-character-sage')).toBeVisible();
+  await expect(gardenPage.getByText(/함께한 \d+일/)).toHaveCount(0);
+  await shot(gardenPage, 'living-garden');
+  await gardenPage.context().close();
+});

@@ -16,35 +16,59 @@ import { cn } from '@/lib/utils';
  */
 export function Bookmark({
   marked,
+  partnerMarked = false,
+  partnerName = '상대',
   onToggle,
   disabled = false,
   disabledReason,
+  visibleLabel,
   className,
 }: {
+  /** The viewer's own mark. This alone controls aria-pressed and removal. */
   marked: boolean;
+  /** A separate partner mark that the viewer is not authorized to remove. */
+  partnerMarked?: boolean;
+  partnerName?: string;
   onToggle: () => void;
   disabled?: boolean;
   disabledReason?: string;
+  /** Optional visible copy for contexts where an icon alone would require guessing. */
+  visibleLabel?: string;
   className?: string;
 }) {
-  const label = marked ? '이따 이야기하기 표시 해제' : '이따 이야기하기';
+  const namedPartner = partnerName.endsWith('님') ? partnerName : `${partnerName}님`;
+  const label = partnerMarked
+    ? marked
+      ? `${namedPartner}도 표시했어요. 이따 이야기하기 표시 해제`
+      : `${namedPartner}이 표시했어요. 나도 이따 이야기하기`
+    : marked
+      ? '이따 이야기하기 표시 해제'
+      : '이따 이야기하기';
   return (
     <button
       type="button"
       onClick={onToggle}
       disabled={disabled}
       aria-pressed={marked}
+      data-partner-marked={partnerMarked || undefined}
       aria-label={disabled && disabledReason ? `${label} — ${disabledReason}` : label}
       title={disabled ? disabledReason : undefined}
       className={cn(
         'press-response inline-flex min-h-11 min-w-11 items-center justify-center',
         'rounded-control transition-colors duration-[120ms]',
-        marked ? 'text-coral-strong' : 'text-muted-foreground hover:text-foreground',
+        visibleLabel && 'gap-1 px-2',
+        marked || partnerMarked ? 'text-coral-strong' : 'text-muted-foreground hover:text-foreground',
         disabled && 'opacity-50',
         className,
       )}
     >
-      <BookmarkIcon size={18} strokeWidth={2} fill={marked ? 'currentColor' : 'none'} aria-hidden="true" />
+      <BookmarkIcon
+        size={18}
+        strokeWidth={2}
+        fill={marked || partnerMarked ? 'currentColor' : 'none'}
+        aria-hidden="true"
+      />
+      {visibleLabel ? <span className="whitespace-nowrap text-label font-semibold">{visibleLabel}</span> : null}
     </button>
   );
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { AppState, MilitaryInfo, PartnerServiceInfo } from '@/types';
@@ -372,6 +373,46 @@ describe('Gomsin Service Integration & Security Invariants', () => {
           }),
         );
       });
+    });
+
+    it('복무 진행률을 보조 기술에 정확한 수치로 전달한다', () => {
+      storeState = createSoldierState();
+
+      render(
+        <MemoryRouter>
+          <ServicePage />
+        </MemoryRouter>,
+      );
+
+      const progressbar = screen.getByRole('progressbar', { name: '민우 복무 진행률' });
+      expect(progressbar).toHaveAttribute('aria-valuemin', '0');
+      expect(progressbar).toHaveAttribute('aria-valuemax', '100');
+      expect(progressbar).toHaveAttribute('aria-valuenow');
+    });
+
+    it('복무 수정으로 포커스를 옮기고 가둔 뒤 연 버튼으로 돌려보낸다', async () => {
+      const user = userEvent.setup();
+      storeState = createSoldierState();
+
+      render(
+        <MemoryRouter>
+          <ServicePage />
+        </MemoryRouter>,
+      );
+
+      const opener = screen.getByRole('button', { name: '복무 정보 수정' });
+      await user.click(opener);
+
+      const dialog = screen.getByRole('dialog', { name: '복무 정보 수정' });
+      expect(screen.getByRole('combobox', { name: '복무 상태' })).toHaveFocus();
+
+      screen.getByRole('combobox', { name: '복무 상태' }).focus();
+      await user.tab({ shift: true });
+      expect(screen.getByRole('button', { name: '저장하기' })).toHaveFocus();
+
+      await user.keyboard('{Escape}');
+      expect(dialog).not.toBeInTheDocument();
+      expect(opener).toHaveFocus();
     });
   });
 });

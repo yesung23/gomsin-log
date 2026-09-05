@@ -3,8 +3,8 @@
 # =============================================================
 #
 # The default ruleset is kept in full — `useDefault = true` — and this file only
-# ever SUBTRACTS from it in three deliberately narrow places. Nothing here adds a
-# rule, relaxes entropy, or disables a detector.
+# ever SUBTRACTS from it through deliberately narrow exceptions. Nothing here
+# adds a rule, relaxes entropy, or disables a detector.
 #
 # All exemptions below are scoped as tightly as gitleaks allows, because the
 # failure mode of a secret scanner is silence: an allowlist that is one
@@ -89,4 +89,67 @@ id = "generic-api-key"
   ]
   regexes = [
     '''^  GomsinlogCapacitorDeviceKeys: [0-9a-f]{40}$''',
+  ]
+
+# -------------------------------------------------------------
+# 4. Exact RC-history false positives
+# -------------------------------------------------------------
+# These findings were inspected at their introducing commits. Each exemption
+# requires BOTH the exact file path and the fully anchored value captured by
+# generic-api-key. Test files remain scanned, and a different credential-shaped
+# value in the same file is still reported.
+  [[rules.allowlists]]
+  description = "Exact AppleAuth CocoaPods spec SHA-1"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^ios/App/Podfile\.lock$''',
+  ]
+  regexes = [
+    '''^4242cbb6f5fc0e27c8480d947fe6cb20f1ca83b7$''',
+  ]
+
+  [[rules.allowlists]]
+  description = "Exact SQL assignment identifier in the Apple auth lifecycle harness"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^scripts/phase0/apple-auth-credentials-harness\.mjs$''',
+  ]
+  regexes = [
+    '''^deletion_provenance=$''',
+  ]
+
+  [[rules.allowlists]]
+  description = "Exact SHA-256 of synthetic TOKEN_A in Apple IAP reconcile tests"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^supabase/functions/apple-iap-reconcile/handler_test\.ts$''',
+  ]
+  regexes = [
+    '''^cf6fef2e19aeb9ede73fe6d30895826ff08249c1bf087c2db252a54f008e8d80$''',
+  ]
+
+  [[rules.allowlists]]
+  description = "Exact signed-URL sentinels in Partner Briefing model-input tests"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^src/lib/partnerBriefing/modelInputGate\.test\.ts$''',
+  ]
+  regexes = [
+    '''^eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9\.sentinel\.signature$''',
+    '''^eyJhbGciOiJIUzI1NiJ9\.sentinel\.sig$''',
+  ]
+
+  [[rules.allowlists]]
+  description = "Exact hidden-record sentinel in Partner Briefing card tests"
+  condition = "AND"
+  regexTarget = "secret"
+  paths = [
+    '''^src/components/widgets/PartnerBriefingCard\.test\.tsx$''',
+  ]
+  regexes = [
+    '''^secret-record-id-xyz-987$''',
   ]

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { StoryCard } from '@/features/story/storyProjection';
+import { buildAllOnDeviceBatches } from '@/lib/dailySummary/contract';
 import { applyRefinedCoverText, deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import type { DailyRecord } from '@/types';
 
@@ -105,5 +106,37 @@ describe('applyRefinedCoverText', () => {
     const lines = deterministicSummaryLines(records);
     expect(lines).toHaveLength(8);
     expect(lines.map((l) => l.recordId)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
+  });
+
+  it('120단위 뒤 tail까지 NFC·공백 접기를 한 full source로 로컬 라인에 보존한다', () => {
+    const raw = `${'가'.repeat(120)}  cafe\u0301\n뒤 정정`;
+    const [summary] = deterministicSummaryLines([{
+      id: 'full-source', userId: 'partner', date: '2026-08-22', time: '09:00', authorRole: 'gomsin',
+      log: raw, isPrivate: false, createdAt: '2026-08-22T00:00:00.000Z',
+    }]);
+
+    expect(summary.sourceText).toBe('가'.repeat(120));
+    expect(summary.fullSourceText).toBe(`${'가'.repeat(120)} café 뒤 정정`);
+    expect(summary.sourceWasTruncated).toBe(true);
+  });
+
+  it('본문 없는 사진 기록은 표지에는 남기되 모델 입력을 합성하지 않아 하루 전체 refinement를 생략한다', () => {
+    const records: DailyRecord[] = [
+      {
+        id: 'body', userId: 'partner', date: '2026-08-22', time: '09:00', authorRole: 'gomsin',
+        log: '직접 쓴 본문', isPrivate: false, createdAt: '2026-08-22T00:00:00.000Z',
+      },
+      {
+        id: 'photo-only', userId: 'partner', date: '2026-08-22', time: '10:00', authorRole: 'gomsin',
+        log: '', isPrivate: false, createdAt: '2026-08-22T01:00:00.000Z',
+        attachments: [{ type: 'photo', name: 'private.jpg', url: 'https://private.example/photo.jpg' }],
+      },
+    ];
+
+    const lines = deterministicSummaryLines(records);
+    expect(lines).toHaveLength(2);
+    expect(lines[1].text).toBe('사진을 남겼어요');
+    expect(lines[1].sourceText).toBeNull();
+    expect(buildAllOnDeviceBatches(lines)).toBeNull();
   });
 });

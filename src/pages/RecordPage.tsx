@@ -3,8 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MobileShell } from '@/components/MobileShell';
 import { useStore } from '@/lib/useStore';
 import { generateDailySummary } from '@/lib/briefing';
-import { useEscapeKey } from '@/lib/hooks';
 import { scrollBehavior } from '@/lib/motion';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import { visibleRecordsForViewer, isOwnRecord } from '@/lib/privacy';
 import { recordAuthorPresentation } from '@/lib/recordAuthor';
 import { EmotionFlowInsightCard } from '@/components/EmotionFlowInsightCard';
@@ -15,6 +15,7 @@ import type { EmotionFlowItem } from '@/types';
 import { EmotionFlowSummarySection } from '@/components/EmotionFlowSummarySection';
 import { TodayLogWidget } from '@/components/widgets/TodayLogWidget';
 import { isMarkedByViewer } from '@/lib/talkAboutList';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 import {
   ChevronLeft, ChevronRight, Lock, Unlock,
   Sparkles, Clock, Calendar,
@@ -164,6 +165,16 @@ export function RecordPage() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isMediaBusy, setIsMediaBusy] = useState(false);
+  const [isDetailActionBusy, setIsDetailActionBusy] = useState(false);
+  /** Synchronous gate for owner edit/delete writes; see the talk/mood gate below. */
+  const detailSaveInFlightRef = useRef(false);
+  /**
+   * React's disabled state is visible only after the next render. This mirror
+   * closes the same-frame gap for the lightweight detail writes (talk marker
+   * and mood correction), where two rapid activations would otherwise send
+   * two mutations before `aria-busy` reached the DOM.
+   */
+  const detailActionInFlightRef = useRef(false);
   const mediaInputRef = useRef<HTMLInputElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   /**
@@ -186,6 +197,17 @@ export function RecordPage() {
    * or a notification.
    */
   const [showComposer, setShowComposer] = useState(() => searchParams.get('compose') === '1');
+  const [isComposerSaving, setIsComposerSaving] = useState(false);
+  const composerOpenerRef = useRef<HTMLElement | null>(null);
+  const composerCloseRef = useRef<HTMLButtonElement | null>(null);
+  const detailOpenerRef = useRef<HTMLElement | null>(null);
+  const detailCloseRef = useRef<HTMLButtonElement | null>(null);
+  const editButtonRef = useRef<HTMLButtonElement | null>(null);
+  const editTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const deleteButtonRef = useRef<HTMLButtonElement | null>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement | null>(null);
+  const wasEditingRef = useRef(false);
+  const wasConfirmingDeleteRef = useRef(false);
 
   const closeSelectedRecord = useCallback(() => {
     setSelectedRecordId(null);
@@ -201,8 +223,9 @@ export function RecordPage() {
    * still saying the composer is open, so a reload -- or Back from a record the
    * user opened next -- reopened it over the timeline they had gone there to read.
    */
-  const closeComposer = useCallback(() => {
+  const finishComposer = useCallback(() => {
     setShowComposer(false);
+    setIsComposerSaving(false);
     if (searchParams.get('compose') === '1') {
       const next = new URLSearchParams(searchParams);
       next.delete('compose');
@@ -210,8 +233,47 @@ export function RecordPage() {
     }
   }, [searchParams, setSearchParams]);
 
-  useEscapeKey(closeSelectedRecord, selectedRecordId !== null);
-  useEscapeKey(closeComposer, showComposer);
+  const closeComposer = useCallback(() => {
+    if (!isComposerSaving) finishComposer();
+  }, [finishComposer, isComposerSaving]);
+
+  const beginDetailAction = useCallback(() => {
+    if (detailActionInFlightRef.current) return false;
+    detailActionInFlightRef.current = true;
+    setIsDetailActionBusy(true);
+    return true;
+  }, []);
+
+  const finishDetailAction = useCallback(() => {
+    detailActionInFlightRef.current = false;
+    setIsDetailActionBusy(false);
+  }, []);
+
+  const detailBusy = isSaving || isMediaBusy || isDetailActionBusy;
+  const handleDetailEscape = useCallback(() => {
+    if (showDeleteConfirm) {
+      setShowDeleteConfirm(false);
+      return;
+    }
+    if (isEditing) {
+      setIsEditing(false);
+      setEditText('');
+      return;
+    }
+    closeSelectedRecord();
+  }, [closeSelectedRecord, isEditing, showDeleteConfirm]);
+
+  useEffect(() => {
+    if (isEditing) editTextareaRef.current?.focus();
+    else if (wasEditingRef.current) editButtonRef.current?.focus();
+    wasEditingRef.current = isEditing;
+  }, [isEditing]);
+
+  useEffect(() => {
+    if (showDeleteConfirm) deleteCancelRef.current?.focus();
+    else if (wasConfirmingDeleteRef.current) deleteButtonRef.current?.focus();
+    wasConfirmingDeleteRef.current = showDeleteConfirm;
+  }, [showDeleteConfirm]);
 
   /*
     Drag-to-dismiss for the two sheets on this screen.
@@ -227,11 +289,28 @@ export function RecordPage() {
   */
   const composerSheet = useSheetDrag({
     onDismiss: closeComposer,
-    enabled: !isSaving,
+    enabled: !isComposerSaving,
   });
   const detailSheet = useSheetDrag({
     onDismiss: closeSelectedRecord,
-    enabled: !isEditing && !showDeleteConfirm && !isSaving && !isMediaBusy,
+    enabled: !isEditing && !showDeleteConfirm && !detailBusy,
+  });
+
+  useDialogFocus({
+    active: showComposer,
+    panelRef: composerSheet.sheetRef,
+    restoreFocusRef: composerOpenerRef,
+    initialFocusRef: composerCloseRef,
+    onClose: closeComposer,
+    closeDisabled: isComposerSaving,
+  });
+  useDialogFocus({
+    active: selectedRecordId !== null,
+    panelRef: detailSheet.sheetRef,
+    restoreFocusRef: detailOpenerRef,
+    initialFocusRef: detailCloseRef,
+    onClose: handleDetailEscape,
+    closeDisabled: detailBusy,
   });
 
   // Own records + the partner's shared ones, with author-only fragments removed.
@@ -613,6 +692,8 @@ export function RecordPage() {
   };
 
   const partnerDisplayName = profile.couple.partnerName || '상대방';
+  const relationshipContext = resolveRelationshipContext(profile.couple.relationshipContext)
+    ?? 'military';
 
   /**
    * Attribution for the open record, so the detail modal names the author with
@@ -624,9 +705,10 @@ export function RecordPage() {
         selectedRecord,
         { userId: profile.id, role: profile.role },
         partnerDisplayName,
+        relationshipContext,
       )
       : null),
-    [selectedRecord, profile.id, profile.role, partnerDisplayName],
+    [selectedRecord, profile.id, profile.role, partnerDisplayName, relationshipContext],
   );
 
   // Check if selected month has any records at all
@@ -685,7 +767,7 @@ export function RecordPage() {
 
         {/* Collapsible Calendar Grid */}
         {showCalendar && (
-          <div className="animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-top-2 motion-safe:duration-200">
             {/* Month Header */}
             <div className="flex items-center justify-between mb-3 px-1">
               <button
@@ -702,7 +784,7 @@ export function RecordPage() {
                 {!(viewYear === today.getFullYear() && viewMonth === today.getMonth()) && (
                   <button
                     onClick={goToToday}
-                    className="press-response text-caption font-bold text-coral-strong bg-coral/10 px-3 py-1.5 rounded-lg min-h-[36px] flex items-center justify-center"
+                    className="press-response text-caption font-bold text-coral-strong bg-coral/10 px-3 py-1.5 rounded-lg min-h-[44px] flex items-center justify-center"
                   >
                     오늘
                   </button>
@@ -943,7 +1025,7 @@ export function RecordPage() {
                    * `글` is the narrowest at 30px, so 8px per side takes it to 46;
                    * 28px tall plus 8px per side is 44.
                    */
-                  'px-2.5 py-1 rounded-full text-caption font-semibold whitespace-nowrap transition min-h-[28px]',
+                  'px-2.5 py-1 rounded-full text-caption font-semibold whitespace-nowrap motion-safe:transition min-h-[28px]',
                   "relative isolate before:absolute before:content-[''] before:-z-10",
                   'before:top-[-8px] before:bottom-[-8px] before:left-[-8px] before:right-[-8px]',
                   'relative before:absolute before:inset-x-0 before:-inset-y-2 before:content-[""]',
@@ -1001,6 +1083,7 @@ export function RecordPage() {
                 r,
                 { userId: profile.id, role: profile.role },
                 partnerDisplayName,
+                relationshipContext,
               );
               const isHighlighted = state.highlightedRecordId === r.id;
               const hasMedia = r.attachments && r.attachments.length > 0;
@@ -1009,10 +1092,12 @@ export function RecordPage() {
                 <li
                   id={`record-${r.id}`}
                   key={r.id}
-                  data-author-role={author.role ?? 'unknown'}
+                  data-author-role={relationshipContext === 'military'
+                    ? author.role ?? 'unknown'
+                    : undefined}
                   data-author-own={author.isOwn ? 'true' : 'false'}
                   className={cn(
-                    'list-none relative border-b border-border/40 last:border-b-0 transition-all duration-500',
+                    'list-none relative border-b border-border/40 last:border-b-0 motion-safe:transition-all motion-safe:duration-500',
                     isHighlighted && 'record-highlighted ring-2 ring-coral/30 bg-coral/5 rounded-control'
                   )}
                 >
@@ -1065,7 +1150,12 @@ export function RecordPage() {
                     */}
                     <button
                       type="button"
-                      onClick={() => setSelectedRecordId(r.id)}
+                      onClick={(event) => {
+                        detailOpenerRef.current = event.currentTarget
+                          .closest('li')
+                          ?.querySelector<HTMLElement>('[data-record-detail-opener]') ?? null;
+                        setSelectedRecordId(r.id);
+                      }}
                       aria-hidden="true"
                       tabIndex={-1}
                       className="press-response shrink-0 flex gap-2 text-left self-stretch rounded-control active:bg-muted/40 cursor-pointer"
@@ -1100,7 +1190,11 @@ export function RecordPage() {
                     <div className="min-w-0 flex-1 flex flex-col gap-2">
                       <button
                         type="button"
-                        onClick={() => setSelectedRecordId(r.id)}
+                        data-record-detail-opener
+                        onClick={(event) => {
+                          detailOpenerRef.current = event.currentTarget;
+                          setSelectedRecordId(r.id);
+                        }}
                         aria-label={`${author.srAttribution} 자세히 보기`}
                         className="press-response-row min-w-0 flex-1 flex flex-col gap-1 text-left rounded-control active:bg-muted/40 cursor-pointer"
                       >
@@ -1142,7 +1236,7 @@ export function RecordPage() {
                           layout cut it off.
                         */}
                         {r.log && (
-                          <span data-testid="record-log" className="text-body text-foreground break-keep whitespace-pre-wrap">{r.log}</span>
+                          <span data-testid="record-log" className="text-body text-foreground break-keep break-words whitespace-pre-wrap">{r.log}</span>
                         )}
 
                         {/* Secondary metadata — compact, never outweighs the prose */}
@@ -1208,20 +1302,28 @@ export function RecordPage() {
           offline banner or the tab bar. Hidden while the sheet it opens is
           already open: left visible it sits behind the overlay with a label
           ("...남기기") that collides with the composer's own save button. */}
-      {!showComposer && (
-        <div className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-5 z-40">
-          <Button
-            variant="primary"
-            size="lg"
-            full
-            onClick={() => setShowComposer(true)}
-            className="shadow-md"
-          >
-            <span aria-hidden="true">+</span>
-            <span>기록 남기기</span>
-          </Button>
-        </div>
-      )}
+      <div
+        ref={(node) => {
+          const fallback = node?.querySelector<HTMLElement>('button') ?? null;
+          if (fallback) composerOpenerRef.current = fallback;
+        }}
+        hidden={showComposer}
+        className="fixed bottom-[calc(var(--gomsin-tabbar-height,70px)+var(--gomsin-bottom-banner-height,0px)+12px)] left-1/2 -translate-x-1/2 w-full max-w-[400px] px-5 z-40"
+      >
+        <Button
+          variant="primary"
+          size="lg"
+          full
+          onClick={(event) => {
+            composerOpenerRef.current = event.currentTarget;
+            setShowComposer(true);
+          }}
+          className="shadow-md"
+        >
+          <span aria-hidden="true">+</span>
+          <span>기록 남기기</span>
+        </Button>
+      </div>
 
       {/*
         Composer sheet. Reuses the exact same TodayLogWidget the Home widget
@@ -1236,20 +1338,23 @@ export function RecordPage() {
             aria-modal="true"
             aria-label="기록 남기기"
             ref={composerSheet.sheetRef}
-            className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-4 shadow-xl max-h-[90vh] overflow-y-auto"
+            aria-busy={isComposerSaving}
+            className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom,0px))] shadow-xl max-h-[90vh] overflow-y-auto"
           >
             <SheetHandle {...composerSheet.handleProps} />
             <div className="flex justify-end mb-1">
               <button
+                ref={composerCloseRef}
                 type="button"
                 onClick={closeComposer}
+                disabled={isComposerSaving}
                 aria-label="닫기"
-                className="press-response min-h-11 min-w-11 flex items-center justify-center text-muted-foreground"
+                className="press-response min-h-11 min-w-11 flex items-center justify-center text-muted-foreground disabled:opacity-50"
               >
                 <X size={18} aria-hidden="true" />
               </button>
             </div>
-            <TodayLogWidget onSaved={closeComposer} />
+            <TodayLogWidget onSaved={finishComposer} onBusyChange={setIsComposerSaving} />
           </div>
         </div>
       )}
@@ -1264,7 +1369,14 @@ export function RecordPage() {
       */}
       {selectedRecord && (
         <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center bg-black/40 backdrop-blur-sm p-4">
-          <div ref={detailSheet.sheetRef} role="dialog" aria-modal="true" aria-labelledby="record-detail-modal-title" className="bg-card w-full max-w-md rounded-t-3xl sm:rounded-surface p-6 shadow-xl">
+          <div
+            ref={detailSheet.sheetRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="record-detail-modal-title"
+            aria-busy={detailBusy}
+            className="bg-card w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-t-3xl sm:rounded-surface px-6 pt-6 pb-[max(1.5rem,env(safe-area-inset-bottom,0px))] shadow-xl"
+          >
             <SheetHandle {...detailSheet.handleProps} />
             <div className="flex justify-between items-center mb-4">
               <div className="min-w-0">
@@ -1294,8 +1406,10 @@ export function RecordPage() {
                 <span className="sr-only">{selectedAuthor?.srAttribution}</span>
               </div>
               <button
+                ref={detailCloseRef}
                 onClick={closeSelectedRecord}
-                className="press-response w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px]"
+                disabled={detailBusy}
+                className="press-response w-10 h-10 flex items-center justify-center rounded-full bg-muted text-muted-foreground min-w-[44px] min-h-[44px] disabled:opacity-50"
                 aria-label="닫기"
               >
                 ✕
@@ -1313,6 +1427,8 @@ export function RecordPage() {
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
+                      if (detailSaveInFlightRef.current) return;
+                      detailSaveInFlightRef.current = true;
                       setIsSaving(true);
                       try {
                         const result = await deleteRecord(selectedRecord.id);
@@ -1325,18 +1441,21 @@ export function RecordPage() {
                           toast.error(result.error);
                         }
                       } finally {
+                        detailSaveInFlightRef.current = false;
                         setIsSaving(false);
                         setShowDeleteConfirm(false);
                       }
                     }}
                     disabled={isSaving || isOffline}
-                    className="press-response px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-label disabled:opacity-50"
+                    className="press-response min-h-[44px] px-4 py-2 rounded-lg bg-destructive text-destructive-foreground font-bold text-label disabled:opacity-50"
                   >
                     {isSaving ? '삭제 중...' : '삭제'}
                   </button>
                   <button
+                    ref={deleteCancelRef}
                     onClick={() => setShowDeleteConfirm(false)}
-                    className="press-response px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-label"
+                    disabled={detailBusy}
+                    className="press-response min-h-[44px] px-4 py-2 rounded-lg bg-muted text-muted-foreground font-bold text-label disabled:opacity-50"
                   >
                     취소
                   </button>
@@ -1344,7 +1463,7 @@ export function RecordPage() {
               </div>
             )}
 
-            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="space-y-4">
               {selectedRecord.reaction && (
                 <div className="px-3 py-1.5 rounded-full bg-coral/10 text-coral-strong text-caption font-semibold inline-block">
                   {REACTION_LABELS[selectedRecord.reaction]}
@@ -1354,10 +1473,14 @@ export function RecordPage() {
               {isEditing ? (
                 <div className="space-y-2">
                   <textarea
+                    ref={editTextareaRef}
                     value={editText}
-                    onChange={(e) => setEditText(e.target.value)}
+                    readOnly={isSaving}
+                    onChange={(e) => {
+                      if (!detailSaveInFlightRef.current) setEditText(e.target.value);
+                    }}
                     aria-label="기록 내용 수정"
-                    className="w-full h-32 bg-muted rounded-xl p-3 text-body text-foreground outline-none resize-none placeholder:text-muted-foreground"
+                    className="w-full h-32 bg-muted rounded-xl p-3 text-body text-foreground resize-none placeholder:text-muted-foreground"
                     placeholder="기록 내용을 입력하세요"
                   />
                   {/* Say it before saving, not after: the confirmations were
@@ -1373,7 +1496,8 @@ export function RecordPage() {
                         setIsEditing(false);
                         setEditText('');
                       }}
-                      className="press-response px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-label"
+                      disabled={detailBusy}
+                      className="press-response min-h-[44px] px-3 py-1.5 rounded-lg bg-muted text-muted-foreground font-bold text-label disabled:opacity-50"
                     >
                       취소
                     </button>
@@ -1383,6 +1507,8 @@ export function RecordPage() {
                           toast.error('빈 내용은 저장할 수 없어요.');
                           return;
                         }
+                        if (detailSaveInFlightRef.current) return;
+                        detailSaveInFlightRef.current = true;
                         setIsSaving(true);
                         try {
                           const textChanged = editText.trim() !== (selectedRecord.log || '').trim();
@@ -1404,6 +1530,7 @@ export function RecordPage() {
                             toast.error(result.error);
                           }
                         } finally {
+                          detailSaveInFlightRef.current = false;
                           setIsSaving(false);
                         }
                       }}
@@ -1432,7 +1559,7 @@ export function RecordPage() {
                         : '이 기록을 열 수 없어요. 내용은 그대로 있지만 이 기기의 열쇠로는 읽을 수 없어요.'}
                     </p>
                   ) : (
-                    <p className="text-foreground whitespace-pre-wrap text-body break-keep">
+                    <p className="text-foreground whitespace-pre-wrap text-body break-keep break-words">
                       {selectedRecord.log || '(내용 없음)'}
                     </p>
                   )}
@@ -1483,7 +1610,7 @@ export function RecordPage() {
                             <button
                               type="button"
                               onClick={() => void handleRemoveAttachment(att.path!)}
-                              disabled={isMediaBusy || isOffline}
+                              disabled={detailBusy || isOffline}
                               aria-label={`첨부 ${att.name} 삭제`}
                               className="press-response min-h-[44px] px-3 inline-flex items-center gap-1.5 rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
                             >
@@ -1512,7 +1639,7 @@ export function RecordPage() {
                       <button
                         type="button"
                         onClick={() => mediaInputRef.current?.click()}
-                        disabled={isMediaBusy || isOffline}
+                        disabled={detailBusy || isOffline}
                         className="press-response-row w-full min-h-[44px] rounded-xl border border-dashed border-border text-label font-bold text-muted-foreground disabled:opacity-50"
                       >
                         {isMediaBusy ? '첨부 처리 중...' : '+ 사진 추가'}
@@ -1542,18 +1669,24 @@ export function RecordPage() {
                         toast.error(OFFLINE_READONLY_MESSAGE);
                         return;
                       }
-                      const marked = isMarkedByViewer(
-                        state.talkAboutMarks ?? [], selectedRecord.id, profile.id,
-                      );
-                      const result = marked
-                        ? await unmarkTalkAbout(selectedRecord.id)
-                        : await markTalkAbout(selectedRecord.id);
-                      if (!result.ok) {
-                        toast.error(result.error || '처리하지 못했어요.');
-                        return;
+                      if (!beginDetailAction()) return;
+                      try {
+                        const marked = isMarkedByViewer(
+                          state.talkAboutMarks ?? [], selectedRecord.id, profile.id,
+                        );
+                        const result = marked
+                          ? await unmarkTalkAbout(selectedRecord.id)
+                          : await markTalkAbout(selectedRecord.id);
+                        if (!result.ok) {
+                          toast.error(result.error || '처리하지 못했어요.');
+                          return;
+                        }
+                        toast.success(marked ? '표시를 해제했어요.' : '이따 이야기할 것으로 표시했어요.');
+                      } finally {
+                        finishDetailAction();
                       }
-                      toast.success(marked ? '표시를 해제했어요.' : '이따 이야기할 것으로 표시했어요.');
                     }}
+                    disabled={detailBusy || isOffline}
                     aria-pressed={isMarkedByViewer(state.talkAboutMarks ?? [], selectedRecord.id, profile.id)}
                     className={cn(
                       'press-response-row w-full flex items-center justify-center gap-1.5 px-4 min-h-[44px] rounded-lg font-bold text-label',
@@ -1601,15 +1734,20 @@ export function RecordPage() {
                   <RecordMoodSection
                     items={selectedRecord.emotionFlow ?? []}
                     suggested={openedRecordSuggestion}
-                    disabled={isOffline}
-                    disabledReason={OFFLINE_READONLY_MESSAGE}
+                    disabled={detailBusy || isOffline}
+                    disabledReason={detailBusy ? '다른 변경을 저장하고 있어요.' : OFFLINE_READONLY_MESSAGE}
                     onChange={async (emotionFlow) => {
-                      const result = await updateRecord(selectedRecord.id, {
-                        emotionFlow,
-                        emotionUpdatedAt: new Date().toISOString(),
-                      });
-                      if (!result.ok) toast.error(result.error || '마음을 바꾸지 못했어요.');
-                      return result.ok;
+                      if (!beginDetailAction()) return false;
+                      try {
+                        const result = await updateRecord(selectedRecord.id, {
+                          emotionFlow,
+                          emotionUpdatedAt: new Date().toISOString(),
+                        });
+                        if (!result.ok) toast.error(result.error || '마음을 바꾸지 못했어요.');
+                        return result.ok;
+                      } finally {
+                        finishDetailAction();
+                      }
                     }}
                   />
                 </div>
@@ -1630,18 +1768,22 @@ export function RecordPage() {
                 <div className="flex gap-2 pt-2 border-t border-border">
                   {!selectedRecord.contentUnavailable && (
                     <button
+                      ref={editButtonRef}
                       onClick={() => {
                         setEditText(selectedRecord.log || '');
                         setIsEditing(true);
                       }}
-                      className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label"
+                      disabled={detailBusy}
+                      className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-muted text-foreground font-bold text-label disabled:opacity-50"
                     >
                       <Pencil size={13} /> 수정
                     </button>
                   )}
                   <button
+                    ref={deleteButtonRef}
                     onClick={() => setShowDeleteConfirm(true)}
-                    className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label"
+                    disabled={detailBusy}
+                    className="press-response flex items-center justify-center gap-1.5 px-4 min-h-[44px] min-w-[44px] rounded-lg bg-destructive/10 text-destructive font-bold text-label disabled:opacity-50"
                   >
                     <Trash2 size={13} /> 삭제
                   </button>

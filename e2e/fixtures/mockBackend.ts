@@ -29,6 +29,10 @@ export type Scenario = {
   userId: string;
   displayName: string;
   role: 'gomsin' | 'soldier';
+  /** Product mode stored on the couple row. Legacy scenarios remain military. */
+  relationshipContext?: 'military' | 'general';
+  /** Optional, owner-only profile identity. It never controls authorization. */
+  genderIdentity?: 'woman' | 'man';
   coupleId: string | null;
   /** Whether `get_partner_profile` returns a partner (drives connected vs pending). */
   partnerPresent: boolean;
@@ -78,6 +82,12 @@ export type Scenario = {
   newAccount?: boolean;
   /** Server verdict for `create_couple_and_invitation`. */
   createCoupleId?: string;
+  /**
+   * Authorized 090 photo-rendition rows. The mock only returns rows belonging
+   * to a record the active scenario may read; it never treats a supplied id as
+   * authorization by itself.
+   */
+  photoMetadata?: RecordPhotoMetadataRow[];
 };
 
 /**
@@ -105,6 +115,86 @@ export type RecordRow = {
   emotion_updated_at?: string | null;
   created_at?: string;
 };
+
+/** Exact JSON shape returned by 090's get_record_photo_metadata RPC. */
+export type RecordPhotoMetadataRow = {
+  record_id: string;
+  media_id: string;
+  source_revision: string;
+  screen_master: {
+    media_object_id: string;
+    width_px: number;
+    height_px: number;
+    byte_size: number;
+    sha256: string;
+    mime_type: 'image/jpeg';
+  };
+  thumbnail: {
+    media_object_id: string;
+    width_px: number;
+    height_px: number;
+    byte_size: number;
+    sha256: string;
+    mime_type: 'image/jpeg';
+  };
+};
+
+type MockRecordState = {
+  ownerUserId: string;
+  coupleId: string;
+  contentRevision: number;
+};
+
+type MockMediaMutation = {
+  operationId: string;
+  kind: 'media' | 'photo';
+  recordId: string;
+  ownerUserId: string;
+  coupleId: string;
+  baseContentRevision: number;
+  targetContentRevision: number;
+  existingPaths: string[];
+  newObjectIds: string[];
+  desiredObjectCount: number;
+  state: 'pending' | 'committed' | 'abandoned';
+};
+
+function nonEmptyDistinctStrings(value: unknown, max: number): string[] | null {
+  if (!Array.isArray(value) || value.length > max || value.some((item) => typeof item !== 'string' || item.length === 0)) {
+    return null;
+  }
+  const values = value as string[];
+  return new Set(values).size === values.length ? values : null;
+}
+
+function validatedPhotoObjectIds(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length > 32) return null;
+  const objectIds: string[] = [];
+  for (const photo of value) {
+    if (!photo || typeof photo !== 'object' || Array.isArray(photo)) return null;
+    const candidate = photo as Record<string, unknown>;
+    const master = candidate.screen_master;
+    const thumbnail = candidate.thumbnail;
+    if (
+      !master || typeof master !== 'object' || Array.isArray(master)
+      || !thumbnail || typeof thumbnail !== 'object' || Array.isArray(thumbnail)
+    ) return null;
+    const masterId = (master as Record<string, unknown>).media_object_id;
+    const thumbnailId = (thumbnail as Record<string, unknown>).media_object_id;
+    if (
+      typeof masterId !== 'string' || masterId.length === 0
+      || typeof thumbnailId !== 'string' || thumbnailId.length === 0
+    ) return null;
+    objectIds.push(masterId, thumbnailId);
+  }
+  return objectIds.length === value.length * 2 && new Set(objectIds).size === objectIds.length
+    ? objectIds
+    : null;
+}
+
+function sameStringList(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
 
 /**
  * The path a signed-URL stub must return.
@@ -194,41 +284,92 @@ function authUser(scenario: Scenario) {
  * "Subscribed" frame supabase-realtime v2 waits for before reporting SUBSCRIBED,
  * heartbeats, and `access_token` refreshes. No row-level events are pushed.
  */
+type PhoenixWireMessage = {
+  format: 'array' | 'object';
+  joinRef: string | null;
+  ref: string | null;
+  topic: string;
+  event: string;
+  payload: Record<string, unknown>;
+};
+
+function decodePhoenixMessage(raw: unknown): PhoenixWireMessage | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(String(raw));
+  } catch {
+    return null;
+  }
+
+  if (Array.isArray(parsed)) {
+    const [joinRef, ref, topic, event, payload] = parsed;
+    if (typeof topic !== 'string' || typeof event !== 'string') return null;
+    return {
+      format: 'array',
+      joinRef: typeof joinRef === 'string' ? joinRef : null,
+      ref: typeof ref === 'string' ? ref : null,
+      topic,
+      event,
+      payload: payload && typeof payload === 'object' ? payload as Record<string, unknown> : {},
+    };
+  }
+
+  if (!parsed || typeof parsed !== 'object') return null;
+  const message = parsed as Record<string, unknown>;
+  if (typeof message.topic !== 'string' || typeof message.event !== 'string') return null;
+  return {
+    format: 'object',
+    joinRef: typeof message.join_ref === 'string' ? message.join_ref : null,
+    ref: typeof message.ref === 'string' ? message.ref : null,
+    topic: message.topic,
+    event: message.event,
+    payload: message.payload && typeof message.payload === 'object'
+      ? message.payload as Record<string, unknown>
+      : {},
+  };
+}
+
+function encodePhoenixMessage(
+  source: PhoenixWireMessage,
+  event: string,
+  payload: Record<string, unknown>,
+  topic = source.topic,
+  ref = source.ref,
+): string {
+  if (source.format === 'array') {
+    return JSON.stringify([source.joinRef, ref, topic, event, payload]);
+  }
+  return JSON.stringify({
+    join_ref: source.joinRef,
+    ref,
+    topic,
+    event,
+    payload,
+  });
+}
+
 export async function installMockRealtime(context: BrowserContext): Promise<void> {
   await context.routeWebSocket(/\/realtime\/v1\/websocket/, (ws) => {
     ws.onMessage((raw) => {
-      let message: { topic?: string; event?: string; ref?: string | null };
-      try {
-        message = JSON.parse(String(raw));
-      } catch {
-        return;
-      }
+      const message = decodePhoenixMessage(raw);
+      if (!message) return;
       const { topic, event, ref } = message;
-      const ok = (overrideTopic?: string) =>
-        ws.send(
-          JSON.stringify({
-            topic: overrideTopic ?? topic,
-            event: 'phx_reply',
-            payload: { status: 'ok', response: {} },
-            ref: ref ?? null,
-          }),
-        );
+      const ok = (overrideTopic?: string) => ws.send(encodePhoenixMessage(
+        message,
+        'phx_reply',
+        { status: 'ok', response: {} },
+        overrideTopic ?? topic,
+        ref,
+      ));
 
       if (event === 'heartbeat') return ok('phoenix');
       if (event === 'phx_join') {
         ok();
-        ws.send(
-          JSON.stringify({
-            topic,
-            event: 'system',
-            payload: {
-              status: 'ok',
-              extension: 'postgres_changes',
-              message: 'Subscribed to PostgreSQL',
-            },
-            ref: null,
-          }),
-        );
+        ws.send(encodePhoenixMessage(message, 'system', {
+          status: 'ok',
+          extension: 'postgres_changes',
+          message: 'Subscribed to PostgreSQL',
+        }, topic, null));
         return;
       }
       if (event === 'access_token' || event === 'phx_leave') return ok();
@@ -238,10 +379,30 @@ export async function installMockRealtime(context: BrowserContext): Promise<void
 
 export async function installMockBackend(
   context: BrowserContext,
-  scenario: Scenario
+  scenario: Scenario,
+  options: { theme?: 'light' | 'dark' } = {},
 ): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const unrouted: string[] = [];
   const dailyRecordWrites: Array<Record<string, unknown>> = [];
+  const records = new Map<string, MockRecordState>((scenario.records ?? []).map((record) => [
+    record.id,
+    {
+      ownerUserId: record.user_id,
+      coupleId: record.couple_id,
+      contentRevision: 1,
+    },
+  ]));
+  const mediaMutations = new Map<string, MockMediaMutation>();
+  let redeemedState: {
+    coupleId: string;
+    relationshipContext: 'military' | 'general';
+  } | null = null;
+  let cycleConsent = {
+    granted: false,
+    revision: 0,
+    grantedAt: null as string | null,
+    revokedAt: null as string | null,
+  };
   await installMockRealtime(context);
 
   // Seed the session BEFORE any app script runs, so the very first
@@ -261,7 +422,7 @@ export async function installMockBackend(
       AUTH_STORAGE_KEY,
       seededSession(scenario),
       'gomsinlog.state.v2',
-      { hasSeenInstallPrompt: true, theme: 'light', widgetLayout: ['today_word', 'dday'] },
+      { hasSeenInstallPrompt: true, theme: options.theme ?? 'light', widgetLayout: ['today_word', 'dday'] },
     ] as const,
   );
 
@@ -308,6 +469,7 @@ export async function installMockBackend(
           id: scenario.userId,
           display_name: scenario.displayName,
           role: scenario.role,
+          gender_identity: scenario.genderIdentity ?? null,
           avatar_path: null,
           onboarding_completed_at: '2026-01-02T00:00:00Z',
           military_info: {
@@ -363,6 +525,7 @@ export async function installMockBackend(
       return rows(route, [
         {
           id: scenario.coupleId,
+          relationship_context: scenario.relationshipContext ?? 'military',
           anniversary_date: scenario.anniversaryDate ?? '2025-01-01',
           created_at: '2026-01-01T00:00:00Z',
         },
@@ -384,24 +547,75 @@ export async function installMockBackend(
     if (path === '/rest/v1/daily_records') {
       const failure = failureFor(scenario, 'daily_records');
       if (failure) return json(route, failure, failure.status);
-      if (method === 'GET') return rows(route, scenario.records ?? []);
+      if (method === 'GET') {
+        // Browser scenarios intentionally stay far below the production page
+        // cap. Once the client supplies its keyset cursor, therefore, the
+        // faithful next page is empty. Returning the same fixture rows forever
+        // turns a healthy complete-read loop into a mock-only non-advancing
+        // cursor failure.
+        if (url.searchParams.has('or')) return rows(route, []);
+        return rows(route, scenario.records ?? []);
+      }
       // Writes echo the payload back, as PostgREST does with `return=representation`.
       const body = request.postDataJSON();
       const payloads = Array.isArray(body) ? body : [body];
       if (method !== 'GET') {
         // Test-only observation: prove that a connected protection-required
         // save never reaches a plaintext daily_records write.
-        for (const p of payloads) dailyRecordWrites.push(p);
+        for (const p of payloads) {
+          dailyRecordWrites.push(p);
+          if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+          const payload = p as Record<string, unknown>;
+          const recordId = typeof payload.id === 'string' ? payload.id : null;
+          const ownerUserId = typeof payload.user_id === 'string' ? payload.user_id : scenario.userId;
+          const coupleId = typeof payload.couple_id === 'string' ? payload.couple_id : scenario.coupleId;
+          if (!recordId || !coupleId) continue;
+          const operationId = typeof payload.last_media_operation_id === 'string'
+            ? payload.last_media_operation_id
+            : null;
+          const mutation = operationId ? mediaMutations.get(operationId) : undefined;
+          if (mutation) {
+            // The daily_records commit trigger accepts only the operation that
+            // reserved this exact owner/couple/record revision. A mismatched
+            // operation must not be confirmed by the fixture.
+            if (
+              mutation.state === 'pending'
+              && mutation.recordId === recordId
+              && mutation.ownerUserId === ownerUserId
+              && mutation.coupleId === coupleId
+            ) {
+              mutation.state = 'committed';
+              records.set(recordId, {
+                ownerUserId,
+                coupleId,
+                contentRevision: mutation.targetContentRevision,
+              });
+            }
+            continue;
+          }
+          const previous = records.get(recordId);
+          const revision = Number(payload.content_revision);
+          records.set(recordId, {
+            ownerUserId,
+            coupleId,
+            contentRevision: Number.isSafeInteger(revision) && revision >= 1
+              ? revision
+              : previous?.contentRevision ?? 1,
+          });
+        }
       }
       // Migration 032 supplies this server-side DEFAULT for legacy plaintext
       // inserts, and saveRecordToDB selects it to pin the next CAS revision.
-      return rows(route, payloads.map((payload) => ({
-        ...payload,
-        content_revision: Number.isSafeInteger(payload?.content_revision)
-          && payload.content_revision >= 1
-          ? payload.content_revision
-          : 1,
-      })));
+      return rows(route, payloads.map((payload) => {
+        const recordId = payload && typeof payload === 'object' && !Array.isArray(payload)
+          && typeof (payload as Record<string, unknown>).id === 'string'
+          ? (payload as Record<string, unknown>).id as string
+          : undefined;
+        return {
+          ...payload,
+          content_revision: recordId ? records.get(recordId)?.contentRevision ?? 1 : 1,
+        };
+      }));
     }
 
     /*
@@ -425,13 +639,22 @@ export async function installMockBackend(
       test to assert on delivery bookkeeping instead of on what the person sees.
     */
     if (path === '/rest/v1/rpc/clear_my_unseen') return json(route, null);
+    // Store bootstrap checks the authenticated user's server-side deletion
+    // fence before hydrating any ordinary product data. Healthy scenarios have
+    // no pending deletion, so model the real scalar RPC response explicitly;
+    // leaving it unrouted turns every unrelated UI flow into a recovery error.
+    if (path === '/rest/v1/rpc/is_my_account_deletion_pending') return json(route, false);
     // Push is disabled by default in the active product. A connected account may
     // still carry a token registered by an older build, so the client revokes it
     // once while the authenticated session is valid. The browser fixture accepts
     // and discards that hygiene RPC just like the unseen-flag cleanup above.
     if (path === '/rest/v1/rpc/revoke_my_push_tokens') return json(route, null);
     if (path === '/rest/v1/events') return rows(route, scenario.events ?? []);
-    if (path === '/rest/v1/couple_tasks') return rows(route, scenario.coupleTasks ?? []);
+    if (path === '/rest/v1/couple_tasks') {
+      const failure = failureFor(scenario, 'couple_tasks');
+      if (failure) return json(route, failure, failure.status);
+      return rows(route, scenario.coupleTasks ?? []);
+    }
     if (path === '/rest/v1/trips') return rows(route, scenario.trips ?? []);
     // Migration 058 is additive to the full-state hydration path. Keep the
     // browser fixture additive too: an empty highlight workspace is a valid
@@ -468,20 +691,211 @@ export async function installMockBackend(
         ...payload,
       }]);
     }
+    if (path === '/rest/v1/cycle_sharing_preferences') {
+      if (method === 'GET') return rows(route, []);
+      const body = request.postDataJSON();
+      const payload = (Array.isArray(body) ? body[0] : body) as Record<string, unknown>;
+      return rows(route, [{
+        user_id: payload.user_id,
+        share_current_period: false,
+        share_prediction_window: false,
+        share_fertility_window: false,
+      }]);
+    }
     if (
       path === '/rest/v1/cycle_settings'
       || path === '/rest/v1/cycle_entries'
       // V3 owner-only tables.
       || path === '/rest/v1/cycle_periods'
       || path === '/rest/v1/cycle_daily_logs'
-      || path === '/rest/v1/cycle_sharing_preferences'
-      || path === '/rest/v1/user_sensitive_consents'
     ) {
       return rows(route, []);
+    }
+    if (path === '/rest/v1/user_sensitive_consents') {
+      if (method !== 'GET' || cycleConsent.revision === 0) return rows(route, []);
+      return rows(route, [{
+        version: '2026-08-09',
+        granted_at: cycleConsent.grantedAt,
+        revoked_at: cycleConsent.revokedAt,
+        revision: cycleConsent.revision,
+      }]);
     }
     if (path === '/rest/v1/cycle_support_signals') return rows(route, []);
 
     // ---- RPCs ------------------------------------------------------------
+    if (
+      (path === '/rest/v1/rpc/begin_record_media_mutation'
+        || path === '/rest/v1/rpc/begin_record_photo_mutation')
+      && method === 'POST'
+    ) {
+      const body = request.postDataJSON() as Record<string, unknown> | null;
+      const operationId = typeof body?.p_operation_id === 'string' ? body.p_operation_id : null;
+      const recordId = typeof body?.p_record_id === 'string' ? body.p_record_id : null;
+      const ownerUserId = typeof body?.p_expected_user_id === 'string' ? body.p_expected_user_id : null;
+      const coupleId = typeof body?.p_expected_couple_id === 'string' ? body.p_expected_couple_id : null;
+      const baseContentRevision = Number(body?.p_base_content_revision);
+      const targetContentRevision = Number(body?.p_target_content_revision);
+      const existingPaths = nonEmptyDistinctStrings(body?.p_existing_paths, 64);
+      const isPhotoMutation = path.endsWith('/begin_record_photo_mutation');
+      const newMediaIds = isPhotoMutation ? null : nonEmptyDistinctStrings(body?.p_new_media_ids, 32);
+      const newPhotos = isPhotoMutation ? body?.p_new_photos : null;
+      const photoObjectIds = isPhotoMutation ? validatedPhotoObjectIds(newPhotos) : null;
+      const suppliedMediaIds = isPhotoMutation ? photoObjectIds : newMediaIds;
+      const storedRecord = recordId ? records.get(recordId) : undefined;
+      if (
+        !operationId
+        || !recordId
+        || ownerUserId !== scenario.userId
+        || coupleId !== scenario.coupleId
+        || !storedRecord
+        || storedRecord.ownerUserId !== ownerUserId
+        || storedRecord.coupleId !== coupleId
+        || !Number.isSafeInteger(baseContentRevision)
+        || baseContentRevision < 1
+        || targetContentRevision !== baseContentRevision + 1
+        || !existingPaths
+        || !suppliedMediaIds
+        || suppliedMediaIds.length + existingPaths.length > (isPhotoMutation ? 64 : 32)
+        || new Set(suppliedMediaIds).size !== suppliedMediaIds.length
+      ) return json(route, { state: 'unavailable' });
+
+      const existing = mediaMutations.get(operationId);
+      if (existing) {
+        if (
+          existing.kind !== (isPhotoMutation ? 'photo' : 'media')
+          ||
+          existing.recordId !== recordId
+          || existing.ownerUserId !== ownerUserId
+          || existing.coupleId !== coupleId
+          || existing.baseContentRevision !== baseContentRevision
+          || existing.targetContentRevision !== targetContentRevision
+          || !sameStringList(existing.existingPaths, existingPaths)
+          || !sameStringList(existing.newObjectIds, suppliedMediaIds)
+          || existing.desiredObjectCount !== existingPaths.length + suppliedMediaIds.length
+        ) return json(route, { state: 'unavailable' });
+        return json(route, {
+          operation_id: operationId,
+          state: existing.state,
+          base_content_revision: existing.baseContentRevision,
+          target_content_revision: existing.targetContentRevision,
+          desired_object_count: existing.desiredObjectCount,
+        });
+      }
+      if (
+        storedRecord.contentRevision !== baseContentRevision
+        || Array.from(mediaMutations.values()).some((mutation) => (
+          mutation.recordId === recordId && mutation.state === 'pending'
+        ))
+      ) return json(route, { state: 'unavailable' });
+
+      const mutation: MockMediaMutation = {
+        operationId,
+        kind: isPhotoMutation ? 'photo' : 'media',
+        recordId,
+        ownerUserId,
+        coupleId,
+        baseContentRevision,
+        targetContentRevision,
+        existingPaths: [...existingPaths],
+        newObjectIds: [...suppliedMediaIds],
+        desiredObjectCount: existingPaths.length + suppliedMediaIds.length,
+        state: 'pending',
+      };
+      mediaMutations.set(operationId, mutation);
+      return json(route, {
+        operation_id: operationId,
+        state: mutation.state,
+        base_content_revision: mutation.baseContentRevision,
+        target_content_revision: mutation.targetContentRevision,
+        desired_object_count: mutation.desiredObjectCount,
+      });
+    }
+
+    if (path === '/rest/v1/rpc/record_media_mutation_status' && method === 'POST') {
+      const body = request.postDataJSON() as Record<string, unknown> | null;
+      const operationId = typeof body?.p_operation_id === 'string' ? body.p_operation_id : null;
+      const mutation = operationId ? mediaMutations.get(operationId) : undefined;
+      if (
+        !mutation
+        || body?.p_record_id !== mutation.recordId
+        || body?.p_expected_user_id !== scenario.userId
+        || body?.p_expected_couple_id !== mutation.coupleId
+      ) return json(route, { state: 'unavailable' });
+      return json(route, {
+        operation_id: mutation.operationId,
+        state: mutation.state,
+        base_content_revision: mutation.baseContentRevision,
+        target_content_revision: mutation.targetContentRevision,
+        desired_object_count: mutation.desiredObjectCount,
+      });
+    }
+
+    if (path === '/rest/v1/rpc/abandon_record_media_mutation' && method === 'POST') {
+      const body = request.postDataJSON() as Record<string, unknown> | null;
+      const operationId = typeof body?.p_operation_id === 'string' ? body.p_operation_id : null;
+      const mutation = operationId ? mediaMutations.get(operationId) : undefined;
+      if (
+        !mutation
+        || body?.p_record_id !== mutation.recordId
+        || body?.p_expected_user_id !== scenario.userId
+        || body?.p_expected_couple_id !== mutation.coupleId
+      ) return json(route, { state: 'unavailable' });
+      if (mutation.state === 'pending') mutation.state = 'abandoned';
+      return json(route, {
+        operation_id: mutation.operationId,
+        state: mutation.state,
+        base_content_revision: mutation.baseContentRevision,
+        target_content_revision: mutation.targetContentRevision,
+        desired_object_count: mutation.desiredObjectCount,
+      });
+    }
+
+    if (path === '/rest/v1/rpc/get_record_photo_metadata' && method === 'POST') {
+      const failure = failureFor(scenario, 'get_record_photo_metadata');
+      if (failure) return json(route, failure, failure.status);
+      // The default fixture has legacy attachment paths and does not seed 090
+      // metadata. Report the exact missing-RPC contract so the real client
+      // takes its deliberately narrow legacy fallback, rather than treating an
+      // empty read as proof that the optional API is deployed.
+      if (scenario.photoMetadata === undefined) {
+        return json(route, {
+          code: 'PGRST202',
+          message: 'Could not find the function public.get_record_photo_metadata(p_record_ids) in the schema cache',
+        }, 404);
+      }
+      const body = request.postDataJSON() as { p_record_ids?: unknown } | null;
+      const recordIds = body?.p_record_ids;
+      if (
+        !Array.isArray(recordIds)
+        || recordIds.length > 100
+        || recordIds.some((id) => typeof id !== 'string' || id.length === 0)
+        || new Set(recordIds).size !== recordIds.length
+      ) {
+        return json(route, { code: '22023', message: 'photo_metadata_invalid' }, 400);
+      }
+
+      // Narrow fixture analogue of 090's read predicate: a scenario's caller
+      // is its active member, and its only active partner is the explicit
+      // `partnerUserId` while `partnerPresent` is true. This rejects a third
+      // same-couple author rather than treating couple membership alone as
+      // visibility. It does not model every SQL predicate (closed couples,
+      // deletion fences, cipher/media ledger, or Storage); this mock is not
+      // evidence of RLS authorization.
+      const activePartnerId = scenario.partnerPresent ? scenario.partnerUserId : undefined;
+      const readableRecordIds = new Set((scenario.records ?? [])
+        .filter((record) => (
+          record.couple_id === scenario.coupleId
+          && (
+            record.user_id === scenario.userId
+            || (record.user_id === activePartnerId && !record.is_private)
+          )
+        ))
+        .map((record) => record.id));
+      return json(route, scenario.photoMetadata.filter((metadata) => (
+        recordIds.includes(metadata.record_id) && readableRecordIds.has(metadata.record_id)
+      )));
+    }
+
     if (path === '/rest/v1/rpc/get_partner_profile_with_username') {
       const failure = failureFor(scenario, 'get_partner_profile_with_username');
       if (failure) return json(route, failure, failure.status);
@@ -556,28 +970,75 @@ export async function installMockBackend(
       }]);
     }
 
+    if (path === '/rest/v1/rpc/grant_cycle_sensitive_consent') {
+      const failure = failureFor(scenario, 'grant_cycle_sensitive_consent');
+      if (failure) return json(route, failure, failure.status);
+      const payload = request.postDataJSON() as { p_expected_revision?: unknown };
+      const expectedRevision = Number(payload?.p_expected_revision);
+      if (expectedRevision !== cycleConsent.revision) {
+        return rows(route, [{
+          applied: false,
+          granted: cycleConsent.granted,
+          revision: cycleConsent.revision,
+        }]);
+      }
+      cycleConsent = {
+        granted: true,
+        revision: cycleConsent.revision + 1,
+        grantedAt: new Date().toISOString(),
+        revokedAt: null,
+      };
+      return rows(route, [{
+        applied: true,
+        granted: true,
+        revision: cycleConsent.revision,
+      }]);
+    }
+
+    if (path === '/rest/v1/rpc/revoke_cycle_sensitive_consent') {
+      const failure = failureFor(scenario, 'revoke_cycle_sensitive_consent');
+      if (failure) return json(route, failure, failure.status);
+      cycleConsent = {
+        granted: false,
+        revision: cycleConsent.revision + 1,
+        grantedAt: cycleConsent.grantedAt ?? new Date().toISOString(),
+        revokedAt: new Date().toISOString(),
+      };
+      return rows(route, [{
+        applied: true,
+        granted: false,
+        revision: cycleConsent.revision,
+      }]);
+    }
+
     if (path === '/rest/v1/rpc/get_my_active_couple_id') {
-      return json(route, scenario.coupleId);
+      return json(route, redeemedState?.coupleId ?? scenario.coupleId);
     }
 
     if (path === '/rest/v1/rpc/get_my_couple_state') {
       const failure = failureFor(scenario, 'get_my_couple_state');
       if (failure) return json(route, failure, failure.status);
+      const effectiveCoupleId = redeemedState?.coupleId ?? scenario.coupleId;
       // `parseRemoteCoupleState` rejects an array outright (coupleLifecycle.ts:47),
       // so this RPC must answer with a bare object the way a `RETURNS TABLE`
       // single-row function does through PostgREST's object accept header.
       return json(route, {
-        couple_id: scenario.coupleId,
-        role: scenario.role,
-        member_status: scenario.coupleId ? 'active' : null,
-        partner_present: scenario.partnerPresent,
-        invitation_active: scenario.invitationActive ?? !scenario.partnerPresent,
+        couple_id: effectiveCoupleId,
+        relationship_context:
+          redeemedState?.relationshipContext ?? scenario.relationshipContext ?? 'military',
+        role: redeemedState ? 'soldier' : scenario.role,
+        member_status: effectiveCoupleId ? 'active' : null,
+        partner_present: redeemedState ? true : scenario.partnerPresent,
+        invitation_active: redeemedState
+          ? false
+          : scenario.invitationActive ?? !scenario.partnerPresent,
         invitation_expires_at:
           scenario.invitationExpiresAt ?? new Date(Date.now() + 86_400_000).toISOString(),
       });
     }
 
-    if (path === '/rest/v1/rpc/redeem_invitation') {
+    if (path === '/rest/v1/rpc/redeem_invitation'
+      || path === '/rest/v1/rpc/redeem_invitation_v2') {
       // `redeem_invitation` is `RETURNS JSONB` (015:100) and the client parser
       // rejects an array outright, so this must be a BARE object. Wrapping it in
       // an array makes the app say "migration 015 is required", which is correct
@@ -590,6 +1051,14 @@ export async function installMockBackend(
       if (!verdict) {
         return json(route, { ok: false, error_code: 'invalid_or_expired', couple_id: null });
       }
+      if (verdict.ok) {
+        redeemedState = {
+          coupleId: verdict.coupleId,
+          // This is independent server state, not an echo of the caller's
+          // expectation. A wrong client expectation must still fail closed.
+          relationshipContext: scenario.relationshipContext ?? 'military',
+        };
+      }
       return json(
         route,
         verdict.ok
@@ -598,7 +1067,8 @@ export async function installMockBackend(
       );
     }
 
-    if (path === '/rest/v1/rpc/create_couple_and_invitation') {
+    if (path === '/rest/v1/rpc/create_couple_and_invitation'
+      || path === '/rest/v1/rpc/create_couple_and_invitation_v2') {
       const failure = failureFor(scenario, 'create_couple_and_invitation');
       if (failure) return json(route, failure, failure.status);
       return json(route, scenario.createCoupleId ?? 'couple-created-by-e2e');

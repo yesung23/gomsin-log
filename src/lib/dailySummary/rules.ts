@@ -1,6 +1,10 @@
 import type { DailyRecord } from '@/types';
 import { momentSummaryText, type StoryCard } from '@/features/story/storyProjection';
-import type { DailySummaryLine } from '@/lib/dailySummary/contract';
+import {
+  collapseSummaryText,
+  normalizeDailySummarySource,
+  type DailySummaryLine,
+} from '@/lib/dailySummary/contract';
 
 /**
  * 규칙만으로 만든 요약. **동기적이고, 항상 존재한다.**
@@ -16,12 +20,23 @@ import type { DailySummaryLine } from '@/lib/dailySummary/contract';
 export function deterministicSummaryLines(
   records: readonly DailyRecord[],
 ): DailySummaryLine[] {
-  return records.map((record) => ({
-    recordId: record.id,
-    text: momentSummaryText(record),
-    time: record.time,
-    date: record.date,
-  }));
+  return records.map((record) => {
+    const text = momentSummaryText(record);
+    const body = collapseSummaryText(record.log ?? '');
+    const source = body ? normalizeDailySummarySource(body) : null;
+
+    return {
+      recordId: record.id,
+      text,
+      time: record.time,
+      date: record.date,
+      // 오직 사용자가 쓴 정규화 본문만 모델 경계를 건넌다. 첨부만 있는 기록은 표지에는
+      // deterministic 문장으로 남지만 sourceText=null이므로 그날 모델 호출 전체를 생략한다.
+      sourceText: source?.text ?? null,
+      fullSourceText: source?.fullText ?? null,
+      sourceWasTruncated: source?.wasTruncated ?? false,
+    };
+  });
 }
 
 /**

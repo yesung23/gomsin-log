@@ -49,7 +49,10 @@ export function InstallPromptBanner() {
     if (isNative) return;
 
     // 1. Check if running in Standalone mode
-    const isStandalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+    const isStandalone = (
+      typeof window.matchMedia === 'function'
+      && window.matchMedia('(display-mode: standalone)').matches
+    ) || (navigator as any).standalone === true;
     if (isStandalone) return;
 
     // 2. Check if user already dismissed or hasn't hit the threshold

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const reloadCalls = vi.fn();
 /** Result the mocked `reloadEvents` returns; a test can flip it mid-run. */
@@ -31,6 +31,7 @@ const state = {
       coupleCode: '',
       connected: true,
       status: 'active' as const,
+      relationshipContext: 'military' as 'military' | 'general',
     },
     military: {},
     contact: {},
@@ -65,6 +66,10 @@ vi.mock('@/lib/useStore', () => ({
 }));
 
 const { SchedulePage } = await import('@/pages/SchedulePage');
+
+afterEach(() => {
+  state.profile.couple.relationshipContext = 'military';
+});
 
 /**
  * `일정 추가` 는 글자가 없는 펜 아이콘이다 (2026-08-23).
@@ -122,6 +127,22 @@ function renderSchedulePage() {
   );
 }
 
+describe('SchedulePage general couple presentation', () => {
+  it('새 일정은 데이트로 시작하고 군 전용 면회 유형을 제안하지 않는다', async () => {
+    state.profile.couple.relationshipContext = 'general';
+    setOnLine(true);
+    renderSchedulePage();
+
+    await pickDay();
+
+    const type = screen.getByRole('combobox', { name: '일정 유형' });
+    expect(type).toHaveValue('date');
+    expect(screen.queryByRole('option', { name: '면회' })).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: '데이트' })).toBeInTheDocument();
+    expect(screen.getByLabelText('일정 제목 *')).not.toHaveAttribute('placeholder', expect.stringContaining('면회'));
+  });
+});
+
 describe('SchedulePage loading lifecycle', () => {
   beforeEach(() => {
     reloadResult = { ok: true };
@@ -137,6 +158,75 @@ describe('SchedulePage loading lifecycle', () => {
     await waitFor(() => expect(reloadCalls).toHaveBeenCalledTimes(1));
     await new Promise((resolve) => window.setTimeout(resolve, 20));
     expect(reloadCalls).toHaveBeenCalledTimes(1);
+  });
+
+  it('페이지 제목과 일정 추가를 같은 상단 landmark에서 제공한다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    const pageHeading = screen.getByRole('heading', { name: '우리의 계획', level: 1 });
+    const pageHeader = pageHeading.closest('header');
+    const createButton = await screen.findByRole('button', { name: '일정 추가' });
+
+    expect(pageHeader).not.toBeNull();
+    expect(pageHeader).toContainElement(createButton);
+  });
+
+  it('uses the calendar state itself instead of a persistent instruction paragraph', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await waitFor(() => expect(addEventButton()).toBeEnabled());
+    expect(screen.queryByText(/일정 추가를 누른 뒤 날짜를/)).not.toBeInTheDocument();
+
+    fireEvent.click(addEventButton());
+    expect(screen.getByText('날짜를 골라 주세요')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+  });
+
+  it('선택한 날짜와 다가오는 일정 영역을 제목으로 탐색할 수 있다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await screen.findByRole('button', { name: '일정 추가' });
+
+    expect(screen.getByRole('region', { name: /\d{2}-\d{2} 일정/ })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: '다가오는 일정' })).toBeInTheDocument();
+  });
+
+  it('오늘 날짜를 색과 별개인 달력 의미로 알린다', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+
+    await screen.findByRole('button', { name: '일정 추가' });
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+    expect(screen.getByRole('button', { name: new RegExp(`^${today},`) }))
+      .toHaveAttribute('aria-current', 'date');
+  });
+
+  it('keeps keyboard focus inside the event dialog and restores its opener', async () => {
+    setOnLine(true);
+    renderSchedulePage();
+    const trigger = await screen.findByRole('button', { name: '이 날짜에 추가' });
+    await waitFor(() => expect(trigger).toBeEnabled());
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(await screen.findByLabelText(/일정 제목/)).toHaveFocus();
+    const first = screen.getByRole('button', { name: '닫기' });
+    const last = screen.getByRole('button', { name: '등록하기' });
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(first).toHaveFocus();
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: '새 일정 추가' })).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
   });
 });
 

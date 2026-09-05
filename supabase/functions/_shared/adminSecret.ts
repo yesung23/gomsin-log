@@ -86,9 +86,17 @@ export async function timingSafeEqualSecret(provided: string, expected: string):
 export function createAdminClientFetch(
   supabaseUrl: string,
   secretKey: string,
+  timeoutMs?: number,
 ): (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> {
   const supabaseOrigin = new URL(supabaseUrl).origin;
   const adminBearer = `Bearer ${secretKey}`;
+
+  if (
+    timeoutMs !== undefined &&
+    (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
+  ) {
+    throw new RangeError('Supabase admin request timeout must be a positive integer');
+  }
 
   return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     let targetUrl: URL;
@@ -117,10 +125,35 @@ export function createAdminClientFetch(
         headers.delete('Authorization');
         headers.delete('authorization');
       }
+
+      if (timeoutMs === undefined) {
+        return fetch(input, {
+          ...init,
+          redirect: 'error',
+          headers,
+        });
+      }
+
+      const controller = new AbortController();
+      const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+      const forwardCallerAbort = () => controller.abort(callerSignal?.reason);
+      if (callerSignal?.aborted) {
+        forwardCallerAbort();
+      } else {
+        callerSignal?.addEventListener('abort', forwardCallerAbort, { once: true });
+      }
+      const timeoutId = setTimeout(() => {
+        controller.abort(new DOMException('Supabase admin request timed out', 'TimeoutError'));
+      }, timeoutMs);
+
       return fetch(input, {
         ...init,
         redirect: 'error',
         headers,
+        signal: controller.signal,
+      }).finally(() => {
+        clearTimeout(timeoutId);
+        callerSignal?.removeEventListener('abort', forwardCallerAbort);
       });
     }
 

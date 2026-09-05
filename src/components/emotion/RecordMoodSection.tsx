@@ -243,7 +243,9 @@ export function RecordMoodSection({
               <li key={item.id ?? item.sequence}>
                 <button
                   type="button"
+                  disabled={disabled}
                   onClick={() => {
+                    if (disabled) return;
                     setEditingSequence(item.sequence);
                     setPending(null);
                   }}

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode, type ReactNode } from 'react';
 import type { Attachment } from '@/types';
 
 /**
@@ -36,6 +37,7 @@ const COUPLE = 'couple-1';
 const RECORD = 'rec-1';
 const FIRST = 'https://example.supabase.co/signed/voice?token=first';
 const SECOND = 'https://example.supabase.co/signed/voice?token=second';
+const THUMBNAIL = 'https://example.supabase.co/signed/thumb?token=first';
 
 function attachment(overrides: Partial<Attachment> = {}): Attachment {
   return {
@@ -45,6 +47,37 @@ function attachment(overrides: Partial<Attachment> = {}): Attachment {
     path: `${COUPLE}/${RECORD}/voice.webm`,
     ...overrides,
   };
+}
+
+function photoWithThumbnail(overrides: Partial<Attachment> = {}): Attachment {
+  return attachment({
+    type: 'photo',
+    name: '사진.jpg',
+    path: `${COUPLE}/${RECORD}/33333333-3333-4333-8333-333333333333.jpg`,
+    url: FIRST,
+    photoRendition: {
+      sourceRevision: '55555555-5555-4555-8555-555555555555',
+      screenMaster: {
+        mediaObjectId: '33333333-3333-4333-8333-333333333333',
+        widthPx: 2048,
+        heightPx: 1536,
+        byteSize: 900_000,
+        sha256: 'a'.repeat(64),
+        mimeType: 'image/jpeg',
+      },
+      thumbnail: {
+        mediaObjectId: '44444444-4444-4444-8444-444444444444',
+        widthPx: 640,
+        heightPx: 480,
+        byteSize: 90_000,
+        sha256: 'b'.repeat(64),
+        mimeType: 'image/jpeg',
+        path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+        url: THUMBNAIL,
+      },
+    },
+    ...overrides,
+  });
 }
 
 /*
@@ -59,8 +92,124 @@ function renderOne(att: Attachment = attachment(), coupleId?: string) {
   );
 }
 
+function renderThumbnail(att: Attachment = photoWithThumbnail(), coupleId?: string) {
+  return renderHook(
+    ({ a, c }: { a: Attachment; c: string | undefined }) =>
+      useMediaAttachment(a, c, RECORD, 'thumbnail'),
+    { initialProps: { a: att, c: coupleId } },
+  );
+}
+
 beforeEach(() => {
   resolveAttachmentUrls.mockReset();
+});
+
+describe('the explicit thumbnail variant', () => {
+  it('uses the authorized thumbnail URL while the default variant stays on master', () => {
+    const thumbnail = renderThumbnail(photoWithThumbnail(), COUPLE);
+    const master = renderOne(photoWithThumbnail(), COUPLE);
+
+    expect(thumbnail.result.current.url).toBe(THUMBNAIL);
+    expect(master.result.current.url).toBe(FIRST);
+  });
+
+  it.each([
+    'auth_expired',
+    'forbidden',
+    'not_found',
+    'offline',
+    'unreachable',
+    'server',
+    'unknown',
+  ] as const)('blocks both variants when metadata authority is unavailable: %s', (reason) => {
+    const blocked = photoWithThumbnail({
+      photoMetadataUnavailable: reason,
+      urlUnavailable: reason,
+    });
+    const thumbnail = renderThumbnail(blocked, COUPLE);
+    const master = renderOne(blocked, COUPLE);
+
+    expect(thumbnail.result.current).toMatchObject({ url: undefined, unavailable: reason });
+    expect(master.result.current).toMatchObject({ url: undefined, unavailable: reason });
+    act(() => thumbnail.result.current.reportLoadFailure());
+    act(() => master.result.current.reportLoadFailure());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+  });
+
+  it('does not expose master bytes after a thumbnail transport failure', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      type: 'photo',
+      name: '사진.jpg',
+      path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+      urlUnavailable: 'unreachable',
+    }]);
+    const { result } = renderThumbnail(photoWithThumbnail(), COUPLE);
+
+    act(() => result.current.reportLoadFailure());
+
+    await waitFor(() => expect(result.current.unavailable).toBe('unreachable'));
+    expect(result.current.url).toBeUndefined();
+    expect(resolveAttachmentUrls).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose the master URL after a thumbnail permission denial', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      type: 'photo',
+      name: '사진.jpg',
+      path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+      urlUnavailable: 'forbidden',
+    }]);
+    const { result } = renderThumbnail(photoWithThumbnail(), COUPLE);
+
+    act(() => result.current.reportLoadFailure());
+
+    await waitFor(() => expect(result.current.unavailable).toBe('forbidden'));
+    expect(result.current.url).toBeUndefined();
+  });
+
+  it('rejects a late response from an older source revision', async () => {
+    let finish!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const { result, rerender } = renderThumbnail(photoWithThumbnail(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const newer = photoWithThumbnail({
+      photoRendition: {
+        ...photoWithThumbnail().photoRendition!,
+        sourceRevision: '77777777-7777-4777-8777-777777777777',
+        thumbnail: {
+          ...photoWithThumbnail().photoRendition!.thumbnail,
+          url: 'https://example.test/new-generation-thumbnail',
+        },
+      },
+    });
+
+    rerender({ a: newer, c: COUPLE });
+    await act(async () => finish([{
+      type: 'photo', name: '사진.jpg', path: photoWithThumbnail().photoRendition!.thumbnail.path,
+      url: 'https://example.test/stale-thumbnail',
+    }]));
+
+    expect(result.current.url).toBe('https://example.test/new-generation-thumbnail');
+  });
+
+  it('clears a stale thumbnail on denied refresh and bypasses hook retry', async () => {
+    const { result, rerender } = renderThumbnail(photoWithThumbnail(), COUPLE);
+    expect(result.current.url).toBe(THUMBNAIL);
+
+    rerender({
+      a: photoWithThumbnail({
+        url: undefined,
+        urlUnavailable: 'forbidden',
+        photoRendition: undefined,
+      }),
+      c: COUPLE,
+    });
+
+    expect(result.current.url).toBeUndefined();
+    expect(result.current.unavailable).toBe('forbidden');
+    act(() => result.current.reportLoadFailure());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+  });
 });
 
 describe('an expired signed URL recovers instead of staying broken', () => {
@@ -190,5 +339,83 @@ describe('a fresh fetch supersedes locally recovered state', () => {
 
     await waitFor(() => expect(result.current.unavailable).toBe('forbidden'));
     expect(result.current.url).toBeUndefined();
+  });
+});
+
+describe('late recovery cannot cross a source or authorization boundary', () => {
+  function pendingRecovery() {
+    let complete!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }));
+    return (value: Attachment[]) => act(async () => { complete(value); });
+  }
+
+  it('does not install an earlier photo after the attachment changes', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const next = attachment({ path: `${COUPLE}/${RECORD}/next.jpg`, url: 'https://example.test/next' });
+    rerender({ a: next, c: COUPLE });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBe(next.url);
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not revive a photo denied by a newer authorization result', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    rerender({ a: attachment({ url: undefined, urlUnavailable: 'forbidden' }), c: undefined });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBeUndefined();
+    expect(result.current.unavailable).toBe('forbidden');
+  });
+
+  it('does not overwrite a newer store signature for the same attachment', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const fresh = 'https://example.test/newer-signature';
+    rerender({ a: attachment({ url: fresh }), c: COUPLE });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBe(fresh);
+  });
+
+  it('recovers after StrictMode effect cleanup and setup replay', async () => {
+    resolveAttachmentUrls.mockResolvedValue([attachment({ url: SECOND })]);
+    const { result } = renderHook(() => useMediaAttachment(attachment(), COUPLE, RECORD), {
+      wrapper: ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>,
+    });
+    act(() => result.current.reportLoadFailure());
+    await waitFor(() => expect(result.current.url).toBe(SECOND));
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not let a stale failure clear a newer request in flight', async () => {
+    let failOld!: (error: Error) => void;
+    let finishNew!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((_, reject) => { failOld = reject; }));
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { finishNew = resolve; }));
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const next = attachment({ url: 'https://example.test/next', path: `${COUPLE}/${RECORD}/next.jpg` });
+    rerender({ a: next, c: COUPLE });
+    act(() => result.current.reportLoadFailure());
+    await act(async () => { failOld(new Error('old request failed')); });
+    expect(result.current.url).toBe(next.url);
+    expect(result.current.unavailable).toBeUndefined();
+    expect(result.current.refreshing).toBe(true);
+    await act(async () => { finishNew([{ ...next, url: 'https://example.test/next-fresh' }]); });
+    expect(result.current.url).toBe('https://example.test/next-fresh');
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not reuse a callback retained from a different couple/record', () => {
+    const { result, rerender } = renderHook(({ c, r }) => useMediaAttachment(attachment(), c, r), {
+      initialProps: { c: COUPLE, r: RECORD },
+    });
+    const oldReport = result.current.reportLoadFailure;
+    rerender({ c: 'other-couple', r: 'other-record' });
+    act(() => oldReport());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
   });
 });

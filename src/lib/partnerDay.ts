@@ -663,8 +663,7 @@ export function spansBeforeToday(records: DailyRecord[], todayStr: string): bool
  *
  * `HH:MM` alone is a lie across days — 18:20 reads as this evening whether it was
  * today or last Tuesday. Today stays bare so the ordinary single-day case is not
- * made noisier, and older rows carry the project's date style (`8월 15일`, as in
- * `cyclePartnerMessage.ts`).
+ * made noisier, and older rows carry the project's short Korean date style.
  */
 export function partnerDayDateLabel(date: string, todayStr: string): string | null {
   if (date === todayStr) return null;

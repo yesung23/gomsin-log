@@ -19,8 +19,8 @@ import {
  */
 
 const ITEMS = buildOnDeviceItems([
-  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22' },
-  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22' },
+  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오전에는 시험 준비 과정을 차근차근 길게 정리했어. 오후에는 운동장을 세 바퀴 걸었어.', fullSourceText: '오전에는 시험 준비 과정을 차근차근 길게 정리했어. 오후에는 운동장을 세 바퀴 걸었어.', sourceWasTruncated: false },
+  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '오전에는 점심 이후 계획을 빠뜨리지 않게 길게 적었어. 오후에는 편지를 다시 읽었어.', fullSourceText: '오전에는 점심 이후 계획을 빠뜨리지 않게 길게 적었어. 오후에는 편지를 다시 읽었어.', sourceWasTruncated: false },
 ]);
 
 const platform = vi.hoisted(() => ({ native: false, name: 'web', pluginAvailable: false }));
@@ -62,21 +62,19 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('기본값은 켜짐', () => {
-  it('환경 변수가 없으면 기능은 켜져 있고 플랫폼 게이트만 적용한다', () => {
-    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
-    expect(onDeviceSummaryGate()).toBe('not_ios');
+describe('명시적으로 검증된 빌드에서만 켜짐', () => {
+  it('환경 변수가 없으면 기능은 꺼져 있고 규칙 요약만 유지한다', () => {
+    expect(isOnDeviceDailySummaryEnabled()).toBe(false);
+    expect(onDeviceSummaryGate()).toBe('disabled');
   });
 
-  it("명시적 'false'만 끄고 그 외 값은 기본 ON으로 취급한다", () => {
-    for (const value of ['false', 'FALSE', '0', 'off']) {
+  it("정확한 'true'만 켜고 그 외 값은 모두 닫힌다", () => {
+    for (const value of ['false', 'FALSE', '0', 'off', 'TRUE', '1', 'yes', '']) {
       vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
       expect(isOnDeviceDailySummaryEnabled()).toBe(false);
     }
-    for (const value of ['true', 'TRUE', '1', 'yes', '']) {
-      vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', value);
-      expect(isOnDeviceDailySummaryEnabled()).toBe(true);
-    }
+    vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+    expect(isOnDeviceDailySummaryEnabled()).toBe(true);
   });
 
   it('명시적으로 꺼져 있으면 플러그인을 부르지 않는다', async () => {
@@ -97,47 +95,66 @@ describe('iOS 네이티브가 아니면 시도하지 않는다', () => {
   });
 
   it('웹', async () => {
-    expect(onDeviceSummaryGate()).toBe('not_ios');
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'not_ios' });
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    expect(onDeviceSummaryGate()).toBe('platform_unsupported');
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'platform_unsupported' });
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
   it('Android -- 이 기능에는 Android 구현이 없다', async () => {
     platform.native = true;
     platform.name = 'android';
     platform.pluginAvailable = true;
-    expect(onDeviceSummaryGate()).toBe('not_ios');
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'not_ios' });
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    expect(onDeviceSummaryGate()).toBe('platform_unsupported');
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'platform_unsupported' });
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
   });
 
   it('iOS인데 플러그인이 등록되지 않았다', async () => {
     platform.native = true;
     platform.name = 'ios';
     platform.pluginAvailable = false;
-    expect(onDeviceSummaryGate()).toBe('plugin_missing');
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'plugin_missing' });
+    expect(onDeviceSummaryGate()).toBe('platform_unsupported');
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'platform_unsupported' });
   });
 });
 
 describe('플러그인이 있어도 답을 믿기 전에 게이트가 있다', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+    platform.native = true;
+    platform.name = 'ios';
+    platform.pluginAvailable = true;
   });
 
-  it('모델이 미지원이면 규칙 결과로 되돌아간다', async () => {
-    const plugin = stubPlugin({
-      availability: vi.fn(async () => ({ available: false, reason: 'model_unavailable' })),
-    });
-    __setOnDeviceSummaryPluginForTests(plugin);
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'unsupported' });
-    expect(plugin.refineLines).not.toHaveBeenCalled();
-  });
+  it.each([
+    'device_not_eligible',
+    'apple_intelligence_disabled',
+    'model_not_ready',
+    'locale_unsupported',
+  ] as const)(
+    'Foundation Models 가용성 사유를 콘텐츠 없이 구분한다: %s',
+    async (reason) => {
+      const plugin = stubPlugin({
+        availability: vi.fn(async () => ({ available: false, reason })),
+      });
+      __setOnDeviceSummaryPluginForTests(plugin);
+      expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason });
+      expect(plugin.refineLines).not.toHaveBeenCalled();
+    },
+  );
 
-  it('로케일이 미지원이어도 같다', async () => {
+  it('알 수 없는 availability 문자열은 화면에 전달하지 않고 platform unsupported로 닫는다', async () => {
     const plugin = stubPlugin({
-      availability: vi.fn(async () => ({ available: false, reason: 'locale_unsupported' })),
+      availability: vi.fn(async () => ({ available: false, reason: 'record-specific-detail' })),
     });
     __setOnDeviceSummaryPluginForTests(plugin);
-    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'unsupported' });
+    expect(await refineOnDeviceSummary(ITEMS)).toEqual({ ok: false, reason: 'platform_unsupported' });
   });
 
   it('한국어 로케일로 물어본다', async () => {
@@ -175,6 +192,9 @@ describe('플러그인이 있어도 답을 믿기 전에 게이트가 있다', (
 describe('timeout', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+    platform.native = true;
+    platform.name = 'ios';
+    platform.pluginAvailable = true;
   });
 
   it('시간이 지나면 포기하고 취소를 보낸다', async () => {
@@ -227,6 +247,9 @@ describe('timeout', () => {
 describe('취소와 single-flight', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'true');
+    platform.native = true;
+    platform.name = 'ios';
+    platform.pluginAvailable = true;
   });
 
   it('새 요청이 이전 요청을 취소한다', async () => {

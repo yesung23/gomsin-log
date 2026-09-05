@@ -31,18 +31,25 @@ const allSql = files
   .map((file) => readFileSync(resolve(MIGRATIONS_DIR, file), 'utf8'))
   .join('\n');
 
-/** The definition that WINS: the last file to define the function. */
+/**
+ * The reviewed destructive implementation. Migration 074 renames this exact
+ * function to `prepare_account_deletion_internal_074` and exposes a fenced v2
+ * wrapper; its legacy public signature is intentionally a non-destructive shim.
+ */
 const deletionFunction = (() => {
-  let winner = '';
-  for (const file of files) {
-    const sql = readFileSync(resolve(MIGRATIONS_DIR, file), 'utf8');
-    const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.prepare_account_deletion');
-    if (start === -1) continue;
-    const end = sql.indexOf('\n$$;', start);
-    winner = sql.slice(start, end === -1 ? undefined : end);
-  }
-  return winner;
+  const sql = readFileSync(
+    resolve(MIGRATIONS_DIR, '027_fix_account_deletion_column.sql'),
+    'utf8',
+  );
+  const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.prepare_account_deletion');
+  const end = sql.indexOf('\n$$;', start);
+  return sql.slice(start, end === -1 ? undefined : end);
 })();
+
+const fencedDeletionMigration = readFileSync(
+  resolve(MIGRATIONS_DIR, '074_immutable_relationship_generation.sql'),
+  'utf8',
+);
 
 /**
  * Every column the migration tree ever declares for a table, gathered from its
@@ -72,6 +79,15 @@ function declaredColumns(table: string): Set<string> {
 }
 
 describe('the winning deletion function is the fixed one', () => {
+  it('migration 074 preserves this implementation behind its fenced v2 wrapper', () => {
+    expect(fencedDeletionMigration).toMatch(
+      /ALTER FUNCTION public\.prepare_account_deletion\(UUID, UUID\[\]\)\s+RENAME TO prepare_account_deletion_internal_074/i,
+    );
+    expect(fencedDeletionMigration).toContain(
+      'public.prepare_account_deletion_internal_074(',
+    );
+  });
+
   it('deletes cycle_support_signals by owner_id, the column that exists', () => {
     expect(deletionFunction).toContain(
       'DELETE FROM public.cycle_support_signals WHERE owner_id = p_user_id',

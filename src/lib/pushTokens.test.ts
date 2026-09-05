@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 
 /**
  * Push token lifecycle, and the negative tests §14.3 asks for by name.
@@ -18,17 +18,21 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 const { registerPushToken, revokeOwnPushTokens, clearOwnUnseen } = await import('@/lib/pushTokens');
+const { registerServerCallGate } = await import('@/lib/accountDeletion');
 
 beforeEach(() => {
+  registerServerCallGate(async () => ({ kind: 'clear' }));
   vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'true');
   rpc.mockReset();
   rpc.mockResolvedValue({ error: null });
 });
 
+afterEach(() => registerServerCallGate(null));
+
 describe('registering this device', () => {
   it('does not claim a token while the product push switch is off', async () => {
     vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
-    const result = await registerPushToken('ios', 'token-abc');
+    const result = await registerPushToken('ios', 'token-abc', 'user-a');
     expect(result.ok).toBe(false);
     expect(rpc).not.toHaveBeenCalled();
   });
@@ -36,7 +40,7 @@ describe('registering this device', () => {
   it('claims the token through the RPC, never by writing the table', async () => {
     // A direct INSERT cannot express the handover, and the table is SELECT-only
     // for clients precisely so this is the only path.
-    const result = await registerPushToken('ios', 'token-abc');
+    const result = await registerPushToken('ios', 'token-abc', 'user-a');
 
     expect(result.ok).toBe(true);
     expect(rpc).toHaveBeenCalledWith('register_push_token', {
@@ -46,14 +50,14 @@ describe('registering this device', () => {
   });
 
   it('refuses an empty token before spending a round trip', async () => {
-    const result = await registerPushToken('android', '   ');
+    const result = await registerPushToken('android', '   ', 'user-a');
     expect(result.ok).toBe(false);
     expect(rpc).not.toHaveBeenCalled();
   });
 
   it('reports a failure in Korean, without the token in it', async () => {
     rpc.mockResolvedValue({ error: { message: 'boom token-abc' } });
-    const result = await registerPushToken('ios', 'token-abc');
+    const result = await registerPushToken('ios', 'token-abc', 'user-a');
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/[가-힣]/);
@@ -89,13 +93,13 @@ describe('clearing one\'s own delivery flag', () => {
   it('acts through the caller-scoped RPC and takes no arguments', async () => {
     // No user id parameter exists, so there is no shape in which this could act
     // on the partner's row -- which is what keeps it from being a read receipt.
-    await clearOwnUnseen();
+    await clearOwnUnseen('user-a');
     expect(rpc).toHaveBeenCalledWith('clear_my_unseen');
     expect(rpc.mock.calls[0]).toHaveLength(1);
   });
 
   it('swallows a failure, because nothing depends on it succeeding', async () => {
     rpc.mockResolvedValue({ error: { message: 'nope' } });
-    await expect(clearOwnUnseen()).resolves.toBeUndefined();
+    await expect(clearOwnUnseen('user-a')).resolves.toBeUndefined();
   });
 });

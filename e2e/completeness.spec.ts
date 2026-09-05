@@ -124,9 +124,9 @@ for (const [name, scenario, expected, forbidden] of STATUS_CASES) {
 }
 
 // ---------------------------------------------------------------------------
-// D-3: an unsent draft was thrown away on tab navigation
+// D-3: an unsent draft was thrown away on bottom navigation
 // ---------------------------------------------------------------------------
-test('an unsent draft survives a tab round-trip and is never written to storage', async ({ browser }) => {
+test('an unsent draft survives a bottom-navigation round-trip and is never written to storage', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
@@ -155,17 +155,17 @@ test('an unsent draft survives a tab round-trip and is never written to storage'
   await expect(field).toHaveValue(DRAFT);
 
   /*
-    컴포저는 전체 화면이라 그 위에는 탭바가 없다. 그래서 탭을 도는 경로는 반드시
+    컴포저는 전체 화면이라 그 위에는 하단 내비게이션이 없다. 그래서 내비게이션을 도는 경로는 반드시
     한 번 닫고 시작한다 -- 실제 사용자도 그렇게 한다.
   */
   await page.getByRole('button', { name: '닫기' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
-  const tab = (name: string) =>
-    page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
-  await tab('우리').click();
+  const destination = (name: string) =>
+    page.getByRole('navigation', { name: '하단 내비게이션' }).getByRole('link', { name });
+  await destination('우리').click();
   await page.waitForURL(/\/us$/, { timeout: 20_000 });
-  await tab('홈').click();
+  await destination('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   // 다시 열면 쓰던 글이 그대로 있다.
@@ -216,11 +216,11 @@ test('a saved record clears the draft instead of leaving it to be re-sent', asyn
   // 남긴 뒤에는 컴포저가 닫히고 홈으로 돌아온다.
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
-  const tab = (name: string) =>
-    page.locator('nav[aria-label="하단 내비게이션"]').getByRole('tab', { name });
-  await tab('우리').click();
+  const destination = (name: string) =>
+    page.getByRole('navigation', { name: '하단 내비게이션' }).getByRole('link', { name });
+  await destination('우리').click();
   await page.waitForURL(/\/us$/, { timeout: 20_000 });
-  await tab('홈').click();
+  await destination('홈').click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
   // A saved record is not unsent work, so nothing should be waiting.

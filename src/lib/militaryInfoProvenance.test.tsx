@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import type { AppState, MilitaryInfo } from '@/types';
@@ -209,6 +209,7 @@ describe('M-1: DEFAULT_STATE seeds no service period either', () => {
 
 const updateProfile = vi.fn();
 let currentMilitary: MilitaryInfo;
+let serviceStateOverride: AppState | undefined;
 
 function stateWithMilitary(military: MilitaryInfo): AppState {
   return {
@@ -247,7 +248,7 @@ function stateWithMilitary(military: MilitaryInfo): AppState {
 
 vi.mock('@/lib/useStore', () => ({
   useStore: () => ({
-    state: stateWithMilitary(currentMilitary),
+    state: serviceStateOverride ?? stateWithMilitary(currentMilitary),
     isReady: true,
     updateProfile,
   }),
@@ -292,7 +293,49 @@ describe('M-1: ServicePage renders an honest empty state, not a fake D-Day', () 
       </MemoryRouter>,
     );
     expect(screen.queryByText('복무 정보가 아직 없어요')).toBeNull();
-    expect(screen.getByText('자동 계산')).toBeTruthy();
+    expect(screen.getByText('자동 계산한 전역일 기준')).toBeTruthy();
     expect(screen.getByText(/복무율 \d/)).toBeTruthy();
+  });
+});
+
+describe('ServicePage celebration identity wiring', () => {
+  afterEach(() => {
+    serviceStateOverride = undefined;
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it.each([
+    ['soldier', 'viewer'], ['soldier', 'couple'],
+    ['gomsin', 'viewer'], ['gomsin', 'subject'], ['gomsin', 'couple'],
+  ] as const)('clears a real event on a same-name/same-dates %s %s switch', (role, changedIdentity) => {
+    vi.useFakeTimers();
+    const start = Date.parse('2025-03-10T00:00:00+09:00');
+    vi.setSystemTime(start + 3599000);
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const military: MilitaryInfo = {
+      branch: 'army', militaryStatus: 'serving', enlistmentDate: '2025-03-10',
+      expectedDischargeDate: '2026-09-09', dischargeDateSource: 'manual',
+    };
+    serviceStateOverride = stateWithMilitary(military);
+    serviceStateOverride.profile.role = role;
+    serviceStateOverride.profile.couple.partnerMilitary = military;
+    serviceStateOverride.profile.couple.partnerUserId = 'soldier-1';
+    const view = render(<MemoryRouter><ServicePage /></MemoryRouter>);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId('service-level-event')).toHaveTextContent('Lv.2 달성');
+
+    if (changedIdentity === 'viewer') serviceStateOverride.authenticatedUser = { ...serviceStateOverride.authenticatedUser!, id: 'viewer-2' };
+    if (changedIdentity === 'subject') serviceStateOverride.profile.couple.partnerUserId = 'soldier-2';
+    if (changedIdentity === 'couple') serviceStateOverride.profile.couple.coupleId = 'couple-2';
+    view.rerender(<MemoryRouter><ServicePage /></MemoryRouter>);
+    expect(screen.queryByTestId('service-level-event')).toBeNull();
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.2');
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('0 / 36,000 EXP');
+    expect(screen.queryByRole('button', { name: '복무 정보 수정' }) !== null).toBe(role === 'soldier');
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

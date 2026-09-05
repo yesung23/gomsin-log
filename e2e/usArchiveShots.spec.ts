@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
-import { PARTNER, TODAY } from './scenarios';
+import { CREATOR_PENDING, PARTNER, TODAY } from './scenarios';
 import { mkdir } from 'node:fs/promises';
 
 const OUT = 'ui-audit-results/us';
@@ -51,15 +51,31 @@ for (const width of [320, 390]) {
     await expect(page.getByTestId('post-grid').locator('[data-kind="text"]')).toHaveCount(0);
     await page.screenshot({ path: `${OUT}/us-${width}.png`, fullPage: true });
 
-    await page.getByTestId('post-tile-rec-shared').click();
+    const postTile = page.getByTestId('post-tile-rec-shared');
+    await postTile.click();
     await expect(page.getByTestId('photo-post-viewer')).toBeVisible();
     await page.screenshot({ path: `${OUT}/us-post-detail-${width}.png`, fullPage: true });
     await page.keyboard.press('Escape');
     await expect(page.getByTestId('photo-post-viewer')).toHaveCount(0);
+    await expect(postTile).toBeFocused();
 
-    const photoTab = page.getByRole('button', { name: '사진', exact: true });
+    const highlightTrigger = page.getByRole('button', { name: '하이라이트 만들기' });
+    await highlightTrigger.click();
+    const highlightDialog = page.getByRole('dialog', { name: '새 하이라이트' });
+    await expect(highlightDialog).toBeVisible();
+    await highlightDialog.getByRole('button', { name: /사진 선택$/ }).first().click();
+    const coverTarget = await highlightDialog.getByRole('button', { name: /커버/ }).boundingBox();
+    expect(coverTarget?.width ?? 0).toBeGreaterThanOrEqual(44);
+    expect(coverTarget?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: '새 하이라이트' })).toHaveCount(0);
+    await expect(highlightTrigger).toBeFocused();
+
+    const photoTab = page.getByRole('tab', { name: '사진', exact: true });
+    await expect(page.locator('#profile-panel-photo')).toBeHidden();
     await photoTab.click();
-    await expect(photoTab).toHaveAttribute('aria-pressed', 'true');
+    await expect(photoTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('#profile-panel-photo')).toBeVisible();
     const tabSizes = await page.locator('.profile-tab').evaluateAll((elements) => elements.map((element) => {
       const rect = element.getBoundingClientRect();
       return { width: rect.width, height: rect.height };
@@ -69,7 +85,7 @@ for (const width of [320, 390]) {
       .toBeLessThan(0.1);
     await page.screenshot({ path: `${OUT}/us-photo-tab-${width}.png`, fullPage: true });
 
-    await page.getByRole('button', { name: '여행' }).click();
+    await page.getByRole('tab', { name: '여행' }).click();
     await expect(page.getByTestId('profile-trips-list')).toBeVisible();
     await expect(page.getByTestId('profile-trip-trip-browser')).toBeVisible();
     await page.screenshot({ path: `${OUT}/us-trips-${width}.png`, fullPage: true });
@@ -77,3 +93,58 @@ for (const width of [320, 390]) {
     await context.close();
   });
 }
+
+test('us empty post flow keeps keyboard focus at 320px', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 320, height: 568 },
+    reducedMotion: 'reduce',
+  });
+  await installMockBackend(context, PARTNER);
+  const page = await context.newPage();
+  await page.goto('/us');
+
+  const tablist = page.getByRole('tablist', { name: '우리의 기억 보기' });
+  await expect(tablist).toBeVisible({ timeout: 15_000 });
+  await expect(tablist.getByRole('tab')).toHaveCount(3);
+
+  const create = page.getByRole('button', { name: '첫 게시물 만들기' });
+  await create.click();
+  const dialog = page.getByRole('dialog', { name: '새 게시물' });
+  const close = dialog.getByRole('button', { name: '게시물 만들기 닫기' });
+  await expect(dialog).toBeVisible();
+  await expect(close).toBeFocused();
+  await expect(dialog.locator('input[type="file"]')).toHaveAttribute('tabindex', '-1');
+  await expect(dialog.locator('input[type="file"]')).toHaveAttribute('aria-hidden', 'true');
+
+  await page.keyboard.press('Shift+Tab');
+  await expect(dialog.getByRole('tabpanel', { name: '스토리에서' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(close).toBeFocused();
+
+  const storySource = dialog.getByRole('tab', { name: '스토리에서' });
+  const tripSource = dialog.getByRole('tab', { name: '여행에서' });
+  await storySource.focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tripSource).toBeFocused();
+  await expect(dialog.getByRole('tabpanel', { name: '여행에서' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(create).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await context.close();
+});
+
+test('us pending space explains how to create a shared archive', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 320, height: 568 } });
+  await installMockBackend(context, CREATOR_PENDING);
+  const page = await context.newPage();
+  await page.goto('/us');
+
+  await expect(page.getByText('상대를 연결하면 둘의 게시물이 보여요')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: '상대 연결' }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+
+  await context.close();
+});

@@ -7,6 +7,12 @@ import { fetchTripsResultFromDB } from '@/lib/trips';
 import { fetchTalkAboutMarksResultFromDB } from '@/lib/talkAbout';
 import { fetchCoupleHighlightsResultFromDB } from '@/lib/highlights';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
+import { fetchPartnerMembershipResult } from '@/lib/coupleTimeline';
+import {
+  parseGenderIdentity,
+  resolveRelationshipContext,
+  usesMilitaryFeatures,
+} from '@/lib/relationshipContext';
 
 export const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
 export type FullStateFetchResult = Partial<AppState> | null | typeof FULL_STATE_UNAVAILABLE;
@@ -25,6 +31,8 @@ export type AuthSyncStage =
   | 'unexpected'
   | 'timeout';
 
+type FullStateSyncStage = AuthSyncStage | 'partner-membership';
+
 /**
  * Same fetch, but carrying WHY it failed.
  *
@@ -35,10 +43,11 @@ export type AuthSyncStage =
  */
 export type FullStateResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind; stage: AuthSyncStage; code?: string };
+  | { ok: false; reason: ServerErrorKind; stage: FullStateSyncStage; code?: string };
 
 const PROFILE_COLUMNS = 'id, display_name, role, avatar_path, military_info, onboarding_completed_at';
 const PROFILE_IDENTITY_COLUMNS = `${PROFILE_COLUMNS}, username, profile_caption, profile_date_type`;
+const PROFILE_IDENTITY_AND_GENDER_COLUMNS = `${PROFILE_IDENTITY_COLUMNS}, gender_identity`;
 
 type PartnerProfileRow = {
   display_name?: string | null;
@@ -120,6 +129,20 @@ async function fetchProfileRow(userId: string) {
   try {
     result = await profiles
       .from('profiles')
+      .select(PROFILE_IDENTITY_AND_GENDER_COLUMNS)
+      .eq('id', userId)
+      .maybeSingle();
+  } catch (error) {
+    result = { data: null, error };
+  }
+
+  if (!result.error) return result;
+
+  // Migration 075 adds optional gender identity after the V4 identity fields.
+  // Keep username/caption/date available while that additive column rolls out.
+  try {
+    result = await profiles
+      .from('profiles')
       .select(PROFILE_IDENTITY_COLUMNS)
       .eq('id', userId)
       .maybeSingle();
@@ -148,7 +171,7 @@ async function fetchProfileRow(userId: string) {
  * The stage is safe to keep as diagnostic metadata. Raw server messages and
  * response objects are deliberately not written to the developer console.
  */
-function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
+function syncFailure(stage: FullStateSyncStage, error: unknown): FullStateResult {
   const reason = classifyServerError(error).kind;
   const record = error && typeof error === 'object'
     ? error as { code?: unknown; message?: unknown }
@@ -185,7 +208,7 @@ function syncFailure(stage: AuthSyncStage, error: unknown): FullStateResult {
  */
 type ResumableMembershipResult =
   | { ok: true; state: Partial<AppState> | null }
-  | { ok: false; reason: ServerErrorKind; stage: 'membership'; code?: string };
+  | { ok: false; reason: ServerErrorKind; stage: 'membership' | 'couple'; code?: string };
 
 async function fetchResumableMembership(
   userId: string,
@@ -203,6 +226,22 @@ async function fetchResumableMembership(
     // A successful empty lookup is the only verified new-account answer.
     if (!data?.couple_id) return { ok: true, state: null };
 
+    const { data: coupleData, error: coupleError } = await supabase
+      .from('couples')
+      .select('*')
+      .eq('id', data.couple_id)
+      .single();
+    if (coupleError || !coupleData) {
+      return syncFailure('couple', coupleError) as ResumableMembershipResult;
+    }
+    const relationshipContext = resolveRelationshipContext(coupleData.relationship_context);
+    if (!relationshipContext) {
+      return syncFailure(
+        'couple',
+        new Error('Invalid relationship context'),
+      ) as ResumableMembershipResult;
+    }
+
     // Onboarding is deliberately NOT marked complete: the profile row really is
     // missing and still has to be written. What changes is that onboarding now
     // resumes INTO the existing couple space instead of trying to create a
@@ -216,6 +255,7 @@ async function fetchResumableMembership(
           role: (data.role as Role) || 'gomsin',
           couple: {
             coupleId: data.couple_id,
+            relationshipContext,
             partnerName: '',
             coupleCode: '',
             connected: false,
@@ -280,41 +320,89 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       if (coupleError || !coupleData) {
         return syncFailure('couple', coupleError);
       }
-
-      // Fetch Partner Profile
-      const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
-      if (partnerError) return syncFailure('partner', partnerError);
-      
-      const hasPartner = !!(partnerData && partnerData.length > 0);
-      let partnerName = '';
-      let partnerUsername: string | undefined;
-      if (hasPartner) {
-        partnerName = partnerData[0].display_name || '';
-        if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
-          partnerUsername = partnerData[0].username;
-        }
-      }
-
-      let partnerMilitary: PartnerServiceInfo | undefined;
-      const currentRole = memberData.role || profileData.role;
-      if (hasPartner && currentRole === 'gomsin') {
-        const serviceResult = await supabase.rpc('get_partner_service_info');
-        if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
-          return syncFailure('partner', serviceResult.error);
-        }
-        partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
+      const relationshipContext = resolveRelationshipContext(coupleData.relationship_context);
+      if (!relationshipContext) {
+        return syncFailure('couple', new Error('Invalid relationship context'));
       }
 
       couple = {
         coupleId: memberData.couple_id,
-        partnerName,
-        ...(partnerUsername ? { partnerUsername } : {}),
-        ...(partnerMilitary ? { partnerMilitary } : {}),
+        relationshipContext,
+        partnerName: '',
         anniversaryDate: coupleData?.anniversary_date || '',
         coupleCode: '',
-        connected: hasPartner,
-        status: hasPartner ? 'active' : 'pending',
+        connected: false,
+        status: 'pending',
       };
+
+      // Presentation RPCs return no subject id, so they can never establish which
+      // partner their fields describe. Bracket every presentation read with the
+      // strict membership authority and publish only when both reads identify the
+      // same active partner. A verified initial absence is the stable pending path
+      // and intentionally skips all partner presentation RPCs.
+      const membershipBeforePresentation = await fetchPartnerMembershipResult(
+        memberData.couple_id,
+        userId,
+      );
+      if (!membershipBeforePresentation.ok) {
+        return syncFailure('partner-membership', membershipBeforePresentation.error);
+      }
+      const expectedPartner = membershipBeforePresentation.partner;
+
+      if (expectedPartner) {
+        const { data: partnerData, error: partnerError } = await fetchPartnerProfile();
+        if (partnerError) return syncFailure('partner', partnerError);
+
+        const hasPartnerPresentation = !!(partnerData && partnerData.length > 0);
+        let partnerName = '';
+        let partnerUsername: string | undefined;
+        if (hasPartnerPresentation) {
+          partnerName = partnerData[0].display_name || '';
+          if (typeof partnerData[0].username === 'string' && partnerData[0].username.trim()) {
+            partnerUsername = partnerData[0].username;
+          }
+        }
+
+        let partnerMilitary: PartnerServiceInfo | undefined;
+        const currentRole = memberData.role || profileData.role;
+        if (
+          hasPartnerPresentation
+          && usesMilitaryFeatures(relationshipContext)
+          && currentRole === 'gomsin'
+        ) {
+          const serviceResult = await supabase.rpc('get_partner_service_info');
+          if (serviceResult.error && serviceResult.error.code !== 'PGRST202') {
+            return syncFailure('partner', serviceResult.error);
+          }
+          partnerMilitary = partnerMilitaryFromRow(serviceResult.data?.[0]);
+        }
+
+        const membershipAfterPresentation = await fetchPartnerMembershipResult(
+          memberData.couple_id,
+          userId,
+        );
+        if (!membershipAfterPresentation.ok) {
+          return syncFailure('partner-membership', membershipAfterPresentation.error);
+        }
+        const verifiedPartner = membershipAfterPresentation.partner;
+        if (!verifiedPartner || verifiedPartner.userId !== expectedPartner.userId) {
+          return syncFailure(
+            'partner-membership',
+            new Error('Partner membership changed during hydration'),
+          );
+        }
+
+        couple = {
+          ...couple,
+          partnerName,
+          partnerUserId: verifiedPartner.userId,
+          ...(verifiedPartner.joinedAt ? { partnerJoinedAt: verifiedPartner.joinedAt } : {}),
+          ...(partnerUsername ? { partnerUsername } : {}),
+          ...(partnerMilitary ? { partnerMilitary } : {}),
+          connected: true,
+          status: 'active',
+        };
+      }
     }
 
     // 3. Fetch Contact Preferences
@@ -347,11 +435,13 @@ export async function fetchFullStateResultFromDB(userId: string): Promise<FullSt
       militaryStatus: 'unknown',
       dischargeDateSource: 'unknown',
     };
+    const genderIdentity = parseGenderIdentity(profileData.gender_identity);
 
     const profile: UserProfile = {
       id: userId,
       myName: profileData.display_name,
       role: memberData?.role || profileData.role,
+      ...(genderIdentity ? { genderIdentity } : {}),
       avatarPath: profileData.avatar_path,
       ...(typeof profileData.username === 'string' ? { username: profileData.username } : {}),
       ...(typeof profileData.profile_caption === 'string' ? { profileCaption: profileData.profile_caption } : {}),

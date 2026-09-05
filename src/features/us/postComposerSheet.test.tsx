@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord } from '@/types';
@@ -66,8 +66,8 @@ vi.mock('@/lib/useStore', () => ({
 
 /** 서명 URL을 실제로 부르지 않는다. 이 테스트가 세는 것은 선택과 순서다. */
 vi.mock('@/lib/useMediaAttachment', () => ({
-  useMediaAttachment: (attachment: { path?: string }) => ({
-    url: attachment.path ? `blob:${attachment.path}` : undefined,
+  useMediaAttachment: (attachment: { path?: string }, _coupleId: string, _recordId: string, variant?: string) => ({
+    url: attachment.path ? `${variant === 'thumbnail' ? 'thumbnail' : 'master'}:${attachment.path}` : undefined,
     refreshing: false,
     reportLoadFailure: () => {},
   }),
@@ -158,10 +158,11 @@ describe('마이탭 헤더 배치', () => {
     expect(id.parentElement?.className).toMatch(/justify-center/);
   });
 
-  it('기존 기록 남기기와 설정 진입점을 없애지 않는다', () => {
+  it('기존 기록 남기기와 설정 진입점을 없애지 않는다', async () => {
     open();
     expect(screen.getByRole('button', { name: '기록 남기기' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '설정' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: '마이 메뉴 열기' }));
+    expect(screen.getByRole('button', { name: '설정 및 계정 관리' })).toBeTruthy();
   });
 });
 
@@ -201,6 +202,8 @@ describe('게시물 만들기 3단계', () => {
     } as Partial<DailyRecord> & { id: string })];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    expect(screen.getByTestId('post-source-photo').querySelector('img'))
+      .toHaveAttribute('src', 'thumbnail:couple-1/r1/a.jpg');
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     expect(screen.getByText('글 쓰기')).toBeTruthy();
@@ -244,6 +247,32 @@ describe('게시물 만들기 3단계', () => {
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     await userEvent.click(screen.getByRole('button', { name: '1번째 사진 빼기' }));
     expect(screen.getAllByRole('button', { name: /사진 빼기/ })).toHaveLength(1);
+  });
+
+  it('공유가 시작된 직후 Escape를 눌러도 진행 중인 초안을 닫지 않는다', async () => {
+    storeState.records = [record({
+      id: 'r1',
+      attachments: [{ type: 'photo', name: 'a.jpg', path: 'couple-1/r1/a.jpg' }],
+    } as Partial<DailyRecord> & { id: string })];
+    let finishDownload!: (result: { file: File }) => void;
+    downloadRecordPhotoForReuse.mockReturnValueOnce(new Promise((resolve) => {
+      finishDownload = resolve;
+    }));
+
+    open();
+    await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    await userEvent.click(screen.getByTestId('post-source-photo'));
+    await userEvent.click(screen.getByRole('button', { name: '다음' }));
+
+    fireEvent.click(screen.getByTestId('post-share'));
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.getByTestId('post-composer')).toBeInTheDocument();
+
+    await act(async () => {
+      finishDownload({ file: new File(['photo'], 'a.jpg', { type: 'image/jpeg' }) });
+    });
+    await waitFor(() => expect(addRecordWithMedia).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByTestId('post-composer')).toBeNull());
   });
 
   it('글을 쓰고 공유하면 기존 사진을 새 파일로 복사해 저장한다', async () => {

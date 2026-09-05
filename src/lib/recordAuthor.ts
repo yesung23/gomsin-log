@@ -1,4 +1,4 @@
-import type { DailyRecord, Role } from '@/types';
+import type { DailyRecord, RelationshipContext, Role } from '@/types';
 import { isOwnRecord, type Viewer } from '@/lib/privacy';
 
 /**
@@ -72,6 +72,9 @@ const ROLE_ACCENT: Record<Role, RoleAccent> = {
   soldier: { stripe: 'bg-info', chip: 'bg-info/15 text-foreground' },
 };
 
+const GENERAL_OWN_ACCENT = ROLE_ACCENT.gomsin;
+const GENERAL_PARTNER_ACCENT = ROLE_ACCENT.soldier;
+
 /**
  * Accent used when `authorRole` is missing or unrecognised.
  *
@@ -104,7 +107,7 @@ const MARKER_PARTNER = 'w-1.5 h-1.5 rounded-full border border-foreground bg-tra
 export interface RecordAuthorPresentation {
   /** `null` when the record carries no usable role. */
   role: Role | null;
-  /** `곰신` / `군화`, or `null` when the role is unknown. */
+  /** Military role label, or `null` for general couples / unknown roles. */
   roleLabel: string | null;
   roleEmoji: string | null;
   isOwn: boolean;
@@ -136,13 +139,17 @@ export function recordAuthorPresentation(
   record: Pick<DailyRecord, 'userId' | 'authorRole'>,
   viewer: Viewer,
   partnerName: string,
+  relationshipContext: RelationshipContext = 'military',
 ): RecordAuthorPresentation {
   const role = isRole(record.authorRole) ? record.authorRole : null;
   const isOwn = isOwnRecord(record, viewer);
-  const accent = role ? ROLE_ACCENT[role] : UNKNOWN_ACCENT;
-  const roleLabel = role ? ROLE_LABEL[role] : null;
-  const roleEmoji = role ? ROLE_EMOJI[role] : null;
   const displayName = isOwn ? '나' : partnerName;
+  const isGeneralCouple = relationshipContext === 'general';
+  const accent = isGeneralCouple
+    ? (isOwn ? GENERAL_OWN_ACCENT : GENERAL_PARTNER_ACCENT)
+    : role ? ROLE_ACCENT[role] : UNKNOWN_ACCENT;
+  const roleLabel = !isGeneralCouple && role ? ROLE_LABEL[role] : null;
+  const roleEmoji = !isGeneralCouple && role ? ROLE_EMOJI[role] : null;
 
   return {
     role,
@@ -151,9 +158,11 @@ export function recordAuthorPresentation(
     isOwn,
     displayName,
     attribution: roleLabel ? `${roleEmoji} ${roleLabel} · ${displayName}` : displayName,
-    srAttribution: roleLabel
-      ? `${roleLabel} ${displayName}가 남긴 기록`
-      : `${displayName}가 남긴 기록`,
+    srAttribution: isGeneralCouple
+      ? (isOwn ? '내가 남긴 기록' : `${displayName}의 기록`)
+      : roleLabel
+        ? `${roleLabel} ${displayName}가 남긴 기록`
+        : `${displayName}가 남긴 기록`,
     // Geometry channel: filled dot for own, hollow ring for partner.
     markerClass: isOwn ? MARKER_OWN : MARKER_PARTNER,
     stripeClass: accent.stripe,

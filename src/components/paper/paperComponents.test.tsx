@@ -110,6 +110,44 @@ describe('Bookmark — 이따 이야기하기', () => {
     rerender(<Bookmark marked onToggle={onToggle} />);
     expect(screen.getByRole('button', { name: '이따 이야기하기 표시 해제' })).toHaveAttribute('aria-pressed', 'true');
   });
+
+  it('이미 존칭이 붙은 상대 이름을 중복해 읽지 않는다', () => {
+    render(
+      <Bookmark
+        marked={false}
+        partnerMarked
+        partnerName="예성님"
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '예성님이 표시했어요. 나도 이따 이야기하기' }))
+      .toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: /예성님님/ })).not.toBeInTheDocument();
+  });
+
+  it('Home에서는 이야기라는 보이는 라벨을 더해도 actor와 비활성 이유를 정확히 읽는다', () => {
+    render(
+      <Bookmark
+        marked={false}
+        partnerMarked
+        partnerName="예성"
+        onToggle={() => {}}
+        disabled
+        disabledReason="공유 정보를 확인하는 중이에요"
+        visibleLabel="이야기"
+      />,
+    );
+
+    const button = screen.getByRole('button', {
+      name: '예성님이 표시했어요. 나도 이따 이야기하기 — 공유 정보를 확인하는 중이에요',
+    });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('aria-pressed', 'false');
+    expect(button).toHaveAttribute('data-partner-marked', 'true');
+    expect(button).toHaveTextContent('이야기');
+    expect(button.querySelector('svg')).toHaveAttribute('fill', 'currentColor');
+  });
 });
 
 describe('PaperCard · FoldDivider · PaperSkeleton', () => {

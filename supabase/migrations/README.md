@@ -1,5 +1,31 @@
 # Supabase 마이그레이션 안내
 
+## 현재 로컬 추가분 — 2026-09-05 / 090
+
+아래 과거 날짜의 원격 확인과 다음 번호는 당시 기록이다. 현재 격리 RC checkout의 마지막 번호는
+**090**, 다음 미사용 번호는 **091**이다. 실제 Production catalog는 이번 작업에서 조회하지 않았다.
+기존 원격에 SQL 파일을 일괄 재적용하지 않는다. 대상 catalog·선행 migration·rollback 검증이 먼저다.
+
+| 파일 | 보존·변경 | 실제 확인 / 미확인 |
+|---|---|---|
+| `090_record_photo_renditions.sql` | 기존 cleanup contract4와 attachment/crypto 형식을 보존. 신규 사진 master+thumbnail 예약·읽기, 논리32/물리64 상한, 구버전 master 유지 시 thumbnail 보존 | `fb880ed`: full001..090(88파일)187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS. remote **NOT APPLIED**, 독립 review/client 연동 미완료 |
+
+등록은 같은 소유자·record·couple·operation에 결속된 2048px/10MiB master와 640px/1MiB thumbnail을
+함께 예약한다. JPEG 치수/bytes/SHA256은 **클라이언트 보고값**이며 서버 바이트 검증·인쇄 품질 보증이 아니다.
+새 RPC는 authenticated만 실행 가능하며 metadata 테이블은 API 역할의 직접 읽기/쓰기를 허용하지 않는다.
+현재 활성 커플, private/shared, 삭제 상태, 실제 published pair를 검사한다. cipher>=1의 새 metadata 조회는
+본인·상대 모두 제외하고 기존 master 경로를 유지한다. 원문/암호 형식이나 Storage 공개 범위는 바꾸지 않는다.
+
+삭제·교체·부분 실패는 새 삭제 worker가 아니라 기존 원장을 사용한다. immutable 등록 이력은 terminal
+operation의 동일 요청/변경된 요청을 구별하기 위해 record/account 삭제까지 남고, retired metadata는 읽기에
+노출하지 않는다. 시도 이력의 누적 행 수는 active 첨부32개와 다른 개념이며 운영 보존 검토 대상이다.
+
+Rollback은 우선 새 클라이언트 경로의 사용을 중단한다. 이미 pair가 존재한다면 구버전 편집 호환 wrapper와
+64 물리 상한·binding을 유지해야 하므로 테이블 DROP/상한32복귀로 되돌리지 않는다. 실제 적용 전에는
+빈 DB뿐 아니라 기존 데이터/양방향 호환, 백업·forward fix·hosted canary를 별도로 검증한다.
+
+## 과거 적용 안내 및 이력
+
 이 폴더의 `.sql` 파일은 **번호 순서대로** 적용합니다. 파일을 직접 수정하지 말고,
 변경이 필요하면 새 번호의 파일을 추가하세요.
 
@@ -29,7 +55,8 @@
 > 실행하지 않은 것: `test:p5` · `test:write-floor` · `test:rollback` 체인에는 넣지
 > 않았다. 057은 `daily_records` 의 write floor 와 무관하다.
 >
-> 다음 사용 가능 번호: **068**.
+> 이 057 시점의 다음 예약 번호는 068이었습니다. 현재 active chain의 다음 사용 가능
+> 번호는 **073**입니다.
 
 > **📄 058·059 작성됨 · 운영 미적용 (2026-08-24).** `058_couple_highlights.sql`은
 > 활성 커플에 한정된 독립 하이라이트와 순서형 사진 항목, shared-only child RLS,
@@ -202,6 +229,11 @@ migration 파일이 저장소에 존재한다는 사실은 **운영 적용의 �
 | `065_harden_e2ee_pairing_rpc.sql` | 062 페어링 RPC의 NULL evidence/signature, 만료·확정·활성화 경계를 forward hardening | **운영 적용 (2026-08-28) — RPC 3개 catalog·negative actor 검증 PASS. live active device/scope key가 0이라 실제 두 기기 정상 ceremony는 UNVERIFIED** |
 | `066_atomic_push_delivery_claims.sql` | 푸시 발송 후보의 원자적 claim/lease와 claim 소유자 완료·release | **운영 미적용 — live 선행 테이블과 sender가 없어 명시적으로 보류** |
 | `067_profile_post_intent.sql` | 기존 기록에 명시적 프로필 게시물 의도 `is_profile_post`를 추가하고 과거 사진은 추측 backfill하지 않음 | **운영 적용 (2026-08-28) — boolean NOT NULL DEFAULT false, 기존 5행 false, actor·rollback 검증 PASS** |
+| `068_allow_story_product_event_screen.sql` | V4 Story의 집계 전환 화면 `story`를 닫힌 product-event 화면 어휘에 추가하되 source record id는 계속 거부 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `069_require_current_cycle_consent.sql` | 현재 버전의 명시적 동의가 있을 때만 legacy partner cycle projection을 계산하도록 fail-closed 보강 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `070_cycle_consent_atomic_write_gate.sql` | 주기 민감정보 동의 grant/revoke와 원본 쓰기·projection을 revision 및 row lock으로 원자화 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `071_disable_automatic_cycle_projection.sql` | 현 동의·고지 범위를 벗어난 자동 건강정보 projection을 all-false로 비활성화하면서 원본은 보존 | **로컬 검증 / 운영 NOT APPLIED · UNVERIFIED** |
+| `072_close_private_capable_realtime_metadata.sql` | `daily_records`·`couple_tasks`를 Realtime publication에서 제거하고 shared 변화만 content-free invalidation으로 전달 | **로컬 fresh-chain·actor 검증 / 운영 NOT APPLIED · UNVERIFIED — client adoption 및 실제 WebSocket gate 전 적용 금지** |
 ## 047 이 열지 않는 것 — 통증 등급 공유가 아니다 (2026-08-20 초안 → 2026-08-21 개정)
 
 V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 몸이 힘들어요"를 보낼 수
@@ -222,9 +254,11 @@ V1_LAUNCH_DECISIONS §5의 제품 결정은 사용자가 **직접** "오늘은 �
 `shared_for_date`는 소유자가 고르고, `expires_at`은 하루, `revoked_at`으로 철회. 그래서
 **어휘 한 값만 넓혔습니다.**
 
-`cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
-경우에도 보이지 않아요"는 **그대로 참**입니다. `feeling_unwell`은 기록된 통증 값이
-아니고, 등급이 없으며, 개인 기록에서 파생되지 않는 독립 opt-in 신호이기 때문입니다.
+당시 `cyclePartnerMessage.ts`의 withholding 문장 "증상, 출혈량, 통증, 기분, 메모는 어떤
+경우에도 보이지 않아요"도 같은 경계를 설명했습니다. 현재 client에서는 migration 071과
+함께 자동 projection UI 및 해당 파일을 제거했고, 같은 약속을 주기 설정의 개인정보 안내가
+직접 설명합니다. `feeling_unwell`은 기록된 통증 값이 아니고, 등급이 없으며, 개인 기록에서
+파생되지 않는 독립 opt-in 신호라는 원칙은 유지됩니다.
 
 ## 039 가 고치는 것 — 032 단독 적용은 `daily_records` 를 쓸 수 없게 만든다 (2026-08-14)
 
@@ -942,3 +976,266 @@ supabase functions deploy delete-account
   읽기 경계와 rollback 후 5행·marker 불변을 확인했습니다. anon PostgREST는
   `401/42501`로 거부됐습니다. 롤백은 먼저 이전 클라이언트로 되돌리고 열은 남긴 뒤
   필요하면 후속 forward migration으로 정리합니다.
+
+## 068 — V4 Story 계측 화면 계약 정합화 (2026-09-03)
+
+- `068_allow_story_product_event_screen.sql`은 활성 V4 상대 브리핑 화면인
+  `/story/partner`가 보내는 `screen='story'`를 `product_events.screen`의 닫힌 허용
+  목록에 추가합니다. 이벤트 종류·payload·날짜 정밀도·RLS·GRANT는 바꾸지 않습니다.
+- 새 CHECK를 `NOT VALID`로 추가한 뒤 기존 행 전체를 검증하고, 검증 성공 뒤에만 이전
+  CHECK를 교체합니다. 예상하지 못한 기존 값이 있으면 transaction 전체가 실패합니다.
+- 구버전 또는 rollback 클라이언트가 Story 전환에 정확한 기록 UUID를 다시 붙여 보내도
+  서버의 `product_events_story_subject_check`가 거부합니다. Story 지표는 집계 전환만
+  필요하며 `subject_id`를 저장하지 않는 것이 최종 개인정보 최소화 계약입니다.
+- 클라이언트와 SQL 화면 목록의 exact parity를 단위 테스트로, 기존 8개 화면·Story·NULL
+  허용과 임의 route 문자열 거부, Story 원본 UUID 거부, owner/partner/unrelated/anon 및
+  UPDATE/DELETE 경계를 phase0 실제 actor harness로 검증합니다.
+- **원격 적용 상태: NOT APPLIED.** Production Supabase에는 이 작업에서 접근하거나
+  적용하지 않았습니다. 로컬 fresh-chain과 독립 보안 검토를 통과한 뒤에도 원격 적용은
+  별도 action-time 승인과 사전 상태 확인이 필요합니다.
+
+## 069 — 현재 버전의 주기 민감정보 동의 강제 (2026-09-03)
+
+- `069_require_current_cycle_consent.sql`은 파트너용 주기 projection이 건강 데이터나 공유
+  설정을 읽기 전에 소유자의 `cycle` 동의 행 존재, 현재 버전 `2026-08-09`, 미철회를
+  모두 확인하도록 최종 함수를 교체합니다.
+- 동의 누락·구버전·철회는 기존 호환 형태인 `false/null` 1행으로 닫힙니다. 현재 버전의
+  유효한 동의와 명시적으로 켠 공유 토글을 모두 만족한 경우에만 최소 projection을
+  반환합니다. 원본 주기 테이블, RLS, 데이터, 8열 API와 권한은 변경하지 않습니다.
+- 클라이언트와 SQL의 동의 버전 parity를 단위 테스트로 고정하고, 로컬 PostgreSQL 실제
+  actor harness가 정상 동의, 누락·구버전·철회, all-off, anon/NULL subject/unrelated/former
+  partner, 원본 5개 테이블 격리와 version/revocation mutation proof를 검증합니다.
+- rollback은 취약한 `026`을 복원하지 않습니다. 문제가 있으면 새 forward migration으로
+  projection을 전부 비공유 상태로 잠근 뒤 원인을 수정합니다.
+- **원격 적용 상태: NOT APPLIED.** 이 작업은 로컬 fresh chain만 사용했으며 Production
+  Supabase에는 접근하거나 적용하지 않았습니다.
+
+## 070 — 주기 민감정보 동의 철회·쓰기 원자화 (2026-09-03)
+
+- `070_cycle_consent_atomic_write_gate.sql`은 동의 확인과 원본 주기 데이터 쓰기 사이의
+  경쟁 조건을 닫습니다. 쓰기와 파트너 projection은 동의 행을 잠근 뒤 현재 버전·미철회
+  상태를 확인하고, 동의 부여와 철회는 revision 기반 RPC로만 수행합니다.
+- 기존 데이터 삭제·내보내기 권리는 보존합니다. 철회된 소유자는 자신의 원본을 읽고
+  삭제할 수 있지만 새 원본 쓰기나 공유 재활성화는 할 수 없고, 모든 공유 토글을 끄는
+  작업은 계속 허용됩니다. 파트너에게는 현재 동의와 명시적 공유 설정을 모두 만족한
+  최소 projection만 반환됩니다.
+- 계정 삭제 시작과 재동의, 쓰기와 철회, projection과 철회의 양쪽 실행 순서를 실제
+  PostgreSQL lock wait로 검증했습니다. NULL actor·anon·비관련 사용자·이전 파트너 거부,
+  stale revision, 삭제 진행 중 재동의 차단, 철회 후 원본 read/delete 보존과 write/share
+  거부도 actor harness로 확인했습니다.
+- 로컬 검증: `scripts/agent/validate.sh migration`에서 diff-check, TypeScript, lint, 전체
+  Vitest, P0, phase0(001→070 fresh chain, 614 assertions), P5, write-floor, native contract,
+  rollback이 PASS했습니다. 기본 build 단계는 공개 Supabase 환경변수 부재로 FAIL했고,
+  동일 exact HEAD에 안전한 로컬 공개값을 주입한 production build는 별도로 PASS했습니다.
+- rollback은 취약한 동의 경계로 되돌리지 않습니다. 문제가 있으면 새 forward migration으로
+  주기 쓰기와 projection을 잠근 뒤 원인을 수정합니다.
+- **원격 적용 상태: NOT APPLIED / UNVERIFIED.** Production Supabase에는 접근하거나
+  적용하지 않았습니다. 선행 migration과 원격 카탈로그를 확인한 별도 배포 게이트 전에는
+  070을 적용하지 않습니다.
+
+## 071 — 자동 주기 projection 비활성화 (2026-09-03)
+
+- `071_disable_automatic_cycle_projection.sql`은 현재 개인정보 동의·고지 범위에 없는
+  건강 파생정보의 자동 파트너 제공을 닫습니다. `현재 생리 여부`, `예상 범위`, `가임 추정`
+  세 legacy toggle을 모두 `false`로 backfill하고, 이후에도 모두 `false`만 허용하는 CHECK와
+  restrictive RLS 정책을 둡니다.
+- 설치된 구버전이 8열 RPC를 호출해도 파싱 오류 대신 `false/null`만 받도록 반환 형태는
+  유지합니다. 실행 권한은 `authenticated`에만 있고 함수는 `SECURITY INVOKER`, 고정
+  `search_path`이며 원본 건강 테이블을 읽지 않습니다. 임의 소유자 UUID를 받던 예측 helper는
+  모든 client role의 실행 권한을 회수한 뒤 제거합니다.
+- 원본 `cycle_periods`, `cycle_daily_logs`, `cycle_settings`, `cycle_entries` 행은 수정·삭제하지
+  않습니다. 사용자가 그날 직접 고르고 만료되는 `cycle_support_signals`도 독립 경로로
+  보존합니다.
+- 로컬 fresh-chain actor 하네스는 8개 toggle 조합 backfill, 구버전 INSERT/UPDATE 거부,
+  owner/partner/unrelated/former-partner의 all-false 결과, anon 거부, helper 제거, RLS 유지,
+  네 원본 테이블의 migration 전후 exact snapshot 보존을 검증했습니다.
+- rollback은 자동 건강정보 제공을 재활성화하지 않습니다. 재도입하려면 별도 partner-provision
+  동의, 새 동의 버전, 법무 검토와 forward migration이 필요합니다.
+- **원격 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업은 로컬 fresh chain만 사용했고
+  Production Supabase에는 접근하거나 적용하지 않았습니다.
+
+## 072 — 비공개 가능 기록·할 일의 Realtime 메타데이터 폐쇄 (2026-09-03)
+
+- `072_close_private_capable_realtime_metadata.sql`은 `daily_records`와 `couple_tasks`를
+  `supabase_realtime` publication에서 제거합니다. Supabase Postgres Changes의 DELETE는
+  row-level filter를 적용할 수 없으므로, 비공개 행의 본문을 보내지 않더라도 삭제 시점과
+  존재 사실이 상대에게 신호로 남을 수 있기 때문입니다.
+- 대체 경로는 `(couple_id, slice, updated_at)`만 가진 기존
+  `collaboration_invalidations`입니다. 새 trigger는 shared INSERT/UPDATE/DELETE와
+  shared↔private 전환만 신호하고, 처음부터 끝까지 private인 INSERT/UPDATE/DELETE는
+  invalidation조차 만들지 않습니다. payload를 상태로 신뢰하지 않고 client가 현재 RLS로
+  보이는 행을 다시 읽습니다.
+- migration 전 호환 단계에서 앱은 direct source subscription을 별도 compatibility
+  channel에 격리합니다. migration 뒤 그 channel이 실패해도 membership·invalidation
+  channel은 독립적으로 유지되고, 오류·foreground·online 경로는 bounded HTTP
+  reconciliation으로 복구합니다.
+- 로컬 검증: `npm run test:phase0`이 실제 001→072 fresh chain을 PostgreSQL 17 임시
+  클러스터에 적용합니다. publication 전후, trigger 함수 실행권한 회수, private CRUD
+  무신호, shared CRUD·양방향 privacy 전환 신호, synthetic cross-couple old/new scope,
+  owner·active partner·unrelated·anon·former-partner RLS를 실제 actor로 검증했습니다.
+  shared child가 있는 단독 커플의 account-cleanup cascade가 DELETE trigger의 FK 재생성에
+  막히지 않는 것도 실제 RPC로 검증합니다. records/tasks out-of-order read, thrown read,
+  create/update/delete-vs-refresh 경합과 mutation 성공 뒤 authoritative re-read까지 실패하는
+  경로는 Vitest로 별도 검증합니다.
+- rollback은 source table을 publication에 다시 넣지 않습니다. 문제가 있으면 두 source는
+  unpublished 상태로 두고 invalidation 또는 HTTP reconciliation을 새 forward migration과
+  client patch로 복구합니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 구버전 client adoption 확인, 원격
+  publication catalog 사전 점검, staging의 실제 2-actor WebSocket(private CRUD 0건,
+  shared CRUD 및 reconnect) 검증 전에는 적용하지 않습니다. migration 파일 존재와 로컬
+  PostgreSQL PASS는 Production 적용 증거가 아닙니다.
+
+## 079 — Apple IAP V2 exact ledger·refund evidence expand (2026-09-05)
+
+- `079_apple_iap_refund_consumption.sql`은 077 원장을 삭제하거나 다시 쓰지 않는 additive
+  expand migration입니다. 정확한 consumable lot/allocation, versioned 선택 동의,
+  fulfillment evidence, transaction review fact, consumption queue와 V2 RPC를 추가합니다.
+- 데이터베이스 CHECK가 모든 catalog의 `sale_enabled = false`만 허용합니다. 079에서는 두
+  V1 service-role entrypoint를 유지하되 V1 consumable 입력은 `legacy_manual_review`로
+  격리하고 pooled grant를 만들지 않습니다.
+- `send_result_unknown`은 자동 재전송 대상이 아닙니다. 정확한 현재 attempt 번호, lease
+  hash, authorization hash, frozen body hash가 모두 일치하는 늦은 완료만 수렴합니다.
+- 동의 adapter는 승인된 notice version/hash가 DB active notice와 정확히 일치할 때만 열립니다.
+  이 migration에는 법적 문구, notice 값, 보관기간, cron secret 또는 sale activation이 없습니다.
+- 로컬 검증은 전용 PostgreSQL actor harness와 Deno/Vitest에서 수행합니다. 실제 명령과
+  결과는 Task 3 report/WORK_LOG에 기록하며, 원격 상태는 별도 확인 전 `UNVERIFIED`입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 원격 Supabase에 접근하거나
+  migration을 적용하지 않았습니다.
+
+## 081 — Apple IAP V1 external contract retirement (2026-09-05)
+
+- `081_retire_apple_iap_v1_entrypoints.sql`은 V2 Edge deploy/canary 이후에만 적용하는 contract
+  migration입니다. 두 V1 함수 자체를 drop하지 않고 그 두 signature의 `service_role`
+  execute만 회수합니다. V2 권한과 079 sale hold는 유지됩니다.
+- rollback은 forward-only입니다. 081 전에는 scheduler를 멈추고 호환 Edge를 되돌립니다.
+  081 후 V1 Edge 복원이 불가피하면 새 migration으로 두 V1 grant만 임시 복원하되 sale
+  hold와 legacy-consumable quarantine을 유지하며, 원장 이력을 drop/rewrite하지 않습니다.
+- 082는 079를 재작성하지 않고 refund/reconciliation 감사 경계를 보강하는 후속
+  forward migration입니다. 법무·retention·원격 migration·V2 canary·cron 운영·실제
+  fulfillment·App Store/Sandbox/device 증거가 모두 별도 승인되기 전에는 sale hold를
+  제거하지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 원격 Supabase에 접근하거나
+  migration을 적용하지 않았습니다.
+
+## 082 — Apple IAP refund/reconciliation forward-only hardening (2026-09-05)
+
+- `082_apple_iap_refund_reconciliation_forward_fix.sql`은 기존 079를 역사 그대로 고정하고
+  081 뒤에 적용하는 전진 수정입니다. 시작 시 원본 079 catalog와 V1 권한 회수를
+  검증하며, 재작성된 079나 예상 밖 schema를 만나면 자동 추측 없이 중단합니다.
+- Apple transaction history cursor는 확인된 원거래 체인·환경마다 분리하고, 한 실행에서
+  target 1개와 한 page만 처리합니다. 각 거래는 페이지의 자체 appAccountToken hash로
+  귀속하며, 계정 충돌·삭제·미확인·토큰 없음은 원본 연결용 메타데이터와 함께 별도
+  review fact로 남깁니다. 페이지 처리와 cursor 전진은 하나의 DB transaction이고,
+  응답 유실 후 같은 lease/page 재호출도 저장된 page hash와 결과 수로 멱등 복구합니다.
+- 과거 `manual_review` 사유를 역추정하지 않습니다. 확인할 수 없는 기존 행은
+  `LEGACY_REVIEW_UNSPECIFIED`로 분리하고 정확한 event/payload hash에 연결된 review
+  fact를 한 건만 생성합니다. 새 review 승인에는 operator actor와 operation id가
+  필수이며, 이전 2인자 RPC의 모든 외부 실행권한은 회수됩니다.
+- 기존 `consumption_request_reason` 값은 감사 증거로 보존하지만 새 요청에서는
+  저장하지 않습니다. 컬럼은 삭제하지 않고 nullable로 전환합니다. Edge가 Apple에
+  보내는 body에도 이 값은 포함되지 않습니다.
+- 기존 whitelist CHECK는 새 CHECK를 먼저 추가·검증한 뒤 교체합니다. 새 reconciliation
+  table은 RLS를 켜고 모든 직접 접근을 회수하며, trigger/helper와 새 RPC는 필요한
+  service-role 경계만 허용합니다. 079의 sale hold와 081의 V1 회수는 유지됩니다.
+- 로컬 검증: `npm run test:iap:ledger`가 실제 PostgreSQL 17에서
+  `077 → 원본 079 → 081 → 082` upgrade/fresh 순서와 500개 actor·data·lease·권한
+  assertion을 통과했습니다. `src/lib/migration082.test.ts`와 전체 migration security
+  contract도 forward-only 형태, 079 hash, RLS, 권한, PostgREST reload를 검증합니다.
+- 다음 사용 가능한 migration 번호는 **083**입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** Production catalog fingerprint,
+  V2 Edge deploy/canary, scheduler secret, Apple Sandbox/Production, 실제 결제·환불은
+  확인하거나 변경하지 않았습니다.
+
+## 083 — 기록 삭제 원자화 및 복구 가능한 미디어 정리 (2026-09-05)
+
+- `083_record_media_cleanup_jobs.sql`은 기록 행을 먼저 삭제하고 Storage를 나중에 정리할
+  수 있도록, 본문·파일명·URL 없이 record/couple/owner UUID와 제한된 lease 상태만 가진
+  private tombstone을 추가합니다. 이 행에는 삭제 cascade를 일으킬 foreign key가 없습니다.
+- 모든 `daily_records` DELETE는 기존 account/couple lock 뒤 Storage relation의 SHARE lock을
+  잡고 같은 transaction에서 tombstone을 만듭니다. owner 앱은 exact owner/couple을 확인하는
+  `delete_my_record` RPC만 사용하며, partner·unrelated·former·anon·missing 대상은 같은
+  비공개 `false` 결과로 닫힙니다.
+- authenticated의 직접 `storage.objects` DELETE 권한과 과거 정책은 회수됩니다. 따라서
+  구버전의 Storage-first 삭제는 blob을 없애기 전에 실패하고, 새 leased service worker만
+  live job의 정확한 `couple_id/record_id` prefix를 삭제할 수 있습니다. `service_role`의
+  `BYPASSRLS`도 Storage trigger를 우회하지 않습니다.
+- worker는 한 번에 한 job을 `SKIP LOCKED` lease로 가져와 page/depth/object/batch/round를
+  제한하고, 새 exhaustive listing이 비어 있을 때만 완료합니다. 계정 삭제는 소유한 job이
+  pending/leased/blocked인 동안 relationship generation과 Auth 삭제로 진행하지 않습니다.
+- 안전한 적용 순서는 검증된 Edge artifact와 scheduler secret을 먼저 준비하되 호출하지 않고,
+  083을 적용한 뒤 schema reload를 확인하고 scheduler를 시작하는 것입니다. worker 장애 시
+  scheduler를 멈춰도 record tombstone과 blob이 보존되며, authenticated DELETE를 복원하지
+  않습니다. 수정은 더 큰 번호의 forward migration/artifact로 수행합니다.
+- 로컬 검증은 migration source contract, 실제 PostgreSQL actor/RLS/trigger/transaction/race
+  harness, 공유 worker/handler/실제 Deno entrypoint 테스트로 수행합니다. Hosted Storage의
+  list/remove 의미와 scheduler 실행은 별도 staging canary 전까지 검증된 것으로 보지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.
+
+## 084 — 기록 미디어 객체 수명주기·revision CAS (2026-09-05)
+
+- `084_record_media_object_lifecycle.sql`은 기존 001–083을 수정하지 않는 forward-only
+  migration입니다. `daily_records`에 media contract/version stamp를 추가하고, 경로·파일명·
+  signed URL·봉투·표시 순서·사용자 콘텐츠 없이 UUID/count/state/timing만 저장하는 private
+  mutation/object ledger를 만듭니다. 세 ledger는 RLS를 켜고 모든 API role의 직접 table
+  privilege를 회수하며 user/couple/record foreign key를 두지 않아 tombstone이 보존됩니다.
+- browser는 record revision의 정확한 base→target operation을 먼저 예약하고 canonical
+  `{couple_uuid}/{record_uuid}/{media_uuid}.{safe_ext}` 객체를 올린 뒤 같은 operation ID로
+  record CAS를 수행합니다. v1이 된 record는 일반 텍스트 수정도 현재의 중복 제거된 media
+  manifest를 제출해야 하며 v0로 낮아질 수 없습니다. 제거된 객체는 DB transaction에서
+  즉시 `cleanup_pending`이 되어 새 read/signing이 차단되고 물리 삭제는 leased worker가
+  나중에 수행합니다. 이미 발급된 signed URL은 만료 전 강제 회수할 수 없습니다.
+- Storage INSERT와 begin/commit/abandon/expiry/record-delete는 동일 record advisory key를
+  사용합니다. 따라서 trigger를 이미 통과한 미커밋 upload를 정확히 drain하면서 다른
+  record/couple의 업로드를 전역 직렬화하지 않습니다. migration 마지막의 Storage SHARE
+  lock 1회는 083 trigger로 시작한 cutover 이전 transaction만 drain하며 steady-state RPC에는
+  존재하지 않습니다.
+- authenticated Storage DELETE는 계속 금지됩니다. service-role의 `couple-media` DELETE도
+  account capability로 우회할 수 없고, 살아 있는 exact full-prefix lease 또는 immutable
+  Storage object ID의 exact object lease가 있어야 합니다. prefix가 retire된 뒤 재개되는
+  늦은 upload와 한번 tombstone이 된 stable media UUID 재사용은 거부됩니다.
+- 기존 `record-media-cleanup` worker는 prefix job이 없을 때 exact object job 하나를 claim해
+  경로를 일시적으로만 해석하고, Storage UUID가 실제로 사라졌는지 확인해 settle합니다.
+  응답 유실 replay, lease expiry/reclaim, bounded exponential retry와 8회 후 `blocked`를
+  지원합니다. 계정 종료는 prefix와 object job 모두 끝날 때까지 DB barrier에서 멈춥니다.
+- 로컬 검증은 `npm run test:record-media-chain`이 활성 migration 82개를 001..084 순서로
+  fresh PostgreSQL에 적용하고, `npm run test:record-media-cleanup`이 실제 actor/RLS/trigger와
+  양방향 upload race를 검증합니다. `master-validation.yml`은 두 명령을 기존
+  `npm run test:phase0` PostgreSQL job에서 직접 실행합니다. Hosted Supabase Storage HTTP,
+  PostgREST schema reload, 실제 scheduler는 hosted canary 전까지 `UNVERIFIED`입니다.
+- 안전한 rollout은 **호출하지 않는 새 worker 준비 → 083/084 적용 및 catalog/contract-v2
+  probe 확인 → 새 delete-account artifact 배포 → hosted prefix/object canary → scheduler 시작**
+  순서입니다. rollback은 scheduler/새 artifact를 멈추고 더 큰 번호의 forward fix를 내며,
+  authenticated 직접 DELETE나 v1 이전 writer를 복원하지 않습니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase, Vercel, App Store에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.
+
+## 085 — 기록 identity 불변성과 cleanup 공정성 보강 (2026-09-05)
+
+- `085_harden_record_media_cleanup.sql`은 기존 001–084를 수정하지 않는 forward-only
+  migration입니다. `daily_records.id`, `user_id`, `couple_id`를 v0/v1 모두에서 UPDATE로
+  바꿀 수 없게 하되 본문·공개 범위·media manifest 같은 정상 UPDATE는 그대로 허용합니다.
+  identity trigger는 media mutation commit trigger보다 먼저 실행되므로 유효 operation ID를
+  붙인 잘못된 identity 변경도 record·operation·object 상태를 한 transaction에서 롤백합니다.
+- account deletion fence는 대상 사용자의 현재 record뿐 아니라 cleanup job, mutation,
+  object ledger에 남은 과거 소유 증거로 exact record/couple namespace를 귀속합니다. 그
+  namespace에 `deleted`가 아닌 객체가 하나라도 있으면 active/reserved/superseded를 포함해
+  일반화된 `record_media_cleanup_pending`으로 중단하며 object ID·경로·다른 owner 존재는
+  응답에 노출하지 않습니다. fresh-empty prefix 완료는 같은 namespace의 ledger 객체도
+  `deleted`로 수렴시켜 barrier가 사실과 일치하게 종료되도록 합니다.
+- cleanup Edge worker는 한 invocation에서 prefix lane과 exact-object lane을 각각 한 번씩
+  bounded하게 진행합니다. object claim에 결합된 stale mutation expiry도 prefix backlog나
+  prefix 오류와 무관하게 매번 실행됩니다. 어느 lane이든 실패하면 다른 lane의 기회는
+  보존하지만 전체 API 호출은 실패하므로 부분 성공을 완료로 오보하지 않습니다.
+- 로컬 검증은 실제 PostgreSQL actor/transaction harness, 001..085 fresh migration chain,
+  공유 worker·실제 Edge entrypoint Deno 테스트와 migration source contract에서 수행합니다.
+  Hosted Storage HTTP, PostgREST schema reload, scheduler 동작은 staging canary 전까지
+  `UNVERIFIED`입니다.
+- 안전한 rollout은 **새 dual-lane worker를 inert 상태로 준비 → 083/084/085 순서 적용 및
+  catalog/contract-v2 probe → 호환 delete-account artifact 배포 → hosted prefix/object 및
+  stale-expiry canary → scheduler 시작** 순서입니다. rollback은 scheduler와 영향 artifact를
+  멈추고 더 큰 번호의 forward fix를 내며 identity 불변성, deletion fence, 직접 DELETE
+  회수를 약화하지 않습니다.
+- 다음 사용 가능한 migration 번호는 **086**입니다.
+- **운영 적용 상태: NOT APPLIED / UNVERIFIED.** 이 작업에서 Production 또는 원격
+  Supabase에 접근하거나 migration/Edge/scheduler를 적용하지 않았습니다.

@@ -93,3 +93,15 @@ hook/Gallery/playback **38 PASS**, 대상 lint/typecheck PASS. 원격 권한·cr
 
 Apple 이벤트 HIGH를 닫는 동안 thumbnail·사진 metadata·책 source 계약을 Architect가 검토한다.
 그 다음 실제 사용자 upload/read/delete 경로에 붙이고 negative tests로 검증한다.
+
+### 후속 배정 checkpoint
+
+- Apple 이벤트 fix는 `d08519f`로 로컬 commit했다. 실제 SDK/Store RED4 FAIL 후 worker475 PASS,
+  parent47 focused PASS, typecheck/lint PASS. fresh 독립 리뷰 전이므로 HIGH 종결 승계는 하지 않는다.
+- photo Architect의 2048 master+640 thumbnail, 동일 private lifecycle·별도 metadata 결속,
+  구버전 편집 보존안을 승인했다. 구현자는 신규090 migration/전용 harness만 소유한다.
+- [6개 종결 계획](../../../docs/operations/rc-closure-plan-2026-09-05.md)을 저장했다.
+  최신 사용자 요청에 따라 all-Astra 대신 역할별 Flash High/Sol High/Sol Max, 필요 시 Astra Max로 배정한다.
+  현재 진행 중인 Astra 구현/리뷰는 중단하지 않는다. 미래 작업을 이미 배정·완료한 것으로 쓰지 않는다.
+- 병렬/하위에이전트 개발 스킬은 한 쓰기 소유자+독립 검토, task brief, 중복 실행 방지 원장에 사용했다.
+  자동 merge/push/삭제나 보안 finding 허용 같은 범용 절차는 프로젝트의 엄격한 gate로 제한했다.

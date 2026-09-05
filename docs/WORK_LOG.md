@@ -108,6 +108,26 @@
 - PRODUCTION: NOT APPLIED. rollback은 해당 local commit revert, 콘텐츠 삭제 없음.
 - 상세 리포트: [Avatar/Auth/Photo](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
 
+### 2026-09-05 · 계획 고정과 역할별 배정 / Apple event fix
+
+- PLAN POSITION: RC 후속 6개 task. 기존 완료 작업 재실행 금지, 신규 기능 무단 확대 금지.
+- DIRECTION CHECK: 최신 사용자 “계획·역할 배분, Astra 필수 아님”; V5/사업§9/로드맵/current/log 확인. NO conflict.
+- OWNERSHIP: parent가 계획/문서/통합 소유. 새 배정은 Flash High 탐색·좁은 구현, Sol High 통합·검증,
+  Sol Max 아키텍처·독립 리뷰, 복잡한 교차 상태는 Astra Max. 기존 Astra 2명은 문맥을 유지해 종료.
+- CHANGED: `operations/rc-closure-plan-2026-09-05.md`, ENGINEERING_ROADMAP §0.1, CURRENT_STATE.
+  목표/수정 범위/금지/완료/테스트/보고 형식 고정. 별도 Book Studio 소유권 유지.
+- Auth 구현 `d08519f`: authSessionGuard/store 진입에서 취소된 Apple 이벤트 거부, INITIAL_SESSION 무한대기 방지.
+  SDK+실제 Store RED4 FAIL→worker475 PASS, parent47 PASS, typecheck/scoped lint PASS. 독립 DELTA 진행 중.
+- EXPLICITLY NOT CHANGED: 기존 crypto/원격DB/계정/상품/Production. metadata backend090은 아직 구현 진행 단계.
+- VERIFICATION: 문서 링크 대상/정확한 branch/HEAD 확인, `git diff --check` PASS.
+  task-brief helper의 실행 비트 누락은 명시적 outfile+`bash`로 우회; 전역 권한/도구 설정 미변경.
+- REVIEW IMPACT: 계획 문서 NONE; auth d08519f DELTA pending. 로컬 테스트를 실제 Apple 인증 증거로 사용하지 않음.
+- BLOCKERS/STOPPED AT: RC HOLD. 계획 작성 및 현재 2명 배정 완료, 앱 전체 완료 아님.
+- NEXT: auth 독립검토 → 사진 backend/API 확정·통합 → 요약 의미/기기 → 수익운영 → UX/복구 → exactRC.
+- DO NOT ADVANCE UNTIL: auth/media 모든HIGH·CRITICAL 종결 및 해당부정권한/실기기/외부게이트 증거.
+- PRODUCTION: NOT APPLIED. 문서 rollback은 이 문서 commit revert, 코드 rollback은 d08519f 별도.
+- 리포트: [Avatar/Auth/Photo control tower](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+
 ## 앞으로 사용할 표준 세션 원장 형식
 
 새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해

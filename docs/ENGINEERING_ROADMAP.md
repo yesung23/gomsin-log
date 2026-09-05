@@ -5,7 +5,7 @@
 > [`V4_AS_BUILT.md`](V4_AS_BUILT.md)에서 확인한다.
 > 현재 저장소 상태는 [`CURRENT_STATE.md`](CURRENT_STATE.md).
 
-- 기준일: 2026-09-03
+- 기준일: 2026-09-05 (V5 실행선은 2026-09-03 승인)
 - 이 문서는 어떤 것도 구현하지 않는다.
 
 ## 0. 현재 V5 실행선
@@ -29,6 +29,15 @@
 CloudKit은 이 실행선의 필수 저장소가 아니다. 플랫폼 중립 암호문 공유 경로가 제품의 source
 of truth이며, 개인 iCloud/Google Drive는 없어도 기능하는 선택형 보존·복구 후보일 뿐이다.
 Production Supabase, App Store 상품/심사, TestFlight, master merge, POD 계약은 각 STOP gate다.
+
+### 0.1 RC 종결 작업 배정 — 2026-09-05
+
+사용자의 명시적 요청에 따라 [6개 실행 작업](operations/rc-closure-plan-2026-09-05.md)으로
+나눠 담당/수정 경계/검증 조건을 고정했다. V5 범위를 확대하거나 과거 완료 작업을 다시 열지 않는다.
+미해결 인증·미디어 무결성 → 사진 variant/책 식별 → 온디바이스 의미·기기 gate → 실제 수익/운영
+경로 → 전체 UX/복구 → exact-HEAD RC 순서로 수렴한다. 독립 검토와 다음 비중첩 탐색은 병렬 실행한다.
+별도 Book Studio task는 이미 진행 중이므로 V5-I는 더 이상 그 task의 시작을 막지 않는다.
+이 앱 task는 Book repo를 수정하거나 Book 전체 완료를 대신 판정하지 않는다.
 
 ---
 

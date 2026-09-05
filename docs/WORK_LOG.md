@@ -128,6 +128,27 @@
 - PRODUCTION: NOT APPLIED. 문서 rollback은 이 문서 commit revert, 코드 rollback은 d08519f 별도.
 - 리포트: [Avatar/Auth/Photo control tower](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
 
+### 2026-09-05 · 독립 Auth/media DELTA 종결, photo API 동결
+
+- PLAN POSITION: RC Task1 auth/hook local종결; 누적 cleanup검토는 남음. Task2 backend, Task3 readonly설계 진행.
+- DIRECTION CHECK: 최신 역할별 배정 승인, V5 §7/8, 사업/로드맵/current/log 확인. NO conflict.
+- OWNERSHIP: `codex/rc-v5-final-fixes`, 검토 d08519f, 시작 b55d25d. parent가 실제 대상5파일diff동일 확인.
+- REVIEWED: auth47f5d07..d08519f3파일 + mediae907c11..47f5d07hook/test2파일, C/H/M/L0.
+- VERIFICATION: 독립 reviewer 실제auth86+경합2PASS, media17+경합1PASS. 이전HIGH종결.
+  parent `git diff --exit-code d08519f --` 대상5파일 종료0. 전체RC/원격/네이티브로그인 검증이 아님.
+- CHANGED: CurrentGate의8월LV를 historical로 분리하고 현재실행선링크를 먼저 노출;
+  AI_SESSION_PROTOCOL의legacyPRODUCT_V3참조를현재V5로 정정. 절차/공유 권한은 확대하지 않음.
+- API DECISION: photo begin/getmetadata및descriptor는 backend보고서계약 승인. master2048/10MiB,
+  thumb640/1MiB 상한, 논리32/물리64; client보고치수/hash이며 서버인쇄검증아님.
+  새metadataREAD는cipher>=1제외(본인/상대동일). 기존허용master경로유지, 암호화다운그레이드없음.
+- WHY/대안: 서버는해독성공을증명할수없어 clientboolean신뢰안을기각. 비용은 해당기록thumb최적화보류이지기능/보안손실이아님.
+- EXPLICITLY NOT CHANGED: DB090구현은worker진행중; auth/crypto/가격/Production 이번문서delta없음.
+- REVIEW IMPACT: auth/media독립DELTA PASS. 새090은아직미검토. 지도수정 NONE.
+- BLOCKERS/STOPPED AT: authlocal경합닫힘, provider/silentmerge/revoke/실기기는HOLD. 전체앱RC아님.
+- NEXT: 단일backendworker090+harness, SolMax요약설계후SolHigh구현. 원격APPLIED없음.
+- PRODUCTION: NOT APPLIED. 문서rollback은namedcommitrevert.
+- 리포트: [독립종결/Photo API](../control-tower/reports/codex/2026-09-05_1505_auth-delta-photo-api_codex.md).
+
 ## 앞으로 사용할 표준 세션 원장 형식
 
 새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해

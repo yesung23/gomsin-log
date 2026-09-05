@@ -37,7 +37,7 @@
   로컬 PostgreSQL 75 assertions와 mock 2계정 browser가 통과했지만 **089 remote NOT APPLIED**다.
 - Apple native 경로는 OFF 상태로 준비됐다(`d0b110b`, `71e5746`). 실제 SDK의 저장 전
   늦은 응답 차단 테스트는 통과했으나, 독립 리뷰에서 저장 후 늦은 SIGNED_IN 이벤트가
-  로그아웃 정리 중 Store에 재적용되는 **HIGH 1건**을 `d08519f`에서 수정했고 fresh 독립 리뷰 중이다. Apple 로그인
+  로그아웃 정리 중 Store에 재적용되는 **HIGH 1건**을 `d08519f`에서 수정했고 fresh 독립 DELTA PASS로 종결했다. Apple 로그인
   실사용 가능/Release Gate 통과로 표시하지 않는다. provider·서명·2계정 자동연결·revoke·실기기는 HOLD/UNVERIFIED.
 - Home/Diary timestamp는 정확한 source record를 연다(`429b612`). 필기 폰트 광학 크기와
   Diary의 200% 글자 설정을 조정했다(`2473591`). 최신 local browser **8 tests PASS**에는
@@ -52,7 +52,8 @@
   무료 기록·정상 사진·보안을 유료로 막지 않는다. 6종 IAP catalog와 서버 원장은 코드에 있지만
   판매 OFF, 실제 승인·가격·Sandbox·소비 증빙 caller·운영 통합은 별도 gate다.
 - 이전 scoped app 검증 274 tests PASS 후 Apple 이벤트 fix의 worker 475 PASS, parent 47 focused PASS,
-  typecheck/lint PASS. `47f5d07` media hook의 stale source 방어 38 tests PASS, narrow review 중이다.
+  typecheck/lint PASS. `47f5d07` media hook의 stale source 방어 38 tests PASS, narrow independent PASS.
+  독립 검토자는 인증 86+추가 경합2, 미디어17+추가 경합1을 직접 검증했고 C/H/M/L finding0이다.
   `02522ca`와 같은 production source의 `npm run build` PASS(placeholder Supabase 환경, 2581 modules).
   505KB chunk 경고가 남는다. 과거 전체 5683 PASS는 `fddb857`의 증거이며 최신 전체 suite를 대신하지 않는다.
 - 기록 미디어 삭제 086–088의 로컬 actor/재시도 검증 후 변경 `a8113b7`, `85be85b`는
@@ -60,7 +61,7 @@
 - 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
   실제 원격 migration catalog, 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
 - 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
-  현재 Astra Max auth reviewer와 photo backend worker만 동시 배정되어 있으며 나머지는 queue다.
+  auth reviewer는 종료했다. 현재 photo backend worker와 온디바이스 Sol Max 설계 탐색이 병렬 진행 중이다.
   신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
   상세 근거는
   [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).

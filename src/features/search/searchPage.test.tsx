@@ -157,7 +157,8 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
     expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '전체 단계' })).not.toBeInTheDocument();
-    expect(screen.getByText('예상 계급')).toBeInTheDocument();
+    expect(screen.getByTestId('service-rank-estimate')).toHaveTextContent('예상 계급 ·');
+    expect(screen.getByText('1초에 +10 EXP')).toBeInTheDocument();
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
   });

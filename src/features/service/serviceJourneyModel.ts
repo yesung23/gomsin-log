@@ -5,7 +5,7 @@ import { effectiveDischargeDate } from '@/lib/milestones';
 /** A display projection, never a military personnel/promotion record. */
 export function computeServiceJourney(military: MilitaryInfo | undefined, nowMs: number) {
   if (!Number.isFinite(nowMs)) return null;
-  if (!military || !Object.hasOwn(BRANCH_SPECS, military.branch)) return null;
+  if (!military || !Object.prototype.hasOwnProperty.call(BRANCH_SPECS, military.branch)) return null;
   const endMs = serviceDateAtMs(effectiveDischargeDate(military) ?? '');
   if (military.militaryStatus === 'discharged' && endMs !== null && endMs > nowMs) return null;
   const exp = computeServiceExp(military, nowMs);

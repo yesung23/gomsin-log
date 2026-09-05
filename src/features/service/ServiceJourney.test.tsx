@@ -59,6 +59,17 @@ describe('live service journey', () => {
     fireEvent.click(screen.getByRole('button', { name: '현재 EXP 확인' }));
     expect(screen.getByTestId('service-exp-readout').textContent).not.toBe(first);
   });
+  it('can advance past enlistment in reduced-motion mode without leaving the page', () => {
+    reduced = true;
+    vi.setSystemTime(new Date('2024-12-31T23:59:59+09:00'));
+    render(<ServiceJourney military={military} name="민우" />);
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.0');
+    act(() => vi.advanceTimersByTime(2000));
+    fireEvent.click(screen.getByRole('button', { name: '현재 복무 현황 확인' }));
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.1');
+    expect(screen.getByRole('button', { name: '현재 EXP 확인' })).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(0);
+  });
   it('labels estimates, preserves date provenance and exposes the whole journey on demand', () => {
     render(<ServiceJourney military={military} name="민우" />);
     expect(screen.getByText('예상 계급')).toBeInTheDocument();

@@ -106,6 +106,13 @@ export function ServiceJourney({ military, name, compact = false }: {
           </div>
       </div>
 
+      {waiting && (reduced || paused) && (
+        <button type="button" className="service-journey-control press-response mt-3"
+          aria-label="현재 복무 현황 확인" title="현재 복무 현황 확인" onClick={() => setNow(Date.now())}>
+          <RefreshCw size={16} aria-hidden="true" />
+        </button>
+      )}
+
       {!waiting && !complete && (
         <div className="mt-4 space-y-2" aria-live="off">
           <div className="flex flex-wrap items-end justify-between gap-2">

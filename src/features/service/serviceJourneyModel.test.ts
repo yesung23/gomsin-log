@@ -53,4 +53,13 @@ describe('service journey presentation contract', () => {
   it('does not award future EXP when a discharged flag contradicts the entered dates', () => {
     expect(computeServiceJourney({ ...military, militaryStatus: 'discharged' }, atDay(1))).toBeNull();
   });
+  it('works on runtimes without Object.hasOwn (supported older iOS WebViews)', () => {
+    const original = Object.getOwnPropertyDescriptor(Object, 'hasOwn')!;
+    Object.defineProperty(Object, 'hasOwn', { ...original, value: undefined });
+    try {
+      expect(computeServiceJourney(military, atDay(100))!.stageLabel).toBe('일병');
+    } finally {
+      Object.defineProperty(Object, 'hasOwn', original);
+    }
+  });
 });

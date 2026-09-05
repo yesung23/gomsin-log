@@ -9,6 +9,88 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — Avatar/Auth/Photo 운영 checkpoint (진행 중)
+
+### PLAN POSITION
+- Phase: V5 RC convergence / 운영·인증·사진
+- Workstream: 실제 프로필 공유, Apple native 보호, source navigation, 비용 계측
+- Step: 로컬 avatar 완료 / Auth 이벤트 HIGH 수정 / media variant 설계
+- Previous Gate: 전체 검증 `fddb857` 이후 media cleanup 보완 `a8113b7`, `85be85b`
+- This Gate: checkpoint `02522ca`, **전체 RC HOLD**
+
+### DIRECTION CHECK
+- Product source checked: 최신 사용자 승인, `PRODUCT_V5_MASTER_DECISION.md` §4/5/7/12, V4 as-built
+- Business source checked: `BUSINESS_MEMORY_ROADMAP_V1.md` §9; 무료 연결/정상 사진/보안 보존
+- Engineering source checked: `AGENTS.md`, `ENGINEERING_ROADMAP.md`, feature-build/release-validation/security-review/migration-gate
+- Current-state checked: 실제 branch/HEAD/status/code, CURRENT_STATE의 이전 Sep3 checkpoint는 historical로 분리
+- Latest relevant Work Log checked: Sep5 IAP forward reconciliation / whole-repo / Task3 기록
+- MASTER PLAN version / 기준일: V5 / 2026-09-03 + 최신 사용자 사진·사업 요청
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A. AI_SESSION_PROTOCOL의 PRODUCT_V3 active 표현은 오래된 참조이며 AGENTS/V5를 우선했다.
+
+### OWNERSHIP
+- Tool: Codex; Model: primary + GPT-6 Astra Max bounded worker/architect/reviewers
+- Role: primary integration/evidence; non-overlapping auth worker, avatar architect/independent reviewer
+- PR: none in this continuation
+- Branch: `codex/rc-v5-final-fixes`
+- Base SHA / Old HEAD: `85be85b` (이 checkpoint의 feature 시작 전)
+- New HEAD: `02522ca` (문서 commit 전); Reviewed HEAD: avatar `4b78ab7`, auth `71e5746`
+- Worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`
+
+### CHANGED / REVIEWED
+- `429b612`: Home/Diary 날짜→정확한 source link. `2473591`: 글꼴/Diary text scale.
+- `d0b110b`: guarded native Apple 준비. `71e5746`: SDK 저장 전 늦은 세션 방어; 독립 HIGH 1건 아직 OPEN.
+- `c59f874`: 089 private profile-avatar SQL/harness. `b6408e3`: My/양쪽 story 실제 공유.
+- `4b78ab7`: fresh deletion/recovery/tombstone edge MEDIUM 3건 수정, independent DELTA PASS.
+- `c84799e`: 비용/순수익 계산기와 운영 기준. `70c16cd`: 사진 decode/encode 제한·JPEG 확인.
+- `de64abc`: 실제 앱 dark state 검증. `02522ca`: 실제 sanitizer 합성 benchmark/정확한 비용 가정.
+- 상세 파일·변경 이유·버린 대안·검증·위험은 [한 곳의 리포트](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md)에 기록.
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: 알고리즘/key/nonce/recovery 및 기존 record ciphertext 변경 없음
+- DB/migration semantics: 089 로컬 추가만; 086–088 삭제 계약 우회 없음; 원격 적용 없음
+- product semantics: 무료 정상 사진/보안 유지, 상품 판매 OFF, Book Studio repo/기존 고객 사진 미변경
+- Production: NOT APPLIED; push/merge/deploy/Apple/Supabase 변경 없음
+
+### VERIFICATION
+- source-navigation 56 PASS; typography 34 + Diary 46 PASS.
+- local PostgreSQL avatar harness 75 assertions PASS / 실제 migration chain 87개; hosted 증거 아님.
+- focused avatar/auth/gates 274 PASS, scoped lint/typecheck PASS.
+- 독립 avatar DELTA 실제 소스 비교 10 scenarios/36 assertions PASS, 기존 MEDIUM 3건 종결.
+- auth worker 500 PASS/2 Android SKIP; 독립 SDK review 78 PASS + 새 경합 3 FAIL로 HIGH 1건 OPEN.
+- imageSanitization + recordMediaFailures 50 PASS; 경제 계산 node:test 7 PASS.
+- Node22 실제 Chromium photo benchmark 3 synthetic fixtures PASS; native/인쇄 품질은 UNVERIFIED.
+- `npx --yes --package=node@22 node node_modules/playwright/cli.js test --config e2e/.artifacts/source-entry.config.ts`: 8 PASS/22.6s/exit 0.
+- 이전 Node26 종료 지연은 PASS로 합산하지 않음. 이전 dark preference-only run은 앱 dark 증거에서 제외.
+- placeholder Supabase env `npm run build`: PASS/2581 modules, 505KB chunk warning; 전체 최신 suite 미실행.
+- targeted ESLint, `git diff --check`: PASS. 전체 정확한 범위/증거는 리포트 참조.
+
+### REVIEW IMPACT
+- FULL: 새 private avatar DB/RLS/버전 계약은 독립 reviewed; DELTA 4b78ab7 PASS.
+- Auth: 기존 리뷰 자동 승계 불가, 71e5746에서 새 HIGH OPEN. 다음 fix fresh DELTA 필수.
+- media cleanup a8113b7/85be85b 누적 리뷰는 아직 필요. 문서/benchmark 변화는 security NONE.
+
+### BLOCKERS
+- code: Apple 저장 후 event race HIGH, thumbnail/print metadata/실제 PPI 미구현, summary semantic guard 미완료
+- environment: 실제 iPhone/저사양/HEIC/발열/온디바이스 추론/전체 최신 suite UNVERIFIED
+- external/manual: remote migrations/Apple identity&revoke/Sandbox/결제 운영/인쇄 교정/비용 실측 미확인
+
+### STOPPED AT
+- 이 항목은 진행 중 checkpoint: avatar local gate 완료, 비용 benchmark 완료, RC 아님.
+
+### REMAINING / NEXT ACTION
+- owner: primary + bounded Astra Max auth worker 및 photo Architect
+- 기준 SHA: `02522ca`; 정확한 다음 task: Apple late event 재현/수정 → fresh independent delta,
+  병렬 photo variant/Book Studio 최소 계약 검토 → upload/read/delete 실제 통합.
+- 별도 Book Studio task에 경계 확인 전달, 해당 repo는 직접 수정하지 않음.
+
+### DO NOT ADVANCE UNTIL
+- 모든 HIGH/CRITICAL 닫힘, migration/negative actor/runtime 검증, 실기기·remote 출시 게이트 확인.
+- 판매/Production은 현재 local test만으로 켜지 않는다. 기존 콘텐츠 삭제/강제 재압축 금지.
+
+### PRODUCTION
+- NOT APPLIED / 원격 상태 UNVERIFIED.
+
 ## 앞으로 사용할 표준 세션 원장 형식
 
 새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해

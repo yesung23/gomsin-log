@@ -25,7 +25,44 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
-## 0. Current V5 control-tower checkpoint — 2026-09-03
+## 0. Current V5 control-tower checkpoint — 2026-09-05
+
+- Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
+  `codex/rc-v5-final-fixes`, application/benchmark checkpoint `02522ca`. 이 문서 이후에도
+  작업은 진행 중이므로 실행 전 live HEAD/status를 확인한다. master/Production에 통합됐다는 뜻은 아니다.
+- My에서 새로 선택한 사진을 본인·파트너 Home story ring에 표시하는 실제 경로가 로컬에 구현됐다
+  (`c59f874`, `b6408e3`, `4b78ab7`). migration 089의 private 256px/64KiB JPEG,
+  버전 조건부 교체·삭제, 현재 커플·삭제 상태 확인, 메모리 전용 클라이언트 조회를 사용한다.
+  이전 기기 로컬 사진을 자동 업로드하지 않는다. 독립 리뷰의 MEDIUM 3건은 DELTA로 해결 확인.
+  로컬 PostgreSQL 75 assertions와 mock 2계정 browser가 통과했지만 **089 remote NOT APPLIED**다.
+- Apple native 경로는 OFF 상태로 준비됐다(`d0b110b`, `71e5746`). 실제 SDK의 저장 전
+  늦은 응답 차단 테스트는 통과했으나, 독립 리뷰에서 저장 후 늦은 SIGNED_IN 이벤트가
+  로그아웃 정리 중 Store에 재적용되는 **HIGH 1건**이 남아 수정 중이다. Apple 로그인
+  실사용 가능/Release Gate 통과로 표시하지 않는다. provider·서명·2계정 자동연결·revoke·실기기는 HOLD/UNVERIFIED.
+- Home/Diary timestamp는 정확한 source record를 연다(`429b612`). 필기 폰트 광학 크기와
+  Diary의 200% 글자 설정을 조정했다(`2473591`). 최신 local browser **8 tests PASS**에는
+  375/402/430px 실제 앱 light/dark 6개, 2계정 사진 변경·삭제, 필기/200%/일반글꼴을 포함한다.
+  OS dark preference만 지정했던 예전 fixture는 앱 theme이 light였으므로 이전 dark 주장은
+  폐기하고 `de64abc`의 html data-theme 검증 결과로 대체한다. 실제 iPhone 증거는 아니다.
+- 일반 사진은 현재 긴 변 2048px JPEG .84이며 EXIF/원래 파일명 제거, 작은 사진 비확대다.
+  `70c16cd`는 decode/encode 대기 상한과 JPEG 결과 확인을 추가했다(관련 50 tests PASS).
+  합성 브라우저 실측과 비용 계산기는 [media-economics](operations/media-economics.md)에 있다.
+  **thumbnail, 인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현**이다.
+- 유료 가치는 권리가 확인된 정원/종이 상품, 책 제작, 지속 가치가 실제 제공되는 선택형 Plus다.
+  무료 기록·정상 사진·보안을 유료로 막지 않는다. 6종 IAP catalog와 서버 원장은 코드에 있지만
+  판매 OFF, 실제 승인·가격·Sandbox·소비 증빙 caller·운영 통합은 별도 gate다.
+- 최신 scoped app 검증 274 tests PASS, targeted lint/typecheck PASS. `02522ca`와 같은
+  production source의 `npm run build` PASS(placeholder Supabase 환경, 2581 modules).
+  505KB chunk 경고가 남는다. 과거 전체 5683 PASS는 `fddb857`의 증거이며 최신 전체 suite를 대신하지 않는다.
+- 기록 미디어 삭제 086–088의 로컬 actor/재시도 검증 후 변경 `a8113b7`, `85be85b`는
+  누적 exact-commit 독립 보안 리뷰가 여전히 필요하다. 새 사진 variant가 이 계약을 우회하면 안 된다.
+- 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
+  실제 원격 migration catalog, 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
+- 다음 우선순위: Apple 이벤트 HIGH 종결 → media variant/책 source 계약 구현·검증 →
+  온디바이스 의미 보존 및 실기기 gate → 누적 release review. 상세 근거는
+  [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+
+## H0. Historical V5 control-tower checkpoint — 2026-09-03
 
 - Active isolated branch: `codex/sol-gomsinlog-rc-v4`; 현재 Garden application checkpoint는
   `a96b0c4`다. 이 문서 작업은 해당 SHA 뒤의 미커밋

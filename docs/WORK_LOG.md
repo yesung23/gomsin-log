@@ -13537,3 +13537,13 @@ PRODUCTION
 - NOT APPLIED / UNVERIFIED
 
 ---
+# 2026-09-06 — RC historical secret-scan gate
+
+- PLAN POSITION: RC integration / pre-design GitHub gate. Previous application verification remains exact-source scoped.
+- DIRECTION CHECK: V5 product and engineering roadmap checked; business NOT APPLICABLE; no direction conflict. Current Git and latest deployment log checked.
+- OWNERSHIP: Codex parent orchestration; Sol Max bounded scanner Worker. Branch `codex/rc-v5-final-fixes`, reviewed HEAD `7901e4a` plus scanner delta.
+- CHANGED: `.gitleaks.toml` exact-path/value false-positive exceptions only; no app/crypto/DB/production semantics changed.
+- VERIFICATION: parent 249-commit gitleaks scan zero findings; worker five same-path negative controls detected; diff check PASS. App suites not rerun for scanner-only delta.
+- REVIEW IMPACT: DELTA. GitHub CI and hosted/device gates remain outstanding.
+- NEXT: RC branch push, protected master PR checks, then approved notebook Home implementation. Automatic production deployment remains held.
+- Report: [RC history secret-scan gate](../control-tower/reports/codex/2026-09-06_gitleaks-integration-gate_codex.md).

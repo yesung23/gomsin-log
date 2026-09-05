@@ -22,6 +22,9 @@ const EXISTING_APP_METADATA = {
 };
 
 type AdminOptions = {
+  cleanupContractData?: unknown;
+  cleanupContractError?: unknown;
+  cleanupContractReject?: unknown;
   flagError?: unknown;
   flagReject?: unknown;
   reassertFlagError?: unknown;
@@ -136,7 +139,11 @@ function makeAdmin(options: AdminOptions = {}) {
       calls.push(`rpc:${name}`);
       rpcCalls.push({ name, args });
       if (name === 'record_media_cleanup_contract_version') {
-        return { data: 3, error: null };
+        if (options.cleanupContractReject) throw options.cleanupContractReject;
+        return {
+          data: Object.hasOwn(options, 'cleanupContractData') ? options.cleanupContractData : 4,
+          error: options.cleanupContractError ?? null,
+        };
       }
       if (name === 'begin_account_deletion_v2') {
         if (options.beginError) return { data: null, error: options.beginError };
@@ -333,6 +340,26 @@ describe('delete-account - the server-authoritative pending flag', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  it.each([3, 5, '4', null, true, {}])('refuses unavailable cleanup contract %j before any mutation', async (cleanupContractData) => {
+    const admin = makeAdmin({ cleanupContractData });
+    const response = await post(admin);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ dataRemoved: false });
+    expect(admin.calls).toEqual(['auth.getUser', 'rpc:record_media_cleanup_contract_version']);
+    expect(admin.metadataWrites).toEqual([]);
+  });
+
+  it.each(['response', 'throw'] as const)('refuses cleanup contract transport failure (%s) before mutation', async (failure) => {
+    const admin = makeAdmin(failure === 'response'
+      ? { cleanupContractError: { code: 'PGRST202' } }
+      : { cleanupContractReject: new Error('network unavailable') });
+    const response = await post(admin);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ dataRemoved: false });
+    expect(admin.calls).toEqual(['auth.getUser', 'rpc:record_media_cleanup_contract_version']);
+    expect(admin.metadataWrites).toEqual([]);
   });
 
   it('writes app_metadata.account_deletion_pending BEFORE the preflight and before fenced begin', async () => {

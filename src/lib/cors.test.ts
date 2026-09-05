@@ -61,7 +61,7 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
       }
       return {
         data: name === 'record_media_cleanup_contract_version'
-          ? 3
+          ? 4
           : name === 'begin_account_deletion_v2'
           ? { ok: true, attempt_id: args?.p_attempt_id, phase: 'media_cleanup' }
           : name === 'inspect_account_deletion_fence_v2'

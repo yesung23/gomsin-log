@@ -142,6 +142,8 @@ const abandonRecordMediaMutation = vi.fn(async () => ({
 }));
 
 vi.mock('@/lib/records', () => ({
+  // These queue/relaunch fixtures model the legacy single-master backend.
+  getRecordPhotoRenditionCapability: async () => ({ ok: true, supported: false }),
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
   deleteRecordFromDB: vi.fn(async () => ({ ok: true as const })),
   fetchRecordsFromDB: vi.fn(async () => []),

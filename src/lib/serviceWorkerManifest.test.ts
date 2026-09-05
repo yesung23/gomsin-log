@@ -13,7 +13,7 @@ type DeriveServiceWorkerBuildId = (input: {
 }) => string;
 
 describe('service-worker offline critical route closure', () => {
-  it('includes Home and Onboarding with their static imports but not unrelated lazy routes', () => {
+  it('includes the offline recovery loop and its static imports but not unrelated lazy routes', () => {
     const bundle = {
       'assets/HomePage-home.js': {
         type: 'chunk' as const,
@@ -55,6 +55,20 @@ describe('service-worker offline critical route closure', () => {
         type: 'chunk' as const,
         fileName: 'assets/RecordPage-record.js',
         facadeModuleId: '/repo/src/pages/RecordPage.tsx',
+        imports: ['assets/vendor-react.js', 'assets/record-shared.js'],
+        dynamicImports: ['assets/RecordMediaGallery-media.js'],
+      },
+      'assets/ComposePage-compose.js': {
+        type: 'chunk' as const,
+        fileName: 'assets/ComposePage-compose.js',
+        facadeModuleId: '/repo/src/features/compose/ComposePage.tsx',
+        imports: ['assets/vendor-react.js', 'assets/record-shared.js'],
+        dynamicImports: [],
+      },
+      'assets/record-shared.js': {
+        type: 'chunk' as const,
+        fileName: 'assets/record-shared.js',
+        facadeModuleId: null,
         imports: ['assets/vendor-react.js'],
         dynamicImports: [],
       },
@@ -65,14 +79,17 @@ describe('service-worker offline critical route closure', () => {
     };
 
     expect(collectOfflineCriticalAssetUrls(bundle)).toEqual([
+      '/assets/ComposePage-compose.js',
       '/assets/HomePage-home.js',
       '/assets/OnboardingPage-onboarding.js',
+      '/assets/RecordPage-record.js',
       '/assets/home-shared.js',
+      '/assets/record-shared.js',
       '/assets/vendor-react.js',
     ]);
   });
 
-  it('fails the build if either critical route is missing from the Rollup graph', () => {
+  it('fails the build if any critical route is missing from the Rollup graph', () => {
     expect(() => collectOfflineCriticalAssetUrls({})).toThrow(/HomePage\.tsx/);
   });
 });

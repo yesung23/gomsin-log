@@ -4,6 +4,8 @@ import type { Plugin } from 'vite';
 const OFFLINE_CRITICAL_MODULES = [
   '/src/pages/HomePage.tsx',
   '/src/pages/OnboardingPage.tsx',
+  '/src/pages/RecordPage.tsx',
+  '/src/features/compose/ComposePage.tsx',
 ] as const;
 
 type BundleAsset = {
@@ -104,9 +106,9 @@ function assetUrl(fileName: string): string {
 }
 
 /**
- * Return the static Rollup closure needed to render the two possible first
- * screens after the eager app shell: authenticated Home and signed-out
- * Onboarding. Dynamic descendants such as the media gallery remain on-demand.
+ * Return the static Rollup closure needed to enter the app and preserve its
+ * smallest useful offline loop: Home -> write -> exact record. Signed-out
+ * Onboarding remains available too. Truly dynamic descendants stay on-demand.
  */
 export function collectOfflineCriticalAssetUrls(
   bundle: ServiceWorkerOutputBundle,

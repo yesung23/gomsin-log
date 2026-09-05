@@ -75,7 +75,9 @@ function emitCspHeaders(getValidated: () => ValidatedBuildEnvironment | null): P
 /**
  * Inject the eager, hashed app shell into the generated service worker.
  * A waiting worker can then activate while offline without serving an index whose
- * entry JavaScript or CSS was never cached, while lazy screens stay truly lazy.
+ * entry JavaScript or CSS was never cached. Only entry/auth plus the core
+ * Home -> compose -> exact-record recovery loop is promoted from lazy runtime
+ * caching; every other screen stays truly on-demand.
  */
 function injectServiceWorkerManifest(): Plugin {
   let offlineCriticalAssetUrls: string[] = [];

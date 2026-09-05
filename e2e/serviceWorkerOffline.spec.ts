@@ -49,7 +49,7 @@ test('a fresh worker boots the onboarding shell after the network and HTTP cache
   await context.close();
 });
 
-test('a fresh worker boots authenticated Home after the network and HTTP cache disappear', async ({ browser }) => {
+test('a fresh worker preserves Home, compose, and exact records after the network and HTTP cache disappear', async ({ browser }) => {
   const context = await browser.newContext({ serviceWorkers: 'allow' });
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
@@ -61,20 +61,30 @@ test('a fresh worker boots authenticated Home after the network and HTTP cache d
     .toHaveAttribute('aria-current', 'page');
   await waitForActiveWorker(page);
 
-  const homeChunk = await page.evaluate(async () => {
+  const criticalChunks = await page.evaluate(async () => {
     const cacheName = (await caches.keys())
       .find((name) => name.startsWith('gomsinlog-app-shell-'));
     if (!cacheName) return null;
     const requests = await (await caches.open(cacheName)).keys();
-    return requests
-      .map((request) => new URL(request.url).pathname)
-      .find((pathname) => /\/HomePage-[^/]+\.js$/.test(pathname)) ?? null;
+    const paths = requests.map((request) => new URL(request.url).pathname);
+    return {
+      home: paths.find((pathname) => /\/HomePage-[^/]+\.js$/.test(pathname)) ?? null,
+      compose: paths.find((pathname) => /\/ComposePage-[^/]+\.js$/.test(pathname)) ?? null,
+      record: paths.find((pathname) => /\/RecordPage-[^/]+\.js$/.test(pathname)) ?? null,
+    };
   });
-  expect(homeChunk).not.toBeNull();
-  const homeWasLoadedByThePage = await page.evaluate((chunkPath) => (
-    performance.getEntriesByName(new URL(chunkPath!, location.origin).href).length
-  ), homeChunk);
-  expect(homeWasLoadedByThePage).toBe(0);
+  expect(criticalChunks).toEqual({
+    home: expect.stringMatching(/\/HomePage-[^/]+\.js$/),
+    compose: expect.stringMatching(/\/ComposePage-[^/]+\.js$/),
+    record: expect.stringMatching(/\/RecordPage-[^/]+\.js$/),
+  });
+  const criticalChunksLoadedByPage = await page.evaluate((chunkPaths) => (
+    Object.fromEntries(Object.entries(chunkPaths!).map(([name, chunkPath]) => [
+      name,
+      performance.getEntriesByName(new URL(chunkPath!, location.origin).href).length,
+    ]))
+  ), criticalChunks);
+  expect(criticalChunksLoadedByPage).toEqual({ home: 0, compose: 0, record: 0 });
 
   await context.unrouteAll({ behavior: 'wait' });
   const devtools = await context.newCDPSession(page);
@@ -94,19 +104,37 @@ test('a fresh worker boots authenticated Home after the network and HTTP cache d
   await expect(page.getByTestId('home-core')).toBeVisible({ timeout: 20_000 });
   await expect(bottomNavigation.getByRole('link', { name: '홈' }))
     .toHaveAttribute('aria-current', 'page');
-  const homeChunkTiming = await page.waitForFunction((chunkPath) => {
+  const readWorkerTiming = (chunkPath: string) => page.waitForFunction((path) => {
     const entry = performance.getEntriesByName(
-      new URL(chunkPath as string, location.origin).href,
+      new URL(path as string, location.origin).href,
     )[0] as PerformanceResourceTiming | undefined;
     return entry
       ? { workerStart: entry.workerStart, transferSize: entry.transferSize }
       : null;
-  }, homeChunk).then((handle) => handle.jsonValue() as Promise<{
+  }, chunkPath).then((handle) => handle.jsonValue() as Promise<{
     workerStart: number;
     transferSize: number;
   }>);
+  const homeChunkTiming = await readWorkerTiming(criticalChunks!.home!);
   expect(homeChunkTiming.workerStart).toBeGreaterThan(0);
   expect(homeChunkTiming.transferSize).toBe(0);
+
+  await page.getByRole('button', { name: '기록 남기기' }).click();
+  await expect(page.getByRole('textbox', { name: '오늘 남길 글' })).toBeVisible();
+  const composeChunkTiming = await readWorkerTiming(criticalChunks!.compose!);
+  expect(composeChunkTiming.workerStart).toBeGreaterThan(0);
+  expect(composeChunkTiming.transferSize).toBe(0);
+
+  await page.getByRole('button', { name: '닫기' }).click();
+  await expect(page.getByTestId('home-core')).toBeVisible();
+  await page.evaluate(() => {
+    window.history.pushState({}, '', '/record');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  });
+  await expect(page.getByRole('heading', { name: '기록' })).toBeVisible();
+  const recordChunkTiming = await readWorkerTiming(criticalChunks!.record!);
+  expect(recordChunkTiming.workerStart).toBeGreaterThan(0);
+  expect(recordChunkTiming.transferSize).toBe(0);
   await context.close();
 });
 

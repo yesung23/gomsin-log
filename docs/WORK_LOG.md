@@ -9,6 +9,24 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — 온디바이스 의미 보존 HIGH 재현 / 활성화 HOLD
+
+- PLAN POSITION: RC Task3 설계·재현; Task2 photo090은 별도 단일 worker 진행 중. 전체 RC HOLD.
+- DIRECTION CHECK: V5 §8, 사업 무료 온디바이스 원칙, ENGINEERING_ROADMAP/종결6단계,
+  CURRENT_STATE와 바로 이전 auth/media DELTA 원장 확인. 기존 총20 계약을 보존하므로 NO conflict.
+- OWNERSHIP: parent + read-only Sol Max Architect; `codex/rc-v5-final-fixes`, reviewed `1f7777f`.
+- REVIEWED: 실제 dailySummary verifier/guard/rules/hook, native bridge/types, Story caller/test.
+  HIGH2는 잘린 부정·정정의 의미 반전, 전체 후반부 검증/무효화 누락. parent 반례4건도 재현.
+- CHANGED: CURRENT_STATE와 [상세 gate report](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md).
+  앱 수정·새 전략·암호·DB 의미·Production 변경 없음; backend worker 소유 파일은 stage하지 않음.
+- VERIFICATION: Architect203 baseline PASS이나 반례는 잘못 허용됨; Story mock 수집 FAIL.
+  parent guard4개 오허용 확인; 실제 Swift iOS15 target typecheck PASS. Mac AI disabled, physical iPhone 연결만 확인.
+- REVIEW IMPACT: 기존 의미 보존 완료 주장 불가. HIGH2 OPEN이며 수정 후 fresh DELTA 필요.
+- BLOCKERS/STOPPED AT: 실제 결함과 허용 수정 경계 확정, 구현 미완료. 기기 모델 성능·hosted는 UNVERIFIED.
+- NEXT ACTION: 현재 backend writer 종료 후 Sol High summary 구현 + stable media 독립 리뷰.
+  정확한 재현·20/21·tail edit·cancel·원본 이동 검증과 HIGH 종결 전 AI/RC를 활성화하지 않는다.
+- PRODUCTION: NOT APPLIED. rollback은 이 named docs commit revert; 사용자 콘텐츠 변경 없음.
+
 ## 2026-09-05 — Avatar/Auth/Photo 운영 checkpoint (진행 중)
 
 ### PLAN POSITION

@@ -60,8 +60,16 @@
   누적 exact-commit 독립 보안 리뷰가 여전히 필요하다. 새 사진 variant가 이 계약을 우회하면 안 된다.
 - 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
   실제 원격 migration catalog, 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
+- 온디바이스 Sol Max 설계 검토는 `1f7777f`와 동일한 scoped source에서 **HIGH 2건 / 활성화 HOLD**다.
+  연속 원문 발췌라도 뒤의 부정·인용·정정을 생략하면 뜻을 뒤집을 수 있고, 120자 이후 원문은
+  검증·결과 무효화에서 빠진다. parent도 별도 합성 반례 4건의 잘못된 허용을 재현했다.
+  총 기록 20개 제한과 긴 후보 20개 제한의 구현 차이, Story 테스트의 native mock 수집 오류도 있다.
+  수정 전이므로 기존 203 focused PASS를 의미 보존 완료로 해석하지 않는다.
+  iOS15 target의 Swift 소스 typecheck는 PASS이고 연결된 지원 iPhone/개발자 모드는 확인했지만
+  실기기 모델 실행은 아직 UNVERIFIED다. Mac availability는 Apple Intelligence OFF였다.
+  [구체적인 반례·수정 범위](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md).
 - 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
-  auth reviewer는 종료했다. 현재 photo backend worker와 온디바이스 Sol Max 설계 탐색이 병렬 진행 중이다.
+  auth reviewer는 종료했다. 현재 photo backend worker와 온디바이스 Sol Max 후속 설계가 진행 중이다.
   신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
   상세 근거는
   [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).

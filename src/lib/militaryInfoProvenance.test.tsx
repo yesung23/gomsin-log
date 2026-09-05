@@ -292,7 +292,7 @@ describe('M-1: ServicePage renders an honest empty state, not a fake D-Day', () 
       </MemoryRouter>,
     );
     expect(screen.queryByText('복무 정보가 아직 없어요')).toBeNull();
-    expect(screen.getByText('자동 계산')).toBeTruthy();
+    expect(screen.getByText('자동 계산한 전역일 기준')).toBeTruthy();
     expect(screen.getByText(/복무율 \d/)).toBeTruthy();
   });
 });

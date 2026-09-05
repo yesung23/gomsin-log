@@ -1,0 +1,236 @@
+/* Home is one warm, flat notebook sheet. The existing paper tokens remain authoritative. */
+.notebook-home {
+  --notebook-home-sheet: color-mix(in srgb, var(--paper) 94%, #ead8b5 6%);
+  --notebook-home-tape: color-mix(in srgb, var(--paper) 76%, #d6c29c 24%);
+  position: relative;
+  isolation: isolate;
+  min-height: 100%;
+  width: calc(100% - 12px);
+  margin: 6px 4px 0 8px;
+  padding-left: 12px;
+  overflow: clip;
+  background-color: var(--notebook-home-sheet);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 calc(var(--rule-gap) - 1px),
+    color-mix(in srgb, var(--rule) 76%, transparent) calc(var(--rule-gap) - 1px) var(--rule-gap)
+  );
+  border: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 58%, transparent);
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.notebook-home::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0 auto 0 0;
+  width: 12px;
+  pointer-events: none;
+  border-right: var(--stroke-thin) solid color-mix(in srgb, var(--margin-rule) 78%, transparent);
+  background-image: radial-gradient(
+    circle at 4px 12px,
+    color-mix(in srgb, var(--ink-faint) 68%, transparent) 0 1.7px,
+    transparent 2px
+  );
+  background-size: 10px 28px;
+  background-repeat: repeat-y;
+}
+
+.notebook-home > :not(.notebook-home__header) {
+  position: relative;
+  z-index: 1;
+}
+
+[data-theme='dark'] .notebook-home {
+  --notebook-home-sheet: color-mix(in srgb, var(--paper) 88%, #5b422f 12%);
+  --notebook-home-tape: color-mix(in srgb, var(--paper) 68%, #8f7759 32%);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 24%);
+}
+
+.notebook-home__header {
+  position: sticky;
+  z-index: 40;
+  background-color: color-mix(in srgb, var(--notebook-home-sheet) 96%, transparent);
+  background-image: repeating-linear-gradient(
+    180deg,
+    transparent 0 calc(var(--rule-gap) - 1px),
+    color-mix(in srgb, var(--rule) 76%, transparent) calc(var(--rule-gap) - 1px) var(--rule-gap)
+  );
+  border-bottom: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 48%, transparent);
+}
+
+.notebook-home__stories {
+  min-height: 88px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  background: color-mix(in srgb, var(--notebook-home-sheet) 86%, transparent);
+}
+
+.notebook-home .ink-rule {
+  height: var(--stroke-thin);
+  opacity: 0.56;
+}
+
+.notebook-home__feed-top .notebook-feed__mode-toggle {
+  flex: 0 0 44px;
+  margin-left: 4px;
+}
+
+.notebook-feed__toolbar {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 2px 12px;
+}
+
+.notebook-feed__mode-toggle,
+.notebook-feed__page-button {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  border-radius: 999px;
+}
+
+.notebook-feed__mode-toggle[data-reading-mode='vertical'] {
+  color: var(--ink-accent);
+  background: color-mix(in srgb, var(--ink-accent) 9%, transparent);
+}
+
+.notebook-feed__horizontal {
+  min-width: 0;
+}
+
+.notebook-feed__swipe-region {
+  min-width: 0;
+  touch-action: pan-y pinch-zoom;
+  outline: none;
+}
+
+.notebook-feed__swipe-region:focus-visible {
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--ink-accent) 72%, transparent);
+}
+
+.notebook-feed__page,
+.notebook-feed__vertical-record {
+  min-width: 0;
+}
+
+.notebook-feed__vertical-record + .notebook-feed__vertical-record {
+  border-top: var(--stroke-thin) dashed color-mix(in srgb, var(--ink-faint) 70%, transparent);
+}
+
+.notebook-feed__pagination {
+  display: grid;
+  grid-template-columns: 44px minmax(56px, auto) 44px;
+  min-height: 52px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 2px 12px 8px;
+}
+
+.notebook-feed__page-button:disabled {
+  opacity: 0.36;
+}
+
+.notebook-feed__page-count {
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.notebook-home__post {
+  padding: 2px 0 4px;
+}
+
+.notebook-home__media {
+  position: relative;
+  padding-top: 8px;
+}
+
+.notebook-home__media::before {
+  content: '';
+  position: absolute;
+  z-index: 4;
+  top: 0;
+  left: 50%;
+  width: 72px;
+  height: 18px;
+  pointer-events: none;
+  transform: translateX(-50%) rotate(-1.2deg);
+  background: var(--notebook-home-tape);
+  opacity: 0.78;
+  clip-path: polygon(2% 8%, 98% 0, 96% 92%, 4% 100%);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
+}
+
+.notebook-home__media [data-testid='record-attachment'] {
+  border: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 76%, transparent);
+  border-radius: 3px;
+  background: var(--paper);
+}
+
+.notebook-home__text-panel {
+  min-height: 132px;
+  padding: 24px 20px;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--notebook-home-sheet) 82%, transparent);
+}
+
+.notebook-home__caption {
+  padding: 16px 18px 8px;
+  line-height: max(var(--record-copy-leading), 1.7em);
+}
+
+.notebook-home__actions {
+  border-top: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 42%, transparent);
+}
+
+@media (max-width: 350px) {
+  .notebook-home {
+    width: calc(100% - 8px);
+    margin-inline: 4px;
+    padding-left: 10px;
+  }
+
+  .notebook-home::before {
+    width: 10px;
+  }
+
+  .notebook-home__header {
+    padding-inline: 10px;
+  }
+
+  .notebook-home__header > div:first-child {
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .notebook-home__header > div:last-child {
+    flex-shrink: 0;
+    gap: 2px;
+  }
+
+  .notebook-home__header [data-brand-mark='true'] {
+    width: 28px;
+    height: 28px;
+  }
+
+  .notebook-home__header button {
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notebook-home__media::before {
+    transform: translateX(-50%);
+  }
+}

@@ -11,6 +11,12 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- **노트 Home scoped gate 종결:** Boyle 구현, Euclid TerraMax 독립 DELTA로 P1/P2 3건 closed; 마지막 P3는 parent가 실제 data attribute/CSS 경로 확인·direct10PASS로 종결. 교정 후 부모115unit/2영향browserPASS, 전 단계25browser/type/lintPASS의 범위 구분. Source commit 준비, Now 제외 named paths만 통합. REVIEW IMPACT scoped DELTA+trivial visual delta, 원격·DB·crypto·Book 변경 없음/Production NOT APPLIED. 다음 CI 및 실제환경/운영 gate; 책 북마크·실기기·AI성능 미완료. [상세](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
+- **노트 Home 로컬 구현 / 독립 검증:** Boyle sole writer, parent는 source 수정 없음. 사진 누락 fixture와 상단 여백, 320px/200% 통화 버튼 잘림을 실제 화면으로 발견·교정. 부모 113 unit/25 browser/type/scopedlint PASS. Euclid TerraMax 리뷰 P1 긴/짧은 기록 선택·P2 우클릭·P2 ARIA 상태는 근거 확인 후 좁은 교정 진행; 이전 PASS가 이 미검증 경계를 증명하지 않음. Product 최신 노트 승인, Business N/A, Engineering/Current/원장 확인/conflict NO. REVIEW IMPACT DELTA required; 미커밋·원격 NOT APPLIED. 4174가 이전 QA 주소 빌드인 원인도 확인. 다음 교정→fresh 검증→미리보기 환경/운영 gate. [증거](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
+- **master 통합 완료 / Home 시작:** PR93 head13eb1b9 전체CI(6188unit/2skip·196browser 및 기타 gate) 확인 후 merge, remote master2d0c7f6 재조회. 같은 worktree에서 codex/notebook-home-v1 시작·session-start/claim 확인. Boyle SolHigh soleHome writer 배정; parent app/test source 수정 없음. Product 최신 승인 이미지/V4·Engineering/Current/최신원장 확인, Business N/A. master APPLIED, 운영DB/배포 NOT APPLIED. 새Home 아직미완료. REVIEW IMPACT integration packaging; 다음 실제iPhone크기화면 검증. [상세](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
 - Trip/OCR 독립 종결: Epicurus SolMax SCOPED LOCAL PASS/C0H0M0L0. 부모4hash일치, 검토는 source/test 정적이며 실행증거는 부모22unit/56browser/TS/lint로 구분. 전환/cleanup 일부 조합의 비차단 테스트 공백은 report에 명시. REVIEW IMPACT scoped DELTA PASS, fullapp/hosted 판정 아님. 다음 exact commit CI→master, 공개는 별도 운영 gate.
 
 - Trip/OCR 후속: `a5abeff` 기반 Noether TerraHigh 4파일 수정, 부모 전체diff·22unit·56browser·TS·scopedlint PASS. Epicurus SolMax 독립 DELTA pending. identity reset은 현재 snapshot/입력 초기화, same-scope refresh는 입력 보존. OCR cleanup은 결과를 막지 않도록 보완. Business N/A, 기존 Product/Engineering 방향 유지/conflict NO. 별도 실패-only/1일 CI artifact 준비. 실제 Linux 원인·새 CI/merge/배포 미검증; [상세와 hash](../control-tower/reports/codex/2026-09-06_trip-runtime-recovery_codex.md).

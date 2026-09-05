@@ -95,6 +95,7 @@ function dateFromToday(offset: number): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   partnerSurface = [];
   partnerUserId = 'partner';
   partnerName = '예성';
@@ -476,6 +477,7 @@ describe('홈 포스트 읽기 순서', () => {
       ...records[0], id, log: id === 'first/id' ? '첫 순간' : '둘째 순간', attachments: [],
     }));
     view();
+    fireEvent.click(screen.getByRole('button', { name: '세로로 읽기' }));
 
     for (const record of records) {
       const article = screen.getByText(record.log).closest('article')!;

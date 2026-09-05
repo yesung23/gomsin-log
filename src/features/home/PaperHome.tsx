@@ -33,6 +33,9 @@ import {
 } from '@/lib/talkAboutList';
 import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus';
 import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
+import { NotebookFeed, NotebookReadingModeToggle } from '@/features/home/NotebookFeed';
+import { useHomeReadingMode } from '@/features/home/useHomeReadingMode';
+import './notebookHome.css';
 
 const loadRecordMediaGallery = () =>
   import('@/components/media/RecordMediaGallery')
@@ -185,6 +188,7 @@ export function PaperHome() {
   } = useStore();
   const { profile, talkAboutMarks } = state;
   const isOnline = useOnlineStatus();
+  const { mode: readingMode, setMode: setReadingMode } = useHomeReadingMode();
   const pendingTalkAboutRef = useRef<string | null>(null);
   const [pendingTalkAboutRecordId, setPendingTalkAboutRecordId] = useState<string | null>(null);
   const todayStr = localToday();
@@ -330,6 +334,7 @@ export function PaperHome() {
         && feed.length === 0
         ? 'empty'
         : null;
+  const hasReadableFeed = sharedPartnerContentAvailable && !!partnerName && feedStatus !== 'empty';
 
   return (
     /*
@@ -340,10 +345,10 @@ export function PaperHome() {
       바뀌지 않았다: 스플래시도 온보딩도 아닌 홈이 떴는가. 그래서 이름을 지우지 않고
       새 홈의 뿌리로 옮긴다.
     */
-    <div className="min-h-full pb-6" data-testid="home-core">
+    <div className="notebook-home min-h-full pb-6" data-testid="home-core">
       <header
         data-testid="home-sticky-header"
-        className="paper-texture-layer sticky top-0 z-40 flex h-14 items-center justify-between px-4"
+        className="paper-texture-layer notebook-home__header sticky top-0 z-40 flex h-14 items-center justify-between px-4"
       >
         {/*
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과
@@ -389,7 +394,7 @@ export function PaperHome() {
       </div>
 
       {/*
-        스토리 레일 — 인스타와 같은 106px, 같은 순서.
+        스토리 레일 — 두 사람만 남긴 컴팩트한 높이, 익숙한 순서.
 
         **내 스토리가 맨 왼쪽이다.** 인스타에서 왼쪽 끝은 언제나 자기 자신이고 `+` 배지가
         거기 붙는다. 손이 기억하는 자리를 바꾸면 인스타 문법을 빌려 온 이유가 사라진다.
@@ -397,7 +402,7 @@ export function PaperHome() {
         링은 둘에서 끝난다. 인스타라면 여기부터 팔로우한 사람들이 이어지지만 이 앱에는
         두 사람뿐이라 그 자리가 비고, **비는 것이 맞다**(§5.2: 링은 정확히 두 개다).
       */}
-      <section aria-label="스토리" className="flex min-h-[106px] items-start gap-5 px-4 pb-2 pt-1">
+      <section aria-label="스토리" className="notebook-home__stories flex items-start gap-5 px-4">
         <div className="relative">
           <button
             type="button"
@@ -467,69 +472,78 @@ export function PaperHome() {
 
       <div className="ink-rule mx-4" aria-hidden="true" />
 
-      {focus ? (
-        <section aria-label="지금 가장 필요한 것" className="px-4">
-          <button
-            type="button"
-            onClick={() => navigate(focus.to)}
-            aria-label={`${focus.title}: ${focus.actionLabel}`}
-            className="press-response flex min-h-[60px] w-full items-center gap-3 py-2 text-left"
-          >
-            <span
-              className="min-w-0 flex-1 break-words text-body font-semibold [overflow-wrap:anywhere]"
-              style={{ color: 'var(--ink)' }}
-            >
-              {focus.title}
-            </span>
-            <ChevronRight
-              size={19}
-              className="pen-icon ml-auto shrink-0"
-              color="var(--ink-accent)"
-              aria-hidden="true"
-            />
-          </button>
+      {focus || hasReadableFeed ? (
+        <div className="notebook-home__feed-top px-4">
+          <div className="flex min-h-12 items-center">
+            {focus ? (
+              <section aria-label="지금 가장 필요한 것" className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => navigate(focus.to)}
+                  aria-label={`${focus.title}: ${focus.actionLabel}`}
+                  className="press-response flex min-h-11 w-full items-center gap-2 text-left"
+                >
+                  <span
+                    className="min-w-0 flex-1 break-words text-body font-semibold [overflow-wrap:anywhere]"
+                    style={{ color: 'var(--ink)' }}
+                  >
+                    {focus.title}
+                  </span>
+                  <ChevronRight
+                    size={19}
+                    className="pen-icon ml-auto shrink-0"
+                    color="var(--ink-accent)"
+                    aria-hidden="true"
+                  />
+                </button>
+              </section>
+            ) : <span className="min-w-0 flex-1" aria-hidden="true" />}
+            {hasReadableFeed ? (
+              <NotebookReadingModeToggle mode={readingMode} onModeChange={setReadingMode} />
+            ) : null}
+          </div>
           <div className="ink-rule" aria-hidden="true" />
-        </section>
+        </div>
       ) : null}
 
       {sharedPartnerContentAvailable && partnerName ? (
         <section aria-labelledby="home-partner-feed-title">
-          <div className="px-4 pb-2 pt-5">
-            <h2
-              id="home-partner-feed-title"
-              className="break-words text-headline font-semibold [overflow-wrap:anywhere]"
-              style={{ color: 'var(--ink)' }}
-            >
-              {partnerName}의 최근 기록
-            </h2>
-          </div>
+          <h2 id="home-partner-feed-title" className="sr-only">
+            {partnerName}의 최근 기록
+          </h2>
 
           {feedStatus === 'empty' ? (
             <p className="px-8 py-6 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
               최근 {FEED_DAYS}일에 공유된 기록이 없어요
             </p>
           ) : (
-            feed.map((record, index) => (
-              <Post
-                key={record.id}
-                record={record}
-                index={index}
-                partnerName={partnerName}
-                todayStr={todayStr}
-                talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
-                talkAboutBusy={pendingTalkAboutRecordId !== null}
-                talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
-                talkAboutDisabledReason={!isOnline
-                  ? OFFLINE_READONLY_MESSAGE
-                  : pendingTalkAboutRecordId !== null
-                    ? '다른 책갈피를 바꾸는 중이에요.'
-                    : undefined}
-                onToggleTalkAbout={() => toggleTalkAbout(
-                  record.id,
-                  talkAboutStateByRecordId.get(record.id) ?? 'none',
-                )}
-              />
-            ))
+            <NotebookFeed
+              records={feed}
+              identityKey={`${profile.id}:${profile.couple.coupleId ?? 'none'}:${activePartnerUserId}`}
+              mode={readingMode}
+              onModeChange={setReadingMode}
+              showModeToggle={false}
+              renderRecord={(record) => (
+                <Post
+                  key={record.id}
+                  record={record}
+                  partnerName={partnerName}
+                  todayStr={todayStr}
+                  talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
+                  talkAboutBusy={pendingTalkAboutRecordId !== null}
+                  talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
+                  talkAboutDisabledReason={!isOnline
+                    ? OFFLINE_READONLY_MESSAGE
+                    : pendingTalkAboutRecordId !== null
+                      ? '다른 책갈피를 바꾸는 중이에요.'
+                      : undefined}
+                  onToggleTalkAbout={() => toggleTalkAbout(
+                    record.id,
+                    talkAboutStateByRecordId.get(record.id) ?? 'none',
+                  )}
+                />
+              )}
+            />
           )}
 
         </section>
@@ -578,7 +592,6 @@ export function PaperHome() {
 
 function Post({
   record,
-  index,
   partnerName,
   todayStr,
   talkAboutState,
@@ -588,7 +601,6 @@ function Post({
   onToggleTalkAbout,
 }: {
   record: DailyRecord;
-  index: number;
   partnerName: string;
   todayStr: string;
   talkAboutState: TalkAboutActorState;
@@ -604,7 +616,7 @@ function Post({
   return (
     <article
       aria-busy={talkAboutBusy || undefined}
-      className={index === 0 ? 'pb-2 pt-3' : 'pb-2'}
+      className="notebook-home__post"
     >
       {/*
         작성자 이름은 홈 상단과 스토리 레일에 이미 있다. 포스트마다 반복하지 않고 사진부터
@@ -614,14 +626,15 @@ function Post({
       */}
       <div className="px-4">
         {hasMedia ? (
-          <RetryableRecordMediaGallery
-            attachments={record.attachments ?? []}
-            recordId={record.id}
-          />
+          <div className="notebook-home__media" data-record-media-region>
+            <RetryableRecordMediaGallery
+              attachments={record.attachments ?? []}
+              recordId={record.id}
+            />
+          </div>
         ) : record.contentUnavailable ? (
           <div
-            className="flex items-center px-5 py-6"
-            style={{ border: 'var(--stroke) solid var(--ink-faint)', borderRadius: '10px 3px 12px 3px / 3px 12px 3px 10px' }}
+            className="notebook-home__text-panel flex items-center"
           >
             <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
               {record.contentUnavailable === 'key_unavailable'
@@ -631,13 +644,7 @@ function Post({
           </div>
         ) : (
           <div
-            className="flex items-center px-5 py-6"
-            style={{
-              border: 'var(--stroke) solid var(--ink-faint)',
-              borderRadius: index % 2
-                ? '10px 3px 12px 3px / 3px 12px 3px 10px'
-                : '3px 12px 3px 10px / 12px 3px 10px 3px',
-            }}
+            className="notebook-home__text-panel flex items-center"
           >
             <p
               className="hand-text record-copy whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
@@ -651,7 +658,7 @@ function Post({
 
       {hasMedia && record.log ? (
         <p
-          className="hand-text record-copy whitespace-pre-wrap break-words px-4 pt-3 [overflow-wrap:anywhere]"
+          className="notebook-home__caption hand-text record-copy whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
           style={{ color: 'var(--ink)' }}
         >
           {record.log}
@@ -675,7 +682,7 @@ function Post({
         줄 아는 사람에게 거짓말**이고, 이 제품에서 그것은 상대가 내 반응을 봤을 것이라고
         믿게 만드는 종류의 거짓말이다. 자리는 비워 두고 되는 것만 답한다.
       */}
-      <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 px-3 py-1">
+      <div className="notebook-home__actions flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 px-3 py-1">
         <Link
           to={`/record?record=${encodeURIComponent(record.id)}`}
           aria-label={`${timeAgo(record, todayStr)} 기록 열기`}

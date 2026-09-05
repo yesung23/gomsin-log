@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { resolveAttachmentUrls } from '@/lib/records';
 import type { Attachment, ServerErrorKind } from '@/types';
 
@@ -49,27 +49,39 @@ export function useMediaAttachment(
   /** URLs already retried, so a second failure of the same URL gives up. */
   const retried = useRef(new Set<string>());
   const mounted = useRef(true);
+  const generation = useRef(0);
+  const sourceKey = JSON.stringify([coupleId, recordId, attachment.type, attachment.path,
+    attachment.url, attachment.urlUnavailable]);
+  const activeKey = useRef(sourceKey);
 
-  useEffect(() => () => { mounted.current = false; }, []);
-
-  // A fresh fetch (realtime patch, reload, navigation) supersedes local state.
-  useEffect(() => {
+  // Invalidate old work before paint, including StrictMode setup/cleanup replay.
+  // Neither an old success nor failure may replace a newer source/denial.
+  useLayoutEffect(() => {
+    mounted.current = true;
+    activeKey.current = sourceKey;
+    generation.current += 1;
+    retried.current.clear();
     setUrl(attachment.url);
     setUnavailable(attachment.urlUnavailable);
-  }, [attachment.url, attachment.urlUnavailable]);
+    setRefreshing(false);
+    return () => { mounted.current = false; generation.current += 1; };
+  }, [sourceKey, attachment.url, attachment.urlUnavailable]);
 
   const reportLoadFailure = useCallback(() => {
+    if (!mounted.current || activeKey.current !== sourceKey) return;
     const failedUrl = url;
     // Without a storage path there is nothing to re-sign: a temporary local blob
     // URL or a legacy attachment saved before paths were durable.
     if (!failedUrl || !attachment.path || !coupleId) return;
     if (retried.current.has(failedUrl)) return;
     retried.current.add(failedUrl);
+    const requestGeneration = generation.current;
+    const isCurrent = () => mounted.current && generation.current === requestGeneration;
     setRefreshing(true);
     void (async () => {
       try {
         const [signed] = await resolveAttachmentUrls([attachment], coupleId, recordId);
-        if (!mounted.current) return;
+        if (!isCurrent()) return;
         if (signed?.url && signed.url !== failedUrl) {
           setUrl(signed.url);
           setUnavailable(undefined);
@@ -79,14 +91,18 @@ export function useMediaAttachment(
         setUrl(undefined);
         setUnavailable(signed?.urlUnavailable ?? 'unknown');
       } catch {
-        if (!mounted.current) return;
+        if (!isCurrent()) return;
         setUrl(undefined);
         setUnavailable('unknown');
       } finally {
-        if (mounted.current) setRefreshing(false);
+        if (isCurrent()) setRefreshing(false);
       }
     })();
-  }, [attachment, coupleId, recordId, url]);
+  }, [attachment, coupleId, recordId, sourceKey, url]);
 
-  return { url, unavailable, refreshing, reportLoadFailure };
+  // Render the new props immediately; do not hand a previous source URL to an
+  // <img> for even the commit preceding the layout-effect state reset.
+  return activeKey.current === sourceKey
+    ? { url, unavailable, refreshing, reportLoadFailure }
+    : { url: attachment.url, unavailable: attachment.urlUnavailable, refreshing: false, reportLoadFailure };
 }

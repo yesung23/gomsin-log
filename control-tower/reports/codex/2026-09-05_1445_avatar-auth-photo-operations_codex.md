@@ -85,5 +85,11 @@ Avatar 범위는 local/independent PASS, Auth는 HIGH OPEN, media 운영은 부�
 
 ## Next Highest-ROI Goal
 
+후속 확인: 기존 미디어 재조회 hook에서도 이전 source 응답이 새 사진/상위 권한 거절/새 URL을
+덮는 3개 실패를 재현했다. source generation과 commit 전 표시 경계를 추가해 수정했다.
+hook/Gallery/playback **38 PASS**, 대상 lint/typecheck PASS. 원격 권한·crypto는 변경하지 않았고,
+아직 별도 narrow DELTA review 전이다. StrictMode wrapper 호환 테스트는 변경 전부터 PASS였으며
+이를 별도의 재현된 결함으로 과장하지 않는다.
+
 Apple 이벤트 HIGH를 닫는 동안 thumbnail·사진 metadata·책 source 계약을 Architect가 검토한다.
 그 다음 실제 사용자 upload/read/delete 경로에 붙이고 negative tests로 검증한다.

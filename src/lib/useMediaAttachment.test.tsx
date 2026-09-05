@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { StrictMode, type ReactNode } from 'react';
 import type { Attachment } from '@/types';
 
 /**
@@ -190,5 +191,83 @@ describe('a fresh fetch supersedes locally recovered state', () => {
 
     await waitFor(() => expect(result.current.unavailable).toBe('forbidden'));
     expect(result.current.url).toBeUndefined();
+  });
+});
+
+describe('late recovery cannot cross a source or authorization boundary', () => {
+  function pendingRecovery() {
+    let complete!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { complete = resolve; }));
+    return (value: Attachment[]) => act(async () => { complete(value); });
+  }
+
+  it('does not install an earlier photo after the attachment changes', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const next = attachment({ path: `${COUPLE}/${RECORD}/next.jpg`, url: 'https://example.test/next' });
+    rerender({ a: next, c: COUPLE });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBe(next.url);
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not revive a photo denied by a newer authorization result', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    rerender({ a: attachment({ url: undefined, urlUnavailable: 'forbidden' }), c: undefined });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBeUndefined();
+    expect(result.current.unavailable).toBe('forbidden');
+  });
+
+  it('does not overwrite a newer store signature for the same attachment', async () => {
+    const complete = pendingRecovery();
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const fresh = 'https://example.test/newer-signature';
+    rerender({ a: attachment({ url: fresh }), c: COUPLE });
+    await complete([attachment({ url: SECOND })]);
+    expect(result.current.url).toBe(fresh);
+  });
+
+  it('recovers after StrictMode effect cleanup and setup replay', async () => {
+    resolveAttachmentUrls.mockResolvedValue([attachment({ url: SECOND })]);
+    const { result } = renderHook(() => useMediaAttachment(attachment(), COUPLE, RECORD), {
+      wrapper: ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>,
+    });
+    act(() => result.current.reportLoadFailure());
+    await waitFor(() => expect(result.current.url).toBe(SECOND));
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not let a stale failure clear a newer request in flight', async () => {
+    let failOld!: (error: Error) => void;
+    let finishNew!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((_, reject) => { failOld = reject; }));
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { finishNew = resolve; }));
+    const { result, rerender } = renderOne(attachment(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const next = attachment({ url: 'https://example.test/next', path: `${COUPLE}/${RECORD}/next.jpg` });
+    rerender({ a: next, c: COUPLE });
+    act(() => result.current.reportLoadFailure());
+    await act(async () => { failOld(new Error('old request failed')); });
+    expect(result.current.url).toBe(next.url);
+    expect(result.current.unavailable).toBeUndefined();
+    expect(result.current.refreshing).toBe(true);
+    await act(async () => { finishNew([{ ...next, url: 'https://example.test/next-fresh' }]); });
+    expect(result.current.url).toBe('https://example.test/next-fresh');
+    expect(result.current.refreshing).toBe(false);
+  });
+
+  it('does not reuse a callback retained from a different couple/record', () => {
+    const { result, rerender } = renderHook(({ c, r }) => useMediaAttachment(attachment(), c, r), {
+      initialProps: { c: COUPLE, r: RECORD },
+    });
+    const oldReport = result.current.reportLoadFailure;
+    rerender({ c: 'other-couple', r: 'other-record' });
+    act(() => oldReport());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
   });
 });

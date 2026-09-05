@@ -91,6 +91,23 @@
 ### PRODUCTION
 - NOT APPLIED / 원격 상태 UNVERIFIED.
 
+### 2026-09-05 · Photo checkpoint 후속 — 늦은 미디어 재조회 차단
+
+- PLAN POSITION: V5 사진/운영 gate의 기존 조회 안정성. 이전 `e907c11`; 이번 local focused PASS.
+- DIRECTION CHECK: 위 checkpoint와 같은 source, NO conflict. 비용 절감을 위한 variant 전 기존 source 권한 보존.
+- OWNERSHIP: primary Codex, `codex/rc-v5-final-fixes`; auth worker 파일과 비중첩.
+- CHANGED: `useMediaAttachment.ts` 및 직접 hook test. 사진/record/couple/상위 URL·권한 결과가
+  바뀌면 이전 재조회 세대를 무효화한다. 늦은 성공/실패가 새 사진·금지 상태·현재 spinner를 덮지 못한다.
+- WHY: 원본 교체/권한 거절/새 URL 뒤 늦은 응답 재설치 3 tests RED를 확인했다.
+- EXPLICITLY NOT CHANGED: Storage/RLS/DB/crypto/형식/압축 품질/디자인/Production.
+- VERIFICATION: hook17 + Gallery16 + playback5 = **38 PASS**, scoped ESLint/typecheck/diff-check PASS.
+  StrictMode wrapper 호환도 PASS지만 해당 테스트는 수정 전에도 통과했으므로 결함 재현 근거로 사용하지 않는다.
+- REVIEW IMPACT: narrow DELTA 필요. 기존 avatar 독립 리뷰의 범위 밖이다.
+- BLOCKERS/REMAINING: 원격 권한/실기기/variant 미검증. UI의 기존에 받은 URL을 원격 회수한다고 주장하지 않음.
+- STOPPED AT/NEXT: 실제 shared hook 안전성 수정, photo Architect에 파일 소유권 반환 후 variant 통합.
+- PRODUCTION: NOT APPLIED. rollback은 해당 local commit revert, 콘텐츠 삭제 없음.
+- 상세 리포트: [Avatar/Auth/Photo](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+
 ## 앞으로 사용할 표준 세션 원장 형식
 
 새 세션 기록은 아래 구조를 사용한다. 과거 자유형식 기록은 역사 보존을 위해

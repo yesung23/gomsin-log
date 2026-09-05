@@ -1,12 +1,14 @@
 PODS:
-  - Capacitor (7.6.9):
+  - Capacitor (7.6.8):
     - CapacitorCordova
   - CapacitorApp (7.1.2):
     - Capacitor
   - CapacitorBrowser (7.0.5):
     - Capacitor
-  - CapacitorCordova (7.6.9)
+  - CapacitorCordova (7.6.8)
   - CapacitorPushNotifications (7.0.7):
+    - Capacitor
+  - GomsinlogCapacitorAppleAuth (0.1.0):
     - Capacitor
   - GomsinlogCapacitorDeviceKeys (0.1.0):
     - Capacitor
@@ -23,6 +25,7 @@ DEPENDENCIES:
   - "CapacitorBrowser (from `../../node_modules/@capacitor/browser`)"
   - "CapacitorCordova (from `../../node_modules/@capacitor/ios`)"
   - "CapacitorPushNotifications (from `../../node_modules/@capacitor/push-notifications`)"
+  - GomsinlogCapacitorAppleAuth (from `../../packages/capacitor-apple-auth`)
   - GomsinlogCapacitorDeviceKeys (from `../../packages/capacitor-device-keys`)
   - GomsinlogCapacitorOnDeviceBriefing (from `../../packages/capacitor-on-device-briefing`)
   - GomsinlogCapacitorOnDeviceSummary (from `../../packages/capacitor-on-device-summary`)
@@ -39,6 +42,8 @@ EXTERNAL SOURCES:
     :path: "../../node_modules/@capacitor/ios"
   CapacitorPushNotifications:
     :path: "../../node_modules/@capacitor/push-notifications"
+  GomsinlogCapacitorAppleAuth:
+    :path: "../../packages/capacitor-apple-auth"
   GomsinlogCapacitorDeviceKeys:
     :path: "../../packages/capacitor-device-keys"
   GomsinlogCapacitorOnDeviceBriefing:
@@ -49,16 +54,17 @@ EXTERNAL SOURCES:
     :path: "../../packages/capacitor-storekit"
 
 SPEC CHECKSUMS:
-  Capacitor: 46067d1c8df89760dbed78780d436327d588c726
+  Capacitor: ff6bf01336ac353098378828aff465095a89e459
   CapacitorApp: f01a913211780e0718dae9750442c3e23f96e106
   CapacitorBrowser: 6d09f59655e89aede71654ef08b98de55cf032b6
-  CapacitorCordova: 2080fc0d6bfbc9dcc0e6d88e77fa624190d343ca
+  CapacitorCordova: e61ee8c40101b8cd011d0224261606a290c082cf
   CapacitorPushNotifications: 0527809a9619ed775439d5ab2c2d996122b48319
+  GomsinlogCapacitorAppleAuth: 4242cbb6f5fc0e27c8480d947fe6cb20f1ca83b7
   GomsinlogCapacitorDeviceKeys: 8771b466923fd3832708159b6992be9c78df2597
   GomsinlogCapacitorOnDeviceBriefing: 744ed4f20b78dc8b22d26ae57b521c9d02b8d9ce
   GomsinlogCapacitorOnDeviceSummary: dd6e82dc9e32289b71d41c3214f15da533718a08
   GomsinlogCapacitorStorekit: 14044a13619bee12613265f38a963bad5f559d3e
 
-PODFILE CHECKSUM: f07cfb3472e0237421f4ed725217c4380b19d694
+PODFILE CHECKSUM: ceb1797ab4865214ba94a987277b4d7388bcf34d
 
 COCOAPODS: 1.17.0

@@ -16,9 +16,20 @@ import {
   type ServerErrorKind,
 } from '@/lib/serverErrors';
 import { parseRemoteCoupleState, type RemoteCoupleState } from '@/lib/coupleLifecycle';
-import type { AuthUser, IAuthRepository, RelationshipContext, Role } from '@/types';
+import type {
+  AuthSignInResult,
+  AuthUser,
+  IAuthRepository,
+  RelationshipContext,
+  Role,
+} from '@/types';
 import { createPkceTimeoutFetch } from '@/lib/oauthPkce';
-import { appleLoginEnabled } from '@/lib/appleLoginFeature';
+import { toAuthUser } from '@/types';
+import {
+  authorizeWithNativeApple,
+  createAppleTokenTimeoutFetch,
+  stageVerifiedAppleNameCandidate,
+} from '@/lib/appleAuth';
 
 /**
  * Supabase environment variables configuration.
@@ -123,7 +134,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
         },
       },
       global: {
-        fetch: createPkceTimeoutFetch(globalThis.fetch.bind(globalThis)),
+        fetch: createPkceTimeoutFetch(createAppleTokenTimeoutFetch(globalThis.fetch.bind(globalThis))),
       },
     })
   : null;
@@ -760,6 +771,8 @@ export class UnconfiguredAuthRepository implements IAuthRepository {
  * Supabase Auth Repository for live integration.
  */
 export class SupabaseAuthRepository implements IAuthRepository {
+  private appleSignInInFlight: Promise<AuthSignInResult> | null = null;
+
   isConfigured(): boolean {
     return isSupabaseConfigured;
   }
@@ -769,12 +782,7 @@ export class SupabaseAuthRepository implements IAuthRepository {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.user) return null;
-      const provider = (session.user.app_metadata?.provider as 'apple' | 'google') || 'google';
-      return {
-        id: session.user.id,
-        email: session.user.email,
-        provider,
-      };
+      return toAuthUser(session.user);
     } catch (e) {
       console.error('[gomsinlog] Failed to read the current auth user.');
       return null;
@@ -790,7 +798,7 @@ export class SupabaseAuthRepository implements IAuthRepository {
    * navigating, open it in a Custom Tab, and let the `appUrlOpen` deep-link
    * handler (lib/deepLinks.ts) finish the exchange.
    */
-  private async startOAuth(provider: 'google' | 'apple'): Promise<{ error?: string }> {
+  private async startOAuth(provider: 'google'): Promise<{ error?: string }> {
     if (!supabase) {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
@@ -826,11 +834,47 @@ export class SupabaseAuthRepository implements IAuthRepository {
     return this.startOAuth('google');
   }
 
-  async signInWithApple(): Promise<{ error?: string }> {
-    if (!appleLoginEnabled()) {
+  async signInWithApple(): Promise<AuthSignInResult> {
+    if (this.appleSignInInFlight) return this.appleSignInInFlight;
+    const operation = this.performAppleSignIn();
+    this.appleSignInInFlight = operation;
+    try {
+      return await operation;
+    } finally {
+      if (this.appleSignInInFlight === operation) this.appleSignInInFlight = null;
+    }
+  }
+
+  private async performAppleSignIn(): Promise<AuthSignInResult> {
+    if (!supabase) {
+      return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
+    }
+    try {
+      const authorization = await authorizeWithNativeApple();
+      if (authorization.status === 'unavailable') {
+        return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+      }
+      if (authorization.status === 'cancelled') return { cancelled: true };
+
+      // The native token remains opaque here. Supabase verifies its signature,
+      // audience, issuer and nonce before any Apple-provided profile hint is used.
+      const { data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: authorization.identityToken,
+        nonce: authorization.rawNonce,
+      });
+      const verifiedUserId = data.session?.user?.id;
+      if (error || !verifiedUserId || data.user?.id !== verifiedUserId) {
+        return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+      }
+      stageVerifiedAppleNameCandidate(verifiedUserId, authorization.fullName);
+      return {};
+    } catch {
+      // Never include the thrown value: native and Supabase failures can carry
+      // credentials, authorization codes, nonce values, or provider details.
+      console.error('[gomsinlog] Native Apple sign-in failed.');
       return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
     }
-    return this.startOAuth('apple');
   }
 
   async signInWithEmail(email: string): Promise<{ error?: string }> {

@@ -908,10 +908,10 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     const podfile = read('ios/App/Podfile');
     const pods = [...podfile.matchAll(/pod '([^']+)', :path => '([^']+)'/g)];
     // The count is what keeps the loop below from passing vacuously on a regex
-    // that stopped matching. Nine with the iOS-only StoreKit plugin and the
-    // first-party on-device summary and Partner Briefing plugins.
-    expect(pods.length).toBe(9);
+    // that stopped matching. Ten pods are currently synced into the app project.
+    expect(pods.length).toBe(10);
     const firstPartyPaths = [
+      '../../packages/capacitor-apple-auth',
       '../../packages/capacitor-device-keys',
       '../../packages/capacitor-on-device-briefing',
       '../../packages/capacitor-on-device-summary',
@@ -922,6 +922,74 @@ describe('both platforms are installed and reproducible from the lockfile', () =
     }
     const lock = read('ios/App/Podfile.lock');
     for (const [, name] of pods) expect(lock, name).toContain(`${name}:`);
+  });
+});
+
+describe('Capacitor Apple Auth is iOS-only and capability-safe', () => {
+  const packageRoot = 'packages/capacitor-apple-auth';
+  const packagePath = `${packageRoot}/package.json`;
+  const definitionsPath = `${packageRoot}/src/definitions.ts`;
+  const indexPath = `${packageRoot}/src/index.ts`;
+  const podspecPath = `${packageRoot}/GomsinlogCapacitorAppleAuth.podspec`;
+  const swiftPath = `${packageRoot}/ios/Sources/AppleAuthPlugin/AppleAuthPlugin.swift`;
+
+  it('installs one private local dependency with an iOS implementation and no Android implementation', () => {
+    expect(packageJson.dependencies['@gomsinlog/capacitor-apple-auth'])
+      .toBe('file:packages/capacitor-apple-auth');
+    expect(packageJson.devDependencies['@gomsinlog/capacitor-apple-auth']).toBeUndefined();
+    expect(existsSync(join(repoRoot, packagePath))).toBe(true);
+
+    const manifest = JSON.parse(read(packagePath)) as {
+      private?: boolean;
+      capacitor?: Record<string, unknown>;
+      files?: string[];
+    };
+    expect(manifest.private).toBe(true);
+    expect(manifest.capacitor).toEqual({ ios: { src: 'ios' } });
+    expect(manifest.files).toContain('GomsinlogCapacitorAppleAuth.podspec');
+    expect(existsSync(join(repoRoot, `${packageRoot}/android`))).toBe(false);
+  });
+
+  it('keeps typed authorize and credential-state methods aligned with the native bridge', () => {
+    for (const path of [definitionsPath, indexPath, podspecPath, swiftPath]) {
+      expect(existsSync(join(repoRoot, path)), path).toBe(true);
+    }
+    const definitions = read(definitionsPath);
+    const index = read(indexPath);
+    const podspec = read(podspecPath);
+    const swift = read(swiftPath);
+
+    expect(definitions).toMatch(/authorize\([^)]*\).*Promise<AppleAuthorizeResult>/s);
+    expect(definitions).toMatch(/getCredentialState\([^)]*\).*Promise<AppleCredentialStateResult>/s);
+    expect(index).toMatch(
+      /registerPlugin<AppleAuthPlugin>\(\s*['"]GomsinlogAppleAuth['"]\s*\)/,
+    );
+    expect(swift).toContain('public let jsName = "GomsinlogAppleAuth"');
+    expect(swift).toContain('CAPPluginMethod(name: "authorize"');
+    expect(swift).toContain('CAPPluginMethod(name: "getCredentialState"');
+    expect(podspec).toContain("s.framework = 'AuthenticationServices'");
+    expect(podspec).toMatch(/s\.ios\.deployment_target\s*=\s*['"]15\.0['"]/);
+  });
+
+  it('binds nonce and state, requests Apple name/email, and resolves cancellation without credential content', () => {
+    const swift = read(swiftPath);
+    expect(swift).toContain('request.requestedScopes = [.fullName, .email]');
+    expect(swift).toContain('request.nonce = hashedNonce');
+    expect(swift).toContain('request.state = state');
+    expect(swift).toContain('returnedState == active.state');
+    expect(swift).toContain('"status": "cancelled"');
+    expect(swift).toContain('activeCall == nil');
+    const cancellationCallback = swift.split('didCompleteWithError error: Error')[1]
+      .split('private func takeActiveAuthorization')[0];
+    expect(cancellationCallback).toContain('guard bridge?.config.loggingEnabled == false, !CAPLog.enableLogging else');
+    expect(swift).not.toMatch(/\b(?:print|debugPrint|NSLog|os_log)\s*\(/);
+    expect(swift).not.toContain('rawNonce');
+  });
+
+  it('ships a local podspec without prematurely adding the Apple entitlement', () => {
+    const podspec = read(podspecPath);
+    expect(podspec).toContain("s.name = 'GomsinlogCapacitorAppleAuth'");
+    expect(withoutComments(entitlements)).not.toContain('com.apple.developer.applesignin');
   });
 });
 

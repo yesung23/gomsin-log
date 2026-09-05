@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import type { AuthUser } from '@/types';
 
 /**
@@ -32,6 +32,22 @@ const state = {
 
 const setOnboardingStep = vi.fn();
 const fetchAuthProviderAvailability = vi.hoisted(() => vi.fn());
+const nativeAppleLoginAvailable = vi.hoisted(() => ({ value: false }));
+const consumeAppleNameCandidate = vi.hoisted(() => vi.fn());
+const appleNameCandidateListener = vi.hoisted(() => ({
+  current: null as null | ((userId: string) => void),
+}));
+
+vi.mock('@/lib/appleAuth', () => ({
+  isNativeAppleLoginAvailable: () => nativeAppleLoginAvailable.value,
+  consumeAppleNameCandidate: (...args: unknown[]) => consumeAppleNameCandidate(...args),
+  subscribeAppleNameCandidate: (listener: (userId: string) => void) => {
+    appleNameCandidateListener.current = listener;
+    return () => {
+      if (appleNameCandidateListener.current === listener) appleNameCandidateListener.current = null;
+    };
+  },
+}));
 
 vi.mock('@/lib/supabase', () => ({
   supabase: null,
@@ -89,6 +105,10 @@ describe('onboarding entry step', () => {
     setOnboardingStep.mockClear();
     state.authenticatedUser = null;
     state.onboardingStep = 0;
+    state.profile.myName = '';
+    nativeAppleLoginAvailable.value = false;
+    consumeAppleNameCandidate.mockReset().mockReturnValue(null);
+    appleNameCandidateListener.current = null;
     fetchAuthProviderAvailability.mockReset().mockResolvedValue({
       google: true,
       apple: false,
@@ -111,6 +131,7 @@ describe('onboarding entry step', () => {
   });
 
   it('does not show a dead Apple button on iPhone when the server disables Apple login', async () => {
+    nativeAppleLoginAvailable.value = true;
     Object.defineProperty(navigator, 'userAgent', {
       configurable: true,
       value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
@@ -122,7 +143,8 @@ describe('onboarding entry step', () => {
     expect(screen.queryByText('Apple로 계속하기')).not.toBeInTheDocument();
   });
 
-  it('shows Apple first on web and PWA after the server confirms the provider', async () => {
+  it('shows Apple first only after both the native plugin gate and server provider are ready', async () => {
+    nativeAppleLoginAvailable.value = true;
     fetchAuthProviderAvailability.mockResolvedValue({
       google: true,
       apple: true,
@@ -256,6 +278,72 @@ describe('onboarding entry step', () => {
     await waitFor(() => expect(next()).toBeEnabled());
   });
 
+  it('offers a verified Apple name once as editable nickname without overwriting a user value', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루').mockReturnValue(null);
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+
+    const view = render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await waitFor(() => expect(input).toHaveValue('김하루'));
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(1);
+    expect(consumeAppleNameCandidate).toHaveBeenCalledWith('apple-user');
+
+    await user.clear(input);
+    await user.type(input, '내선택');
+    view.rerender(<OnboardingPage />);
+
+    expect(input).toHaveValue('내선택');
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes but never overwrites an existing onboarding nickname', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    state.profile.myName = '사용자이름';
+    consumeAppleNameCandidate.mockReturnValueOnce('Apple 이름');
+
+    render(<OnboardingPage />);
+
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await waitFor(() => expect(consumeAppleNameCandidate).toHaveBeenCalledWith('apple-user'));
+    expect(input).toHaveValue('사용자이름');
+  });
+
+  it('accepts the verified name when Supabase hydration wins the auth-event race', async () => {
+    state.authenticatedUser = { id: 'apple-user', email: 'relay@example.com', provider: 'apple' };
+    state.onboardingStep = 2;
+    consumeAppleNameCandidate.mockReturnValueOnce(null);
+    render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    expect(input).toHaveValue('');
+    expect(appleNameCandidateListener.current).not.toBeNull();
+
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루');
+    await act(async () => {
+      appleNameCandidateListener.current?.('apple-user');
+    });
+
+    expect(input).toHaveValue('김하루');
+    expect(consumeAppleNameCandidate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not refill a nickname the user cleared before the Apple name arrived', async () => {
+    state.authenticatedUser = { id: 'apple-user', provider: 'apple' };
+    state.onboardingStep = 2;
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    render(<OnboardingPage />);
+    const input = await screen.findByLabelText(/내 닉네임/);
+    await user.type(input, '내선택');
+    await user.clear(input);
+    consumeAppleNameCandidate.mockReturnValueOnce('김하루');
+    act(() => appleNameCandidateListener.current?.('apple-user'));
+    expect(input).toHaveValue('');
+  });
+
   it('respects a resumed step instead of forcing the user back to the start', async () => {
     state.authenticatedUser = { id: 'user-new', email: 'new@example.com', provider: 'google' };
     state.onboardingStep = 3;
@@ -325,7 +413,7 @@ describe('onboarding entry step', () => {
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     });
 
-    it('offers Apple on non-iOS web when it is the only enabled provider and the build gate is on', async () => {
+    it('fails closed on non-native surfaces when Apple is the only enabled remote provider', async () => {
       fetchAuthProviderAvailability.mockResolvedValue({
         google: false,
         apple: true,
@@ -333,9 +421,25 @@ describe('onboarding entry step', () => {
       });
       render(<OnboardingPage />);
 
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        '현재 사용할 수 있는 로그인 방법을 확인하지 못했어요.',
+      );
+      expect(screen.queryByRole('button', { name: /Apple로 계속하기/ })).not.toBeInTheDocument();
+      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
+    });
+
+    it('offers Apple when the native iOS plugin gate and remote provider are both ready', async () => {
+      nativeAppleLoginAvailable.value = true;
+      fetchAuthProviderAvailability.mockResolvedValue({
+        google: false,
+        apple: true,
+        email: true,
+      });
+
+      render(<OnboardingPage />);
+
       expect(await screen.findByRole('button', { name: /Apple로 계속하기/ })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-      expect(screen.queryByRole('separator', { name: '기타 로그인' })).not.toBeInTheDocument();
     });
 
     it('does not label Google as an alternate when Apple is unavailable', async () => {
@@ -351,6 +455,7 @@ describe('onboarding entry step', () => {
     });
 
     it('fails closed on re-entering step 0 and prevents stale Google/Apple CTA during pending recheck', async () => {
+      nativeAppleLoginAvailable.value = true;
       Object.defineProperty(navigator, 'userAgent', {
         configurable: true,
         value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',

@@ -24,7 +24,11 @@ import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
 import { LEGAL_DOC_TITLES, type LegalDocKey } from '@/lib/legalDocs';
 import { LegalDocumentSheet } from '@/pages/LegalPage';
 import { classifyServerError } from '@/lib/serverErrors';
-import { appleLoginEnabled } from '@/lib/appleLoginFeature';
+import {
+  consumeAppleNameCandidate,
+  isNativeAppleLoginAvailable,
+  subscribeAppleNameCandidate,
+} from '@/lib/appleAuth';
 import { isGeneralCoupleOnboardingEnabled } from '@/lib/generalCoupleGate';
 import {
   parseGenderIdentity,
@@ -173,7 +177,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   const [authProvidersResolved, setAuthProvidersResolved] = useState(false);
   const [authAvailabilityReloadIndex, setAuthAvailabilityReloadIndex] = useState(0);
   const appleLoginAvailable = authProvidersResolved
-    && appleLoginEnabled()
+    && isNativeAppleLoginAvailable()
     && authProviders.apple;
 
   useEffect(() => {
@@ -233,7 +237,29 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   const [genderIdentity, setGenderIdentity] = useState<GenderIdentity | undefined>(() =>
     parseGenderIdentity(state.profile.genderIdentity));
   const generalCoupleOnboardingEnabled = isGeneralCoupleOnboardingEnabled();
-  const [nickname, setNickname] = useState('');
+  const [nickname, setNickname] = useState(() => state.profile.myName || '');
+  const consumedAppleNameForUserRef = useRef<string | null>(null);
+  const nicknameEditedForUserRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const userId = state.authenticatedUser?.id;
+    if (!userId) return;
+    const applyCandidate = () => {
+      if (consumedAppleNameForUserRef.current === userId) return;
+      const candidate = consumeAppleNameCandidate(userId);
+      if (!candidate) return;
+      consumedAppleNameForUserRef.current = userId;
+      if (nicknameEditedForUserRef.current === userId) return;
+      // Consuming happens even when the field already has text. This makes the
+      // one-time Apple value incapable of replacing a user choice after a clear,
+      // rerender, or later Apple response that contains no name.
+      setNickname((current) => current.length === 0 ? candidate : current);
+    };
+    applyCandidate();
+    return subscribeAppleNameCandidate((candidateUserId) => {
+      if (candidateUserId === userId) applyCandidate();
+    });
+  }, [state.authenticatedUser?.id]);
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
   const [createdCoupleId, setCreatedCoupleId] = useState('');
   const [createdInviteCode, setCreatedInviteCode] = useState('');
@@ -359,7 +385,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     }
   };
 
-  // Handle Apple OAuth Login
+  // Handle native Sign in with Apple
   const handleAppleLogin = async () => {
     if (!requireLegalGate()) return;
     if (socialLoginInFlightRef.current) return;
@@ -1446,7 +1472,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     id="onboarding-nickname"
                     type="text"
                     value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
+                    onChange={(e) => {
+                      nicknameEditedForUserRef.current = state.authenticatedUser?.id ?? null;
+                      setNickname(e.target.value);
+                    }}
                     /*
                       This step has exactly one field and nothing else to decide, so
                       arriving with it unfocused costs a tap and a keyboard-open

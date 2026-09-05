@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState } from '@/types';
@@ -21,6 +21,13 @@ import type { AppState } from '@/types';
 const signInWithGoogle = vi.fn(async () => ({ error: null }));
 const signInWithApple = vi.fn(async () => ({ error: null }));
 const signInWithEmail = vi.fn(async () => ({ error: null }));
+const nativeAppleLoginAvailable = vi.hoisted(() => ({ value: false }));
+
+vi.mock('@/lib/appleAuth', () => ({
+  isNativeAppleLoginAvailable: () => nativeAppleLoginAvailable.value,
+  consumeAppleNameCandidate: () => null,
+  subscribeAppleNameCandidate: () => () => {},
+}));
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
@@ -177,7 +184,8 @@ describe('Apple sign-in on iOS obeys the legal consent gate', () => {
 
   beforeEach(() => {
     vi.stubEnv('VITE_APPLE_LOGIN_ENABLED', 'true');
-    signInWithApple.mockClear();
+    nativeAppleLoginAvailable.value = true;
+    signInWithApple.mockReset().mockResolvedValue({ error: null });
     Object.defineProperty(navigator, 'userAgent', {
       value: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)',
       configurable: true,
@@ -214,6 +222,25 @@ describe('Apple sign-in on iOS obeys the legal consent gate', () => {
     expect(appleBtn).toHaveAttribute('aria-disabled', 'false');
     await user.click(appleBtn);
     expect(signInWithApple).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps double taps single-flight while the Apple request is pending', async () => {
+    let resolveSignIn!: (value: { error: null }) => void;
+    signInWithApple.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveSignIn = resolve;
+    }));
+    const user = userEvent.setup();
+    renderLanding();
+    const appleBtn = await screen.findByRole('button', { name: /Apple로 계속하기/ });
+    await agreeAll(user);
+
+    fireEvent.click(appleBtn);
+    fireEvent.click(appleBtn);
+
+    expect(signInWithApple).toHaveBeenCalledTimes(1);
+    expect(appleBtn).toBeDisabled();
+    resolveSignIn({ error: null });
+    await waitFor(() => expect(appleBtn).not.toBeDisabled());
   });
 
   it('blocks Apple sign-in when only age is confirmed without terms agreement', async () => {

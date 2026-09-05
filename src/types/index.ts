@@ -542,10 +542,38 @@ export interface AppState {
   locale?: AppLocale;
 }
 
+export type AuthProvider = 'apple' | 'google' | 'email' | 'unknown';
+
 export interface AuthUser {
   id: string;
   email?: string;
-  provider: 'apple' | 'google' | 'email';
+  /** Primary provider reported by Supabase; not proof of the most recent login method. */
+  provider: AuthProvider;
+  /** Present only when Supabase actually loaded the linked identity records. */
+  identityProviders?: string[];
+}
+
+export type AuthSignInResult = { error?: string; cancelled?: true };
+
+/** One mapping for session hydration and explicit repository reads. Never infer
+ * a provider from email, or treat absent identities as a loaded empty list. */
+export function toAuthUser(user: {
+  id: string;
+  email?: string;
+  app_metadata?: { provider?: unknown };
+  identities?: Array<{ provider?: unknown } | null> | null;
+}): AuthUser {
+  const value = user.app_metadata?.provider;
+  const provider = value === 'apple' || value === 'google' || value === 'email' ? value : 'unknown';
+  const identityProviders = Array.isArray(user.identities)
+    ? user.identities.flatMap((identity) => typeof identity?.provider === 'string' ? [identity.provider] : [])
+    : undefined;
+  return {
+    id: user.id,
+    email: user.email,
+    provider,
+    ...(identityProviders ? { identityProviders } : {}),
+  };
 }
 
 /**
@@ -553,8 +581,8 @@ export interface AuthUser {
  */
 export interface IAuthRepository {
   getCurrentUser(): Promise<AuthUser | null>;
-  signInWithGoogle(): Promise<{ error?: string }>;
-  signInWithApple(): Promise<{ error?: string }>;
+  signInWithGoogle(): Promise<AuthSignInResult>;
+  signInWithApple(): Promise<AuthSignInResult>;
   signInWithEmail(email: string): Promise<{ error?: string }>;
   signOut(): Promise<void>;
   isConfigured(): boolean;

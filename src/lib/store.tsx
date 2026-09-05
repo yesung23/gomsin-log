@@ -5,6 +5,7 @@ import {
   UserProfile,
   Role,
   AuthUser,
+  toAuthUser,
   CoupleEvent,
   Attachment,
 } from '@/types';
@@ -1701,18 +1702,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
         if (session?.user) {
           const sessionUser = session.user;
-          const provider = (sessionUser.app_metadata?.provider as AuthUser['provider']) || 'google';
-          const authUser: AuthUser = {
-            id: sessionUser.id,
-            email: sessionUser.email,
-            provider,
-          };
+          const authUser = toAuthUser(sessionUser);
 
           // A refreshed token for the account we already loaded changes nothing.
           if (
             (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') &&
             hydratedUserIdRef.current === sessionUser.id
           ) {
+            replaceStateImmediately({ ...stateRef.current, authenticatedUser: authUser });
             setIsAuthChecked(true);
             return;
           }

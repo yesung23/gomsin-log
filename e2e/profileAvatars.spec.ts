@@ -13,7 +13,7 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   const setup = async (context: BrowserContext, id: string, partner: string) => {
     const scenario: Scenario = { ...CREATOR, userId: id, partnerUserId: partner,
       displayName: id === A ? '봄' : '여름', partnerName: id === A ? '여름' : '봄', records: [] };
-    await installMockBackend(context, scenario);
+    await installMockBackend(context, scenario, { theme: id === B ? 'dark' : 'light' });
     await context.route('**/rest/v1/rpc/*profile_avatar', async (route) => {
       const params = route.request().postDataJSON();
       if (route.request().url().endsWith('/get_profile_avatar')) {
@@ -32,6 +32,8 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   await setup(a, A, B); await setup(b, B, A);
   const owner = await a.newPage(); const partner = await b.newPage();
   await owner.goto('/my'); await partner.goto('/home');
+  await expect(owner.locator('html')).toHaveAttribute('data-theme', 'light');
+  await expect(partner.locator('html')).toHaveAttribute('data-theme', 'dark');
   const source = await sharp({ create: { width: 1200, height: 800, channels: 3, background: '#dc8396' } }).jpeg().toBuffer();
   await expect(owner.getByRole('button', { name: '내 사진 고르기' })).toBeVisible();
   await owner.locator('input[type=file]').setInputFiles({ name: 'private-original-name.jpg', mimeType: 'image/jpeg', buffer: source });

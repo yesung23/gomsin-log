@@ -293,7 +293,8 @@ export async function installMockRealtime(context: BrowserContext): Promise<void
 
 export async function installMockBackend(
   context: BrowserContext,
-  scenario: Scenario
+  scenario: Scenario,
+  options: { theme?: 'light' | 'dark' } = {},
 ): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
   const unrouted: string[] = [];
   const dailyRecordWrites: Array<Record<string, unknown>> = [];
@@ -326,7 +327,7 @@ export async function installMockBackend(
       AUTH_STORAGE_KEY,
       seededSession(scenario),
       'gomsinlog.state.v2',
-      { hasSeenInstallPrompt: true, theme: 'light', widgetLayout: ['today_word', 'dday'] },
+      { hasSeenInstallPrompt: true, theme: options.theme ?? 'light', widgetLayout: ['today_word', 'dday'] },
     ] as const,
   );
 

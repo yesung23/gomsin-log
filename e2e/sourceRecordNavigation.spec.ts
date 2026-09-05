@@ -10,12 +10,13 @@ for (const viewport of [
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`Home and Diary open the exact source at ${viewport.width}px ${colorScheme}`, async ({ browser }, testInfo) => {
       const context = await browser.newContext({ viewport, colorScheme, reducedMotion: 'reduce' });
-      await installMockBackend(context, CREATOR);
+      await installMockBackend(context, CREATOR, { theme: colorScheme });
       const page = await context.newPage();
       const errors: string[] = [];
       page.on('pageerror', (error) => errors.push(error.message));
 
       await page.goto('/home');
+      await expect(page.locator('html')).toHaveAttribute('data-theme', colorScheme);
       const post = page.getByRole('article').filter({ hasText: PARTNER_LOG });
       const homeLink = post.getByRole('link', { name: /기록 열기$/ });
       await expect(homeLink).toHaveAttribute('href', '/record?record=rec-partner');

@@ -26,7 +26,11 @@ const {
   mockSupabase,
   saveRecordToDB,
   uploadRecordMedia,
+  uploadRecordPhotoRendition,
   beginRecordMediaMutation,
+  beginRecordPhotoMutation,
+  getRecordPhotoRenditionCapability,
+  prepareRecordPhotoRenditions,
   getRecordMediaMutationStatus,
   abandonRecordMediaMutation,
   fetchRecordsResultFromDB,
@@ -43,7 +47,11 @@ const {
     callOrder,
     saveRecordToDB: vi.fn(),
     uploadRecordMedia: vi.fn(),
+    uploadRecordPhotoRendition: vi.fn(),
     beginRecordMediaMutation: vi.fn(),
+    beginRecordPhotoMutation: vi.fn(),
+    getRecordPhotoRenditionCapability: vi.fn(),
+    prepareRecordPhotoRenditions: vi.fn(),
     getRecordMediaMutationStatus: vi.fn(),
     abandonRecordMediaMutation: vi.fn(),
     fetchRecordsResultFromDB: vi.fn(),
@@ -106,11 +114,23 @@ vi.mock('@/lib/records', () => ({
     callOrder.push(`upload:${(args[0] as File).name}`);
     return uploadRecordMedia(...(args as []));
   },
+  uploadRecordPhotoRendition: (...args: unknown[]) => {
+    callOrder.push(`upload-rendition:${String(args[1])}`);
+    return uploadRecordPhotoRendition(...(args as []));
+  },
   beginRecordMediaMutation: (...args: unknown[]) => {
     const request = args[0] as { baseContentRevision: number; newMediaIds: string[] };
     callOrder.push(`begin:${request.baseContentRevision}:${request.newMediaIds.length}`);
     return beginRecordMediaMutation(...(args as []));
   },
+  beginRecordPhotoMutation: (...args: unknown[]) => {
+    const request = args[0] as { baseContentRevision: number; newPhotos: unknown[] };
+    callOrder.push(`begin-photo:${request.baseContentRevision}:${request.newPhotos.length}`);
+    return beginRecordPhotoMutation(...(args as []));
+  },
+  getRecordPhotoRenditionCapability: (...args: unknown[]) => (
+    getRecordPhotoRenditionCapability(...(args as []))
+  ),
   getRecordMediaMutationStatus: (...args: unknown[]) => {
     callOrder.push('status');
     return getRecordMediaMutationStatus(...(args as []));
@@ -130,6 +150,12 @@ vi.mock('@/lib/records', () => ({
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
   ),
   MEDIA_ACCEPT: 'image/png',
+}));
+
+vi.mock('@/lib/recordPhotoRenditions', () => ({
+  prepareRecordPhotoRenditions: (...args: unknown[]) => (
+    prepareRecordPhotoRenditions(...(args as []))
+  ),
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -283,6 +309,25 @@ function pngFile(name: string): File {
   return new File(['x'], name, { type: 'image/png' });
 }
 
+function preparedPhoto() {
+  return {
+    screenMaster: {
+      file: new File(['master'], 'photo.jpg', { type: 'image/jpeg' }),
+      widthPx: 2048,
+      heightPx: 1536,
+      byteSize: 6,
+      sha256: 'a'.repeat(64),
+    },
+    thumbnail: {
+      file: new File(['thumb'], 'photo.jpg', { type: 'image/jpeg' }),
+      widthPx: 640,
+      heightPx: 480,
+      byteSize: 5,
+      sha256: 'b'.repeat(64),
+    },
+  };
+}
+
 describe('updateRecordMedia', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
@@ -313,7 +358,32 @@ describe('updateRecordMedia', () => {
     ) => ({
       attachment: { type: 'photo', name: file.name, path: `${coupleId}/${recordId}/${objectId}.png` },
     }));
+    getRecordPhotoRenditionCapability.mockReset().mockResolvedValue({
+      ok: true,
+      supported: false,
+    });
+    prepareRecordPhotoRenditions.mockReset().mockResolvedValue(preparedPhoto());
+    uploadRecordPhotoRendition.mockReset().mockImplementation(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: {
+        type: 'photo',
+        name: rendition.file.name,
+        path: `${coupleId}/${recordId}/${objectId}.jpg`,
+      },
+    }));
     beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    beginRecordPhotoMutation.mockReset().mockImplementation(async (
       request: { baseContentRevision: number },
     ) => ({
       ok: true,
@@ -332,6 +402,189 @@ describe('updateRecordMedia', () => {
     mockSupabase.rpc.mockReset().mockResolvedValue({ data: 'couple-1', error: null });
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+
+  it('reserves and uploads a stable pair but persists only the screen master attachment', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(beginRecordPhotoMutation).toHaveBeenCalledTimes(1);
+    const request = beginRecordPhotoMutation.mock.calls[0]?.[0] as {
+      newPhotos: Array<{
+        screenMaster: { mediaObjectId: string; sha256: string };
+        thumbnail: { mediaObjectId: string; sha256: string };
+      }>;
+    };
+    const pair = request.newPhotos[0];
+    expect(pair.screenMaster.mediaObjectId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(pair.thumbnail.mediaObjectId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(pair.thumbnail.mediaObjectId).not.toBe(pair.screenMaster.mediaObjectId);
+    expect(pair.screenMaster.sha256).toBe('a'.repeat(64));
+    expect(pair.thumbnail.sha256).toBe('b'.repeat(64));
+    expect(uploadRecordPhotoRendition.mock.calls.map((call) => [call[1], call[4]])).toEqual([
+      ['screen_master', pair.screenMaster.mediaObjectId],
+      ['thumbnail', pair.thumbnail.mediaObjectId],
+    ]);
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+    ]);
+    const saved = saveRecordToDB.mock.calls[0]?.[0] as DailyRecord;
+    expect(saved.attachments?.map((attachment) => attachment.path)).toEqual([
+      EXISTING_PATH,
+      `couple-1/rec-1/${pair.screenMaster.mediaObjectId}.jpg`,
+    ]);
+    expect(JSON.stringify(saved.attachments)).not.toContain(pair.thumbnail.mediaObjectId);
+  });
+
+  it('stops before preparation or mutation when the capability probe is not authoritative', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({
+      ok: false,
+      reason: 'auth_expired',
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: false, reason: 'auth_expired' });
+    expect(prepareRecordPhotoRenditions).not.toHaveBeenCalled();
+    expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('re-checks the actor after asynchronous preparation and before durable begin', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    let finishPreparation!: (value: ReturnType<typeof preparedPhoto>) => void;
+    prepareRecordPhotoRenditions.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPreparation = resolve;
+    }));
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(prepareRecordPhotoRenditions).toHaveBeenCalledOnce());
+    await act(async () => { emitAuth('SIGNED_OUT', null); });
+    finishPreparation(preparedPhoto());
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: false, reason: 'stale' });
+    expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('abandons a pair when the thumbnail upload definitively fails', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    uploadRecordPhotoRendition.mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: { type: 'photo', name: rendition.file.name, path: `${coupleId}/${recordId}/${objectId}.jpg` },
+    })).mockResolvedValueOnce({ error: '권한이 없어요.', reason: 'forbidden' });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    // The existing media API reports settled upload failures via failedFiles.
+    // Its callers require both ok and an empty failedFiles list for success.
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'forbidden' });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'abandon',
+    ]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+  });
+
+  it('continues the exact paired operation after a lost begin response', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    beginRecordPhotoMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 2,
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'status',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+    ]);
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
+  it('lets authoritative CAS reconcile an ambiguous thumbnail upload and lost patch response', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    uploadRecordPhotoRendition.mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: { type: 'photo', name: rendition.file.name, path: `${coupleId}/${recordId}/${objectId}.jpg` },
+    })).mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      error: '응답을 확인하지 못했어요.',
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: rendition.file.name,
+        path: `${coupleId}/${recordId}/${objectId}.jpg`,
+      },
+    }));
+    saveRecordToDB.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+      'status',
+    ]);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+    const saved = saveRecordToDB.mock.calls[0]?.[0] as DailyRecord;
+    expect(saved.attachments).toHaveLength(2);
   });
 
   it('retires removals once, then reserves and commits the replacement in the next revision', async () => {

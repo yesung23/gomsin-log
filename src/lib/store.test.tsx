@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { useEffect } from 'react';
-import type { AppState } from '@/types';
+import type { AppState, DailyRecord } from '@/types';
+import type { RecordPhotoMutationRequest } from '@/lib/records';
+import type { PreparedRecordPhotoRenditions } from '@/lib/recordPhotoRenditions';
+import { getOrCreateRecordMediaMutationOwnerToken, listRecordMediaMutationJournalEntries } from '@/lib/recordMediaMutationJournal';
 import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 import {
   clearCoupleProtectionRequirement,
@@ -251,6 +254,14 @@ const abandonRecordMediaMutation = vi.fn(async () => ({
   ok: true as const,
   state: 'abandoned' as const,
 }));
+const getRecordPhotoRenditionCapability = vi.fn();
+const beginRecordPhotoMutation = vi.fn();
+const uploadRecordPhotoRendition = vi.fn();
+const prepareRecordPhotoRenditions = vi.fn();
+
+vi.mock('@/lib/recordPhotoRenditions', () => ({
+  prepareRecordPhotoRenditions: (...args: unknown[]) => prepareRecordPhotoRenditions(...args),
+}));
 
 const fetchRecordsFromDB = vi.fn(async () => []);
 
@@ -267,6 +278,10 @@ vi.mock('@/lib/records', () => ({
     ...(args as [File, string?, string?, string?, string?]),
   ),
   beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(...(args as [])),
+  // These existing store scenarios exercise the legacy single-master backend.
+  getRecordPhotoRenditionCapability: () => getRecordPhotoRenditionCapability(),
+  beginRecordPhotoMutation: (...args: unknown[]) => beginRecordPhotoMutation(...args),
+  uploadRecordPhotoRendition: (...args: unknown[]) => uploadRecordPhotoRendition(...args),
   getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
   abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
@@ -576,6 +591,10 @@ describe('StoreProvider auth lifecycle', () => {
     }));
     getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
     abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
+    getRecordPhotoRenditionCapability.mockReset().mockResolvedValue({ ok: true, supported: false });
+    beginRecordPhotoMutation.mockReset();
+    uploadRecordPhotoRendition.mockReset();
+    prepareRecordPhotoRenditions.mockReset();
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
     mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
@@ -2685,6 +2704,169 @@ describe('StoreProvider auth lifecycle', () => {
     await act(async () => emitAuth('SIGNED_IN', 'user-b'));
     await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-b'));
     expect(mockSupabase.removeChannel).toHaveBeenCalledWith(firstChannel);
+  });
+
+  describe('paired photo creation', () => {
+    let prepared: PreparedRecordPhotoRenditions;
+    const journalEntries = () => listRecordMediaMutationJournalEntries(
+      'user-a', getOrCreateRecordMediaMutationOwnerToken()!,
+    );
+
+    beforeEach(() => {
+      callOrder.length = 0;
+      lastMediaResult = null;
+      sessionStorage.clear();
+      uploadRecordMedia.mockClear();
+      saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+        callOrder.push('saveRecord');
+        const intent = args[3] as { expectedRevision?: number };
+        return { ok: true, contentRevision: (intent?.expectedRevision ?? 0) + 1 };
+      });
+      getRecordPhotoRenditionCapability.mockImplementation(async () => {
+        callOrder.push('capability');
+        expect(journalEntries()).toEqual([]);
+        return { ok: true, supported: true };
+      });
+      prepared = {
+        screenMaster: {
+          file: new File(['master'], 'photo.jpg', { type: 'image/jpeg' }),
+          widthPx: 2048, heightPx: 1536, byteSize: 6, sha256: 'a'.repeat(64),
+        },
+        thumbnail: {
+          file: new File(['thumb'], 'photo.jpg', { type: 'image/jpeg' }),
+          widthPx: 640, heightPx: 480, byteSize: 5, sha256: 'b'.repeat(64),
+        },
+      };
+      prepareRecordPhotoRenditions.mockImplementation(async () => {
+        callOrder.push('prepare');
+        expect(journalEntries()).toEqual([]);
+        return prepared;
+      });
+      beginRecordPhotoMutation.mockImplementation(async (request: RecordPhotoMutationRequest) => {
+        callOrder.push('beginPhoto');
+        const entries = journalEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+          operationId: request.operationId, userId: request.userId,
+          coupleId: request.coupleId, recordId: request.recordId,
+        });
+        expect(Object.keys(entries[0]).sort()).toEqual([
+          'coupleId', 'createdAtMs', 'operationId', 'ownerToken', 'recordId', 'userId', 'version',
+        ]);
+        return { ok: true, state: 'pending', targetContentRevision: request.baseContentRevision + 1 };
+      });
+      uploadRecordPhotoRendition.mockImplementation(async (
+        _rendition: unknown, kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => {
+        callOrder.push(kind);
+        return { attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } };
+      });
+      fetchFullStateFromDB.mockResolvedValue(serverState({
+        profile: {
+          myName: '춘향', role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }));
+    });
+
+    async function createPhotos(files: File[], allOrNothingMedia = true) {
+      render(<StoreProvider><Probe files={files} allOrNothingMedia={allOrNothingMedia} /></StoreProvider>);
+      await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+      await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+      await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+      await act(async () => screen.getByText('post').click());
+      await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    }
+
+    it('creates the row, reserves opaque paired IDs, uploads both exact prepared files and publishes only the master by CAS', async () => {
+      const original = new File(['original'], 'private-original.png', { type: 'image/png' });
+      await createPhotos([original]);
+
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: [] });
+      expect(callOrder).toEqual(['saveRecord', 'capability', 'prepare', 'beginPhoto', 'screen_master', 'thumbnail', 'saveRecord']);
+      expect(prepareRecordPhotoRenditions).toHaveBeenCalledWith(original, expect.any(Function));
+      const request = beginRecordPhotoMutation.mock.calls[0][0] as RecordPhotoMutationRequest;
+      const pair = request.newPhotos[0];
+      expect(request).toMatchObject({ userId: 'user-a', coupleId: 'couple-1', baseContentRevision: 1, existingPaths: [] });
+      expect(pair.screenMaster).toMatchObject({ widthPx: 2048, heightPx: 1536, byteSize: 6, sha256: 'a'.repeat(64) });
+      expect(pair.thumbnail).toMatchObject({ widthPx: 640, heightPx: 480, byteSize: 5, sha256: 'b'.repeat(64) });
+      expect(pair.thumbnail.mediaObjectId).not.toBe(pair.screenMaster.mediaObjectId);
+      expect(uploadRecordPhotoRendition.mock.calls.map((call) => [call[1], call[4]])).toEqual([
+        ['screen_master', pair.screenMaster.mediaObjectId], ['thumbnail', pair.thumbnail.mediaObjectId],
+      ]);
+      expect(uploadRecordPhotoRendition.mock.calls[0][0]).toBe(prepared.screenMaster);
+      expect(uploadRecordPhotoRendition.mock.calls[1][0]).toBe(prepared.thumbnail);
+      const saved = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+      expect(saved).toHaveLength(2);
+      expect(saved[0]).toMatchObject({ isPrivate: true });
+      expect(saved[0].attachments).toBeUndefined();
+      expect(saved[1]).toMatchObject({ isPrivate: false, isProfilePost: true, log: '오늘의 기록' });
+      expect(saved[1].attachments).toEqual([{
+        type: 'photo', name: 'photo.jpg', path: `couple-1/${request.recordId}/${pair.screenMaster.mediaObjectId}.jpg`,
+      }]);
+      expect(saveRecordToDB.mock.calls[1][3]).toEqual({ kind: 'update', expectedRevision: 1, mediaOperationId: request.operationId });
+      expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+      expect(journalEntries()).toEqual([]);
+    });
+
+    it('keeps the staged row private and abandons the pair when the thumbnail is denied', async () => {
+      uploadRecordPhotoRendition.mockImplementationOnce(async (
+        _rendition: unknown, _kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => ({ attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } }))
+        .mockResolvedValueOnce({ error: 'denied', reason: 'forbidden' });
+      await createPhotos([new File(['x'], 'new.png', { type: 'image/png' })]);
+
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'forbidden' });
+      expect(uploadRecordPhotoRendition).toHaveBeenCalledTimes(2);
+      expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+      expect(abandonRecordMediaMutation).toHaveBeenCalledWith(expect.objectContaining({
+        operationId: beginRecordPhotoMutation.mock.calls[0][0].operationId,
+      }));
+      expect(screen.getByTestId('privacy')).toHaveTextContent('private');
+      expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+      expect(screen.getByTestId('attachments')).toBeEmptyDOMElement();
+      expect(journalEntries()).toEqual([]);
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+    });
+
+    it('does not begin or fall back when capability fails after the initial row save', async () => {
+      getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: false, reason: 'server' });
+      await createPhotos([new File(['x'], 'new.png', { type: 'image/png' })]);
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'server' });
+      expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+      expect(prepareRecordPhotoRenditions).not.toHaveBeenCalled();
+      expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+      expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+      expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+      expect(journalEntries()).toEqual([]);
+    });
+
+    it('keeps the first complete pair when a later file fails in ordinary partial-success creation', async () => {
+      uploadRecordPhotoRendition.mockImplementation(async (
+        _rendition: unknown, _kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => uploadRecordPhotoRendition.mock.calls.length === 4
+        ? { error: 'denied', reason: 'forbidden' }
+        : { attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } });
+      await createPhotos([
+        new File(['1'], 'first.png', { type: 'image/png' }),
+        new File(['2'], 'second.png', { type: 'image/png' }),
+      ], false);
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['second.png'], reason: 'forbidden' });
+      expect(beginRecordPhotoMutation.mock.calls.map(([request]) => request.baseContentRevision)).toEqual([1, 2]);
+      expect(uploadRecordPhotoRendition).toHaveBeenCalledTimes(4);
+      expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+      const first = beginRecordPhotoMutation.mock.calls[0][0] as RecordPhotoMutationRequest;
+      const firstPath = `couple-1/${first.recordId}/${first.newPhotos[0].screenMaster.mediaObjectId}.jpg`;
+      expect(beginRecordPhotoMutation.mock.calls[1][0].existingPaths).toEqual([firstPath]);
+      expect((saveRecordToDB.mock.calls[1][0] as DailyRecord).attachments).toEqual([
+        { type: 'photo', name: 'photo.jpg', path: firstPath },
+      ]);
+      expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+      expect(journalEntries()).toEqual([]);
+    });
   });
 
   it('saves the record row before uploading media (storage RLS requires it)', async () => {

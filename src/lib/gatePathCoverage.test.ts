@@ -35,6 +35,7 @@ const SERVER_TRANSPORT_PATTERNS: Record<TransportKind, RegExp> = {
 const EXEMPT_TRANSPORT_ALLOWLIST: Record<string, Record<string, string[]>> = {
   'records.ts': {
     getRecordMediaMutationStatus: ['rpc:record_media_mutation_status'],
+    getRecordPhotoRenditionCapability: ['rpc:get_record_photo_metadata'],
   },
   'trips.ts': {
     fetchTripsResultFromDB: ['rpc:get_my_active_couple_id'],
@@ -223,6 +224,8 @@ const STORE_GATED: Record<string, { functions: string[]; reason: string }> = {
       'deleteRecordFromDB',
       'uploadRecordMedia',
       'beginRecordMediaMutation',
+      'beginRecordPhotoMutation',
+      'uploadRecordPhotoRendition',
       'abandonRecordMediaMutation',
     ],
     reason:
@@ -261,6 +264,8 @@ const STORE_GATED_EXEMPTIONS: Record<string, Record<string, string>> = {
     fetchRecordsResultFromDB: 'Read-only: fetches records without mutation',
     fetchRecordsFromDB: 'Read-only: wrapper around fetchRecordsResultFromDB',
     getRecordMediaMutationStatus: 'Read-only: reconciles one opaque operation identity',
+    getRecordPhotoRenditionCapability:
+      'Read-only: probes get_record_photo_metadata with an empty ID list; no reservation or upload',
     resolveAttachmentUrls: 'Read-only: signs existing paths, creates nothing',
     downloadRecordPhotoForReuse:
       'Read-only: downloads one RLS-authorized canonical photo; the store owns any later write',
@@ -860,7 +865,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/events.ts': 3,
       'src/lib/highlights.ts': 1,
       'src/lib/productEvents.ts': 1,
-      'src/lib/records.ts': 5,
+      'src/lib/records.ts': 6, // Adds the Store-gated prepared-rendition Storage upload.
       'src/lib/sensitiveConsent.ts': 1,
       'src/lib/store.tsx': 2,
       'src/lib/supabase.ts': 1,
@@ -876,7 +881,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/partnerUsername.ts': 1,
       'src/lib/profileAvatars.ts': 1,
       'src/lib/pushTokens.ts': 3,
-      'src/lib/records.ts': 4,
+      'src/lib/records.ts': 6, // Adds the read-only capability probe and Store-gated paired begin.
       'src/lib/relationshipSnapshot.ts': 1,
       'src/lib/sensitiveConsent.ts': 2,
       'src/lib/store.tsx': 3,

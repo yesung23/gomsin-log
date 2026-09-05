@@ -1,7 +1,12 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
-import { sanitizePhotoForUpload } from '@/lib/imageSanitization';
+import {
+  SANITIZED_PHOTO_EXTENSION,
+  SANITIZED_PHOTO_MIME,
+  sanitizePhotoForUpload,
+} from '@/lib/imageSanitization';
+import { isPreparedRecordPhotoRendition, type PreparedRecordPhotoRendition } from '@/lib/recordPhotoRenditions';
 import {
   RECORD_CIPHER_GLE1,
   RECORD_CIPHER_PLAINTEXT,
@@ -600,6 +605,21 @@ export type RecordMediaMutationRequest = {
   newMediaIds: string[];
 };
 
+export type RecordPhotoMutationDescriptor = {
+  mediaObjectId: string;
+  widthPx: number;
+  heightPx: number;
+  byteSize: number;
+  sha256: string;
+};
+
+export type RecordPhotoMutationRequest = Omit<RecordMediaMutationRequest, 'newMediaIds'> & {
+  newPhotos: Array<{
+    screenMaster: RecordPhotoMutationDescriptor;
+    thumbnail: RecordPhotoMutationDescriptor;
+  }>;
+};
+
 export type RecordMediaMutationIdentity = Pick<
   RecordMediaMutationRequest,
   'operationId' | 'recordId' | 'userId' | 'coupleId'
@@ -631,6 +651,47 @@ function validMutationIdentity(request: RecordMediaMutationIdentity): boolean {
   return Boolean(request.operationId && request.recordId && request.userId && request.coupleId);
 }
 
+const RECORD_PHOTO_CAPABILITY_TIMEOUT_MS = 10_000;
+
+export type RecordPhotoRenditionCapabilityResult =
+  | { ok: true; supported: boolean }
+  | { ok: false; reason: ServerErrorKind };
+
+/** Probe the optional 090 API with a read-only empty request before any mutation. */
+export async function getRecordPhotoRenditionCapability(): Promise<RecordPhotoRenditionCapabilityResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const timeout = Symbol('record-photo-capability-timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      supabase.rpc('get_record_photo_metadata', { p_record_ids: [] }),
+      new Promise<typeof timeout>((resolve) => {
+        timer = setTimeout(() => resolve(timeout), RECORD_PHOTO_CAPABILITY_TIMEOUT_MS);
+      }),
+    ]);
+    if (result === timeout) return { ok: false, reason: 'unreachable' };
+    const { data, error } = result;
+    if (!error) return Array.isArray(data) && data.length === 0
+      ? { ok: true, supported: true }
+      : { ok: false, reason: 'server' };
+    const code = typeof error === 'object' && error && 'code' in error
+      ? String(error.code)
+      : '';
+    const confirmedMissingSqlFunction = code === '42883'
+      && /^function (?:public\.)?get_record_photo_metadata\(uuid\[\]\) does not exist$/i.test(error.message ?? '');
+    if (code === 'PGRST202' || confirmedMissingSqlFunction) {
+      return { ok: true, supported: false };
+    }
+    return { ok: false, reason: classifyServerError(error).kind };
+  } catch (error) {
+    return { ok: false, reason: classifyServerError(error).kind };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export async function beginRecordMediaMutation(
   request: RecordMediaMutationRequest,
 ): Promise<RecordMediaMutationResult> {
@@ -657,6 +718,53 @@ export async function beginRecordMediaMutation(
     return { ok: false, reason: classifyServerError(error).kind };
   }
   return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
+export async function beginRecordPhotoMutation(
+  request: RecordPhotoMutationRequest,
+): Promise<RecordMediaMutationResult> {
+  if (
+    !isSupabaseConfigured
+    || !supabase
+    || !validMutationIdentity(request)
+    || !Number.isSafeInteger(request.baseContentRevision)
+    || request.baseContentRevision < 1
+  ) return { ok: false, reason: unconfiguredReason() };
+
+  try {
+  const { data, error } = await supabase.rpc('begin_record_photo_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+    p_base_content_revision: request.baseContentRevision,
+    p_target_content_revision: request.baseContentRevision + 1,
+    p_existing_paths: [...request.existingPaths],
+    p_new_photos: request.newPhotos.map(({ screenMaster, thumbnail }) => ({
+      screen_master: {
+        media_object_id: screenMaster.mediaObjectId,
+        width_px: screenMaster.widthPx,
+        height_px: screenMaster.heightPx,
+        byte_size: screenMaster.byteSize,
+        sha256: screenMaster.sha256,
+      },
+      thumbnail: {
+        media_object_id: thumbnail.mediaObjectId,
+        width_px: thumbnail.widthPx,
+        height_px: thumbnail.heightPx,
+        byte_size: thumbnail.byteSize,
+        sha256: thumbnail.sha256,
+      },
+    })),
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to begin record photo mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+  } catch (error) {
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
 }
 
 export async function getRecordMediaMutationStatus(
@@ -1084,6 +1192,76 @@ export async function uploadRecordMedia(
     };
   }
 
+  return { attachment };
+}
+
+export type RecordPhotoRenditionKind = 'screen_master' | 'thumbnail';
+
+function validPreparedPhotoRendition(
+  rendition: PreparedRecordPhotoRendition,
+  kind: RecordPhotoRenditionKind,
+): boolean {
+  const maxEdge = kind === 'screen_master' ? 2048 : 640;
+  const maxBytes = kind === 'screen_master' ? MAX_BYTES.photo : 1024 * 1024;
+  return isPreparedRecordPhotoRendition(rendition, kind)
+    && rendition.file.type === SANITIZED_PHOTO_MIME
+    && rendition.file.size === rendition.byteSize
+    && rendition.byteSize > 0
+    && rendition.byteSize <= maxBytes
+    && Number.isSafeInteger(rendition.widthPx)
+    && Number.isSafeInteger(rendition.heightPx)
+    && rendition.widthPx > 0
+    && rendition.heightPx > 0
+    && rendition.widthPx <= maxEdge
+    && rendition.heightPx <= maxEdge
+    && /^[0-9a-f]{64}$/.test(rendition.sha256);
+}
+
+/** Upload one already-sanitized 090 rendition without any second encode step. */
+export async function uploadRecordPhotoRendition(
+  rendition: PreparedRecordPhotoRendition,
+  kind: RecordPhotoRenditionKind,
+  coupleId: string,
+  recordId: string,
+  stableObjectId: string,
+): Promise<RecordMediaUploadResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.', reason: 'server' };
+  }
+  if (
+    !coupleId
+    || !recordId
+    || !isValidMediaObjectId(stableObjectId)
+    || !validPreparedPhotoRendition(rendition, kind)
+  ) {
+    return {
+      error: '사진 렌디션 정보를 확인하지 못해 업로드하지 않았어요.',
+      reason: 'unknown',
+    };
+  }
+
+  const path = buildMediaPath(coupleId, recordId, SANITIZED_PHOTO_EXTENSION, stableObjectId);
+  const attachment: Attachment = { type: 'photo', name: 'photo.jpg', path };
+  let error: unknown;
+  try {
+    ({ error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, rendition.file, {
+      contentType: SANITIZED_PHOTO_MIME,
+      upsert: false,
+    }));
+  } catch (transportError) {
+    error = transportError;
+  }
+  if (error && !isAlreadyUploadedStableObject(error)) {
+    console.error('[gomsinlog] Photo rendition upload failed.');
+    const classifiedError = classifyServerError(error);
+    return {
+      error: `파일을 올리지 못했어요. ${classifiedError.message}`,
+      reason: classifiedError.kind,
+      ...(UNCERTAIN_MEDIA_UPLOAD_REASONS.has(classifiedError.kind)
+        ? { uncertainAttachment: attachment }
+        : {}),
+    };
+  }
   return { attachment };
 }
 

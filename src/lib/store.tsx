@@ -122,13 +122,21 @@ import {
   deleteRecordFromDB,
   fetchRecordsResultFromDB,
   uploadRecordMedia,
+  uploadRecordPhotoRendition,
   beginRecordMediaMutation,
+  beginRecordPhotoMutation,
+  getRecordPhotoRenditionCapability,
   getRecordMediaMutationStatus,
   abandonRecordMediaMutation,
   resolveAttachmentUrls,
   isCanonicalRecordMediaPath,
   isValidMediaObjectId,
+  classifyMediaFile,
 } from '@/lib/records';
+import {
+  prepareRecordPhotoRenditions,
+  type PreparedRecordPhotoRenditions,
+} from '@/lib/recordPhotoRenditions';
 import {
   clearRecordMediaMutationJournalEntry,
   getOrCreateRecordMediaMutationOwnerToken,
@@ -182,6 +190,10 @@ type QueuedRecordInput = Omit<QueuedRecord, 'attempts' | 'queuedAt' | 'sealedRec
 };
 type BarrieredEnqueueResult = 'queued' | 'deletion_pending' | 'stale' | 'failed';
 type MediaRevisionUpload = { file: File; objectId: string };
+type PreparedPhotoRevisionUpload = MediaRevisionUpload & {
+  renditions: PreparedRecordPhotoRenditions;
+  thumbnailObjectId: string;
+};
 type MediaRevisionCommitResult =
   | { ok: true; record: DailyRecord; operationId: string }
   | {
@@ -3243,6 +3255,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     desiredRecordBeforeUploads: DailyRecord,
     uploads: MediaRevisionUpload[],
   ): Promise<MediaRevisionCommitResult> => {
+    const failedFiles = uploads.map(({ file }) => file.name);
+    const staleFailure = (): MediaRevisionCommitResult => ({
+      ok: false,
+      phase: 'stale',
+      reason: 'stale',
+      error: recordFailureMessage('stale'),
+      failedFiles,
+    });
+    let preparedPhotoUploads: PreparedPhotoRevisionUpload[] | null = null;
+    if (uploads.length > 0) {
+      const capability = await getRecordPhotoRenditionCapability();
+      if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+      if (!capability.ok) {
+        if (capability.reason === 'auth_expired') void handleAuthExpired();
+        return {
+          ok: false,
+          phase: 'begin',
+          reason: capability.reason,
+          error: recordFailureMessage(capability.reason),
+          failedFiles,
+        };
+      }
+      if (capability.supported) {
+        preparedPhotoUploads = [];
+        // Keep peak decode/canvas memory bounded: finish and release one source
+        // before starting the next photo in an all-or-nothing batch.
+        for (const upload of uploads) {
+          const classified = classifyMediaFile(upload.file);
+          if ('error' in classified) return {
+            ok: false, phase: 'upload', reason: 'unknown', error: classified.error, failedFiles,
+          };
+          const prepared = await prepareRecordPhotoRenditions(upload.file, () => isCurrentLinkedCouple(workspace));
+          if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+          if ('error' in prepared) {
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: 'unknown',
+              error: prepared.error,
+              failedFiles,
+            };
+          }
+          preparedPhotoUploads.push({
+            ...upload,
+            renditions: prepared,
+            thumbnailObjectId: crypto.randomUUID(),
+          });
+        }
+      }
+    }
+    // Capability and pixel preparation both await external/browser work. Pin
+    // the actor again before writing the durable operation journal or beginning.
+    if (!isCurrentLinkedCouple(workspace)) return staleFailure();
+
     const baseRevision = baseRecord.contentRevision ?? 1;
     const operationId = crypto.randomUUID();
     const identity = {
@@ -3258,7 +3324,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         phase: 'begin',
         reason: 'unknown',
         error: recordFailureMessage('unknown'),
-        failedFiles: uploads.map(({ file }) => file.name),
+        failedFiles,
       };
     }
     activeMediaOperationIdsRef.current.add(operationId);
@@ -3273,12 +3339,34 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           isCanonicalRecordMediaPath(path, workspace.coupleId, baseRecord.id)
         )),
     ));
-    let begun = await beginRecordMediaMutation({
-      ...identity,
-      baseContentRevision: baseRevision,
-      existingPaths,
-      newMediaIds: uploads.map((upload) => upload.objectId),
-    });
+    let begun = preparedPhotoUploads
+      ? await beginRecordPhotoMutation({
+          ...identity,
+          baseContentRevision: baseRevision,
+          existingPaths,
+          newPhotos: preparedPhotoUploads.map(({ objectId, thumbnailObjectId, renditions }) => ({
+            screenMaster: {
+              mediaObjectId: objectId,
+              widthPx: renditions.screenMaster.widthPx,
+              heightPx: renditions.screenMaster.heightPx,
+              byteSize: renditions.screenMaster.byteSize,
+              sha256: renditions.screenMaster.sha256,
+            },
+            thumbnail: {
+              mediaObjectId: thumbnailObjectId,
+              widthPx: renditions.thumbnail.widthPx,
+              heightPx: renditions.thumbnail.heightPx,
+              byteSize: renditions.thumbnail.byteSize,
+              sha256: renditions.thumbnail.sha256,
+            },
+          })),
+        })
+      : await beginRecordMediaMutation({
+          ...identity,
+          baseContentRevision: baseRevision,
+          existingPaths,
+          newMediaIds: uploads.map((upload) => upload.objectId),
+        });
     if (!begun.ok && RECORD_UPDATE_READ_BACK_REASONS.has(begun.reason)) {
       const recovered = await getRecordMediaMutationStatus(identity);
       if (recovered.ok && recovered.state === 'pending') begun = recovered;
@@ -3294,7 +3382,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         phase: 'begin',
         reason,
         error: recordFailureMessage(reason),
-        failedFiles: uploads.map(({ file }) => file.name),
+        failedFiles,
       };
     }
 
@@ -3310,17 +3398,69 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     };
     if (!isCurrentLinkedCouple(workspace)) {
       await abandonPending();
-      return {
-        ok: false,
-        phase: 'stale',
-        reason: 'stale',
-        error: recordFailureMessage('stale'),
-        failedFiles: uploads.map(({ file }) => file.name),
-      };
+      return staleFailure();
     }
 
     const uploaded: Attachment[] = [];
-    for (const { file, objectId } of uploads) {
+    if (preparedPhotoUploads) {
+      for (const { renditions, objectId, thumbnailObjectId } of preparedPhotoUploads) {
+        const master = await uploadRecordPhotoRendition(
+          renditions.screenMaster,
+          'screen_master',
+          workspace.coupleId,
+          baseRecord.id,
+          objectId,
+        );
+        if (!isCurrentLinkedCouple(workspace)) {
+          await abandonPending();
+          return staleFailure();
+        }
+        let masterAttachment: Attachment;
+        if ('error' in master) {
+          if (master.uncertainAttachment && RECORD_UPDATE_READ_BACK_REASONS.has(master.reason)) {
+            masterAttachment = master.uncertainAttachment;
+          } else {
+            await abandonPending();
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: master.reason ?? 'unknown',
+              error: master.error,
+              failedFiles,
+            };
+          }
+        } else {
+          masterAttachment = master.attachment;
+        }
+
+        const thumbnail = await uploadRecordPhotoRendition(
+          renditions.thumbnail,
+          'thumbnail',
+          workspace.coupleId,
+          baseRecord.id,
+          thumbnailObjectId,
+        );
+        if (!isCurrentLinkedCouple(workspace)) {
+          await abandonPending();
+          return staleFailure();
+        }
+        if ('error' in thumbnail) {
+          if (!(thumbnail.uncertainAttachment
+            && RECORD_UPDATE_READ_BACK_REASONS.has(thumbnail.reason))) {
+            await abandonPending();
+            return {
+              ok: false,
+              phase: 'upload',
+              reason: thumbnail.reason ?? 'unknown',
+              error: thumbnail.error,
+              failedFiles,
+            };
+          }
+        }
+        // The record content contract remains {type,name,path} for the master.
+        uploaded.push(masterAttachment);
+      }
+    } else for (const { file, objectId } of uploads) {
       const result = await uploadRecordMedia(
         file,
         workspace.coupleId,
@@ -3330,13 +3470,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       );
       if (!isCurrentLinkedCouple(workspace)) {
         await abandonPending();
-        return {
-          ok: false,
-          phase: 'stale',
-          reason: 'stale',
-          error: recordFailureMessage('stale'),
-          failedFiles: uploads.map(({ file: candidate }) => candidate.name),
-        };
+        return staleFailure();
       }
       if ('error' in result) {
         if (
@@ -3356,7 +3490,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           phase: 'upload',
           reason: result.reason ?? 'unknown',
           error: result.error,
-          failedFiles: uploads.map(({ file: candidate }) => candidate.name),
+          failedFiles,
         };
       }
       uploaded.push(result.attachment);
@@ -3397,7 +3531,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         phase: 'commit',
         reason,
         error: recordFailureMessage(reason),
-        failedFiles: uploads.map(({ file }) => file.name),
+        failedFiles,
       };
     };
 
@@ -3413,13 +3547,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         },
       );
       if (!isCurrentLinkedCouple(workspace)) {
-        return {
-          ok: false,
-          phase: 'stale',
-          reason: 'stale',
-          error: recordFailureMessage('stale'),
-          failedFiles: uploads.map(({ file }) => file.name),
-        };
+        return staleFailure();
       }
       if (!saved.ok) {
         if (saved.reason === 'auth_expired') void handleAuthExpired();
@@ -3428,13 +3556,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return committed(saved.contentRevision ?? baseRevision + 1);
     } catch (error) {
       if (!isCurrentLinkedCouple(workspace)) {
-        return {
-          ok: false,
-          phase: 'stale',
-          reason: 'stale',
-          error: recordFailureMessage('stale'),
-          failedFiles: uploads.map(({ file }) => file.name),
-        };
+        return staleFailure();
       }
       console.error('[gomsinlog] Failed to commit record media revision.');
       const reason = classifyServerError(error).kind;

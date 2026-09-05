@@ -4,6 +4,7 @@ import {
   SANITIZED_PHOTO_MAX_EDGE,
   SANITIZED_PHOTO_MIME,
   calculateSanitizedPhotoSize,
+  sanitizePhotoRenditionsForUpload,
   sanitizePhotoForUpload,
   sanitizedPhotoName,
   type PhotoSanitizerRuntime,
@@ -36,6 +37,129 @@ function runtimeFor(
 }
 
 describe('privacy-preserving photo sanitization', () => {
+  it.each(['decode', 'encode'] as const)('cancels paired %s work and discards late completion', async (stage) => {
+    const { runtime, canvas, release } = runtimeFor(4032, 3024);
+    const controller = new AbortController();
+    let finish!: () => void;
+    if (stage === 'decode') {
+      runtime.decode = vi.fn(() => new Promise((resolve) => {
+        finish = () => resolve({ source: {} as CanvasImageSource, width: 4032, height: 3024, release });
+      }));
+    } else {
+      canvas.toBlob.mockImplementation((callback) => {
+        finish = () => callback(new Blob(['late'], { type: SANITIZED_PHOTO_MIME }));
+      });
+    }
+    const pending = sanitizePhotoRenditionsForUpload(new File(['raw'], 'photo.jpg'), runtime, controller.signal);
+    for (let i = 0; i < 10 && !finish; i++) await Promise.resolve();
+    controller.abort();
+    // A missing cancellation branch must fail promptly rather than wait for the codec timeout.
+    const settled = vi.fn();
+    void pending.then(settled);
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+    expect(canvas.width).toBe(0);
+    expect(canvas.height).toBe(0);
+    finish();
+    await pending;
+    await Promise.resolve();
+    expect(release).toHaveBeenCalledOnce();
+    expect(runtime.createCanvas).toHaveBeenCalledTimes(stage === 'decode' ? 0 : 1);
+  });
+
+  it('releases both canvases and the single decoder when thumbnail encoding times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, canvas, release } = runtimeFor(4032, 3024);
+      canvas.toBlob.mockImplementationOnce((callback) => callback(new Blob(['master'], { type: SANITIZED_PHOTO_MIME })))
+        .mockImplementationOnce(() => {});
+      const pending = sanitizePhotoRenditionsForUpload(new File(['raw'], 'photo.jpg'), runtime);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await pending).toHaveProperty('error');
+      expect(runtime.decode).toHaveBeenCalledOnce();
+      expect(release).toHaveBeenCalledOnce();
+      expect(canvas).toMatchObject({ width: 0, height: 0 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('decodes once and renders oriented master and thumbnail pixels into separate JPEGs', async () => {
+    const release = vi.fn();
+    const canvases: Array<{
+      width: number;
+      height: number;
+      fillRect: ReturnType<typeof vi.fn>;
+      drawImage: ReturnType<typeof vi.fn>;
+      toBlob: ReturnType<typeof vi.fn>;
+    }> = [];
+    const runtime: PhotoSanitizerRuntime = {
+      decode: vi.fn(async () => ({
+        source: {} as CanvasImageSource,
+        // The decoder owns EXIF orientation. These are the upright dimensions.
+        width: 3024,
+        height: 4032,
+        release,
+      })),
+      createCanvas: vi.fn(() => {
+        const renditionIndex = canvases.length;
+        const fillRect = vi.fn();
+        const drawImage = vi.fn();
+        const canvas = {
+          width: 0,
+          height: 0,
+          fillRect,
+          drawImage,
+          getContext: vi.fn(() => ({ fillStyle: '', fillRect, drawImage })),
+          toBlob: vi.fn((callback: BlobCallback) => callback(new Blob(
+            [renditionIndex === 0 ? 'master pixels' : 'thumbnail pixels'],
+            { type: SANITIZED_PHOTO_MIME },
+          ))),
+        };
+        canvases.push(canvas);
+        return canvas;
+      }),
+    };
+
+    const result = await sanitizePhotoRenditionsForUpload(
+      new File(['source bytes with EXIF'], 'IMG_0001.HEIC', { type: 'image/heic' }),
+      runtime,
+    );
+
+    expect(result).not.toHaveProperty('error');
+    const renditions = result as {
+      screenMaster: { file: File; width: number; height: number };
+      thumbnail: { file: File; width: number; height: number };
+    };
+    expect(runtime.decode).toHaveBeenCalledOnce();
+    expect(renditions.screenMaster).toMatchObject({ width: 1536, height: 2048 });
+    expect(renditions.thumbnail).toMatchObject({ width: 480, height: 640 });
+    expect(renditions.screenMaster.file.size).toBe('master pixels'.length);
+    expect(renditions.thumbnail.file.size).toBe('thumbnail pixels'.length);
+    expect(canvases).toHaveLength(2);
+    expect(canvases[0].fillRect).toHaveBeenCalledWith(0, 0, 1536, 2048);
+    expect(canvases[1].fillRect).toHaveBeenCalledWith(0, 0, 480, 640);
+    expect(canvases[0].drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 1536, 2048);
+    expect(canvases[1].drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 480, 640);
+    expect(release).toHaveBeenCalledOnce();
+    expect(canvases.map(({ width, height }) => ({ width, height }))).toEqual([
+      { width: 0, height: 0 },
+      { width: 0, height: 0 },
+    ]);
+  });
+
+  it('does not enlarge a small source for either rendition', async () => {
+    const { runtime } = runtimeFor(320, 200);
+    const result = await sanitizePhotoRenditionsForUpload(
+      new File(['small'], 'small.png', { type: 'image/png' }),
+      runtime,
+    );
+
+    expect(result).toMatchObject({
+      screenMaster: { width: 320, height: 200 },
+      thumbnail: { width: 320, height: 200 },
+    });
+    expect(runtime.decode).toHaveBeenCalledOnce();
+  });
+
   it('fits photos inside the maximum edge without enlarging', () => {
     expect(calculateSanitizedPhotoSize(4032, 3024)).toEqual({ width: 2048, height: 1536 });
     expect(calculateSanitizedPhotoSize(1000, 3000)).toEqual({ width: 683, height: 2048 });
@@ -64,8 +188,8 @@ describe('privacy-preserving photo sanitization', () => {
     expect(sanitized.file.name).not.toContain('HEIC');
     expect(sanitized.file.name).not.toContain('heic');
     expect(sanitized.ext).toBe('jpg');
-    expect(canvas.width).toBe(2048);
-    expect(canvas.height).toBe(1536);
+    expect(canvas.width).toBe(0);
+    expect(canvas.height).toBe(0);
     expect(fillRect).toHaveBeenCalledWith(0, 0, 2048, 1536);
     expect(drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 2048, 1536);
     expect(release).toHaveBeenCalledOnce();

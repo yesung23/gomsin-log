@@ -451,7 +451,15 @@ export async function installMockBackend(
     if (path === '/rest/v1/daily_records') {
       const failure = failureFor(scenario, 'daily_records');
       if (failure) return json(route, failure, failure.status);
-      if (method === 'GET') return rows(route, scenario.records ?? []);
+      if (method === 'GET') {
+        // Browser scenarios intentionally stay far below the production page
+        // cap. Once the client supplies its keyset cursor, therefore, the
+        // faithful next page is empty. Returning the same fixture rows forever
+        // turns a healthy complete-read loop into a mock-only non-advancing
+        // cursor failure.
+        if (url.searchParams.has('or')) return rows(route, []);
+        return rows(route, scenario.records ?? []);
+      }
       // Writes echo the payload back, as PostgREST does with `return=representation`.
       const body = request.postDataJSON();
       const payloads = Array.isArray(body) ? body : [body];

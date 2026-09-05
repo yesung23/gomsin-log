@@ -254,7 +254,7 @@ describe('daily_records complete pagination', () => {
 
   it.each([
     ['timestamp', { created_at: '2026-02-30T01:00:00.123456Z' }],
-    ['UUID', { id: uuidAt(10).toUpperCase() }],
+    ['filter-unsafe id', { id: 'row,or(created_at.gt.2026-01-01)' }],
   ])('rejects a non-canonical %s cursor from the last row', async (_label, overrides) => {
     mocks.pages.push({ data: [recordRow(10, overrides)], error: null });
 
@@ -263,6 +263,21 @@ describe('daily_records complete pagination', () => {
     expect(result.ok).toBe(false);
     expect(result.records).toEqual([]);
     expect(mocks.pageRequests).toHaveLength(1);
+  });
+
+  it('accepts a filter-safe synthetic id while production UUID integrity remains database-owned', async () => {
+    mocks.pages.push(
+      { data: [recordRow(10, { id: 'fixture-record-10' })], error: null },
+      { data: [], error: null },
+    );
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(true);
+    expect(result.records).toHaveLength(1);
+    expect(mocks.pageRequests[1].filters).toEqual([
+      `created_at.lt.${CREATED_AT},and(created_at.eq.${CREATED_AT},id.lt.fixture-record-10)`,
+    ]);
   });
 
   it('rejects data:null with error:null instead of treating it as an empty final page', async () => {

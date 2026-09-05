@@ -303,7 +303,12 @@ async function signValidatedAttachments(attachments: Attachment[]): Promise<Atta
 
 type RecordsPageCursor = { createdAt: string; timestampKey: string; id: string };
 
-const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// `daily_records.id` is a UUID in PostgreSQL, but this boundary only needs to
+// guarantee that a returned value cannot alter PostgREST's `.or(...)` grammar.
+// Keeping that security property separate from the schema type also lets the
+// browser backend use readable fixture ids without weakening Production, where
+// the UUID column remains authoritative.
+const POSTGREST_SAFE_CURSOR_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
 const UTC_RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|\+00:00)$/;
 
 function isLeapYear(year: number): boolean {
@@ -340,7 +345,7 @@ function cursorForRecordRow(row: unknown): RecordsPageCursor | null {
   const candidate = row as Record<string, unknown>;
   const timestampKey = canonicalTimestampKey(candidate.created_at);
   if (!timestampKey || typeof candidate.created_at !== 'string') return null;
-  if (typeof candidate.id !== 'string' || !CANONICAL_UUID.test(candidate.id)) return null;
+  if (typeof candidate.id !== 'string' || !POSTGREST_SAFE_CURSOR_ID.test(candidate.id)) return null;
   return { createdAt: candidate.created_at, timestampKey, id: candidate.id };
 }
 

@@ -71,8 +71,11 @@
   합성 브라우저 실측과 비용 계산기는 [media-economics](operations/media-economics.md)에 있다.
   `fb880ed`에 사진 pair 예약·metadata·구버전 호환 backend090이 로컬 구현됐다. 전체001..090
   187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS.
-  **클라이언트 thumbnail 생성/업로드 SliceA는 8개 파일의 미완료 WIP**로 보존됐다. Store 통합 후
-  검증은 미실행이며 최신 복무 UI 요청 동안 parent에게 소유권을 반환했다. 표시 SliceB,
+  **클라이언트 thumbnail 생성/업로드 SliceA는 `128736c`에 구현됐다**. 원본1회decode→2048/640
+  생성·해시·paired예약·업로드·master-only저장과 계정전환취소/응답유실복구를 포함한다.
+  worker259tests/lint/typecheck PASS, parent gate206+생성86+수정37=329PASS. **독립SolMax
+  exact128736c C/H/M/L0 Spec/LocalQualityPASS**,465focused+7memoryprobes+2mutant예상RED.
+  표시 SliceB,
   인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현이다.
   backend090 독립 Sol Max 리뷰는 exact `fb880ed`에서 **C/H/M/L 0, PASS**다.
   001..090187/기존회귀520/보안형태209를 독립 재실행했다. remote NOT APPLIED다.
@@ -91,27 +94,32 @@
   원격 catalog는 위 live inventory 참조. 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
 - 온디바이스 `d01793a`는 관찰된 HIGH2 반례를 수정했고 독립 Sol Max에서 해당 반례 종결을 확인했다.
   전체 원문 보존/결과 무효화, 총20 상한, 완전한 마지막 문장 발췌, 원문 편집 뒤 새 수동 요청,
-  Story test 수집을 고쳤다. 독립258PASS와 추가 부정 재현에서 **C0/H0/M1/L0, DELTA FAIL**다.
-  M1: 거대한 결합문자 때문에 절단 prefix가40이하가 되면 후보 필터를 빠져나가 나머지만 요약한다.
-  전체기록 절단 검사를 후보 필터 이전에 적용하는 수정이 남았다. 일반 의미 동등성/활성화는 여전히 HOLD.
-  iOS15 target의 Swift 소스 typecheck는 PASS이고 연결된 지원 iPhone/개발자 모드는 확인했지만
-  실기기 모델 실행은 아직 UNVERIFIED다. Mac availability는 Apple Intelligence OFF였다.
+  Story test 수집을 고쳤다. 이후 발견된 M1(절단 prefix의 후보 필터 누락)은 **`2a420b2`에서
+  수정하고 독립Max C/H/M/L0 PASS로 종결**했다. 일반 의미 동등성/활성화는 여전히 HOLD.
+  iOS15 target의 Swift 소스 typecheck는 PASS지만 실기기 모델 실행은 UNVERIFIED이며,
+  최신 CoreDevice 상태는 unavailable이다. Mac availability는 Apple Intelligence OFF였다.
   [초기 반례](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md),
   [현재 수정·검토·CI/브라우저 결과](../control-tower/reports/codex/2026-09-05_1625_summary-ci-closure_codex.md).
-- `e35ff9d`의 표준 production build는 placeholder 환경으로 PASS. 사용자4174 dev와 분리해 immutable
- 4177 mock preview를 만들었다. 실제 브라우저는 17/18 +별도2/2 +UI capture11/11 통과다.
-  실패1건은 malformed DB fixture가 render crash 이전 sync 보호에서 차단되는데 옛 검사가
-  ErrorBoundary를 기대한 차이다. 검사를 실제 복구 흐름에 맞추는 수정이 남았으며 PASS로 세지 않는다.
+- `e35ff9d`의 이전 브라우저17/18 중 실패한 오류 fixture는 **`4800fcf`에서 해결**했다.
+  malformed 기록의 fail-closed 복구를 그대로 검증하고, 실제 복구 화면에 종이/ink/safe-area
+  표현을 맞췄다. UI source는 class3곳만 변경, 인증/데이터/콜백 불변이다.
+  parent6unit/lint/rebuildPASS, 실제 built-browser2PASS +정상응답재시도→Home이동추가1PASS.
+  그 외 이전17/18+별도2/2+UIcapture11/11 증거는 이전SHA의 검사임을 구분한다.
   작은5탭 가로넘침, 정원13흐름, 기본원본펼침/이동, 설정키보드, 실제 dark 캡처를 확인했다.
+- 전체Vitest 사전검사(363files)는 6083중6018PASS/63FAIL/2skip이었다. `217c666`은
+  cleanup구버전3 fixture→현행4 + 잘못된버전/응답/throw8부정검사, outbox의 legacy사진
+  capability fixture를 맞췄다. source안전장치는 변경하지 않았고3관련suite97PASS/lintPASS다.
+  gate inventory3실패는 `128736c`에서 이미 교정됐다. **안정HEAD `217c666` 전체363files:
+  6092PASS/0FAIL/2skip**, typecheck/전체lint PASS. 2skip은 Android built merged-manifest
+  미존재 시의 검사이며 native 빌드 통과가 아니다. 전체RC/remote/실기기 판정을 대신하지 않는다.
   스크린샷 수집은 기능 전체/VoiceOver/실기기/전체접근성 통과 증거가 아니다.
 - 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
-  auth reviewer와 photo backend writer/요약 Architect는 종료했다. parent가090검증을 인수해 고정했고,
-  parent가 요약 patch를 인수·검증했으며 Sol Max summary Reviewer는 위 M1 반환 후 종료했다.
-  Hegel Sol High는 최신 복무 UI 요청으로 photo upload SliceA의 8개 WIP를 보존하고 parent에게
-  소유권을 반환했다. Store 통합 직후 검증은 미실행이며, parent가 복무 local gate 후 재개한다.
+  복무/요약/사진SliceA의 구현자·독립Reviewer와 fixture Explorer가 결과를 반환하고 모두 종료했다.
+  사진 source WIP는128736c에 통합되어 남아 있지 않다. parent가 Task2B와 미충족 외부gate를
+  이어받으며, Apple 계정연결정책의 사용자 응답·실기기·복구 증거 없이 활성화하지 않는다.
   신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
   상세 근거는
-  [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).
+  [최신 Control Tower report](../control-tower/reports/codex/2026-09-05_photo-client-and-regression-closure_codex.md).
 
 ## H0. Historical V5 control-tower checkpoint — 2026-09-03
 

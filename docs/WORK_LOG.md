@@ -9,6 +9,42 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — Photo SliceA·복구 화면 종결 / 안정 HEAD 전체6092 PASS
+
+- PLAN POSITION: RC Task2 upload SliceA / Task5 복구 / Task6 로컬 검사. Previous Gate ba3f6bb;
+  This Gate bounded local PASS, **전체RC·master HOLD**.
+- DIRECTION CHECK: 최신 앱완성·사진·운영 승인, V5§1–3/7/8, BUSINESS§9/free기본사진,
+  ENGINEERING6task, CURRENT_STATE/직전원장/rollback 확인. 기준 V5/2026-09-05; conflict NO.
+  Apple정책충돌은 전항의 사용자결정 대기이며 이 작업에서 수정하지 않음.
+- OWNERSHIP: Hegel SolHigh 유일photo writer→parent통합, Russell SolMax 독립검토;
+  parent UI/test-only교정, Sartre FlashHigh 읽기전용 실패원인확인. branch `codex/rc-v5-final-fixes`,
+  base/old ba3f6bb, photo128736c, UI4800fcf, test217c666. PR없음. 모든 agent 반환·종료.
+- CHANGED: photo10파일(기존9WIP 완결+gatePathCoverage), UI App class3곳과 실제복구E2E,
+  cleanup/CORS/outbox 테스트3파일. 실제bytes의2048/640paired준비·업로드·master-only저장,
+  계정전환취소·부분실패·CAS/journal/보호된호출 유지. 자세한 파일·근거는 아래보고서.
+- EXPLICITLY NOT CHANGED: DB/migration/crypto/삭제handler/auth정책/ack/health/Book/Production.
+  기존사진 일괄변환·삭제없음. Now는claim script로만 관리하며 stage하지 않음.
+- VERIFICATION: worker259tests/lint/typecheckPASS; parent gateRED3→206+store86+edit37=329PASS.
+  독립 exact128736c465/465PASS+7memoryprobes+2defense-removal mutant 예상RED,
+  C/H/M/L0 **Spec/LocalQuality PASS**. 검토10files는217c666까지불변.
+  UI6unit/lint/rebuildPASS, built2PASS +재시도→Home검사추가1PASS; parentdark화면확인.
+  전체사전검사6018PASS/63FAIL/2skip → 4파일fixture/미등록원인분리;
+  실제handler4요구를 유지하며8부정검사추가, 관련97PASS. Flash독립원인확인/read-only.
+  **안정HEAD217c666 전체363files:6092PASS/0FAIL/2skip(6094total),287.4s**.
+  `npm run typecheck && npm run lint` PASS. 정확한명령/JSON경로는 report 한곳에 보존.
+- NOT EXECUTED: 2skip은 Android merged-manifest artifact검사. Native AI/실기기/StoreKit/
+  Production적용/owner-partner-former 실제JWT 전체권한/DB restore drill은 미검증.
+- REVIEW IMPACT: photo새독립검토fresh, UI/test-only narrowDELTA; 문서-only는runtime검토불변.
+- BLOCKERS/STOPPED AT: 이번source작업 모두커밋·localgate종결, **Task2B표시경로 미구현**,
+  Apple계정연결선택·revoke·서명/provider, unavailable실기기, backup/restore·Book호환forward/
+  실사용권한canary, 유료상품권리/승인/Sandbox/실제제공증빙, 전체RC통합판정은 남음.
+- NEXT ACTION: parent가 기존Task2B actualthumbnail/master 소비연결을 이어받되, Apple정책결정/
+  실기기연결·복구증거 없는 Production활성화는 하지 않음. 재온보딩/전체리디자인 재시작 금지.
+- DO NOT ADVANCE UNTIL: 필요한 사용자정책승인·기기/복구·실제결제검증과 전체RC조건 충족.
+- PRODUCTION: **NOT APPLIED**, merge/push/deploy없음. 개별localcommit revert가능;
+  hostedpair발생후에는companion/cleanup계약을유지하는forwardfix. master가끝났다는주장금지.
+- 보고서: [사진·회귀 종결](../control-tower/reports/codex/2026-09-05_photo-client-and-regression-closure_codex.md).
+
 ## 2026-09-05 — 시간당 레벨업 종결 · Summary M1 종결 · 실제 원격 기준 확인
 
 - PLAN POSITION: RC Task5 최신 승인 delta / Task3 M1 / Task6 원격 사전조건. Previous Gate b4b479b;

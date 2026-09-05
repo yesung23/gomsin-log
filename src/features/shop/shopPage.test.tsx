@@ -85,35 +85,30 @@ describe('free local companion shop', () => {
     expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).not.toHaveAttribute('aria-pressed');
   });
 
-  it('shows one finite free reveal without currency, payment actions, or date pressure', () => {
+  it('shows five explicit starter choices without chance, payment, or date pressure', () => {
     renderShop();
 
-    expect(screen.getByTestId('accessory-draw-roulette')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '무료 장식 하나 공개하기' })).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: /선택$/ })).toHaveLength(5);
+    expect(screen.getByRole('button', { name: '검정 부츠 선택' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: '장식을 골라 주세요' })).toBeDisabled();
+    expect(screen.queryByTestId('accessory-draw-roulette')).not.toBeInTheDocument();
     expect(screen.queryByText(/오늘|매일|마감|자정|기회|코인|포인트|재화|₩|\d[\d, ]*원/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /결제|구매|구독/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /결제|구매|구독|뽑기|공개/ })).not.toBeInTheDocument();
   });
 
-  it('persists the selected unowned item before a full rotation reveals it', async () => {
+  it('persists exactly the selected unowned item before claiming success', async () => {
     const user = userEvent.setup();
-    vi.spyOn(Math, 'random').mockReturnValue(0.4);
     renderShop();
 
-    await user.click(screen.getByRole('button', { name: '무료 장식 하나 공개하기' }));
-
-    const stateAfterClick = loadCompanionShopState('user-me');
-    expect(stateAfterClick.ownedAccessories).toEqual(['letter']);
-    expect(screen.queryByTestId('starter-reveal-result')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '하트 편지 선택' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
+    expect(screen.getByRole('button', { name: '하트 편지 선택' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '하트 편지 받기' }));
 
-    const wheel = screen.getByTestId('accessory-roulette-wheel');
-    expect(wheel).toHaveClass('starter-reveal-rotating', 'animate-spin');
-    fireEvent.animationEnd(wheel);
-
-    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument());
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['letter']);
     expect(screen.getByRole('status')).toHaveTextContent('하트 편지를 무료로 받았어요.');
-    expect(screen.getByTestId('starter-reveal-result')).toHaveAttribute('data-accessory', 'letter');
-    expect(screen.getByText('하트 편지').closest('[data-owned]')).toHaveAttribute('data-owned', 'true');
+    expect(screen.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
   });
 
   it('keeps the item unowned and announces an error when collection persistence fails', async () => {
@@ -123,11 +118,11 @@ describe('free local companion shop', () => {
       throw new DOMException('quota', 'QuotaExceededError');
     });
 
-    await user.click(screen.getByRole('button', { name: '무료 장식 하나 공개하기' }));
+    await user.click(screen.getByRole('button', { name: '검정 부츠 선택' }));
+    await user.click(screen.getByRole('button', { name: '검정 부츠 받기' }));
 
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
-    expect(screen.getByRole('button', { name: '무료 장식 하나 공개하기' })).toBeEnabled();
-    expect(screen.getByTestId('accessory-draw-roulette')).toHaveAttribute('aria-busy', 'false');
+    expect(screen.getByRole('button', { name: '검정 부츠 받기' })).toBeEnabled();
     expect(screen.getByRole('alert')).toHaveTextContent('액세서리를 저장하지 못했어요.');
   });
 
@@ -149,7 +144,6 @@ describe('free local companion shop', () => {
 
   it('excludes owned accessories while a legacy draw date does not block collection', async () => {
     const user = userEvent.setup();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
     localStorage.setItem('gomsin.diary.shop.user-me', JSON.stringify({
       version: 1,
       ownedAccessories: ['boots'],
@@ -158,10 +152,9 @@ describe('free local companion shop', () => {
     }));
     renderShop();
 
-    expect(screen.getByText('검정 부츠')).toBeInTheDocument();
-    const drawButton = screen.getByRole('button', { name: '무료 장식 하나 공개하기' });
-    expect(drawButton).toBeEnabled();
-    await user.click(drawButton);
+    expect(screen.getByRole('button', { name: '검정 부츠 보유 중' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: '운동화 선택' }));
+    await user.click(screen.getByRole('button', { name: '운동화 받기' }));
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots', 'sneakers']);
   });
 
@@ -173,7 +166,8 @@ describe('free local companion shop', () => {
     renderShop();
 
     const loginReason = screen.getByText('로그인하면 무료 수집과 종이 적용을 이용할 수 있어요.');
-    const drawButton = screen.getByRole('button', { name: '무료 장식 하나 공개하기' });
+    const accessoryChoices = screen.getAllByRole('button', { name: /선택$/ });
+    const collectButton = screen.getByRole('button', { name: '장식을 골라 주세요' });
     const paperButtons = [
       '따뜻한 무지 적용하기',
       '줄 노트 사용 중',
@@ -182,7 +176,7 @@ describe('free local companion shop', () => {
       '크림 편지지 무료로 받기',
     ].map((label) => screen.getByRole('button', { name: label }));
 
-    [drawButton, ...paperButtons].forEach((button) => {
+    [...accessoryChoices, collectButton, ...paperButtons].forEach((button) => {
       expect(button).toBeDisabled();
       expect(button).toHaveAttribute('aria-describedby', loginReason.id);
     });
@@ -209,7 +203,7 @@ describe('free local companion shop', () => {
 
     const view = renderShop();
     expect(screen.getByText('기본 장식 5종을 모두 모았어요.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '무료 장식 하나 공개하기' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '장식을 골라 주세요' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '모눈 종이 사용 중' })).toBeInTheDocument();
 
     currentState = {
@@ -219,7 +213,8 @@ describe('free local companion shop', () => {
     view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '무료 장식 하나 공개하기' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '검정 부츠 보유 중' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: '운동화 선택' })).toBeEnabled();
       expect(screen.getByRole('button', { name: '따뜻한 무지 사용 중' })).toBeInTheDocument();
     });
   });
@@ -238,39 +233,37 @@ describe('free local companion shop', () => {
     expect(document.documentElement).toHaveAttribute('data-paper', 'ruled');
   });
 
-  it('does not let a second activation duplicate the pending persisted reveal', async () => {
-    const user = userEvent.setup();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+  it('does not let a second activation duplicate a collected choice', async () => {
     renderShop();
 
-    const button = screen.getByRole('button', { name: '무료 장식 하나 공개하기' });
-    await user.dblClick(button);
+    fireEvent.click(screen.getByRole('button', { name: '검정 부츠 선택' }));
+    const button = screen.getByRole('button', { name: '검정 부츠 받기' });
+    fireEvent.click(button);
+    fireEvent.click(button);
     expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
-    expect(button).toBeDisabled();
+    expect(screen.getByRole('button', { name: '검정 부츠 보유 중' })).toBeDisabled();
   });
 
-  it('locks paper actions during reveal, then keeps paper collection independent', async () => {
+  it('keeps paper collection independent from an unconfirmed accessory choice', async () => {
     const user = userEvent.setup();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
     renderShop();
 
-    await user.click(screen.getByRole('button', { name: '무료 장식 하나 공개하기' }));
+    await user.click(screen.getByRole('button', { name: '검정 부츠 선택' }));
     const paperButton = screen.getByRole('button', { name: '모눈 종이 무료로 받기' });
-    expect(paperButton).toBeDisabled();
-    fireEvent.animationEnd(screen.getByTestId('accessory-roulette-wheel'));
-    await waitFor(() => expect(paperButton).toBeEnabled());
+    expect(paperButton).toBeEnabled();
     await user.click(paperButton);
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
     expect(loadCompanionShopState('user-me').ownedPapers).toEqual(['plain', 'ruled', 'grid']);
+    expect(screen.getByRole('button', { name: '검정 부츠 받기' })).toBeEnabled();
   });
 
-  it('cancels a pending reveal and never carries it into another account', async () => {
+  it('never carries an unconfirmed accessory choice into another account', async () => {
     const user = userEvent.setup();
-    vi.spyOn(Math, 'random').mockReturnValue(0);
     const view = renderShop();
 
-    await user.click(screen.getByRole('button', { name: '무료 장식 하나 공개하기' }));
-    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
+    await user.click(screen.getByRole('button', { name: '검정 부츠 선택' }));
+    expect(screen.getByRole('button', { name: '검정 부츠 받기' })).toBeEnabled();
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
 
     currentState = {
       authenticatedUser: { id: 'user-other' },
@@ -279,46 +272,39 @@ describe('free local companion shop', () => {
     view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '무료 장식 하나 공개하기' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: '검정 부츠 선택' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: '장식을 골라 주세요' })).toBeDisabled();
     });
-    expect(screen.getByTestId('accessory-draw-roulette')).toHaveAttribute('aria-busy', 'false');
-    expect(screen.queryByTestId('starter-reveal-result')).not.toBeInTheDocument();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(loadCompanionShopState('user-other').ownedAccessories).toEqual([]);
   });
 
-  it('uses a short non-rotating transition before reveal when reduced motion is requested', async () => {
-    const originalMatchMedia = window.matchMedia;
-    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: query === '(prefers-reduced-motion: reduce)',
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
+  it('never announces a previous account collection after the account changes', async () => {
+    const user = userEvent.setup();
+    const view = renderShop();
 
-    try {
-      const user = userEvent.setup();
-      vi.spyOn(Math, 'random').mockReturnValue(0);
-      renderShop();
-      await user.click(screen.getByRole('button', { name: '무료 장식 하나 공개하기' }));
+    await user.click(screen.getByRole('button', { name: '하트 편지 선택' }));
+    await user.click(screen.getByRole('button', { name: '하트 편지 받기' }));
+    expect(screen.getByRole('status')).toHaveTextContent('하트 편지를 무료로 받았어요.');
 
-      const wheel = screen.getByTestId('accessory-roulette-wheel');
-      expect(wheel).toHaveAttribute('data-reveal-motion', 'reduced');
-      expect(wheel).not.toHaveClass('animate-spin', 'starter-reveal-rotating');
-      expect(screen.queryByTestId('starter-reveal-result')).not.toBeInTheDocument();
-      expect(loadCompanionShopState('user-me').ownedAccessories).toEqual(['boots']);
+    currentState = {
+      authenticatedUser: { id: 'user-other' },
+      profile: { id: 'profile-other' },
+    };
+    view.rerender(<MemoryRouter initialEntries={['/shop']}><ShopPage /></MemoryRouter>);
 
-      await waitFor(() => expect(screen.getByTestId('starter-reveal-result')).toBeInTheDocument(), {
-        timeout: 500,
-      });
-      expect(screen.getByRole('status')).toHaveTextContent('검정 부츠를 무료로 받았어요.');
-    } finally {
-      window.matchMedia = originalMatchMedia;
-    }
+    expect(screen.queryByText('하트 편지를 무료로 받았어요.')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    expect(loadCompanionShopState('user-other').ownedAccessories).toEqual([]);
+  });
+
+  it('does not mutate ownership until the explicit receive action', async () => {
+    const user = userEvent.setup();
+    renderShop();
+
+    await user.click(screen.getByRole('button', { name: '종이비행기 선택' }));
+    expect(loadCompanionShopState('user-me').ownedAccessories).toEqual([]);
+    expect(screen.getByRole('button', { name: '종이비행기 받기' })).toBeEnabled();
   });
 
   it('shows a quiet completion state when all 5 starter items are owned', () => {
@@ -331,8 +317,8 @@ describe('free local companion shop', () => {
     renderShop();
 
     expect(screen.getByText('기본 장식 5종을 모두 모았어요.')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: '무료 장식 하나 공개하기' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('accessory-draw-roulette')).toHaveAttribute('aria-busy', 'false');
+    expect(screen.queryByRole('button', { name: '장식을 골라 주세요' })).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /보유 중$/ })).toHaveLength(5);
   });
 
   it('returns to the diary and opens the garden from the Shop app bar', async () => {

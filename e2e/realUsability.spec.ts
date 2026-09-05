@@ -26,14 +26,6 @@ async function bootedInto(page: Page, route: string) {
   await expect(page.locator('#root')).not.toBeEmpty();
 }
 
-const STARTER_ACCESSORY_LABELS: Record<string, string> = {
-  boots: '검정 부츠',
-  sneakers: '운동화',
-  letter: '하트 편지',
-  dogtag: '메탈 펜던트',
-  plane: '종이비행기',
-};
-
 async function readOwnedAccessories(page: Page): Promise<string[]> {
   return page.evaluate((storageKey) => {
     const raw = window.localStorage.getItem(storageKey);
@@ -212,8 +204,8 @@ for (const width of [320, 375]) {
   });
 }
 
-for (const width of [320, 393]) {
-  test(`finite free Shop reveal visibly rotates, avoids duplicates, and persists at ${width}px`, async ({ browser }) => {
+for (const width of [320, 393, 768]) {
+  test(`finite free Shop choice stays explicit, accessible, and persistent at ${width}px`, async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width, height: 852 } });
     const { unrouted } = await installMockBackend(context, CREATOR);
     const page = await context.newPage();
@@ -227,66 +219,50 @@ for (const width of [320, 393]) {
     await expect(page.getByRole('button', { name: /결제|구매|충전|구독|코인|포인트/ })).toHaveCount(0);
     await expect(page.getByText('지금 상점은 모두 무료이며 결제 기능이 없어요.')).toBeVisible();
 
-    const roulette = page.getByTestId('accessory-draw-roulette');
-    const wheel = page.getByTestId('accessory-roulette-wheel');
-    const revealResult = page.getByTestId('starter-reveal-result');
-    const drawButton = page.getByRole('button', { name: '무료 장식 하나 공개하기' });
-    await expect(roulette).toBeVisible();
-    await expect(drawButton).toBeEnabled();
+    const starterChoices = page.getByRole('button', { name: /선택$/ });
+    const collectPlaceholder = page.getByRole('button', { name: '장식을 골라 주세요' });
+    await expect(starterChoices).toHaveCount(5);
+    await expect(collectPlaceholder).toBeDisabled();
+    await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
     const accessoryGrid = page.locator('[aria-label="액세서리 목록"]');
-    const drawBox = await drawButton.boundingBox();
-    expect(drawBox?.height ?? 0, 'the free reveal keeps a 44px touch target').toBeGreaterThanOrEqual(44);
+    const choiceBoxes = await starterChoices.evaluateAll((buttons) => (
+      buttons.map((button) => {
+        const bounds = button.getBoundingClientRect();
+        return { height: bounds.height, width: bounds.width };
+      })
+    ));
+    expect(Math.min(...choiceBoxes.map(({ height }) => height)), 'every starter choice keeps a 44px touch target')
+      .toBeGreaterThanOrEqual(44);
+    expect(Math.min(...choiceBoxes.map(({ width: cardWidth }) => cardWidth)), 'starter labels keep readable card width')
+      .toBeGreaterThanOrEqual(160);
     expect((await accessoryGrid.boundingBox())?.width ?? width + 1).toBeLessThanOrEqual(width - 32);
 
-    await drawButton.click();
-    await expect(roulette).toHaveAttribute('aria-busy', 'true');
-    await expect(wheel).toHaveAttribute('data-reveal-motion', 'full');
-    await expect(revealResult).toHaveCount(0);
+    const letterChoice = page.getByRole('button', { name: '하트 편지 선택' });
+    await letterChoice.click();
+    await expect(letterChoice).toHaveAttribute('aria-pressed', 'true');
+    expect(await readOwnedAccessories(page)).toEqual([]);
+    const receiveLetter = page.getByRole('button', { name: '하트 편지 받기' });
+    await expect(receiveLetter).toBeEnabled();
+    expect((await receiveLetter.boundingBox())?.height ?? 0, 'the receive action keeps a 44px touch target')
+      .toBeGreaterThanOrEqual(44);
+    await receiveLetter.click();
 
-    const firstPersisted = await readOwnedAccessories(page);
-    expect(firstPersisted).toHaveLength(1);
-    const firstId = firstPersisted[0];
-    expect(STARTER_ACCESSORY_LABELS[firstId]).toBeDefined();
-
-    const visibleMotion = await wheel.evaluate((element) => {
-      const style = window.getComputedStyle(element);
-      const bounds = element.getBoundingClientRect();
-      return {
-        animationName: style.animationName,
-        animationDurationSeconds: Number.parseFloat(style.animationDuration),
-        width: bounds.width,
-        height: bounds.height,
-      };
-    });
-    expect(visibleMotion.animationName).not.toBe('none');
-    expect(visibleMotion.animationDurationSeconds).toBeGreaterThan(0);
-    expect(visibleMotion.width).toBeGreaterThan(0);
-    expect(visibleMotion.height).toBeGreaterThan(0);
-    if (width === 393) {
-      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-reveal-rotating.png' });
-    }
-
-    await expect(revealResult).toHaveAttribute('data-accessory', firstId, { timeout: 3_000 });
-    const revealStatus = page
+    expect(await readOwnedAccessories(page)).toEqual(['letter']);
+    const collectionStatus = page
       .locator('section[aria-labelledby="accessory-collection-title"]')
       .getByRole('status');
-    await expect(revealStatus).toContainText(STARTER_ACCESSORY_LABELS[firstId]);
-    await expect(revealStatus).toContainText('무료로 받았어요.');
-    await expect(
-      accessoryGrid.locator('[data-owned="true"]').filter({ hasText: STARTER_ACCESSORY_LABELS[firstId] }),
-    ).toBeVisible();
+    await expect(collectionStatus).toHaveText('하트 편지를 무료로 받았어요.');
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
     if (width === 393) {
-      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-reveal-result.png' });
+      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-direct-choice.png' });
     }
 
-    await drawButton.click();
-    await expect(revealResult).toHaveCount(0);
+    await page.getByRole('button', { name: '운동화 선택' }).click();
+    expect(await readOwnedAccessories(page)).toEqual(['letter']);
+    await page.getByRole('button', { name: '운동화 받기' }).click();
     const secondPersisted = await readOwnedAccessories(page);
-    expect(secondPersisted).toHaveLength(2);
-    expect(new Set(secondPersisted).size, 'each reveal must select an unowned item').toBe(2);
-    const secondId = secondPersisted.find((id) => id !== firstId);
-    if (!secondId) throw new Error('the second reveal did not persist a distinct accessory');
-    await expect(revealResult).toHaveAttribute('data-accessory', secondId, { timeout: 3_000 });
+    expect(secondPersisted).toEqual(['sneakers', 'letter']);
+    expect(new Set(secondPersisted).size, 'each receive must preserve unique ownership').toBe(2);
 
     await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
     await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
@@ -295,12 +271,9 @@ for (const width of [320, 393]) {
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
     await page.reload();
-    for (const id of secondPersisted) {
-      await expect(
-        accessoryGrid.locator('[data-owned="true"]').filter({ hasText: STARTER_ACCESSORY_LABELS[id] }),
-      ).toBeVisible();
-    }
-    await expect(drawButton).toBeEnabled();
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '운동화 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '검정 부츠 선택' })).toBeEnabled();
     await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
     await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
 
@@ -311,7 +284,7 @@ for (const width of [320, 393]) {
   });
 }
 
-test('the finite free Shop reveal replaces rotation with a short transition for reduced motion', async ({ browser }) => {
+test('the finite free Shop choice never depends on motion to complete', async ({ browser }) => {
   const context = await browser.newContext({
     viewport: { width: 390, height: 852 },
     reducedMotion: 'reduce',
@@ -322,28 +295,12 @@ test('the finite free Shop reveal replaces rotation with a short transition for 
   await bootedInto(page, '/shop');
   await expect.poll(() => page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
-  const wheel = page.getByTestId('accessory-roulette-wheel');
-  const drawButton = page.getByRole('button', { name: '무료 장식 하나 공개하기' });
-  await drawButton.click();
-
-  const reducedTransition = await wheel.evaluate((element) => {
-    const style = window.getComputedStyle(element);
-    return {
-      mode: element.getAttribute('data-reveal-motion'),
-      rotates: element.classList.contains('starter-reveal-rotating'),
-      animationName: style.animationName,
-      transitionDurationSeconds: Number.parseFloat(style.transitionDuration),
-      resultIsVisible: element.parentElement?.querySelector('[data-testid="starter-reveal-result"]') !== null,
-    };
-  });
-  expect(reducedTransition.mode).toBe('reduced');
-  expect(reducedTransition.rotates).toBe(false);
-  expect(reducedTransition.animationName).toBe('none');
-  expect(reducedTransition.transitionDurationSeconds).toBeGreaterThan(0);
-  expect(reducedTransition.resultIsVisible).toBe(false);
-  expect(await readOwnedAccessories(page)).toHaveLength(1);
-
-  await expect(page.getByTestId('starter-reveal-result')).toBeVisible({ timeout: 1_000 });
+  await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
+  await page.getByRole('button', { name: '검정 부츠 선택' }).click();
+  expect(await readOwnedAccessories(page)).toEqual([]);
+  await page.getByRole('button', { name: '검정 부츠 받기' }).click();
+  expect(await readOwnedAccessories(page)).toEqual(['boots']);
+  await expect(page.getByRole('button', { name: '검정 부츠 보유 중' })).toBeDisabled();
   await context.close();
 });
 

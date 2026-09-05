@@ -127,6 +127,13 @@ import {
   isCanonicalRecordMediaPath,
   isValidMediaObjectId,
 } from '@/lib/records';
+import {
+  clearRecordMediaMutationJournalEntry,
+  getOrCreateRecordMediaMutationOwnerToken,
+  listRecordMediaMutationJournalEntries,
+  purgeRecordMediaMutationJournalForUser,
+  writeRecordMediaMutationJournalEntry,
+} from '@/lib/recordMediaMutationJournal';
 import { StoreContext } from '@/lib/storeContext';
 import { isValidUsername, normalizeUsername, PROFILE_CAPTION_MAX_LENGTH } from '@/lib/profileCaption';
 import type {
@@ -791,6 +798,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * realtime channel constantly.
    */
   const flushOutboxRef = useRef<(() => Promise<unknown>) | null>(null);
+  /** Same-tab recovery identity; contains no user content and survives a refresh. */
+  const mediaOperationOwnerTokenRef = useRef<string | null | undefined>(undefined);
+  if (mediaOperationOwnerTokenRef.current === undefined) {
+    mediaOperationOwnerTokenRef.current = getOrCreateRecordMediaMutationOwnerToken();
+  }
+  /** Prevents resume events from abandoning an operation still running here. */
+  const activeMediaOperationIdsRef = useRef(new Set<string>());
+  const reconcileMediaOperationsRef = useRef<(() => Promise<void>) | null>(null);
 
   // Module-level crypto capabilities may be shared by overlapping Providers
   // during an app-shell replacement. Only the last Provider clears them, while
@@ -1136,8 +1151,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     revokeCycleSensitiveConsent(userId);
     clearPendingCycleConsentRevocation(userId);
     const diaryStateRemoved = purgeDiaryLocalStateForUser(userId);
+    const mediaJournalRemoved = purgeRecordMediaMutationJournalForUser(userId);
 
     const localArtifactsRemoved = diaryStateRemoved
+      && mediaJournalRemoved
       && readComposerDraft(userId) === null
       && readAvatar(userId, 'me') === null
       && readAvatar(userId, 'couple') === null
@@ -3228,6 +3245,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       userId: workspace.userId,
       coupleId: workspace.coupleId,
     };
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!ownerToken || !writeRecordMediaMutationJournalEntry(identity, ownerToken)) {
+      return {
+        ok: false,
+        phase: 'begin',
+        reason: 'unknown',
+        error: recordFailureMessage('unknown'),
+        failedFiles: uploads.map(({ file }) => file.name),
+      };
+    }
+    activeMediaOperationIdsRef.current.add(operationId);
+    try {
     // A duplicated attachment remains duplicated in encrypted content for
     // rollout compatibility, but the lifecycle manifest names object identities,
     // not display occurrences. SQL intentionally rejects duplicate paths.
@@ -3250,6 +3279,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     if (!begun.ok || begun.state !== 'pending') {
       const reason = begun.ok ? 'server' : begun.reason;
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        clearRecordMediaMutationJournalEntry(identity);
+      }
       if (reason === 'auth_expired') void handleAuthExpired();
       return {
         ok: false,
@@ -3262,7 +3294,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
     const abandonPending = async (): Promise<void> => {
       try {
-        await abandonRecordMediaMutation(identity);
+        const abandoned = await abandonRecordMediaMutation(identity);
+        if (abandoned.ok && ['abandoned', 'committed'].includes(abandoned.state)) {
+          clearRecordMediaMutationJournalEntry(identity);
+        }
       } catch {
         // The reservation remains durable and the service worker expires it.
       }
@@ -3325,17 +3360,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ...desiredRecordBeforeUploads,
       attachments: [...(desiredRecordBeforeUploads.attachments || []), ...uploaded],
     };
-    const committed = (targetContentRevision: number): MediaRevisionCommitResult => ({
-      ok: true,
-      operationId,
-      record: {
-        ...desiredRecord,
-        contentRevision: targetContentRevision,
-        mediaContractVersion: 1,
-        mediaManifestRevision: targetContentRevision,
-        lastMediaOperationId: operationId,
-      },
-    });
+    const committed = (targetContentRevision: number): MediaRevisionCommitResult => {
+      clearRecordMediaMutationJournalEntry(identity);
+      return {
+        ok: true,
+        operationId,
+        record: {
+          ...desiredRecord,
+          contentRevision: targetContentRevision,
+          mediaContractVersion: 1,
+          mediaManifestRevision: targetContentRevision,
+          lastMediaOperationId: operationId,
+        },
+      };
+    };
     const reconcileFailure = async (
       reason: RecordMutationReason,
     ): Promise<MediaRevisionCommitResult> => {
@@ -3397,7 +3435,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (reason === 'auth_expired') void handleAuthExpired();
       return reconcileFailure(reason);
     }
+    } finally {
+      activeMediaOperationIdsRef.current.delete(operationId);
+    }
   };
+
+  const reconcileInterruptedMediaOperations = async (): Promise<void> => {
+    const workspace = captureLinkedCouple();
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!workspace || !ownerToken) return;
+    const entries = listRecordMediaMutationJournalEntries(workspace.userId, ownerToken);
+    for (const entry of entries) {
+      if (!isCurrentLinkedCouple(workspace)) return;
+      if (activeMediaOperationIdsRef.current.has(entry.operationId)) continue;
+      if (entry.coupleId !== workspace.coupleId) {
+        // A relationship generation is never reused. Its server reservation has
+        // bounded expiry, so the old opaque client marker cannot be applied to a
+        // new partner space and may be discarded here.
+        clearRecordMediaMutationJournalEntry(entry);
+        continue;
+      }
+      const status = await getRecordMediaMutationStatus(entry);
+      if (!isCurrentLinkedCouple(workspace) || !status.ok) continue;
+      if (status.state === 'pending') {
+        const abandoned = await abandonRecordMediaMutation(entry);
+        if (
+          isCurrentLinkedCouple(workspace)
+          && abandoned.ok
+          && ['abandoned', 'committed'].includes(abandoned.state)
+        ) clearRecordMediaMutationJournalEntry(entry);
+        continue;
+      }
+      clearRecordMediaMutationJournalEntry(entry);
+    }
+  };
+  reconcileMediaOperationsRef.current = reconcileInterruptedMediaOperations;
 
   /**
    * Create a record and attach media files to it.
@@ -4255,6 +4327,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const flush = () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void flushOutboxRef.current?.();
+      void reconcileMediaOperationsRef.current?.();
     };
 
     /*
@@ -4312,6 +4385,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       userId: workspace.userId,
       coupleId: workspace.coupleId,
     };
+    const ownerToken = mediaOperationOwnerTokenRef.current;
+    if (!ownerToken || !writeRecordMediaMutationJournalEntry(mediaIdentity, ownerToken)) {
+      return recordFailure('unknown');
+    }
+    activeMediaOperationIdsRef.current.add(mediaOperationId);
+    try {
     const manifestPaths = Array.from(new Set(
       (updated.attachments || [])
         .map((attachment) => attachment.path)
@@ -4330,11 +4409,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     if (!begun.ok || begun.state !== 'pending') {
       const reason = begun.ok ? 'server' : begun.reason;
+      if (!RECORD_UPDATE_READ_BACK_REASONS.has(reason)) {
+        clearRecordMediaMutationJournalEntry(mediaIdentity);
+      }
       if (reason === 'auth_expired') void handleAuthExpired();
       return recordFailure(reason);
     }
     const abandonPending = async () => {
-      await abandonRecordMediaMutation(mediaIdentity);
+      const abandoned = await abandonRecordMediaMutation(mediaIdentity);
+      if (abandoned.ok && ['abandoned', 'committed'].includes(abandoned.state)) {
+        clearRecordMediaMutationJournalEntry(mediaIdentity);
+      }
     };
     if (!isCurrentLinkedCouple(workspace)) {
       await abandonPending();
@@ -4412,6 +4497,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    clearRecordMediaMutationJournalEntry(mediaIdentity);
     let recordToCommit: DailyRecord = {
       ...(reconciledRecord ?? updated),
       contentRevision: authoritativeRevision,
@@ -4450,6 +4536,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         : current,
     );
     return isCurrentLinkedCouple(workspace) ? { ok: true } : recordFailure('stale');
+    } finally {
+      activeMediaOperationIdsRef.current.delete(mediaOperationId);
+    }
       },
     );
   };

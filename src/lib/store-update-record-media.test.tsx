@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import type { DailyRecord } from '@/types';
+import {
+  getOrCreateRecordMediaMutationOwnerToken,
+  listRecordMediaMutationJournalEntries,
+  writeRecordMediaMutationJournalEntry,
+} from '@/lib/recordMediaMutationJournal';
 
 /**
  * Media replacement on an EXISTING record.
@@ -277,6 +282,7 @@ describe('updateRecordMedia', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
     localStorage.clear();
+    sessionStorage.clear();
     callOrder.length = 0;
     lastResult = null;
     // The shared setup's `vi.restoreAllMocks()` strips implementations, including
@@ -695,6 +701,74 @@ describe('updateRecordMedia', () => {
     expect((saveRecordToDB.mock.calls[0]?.[3] as { mediaOperationId: string }).mediaOperationId)
       .toBe(beginRequest.operationId);
     expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
+  it('journals an ordinary update when both begin and status responses are lost', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
+
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken();
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([
+      expect.objectContaining({
+        operationId: (beginRecordMediaMutation.mock.calls[0]?.[0] as { operationId: string }).operationId,
+        recordId: 'rec-1',
+        userId: 'user-1',
+        coupleId: 'couple-1',
+      }),
+    ]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exact opaque operation identity when both begin and status responses are lost', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken();
+    expect(ownerToken).not.toBeNull();
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([
+      expect.objectContaining({
+        operationId: (beginRecordMediaMutation.mock.calls[0]?.[0] as { operationId: string }).operationId,
+        recordId: 'rec-1',
+        userId: 'user-1',
+        coupleId: 'couple-1',
+      }),
+    ]);
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('abandons and clears an interrupted same-tab operation after the app resumes online', async () => {
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken(sessionStorage, () => 'tab-a');
+    expect(ownerToken).toBe('tab-a');
+    const interrupted = {
+      operationId: 'operation-interrupted',
+      recordId: 'rec-1',
+      userId: 'user-1',
+      coupleId: 'couple-1',
+    };
+    expect(writeRecordMediaMutationJournalEntry(interrupted, ownerToken!)).toBe(true);
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockResolvedValueOnce({ ok: true, state: 'abandoned' });
+    await setup();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => expect(abandonRecordMediaMutation).toHaveBeenCalledWith(
+      expect.objectContaining(interrupted),
+    ));
+
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
   });
 
   it('keeps uncertain uploads when response loss cannot be reconciled', async () => {

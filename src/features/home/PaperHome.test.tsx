@@ -471,6 +471,23 @@ describe('홈의 지난 오늘 개인정보 경계', () => {
 });
 
 describe('홈 포스트 읽기 순서', () => {
+  it('같은 시각의 기록도 날짜 링크로 각각 정확한 기록을 연다', () => {
+    records = ['first/id', 'second&id'].map((id) => ({
+      ...records[0], id, log: id === 'first/id' ? '첫 순간' : '둘째 순간', attachments: [],
+    }));
+    view();
+
+    for (const record of records) {
+      const article = screen.getByText(record.log).closest('article')!;
+      const link = within(article).getByRole('link', { name: '오늘 01:23 기록 열기' });
+      expect(link).toHaveAttribute('href', `/record?record=${encodeURIComponent(record.id)}`);
+      expect(link).toHaveTextContent('오늘 01:23');
+      expect(link).not.toHaveTextContent('원문');
+    }
+    expect(acknowledgePartnerDay).not.toHaveBeenCalled();
+    expect(markTalkAbout).not.toHaveBeenCalled();
+  });
+
   it('사진 다음에 이름 없는 글, 그 아래 분 단위 시간과 책갈피를 표시한다', async () => {
     view();
 

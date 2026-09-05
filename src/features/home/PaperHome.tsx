@@ -9,7 +9,7 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Bookmark as BookmarkIcon, ChevronRight, Phone, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
@@ -675,12 +675,15 @@ function Post({
         믿게 만드는 종류의 거짓말이다. 자리는 비워 두고 되는 것만 답한다.
       */}
       <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 px-3 py-1">
-        <p
-          className="mr-auto flex min-h-11 items-center px-1 text-caption tabular-nums"
+        <Link
+          to={`/record?record=${encodeURIComponent(record.id)}`}
+          aria-label={`${timeAgo(record, todayStr)} 기록 열기`}
+          className="press-response mr-auto flex min-h-11 min-w-11 items-center gap-1 px-1 text-caption tabular-nums"
           style={{ color: 'var(--ink-soft)' }}
         >
           {timeAgo(record, todayStr)}
-        </p>
+          <ChevronRight size={12} aria-hidden="true" />
+        </Link>
         <Bookmark
           marked={marked}
           partnerMarked={partnerMarked}

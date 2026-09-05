@@ -71,6 +71,23 @@ beforeEach(() => {
 });
 
 describe('day-page diary', () => {
+  it('opens the exact record from its time even when two records share that time', async () => {
+    currentState = stateWith([
+      record({ id: 'first/id', date: '2026-08-02', time: '08:00', log: '첫 순간' }),
+      record({ id: 'second&id', date: '2026-08-02', time: '08:00', log: '둘째 순간' }),
+    ]);
+    const user = userEvent.setup();
+    renderDiary();
+    await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
+
+    for (const source of currentState.records) {
+      const row = screen.getByText(source.log).closest('li')!;
+      expect(within(row).getByRole('link', { name: '8월 2일 08:00 기록 열기' }))
+        .toHaveAttribute('href', `/record?record=${encodeURIComponent(source.id)}`);
+    }
+    expect(localStorage.getItem('gomsin.diary.page.user-me.2026-08-02')).toBeNull();
+  });
+
   it('keeps the landing screen self-explanatory and gives an empty diary one clear action', async () => {
     currentState = stateWith([]);
     const user = userEvent.setup();

@@ -17,6 +17,8 @@ interface ImportMetaEnv {
    * 공개 불리언이며 자격증명이 아니다. `src/lib/dailySummary/nativeOnDeviceSummary.ts`.
    */
   readonly VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED?: string;
+  /** Multi-day Partner Briefing. Exact string `'true'` enables; unset is OFF. */
+  readonly VITE_PARTNER_BRIEFING_ENABLED?: string;
 }
 
 interface ImportMeta {

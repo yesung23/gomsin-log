@@ -6,8 +6,8 @@
  * Invariants:
  * 1. Synchronous Baseline: Generates and returns a safe, deterministic Korean briefing
  *    immediately upon receiving a valid corpus (no loading blank state).
- * 2. Asynchronous Refinement: If an on-device provider is supplied, executes extract selection
- *    in an effect via PartnerBriefingRunner and transparently updates the briefing upon verified completion.
+ * 2. Explicit Asynchronous Refinement: A content-free availability preflight opens the CTA; only a
+ *    user request executes extract selection through PartnerBriefingRunner and verified output may replace it.
  * 3. Fail-Closed Boundaries: Returns 'disabled' when disabled, 'unavailable' on unresolved couple/identity
  *    or malformed chronology metadata, and 'empty' when no partner records are accepted.
  * 4. Surface Fidelity: Evaluates caller-supplied usePartnerDay().surface directly. Never recalculates OUTSTANDING.
@@ -195,6 +195,17 @@ export function usePartnerBriefing(
     status: Exclude<PartnerBriefingRefinementStatus, 'idle' | 'unavailable'>;
     briefing: PartnerBriefing | null;
   } | null>(null);
+  const [preflight, setPreflight] = useState<{
+    inputKey: string;
+    provider: BriefingProvider | null;
+    locale: BriefingLocale;
+    status: 'idle' | 'checking' | 'ready' | 'unavailable';
+  }>({
+    inputKey: '',
+    provider: null,
+    locale,
+    status: 'idle',
+  });
 
   const runnerRef = useRef<PartnerBriefingRunner | null>(null);
   if (!runnerRef.current) {
@@ -223,12 +234,80 @@ export function usePartnerBriefing(
     && requestedInputRef.current.inputKey === currentInputKey;
   const completedRequestsRef = useRef(new Set<string>());
 
+  /*
+    CTA를 열기 전 콘텐츠 없는 지원 확인.
+
+    기기/모델 지원 여부만 묻고 기록 본문·식별자·날짜는 보내지 않는다. 웹, 미지원
+    네이티브 브리지, 준비되지 않은 모델에서는 버튼 자체를 숨겨 사용자가 실패를 먼저
+    경험하지 않게 한다. 실제 생성 시점에는 runner가 같은 경계를 다시 확인한다.
+  */
+  useEffect(() => {
+    if (
+      !enabled
+      || currentStatus !== 'ready'
+      || !provider
+      || !normalizedRef.current
+    ) {
+      setPreflight({
+        inputKey: currentInputKey,
+        provider: provider ?? null,
+        locale,
+        status: 'idle',
+      });
+      return;
+    }
+
+    const abortController = new AbortController();
+    let active = true;
+    setPreflight({
+      inputKey: currentInputKey,
+      provider,
+      locale,
+      status: 'checking',
+    });
+
+    void Promise.resolve()
+      .then(() => provider.getAvailability({
+        signal: abortController.signal,
+        locale,
+      }))
+      .then((availability) => {
+        if (!active || abortController.signal.aborted) return;
+        setPreflight({
+          inputKey: currentInputKey,
+          provider,
+          locale,
+          status: availability === 'ready' ? 'ready' : 'unavailable',
+        });
+      })
+      .catch(() => {
+        if (!active || abortController.signal.aborted) return;
+        setPreflight({
+          inputKey: currentInputKey,
+          provider,
+          locale,
+          status: 'unavailable',
+        });
+      });
+
+    return () => {
+      active = false;
+      abortController.abort();
+    };
+  }, [enabled, currentInputKey, currentStatus, locale, provider]);
+
+  const preflightReady = preflight.inputKey === currentInputKey
+    && preflight.provider === provider
+    && preflight.locale === locale
+    && preflight.status === 'ready';
+
   useEffect(() => {
     if (
       !enabled ||
       currentStatus !== 'ready' ||
       !provider ||
       !normalizedRef.current ||
+      !preflightReady ||
       !requestMatchesCurrentInput
     ) {
       runner.cancel();
@@ -268,11 +347,12 @@ export function usePartnerBriefing(
         }
         completedRequestsRef.current.add(requestKey);
 
+        const refined = result !== null && result.generation !== 'deterministic';
         setRefinement({
           inputKey: currentInputKey,
           requestVersion,
-          status: result ? 'applied' : 'fallback',
-          briefing: result,
+          status: refined ? 'applied' : 'fallback',
+          briefing: refined ? result : null,
         });
       } catch {
         if (!isMounted || abortController.signal.aborted) return;
@@ -296,6 +376,7 @@ export function usePartnerBriefing(
     currentStatus,
     currentInputKey,
     provider,
+    preflightReady,
     requestVersion,
     requestMatchesCurrentInput,
     effectiveTimeoutMs,
@@ -321,9 +402,22 @@ export function usePartnerBriefing(
     activeRefinement?.briefing
       ? activeRefinement.briefing
       : syncEval.briefing;
-  const refinementAvailable = Boolean(provider && syncEval.normalized);
-  const refinementStatus: PartnerBriefingRefinementStatus = !refinementAvailable
+  const preflightMatches = preflight.inputKey === syncEval.inputKey
+    && preflight.provider === provider
+    && preflight.locale === locale;
+  const refinementAvailable = Boolean(
+    provider
+    && syncEval.normalized
+    && preflightMatches
+    && preflight.status === 'ready',
+  );
+  const refinementUnavailable = !provider
+    || !syncEval.normalized
+    || (preflightMatches && preflight.status === 'unavailable');
+  const refinementStatus: PartnerBriefingRefinementStatus = refinementUnavailable
     ? 'unavailable'
+    : !refinementAvailable
+      ? 'idle'
     : !requestMatchesCurrentInput
       ? 'idle'
       : activeRefinement?.status ?? 'running';

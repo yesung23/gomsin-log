@@ -432,7 +432,8 @@ describe('/story/partner', () => {
       open('/story/partner');
 
       expect(plugin.selectExtracts).not.toHaveBeenCalled();
-      await userEvent.click(screen.getByRole('button', { name: '기기에서 문장 다듬기' }));
+      await waitFor(() => expect(plugin.availability).toHaveBeenCalledWith({ locale: 'ko' }));
+      await userEvent.click(await screen.findByRole('button', { name: '기기에서 문장 다듬기' }));
       await waitFor(() => expect(plugin.selectExtracts).toHaveBeenCalled());
       expect(acknowledge).not.toHaveBeenCalled();
       await userEvent.click(screen.getByTestId('partner-briefing-expand'));

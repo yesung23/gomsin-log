@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { CoupleStatus, DailyRecord } from '@/types';
 import type { BriefingLocale } from './contract';
@@ -39,6 +39,123 @@ function makeDefaultInput(
 
 describe('usePartnerBriefing (Phase B1)', () => {
   describe('Explicit on-device refinement', () => {
+    it('opens the refinement CTA only after a content-free ready preflight', async () => {
+      let resolveAvailability: ((value: 'ready') => void) | undefined;
+      const provider = {
+        getAvailability: vi.fn(() => new Promise<'ready'>((resolve) => {
+          resolveAvailability = resolve;
+        })),
+        getCapability: vi.fn(() => ({
+          envelope: {
+            maxContextUtf8Bytes: 4096,
+            promptOverheadUtf8Bytes: 256,
+            responseReserveUtf8Bytes: 512,
+            maxInputTextGraphemes: 1000,
+            maxItems: 64,
+            maxCandidatesPerItem: 32,
+          },
+        })),
+        selectExtracts: vi.fn(),
+        cancel: vi.fn(async () => undefined),
+      };
+
+      const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion: 0,
+      })));
+
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.canRequestRefinement).toBe(false);
+      await waitFor(() => expect(provider.getAvailability).toHaveBeenCalledTimes(1));
+      const preflight = vi.mocked(provider.getAvailability).mock.calls[0][0];
+      expect(Object.keys(preflight).sort()).toEqual(['locale', 'signal']);
+      expect(preflight.locale).toBe('ko');
+      expect(preflight.signal).toBeInstanceOf(AbortSignal);
+      expect(provider.getCapability).not.toHaveBeenCalled();
+      expect(provider.selectExtracts).not.toHaveBeenCalled();
+
+      act(() => resolveAvailability?.('ready'));
+      await waitFor(() => expect(result.current.canRequestRefinement).toBe(true));
+    });
+
+    it.each(['unsupported', 'model_unavailable', 'preparing', 'locale_unsupported'] as const)(
+      'keeps the refinement CTA closed when the content-free preflight returns %s',
+      async (availability) => {
+        const provider = new FakeBriefingProvider({ availability });
+        const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+          provider,
+          requestVersion: 0,
+        })));
+
+        expect(result.current.briefing?.generation).toBe('deterministic');
+        await waitFor(() => expect(result.current.refinementStatus).toBe('unavailable'));
+        expect(result.current.canRequestRefinement).toBe(false);
+        expect(provider.getCallHistory()).toHaveLength(0);
+      },
+    );
+
+    it('ignores a stale ready preflight after the provider changes', async () => {
+      let resolveFirst: ((value: 'ready') => void) | undefined;
+      const first = new FakeBriefingProvider({
+        availability: () => new Promise<'ready'>((resolve) => {
+          resolveFirst = resolve;
+        }),
+      });
+      const second = new FakeBriefingProvider({ availability: 'unsupported' });
+      const { result, rerender } = renderHook(
+        (props: UsePartnerBriefingInput) => usePartnerBriefing(props),
+        { initialProps: makeDefaultInput({ provider: first, requestVersion: 0 }) },
+      );
+
+      await act(async () => { await Promise.resolve(); });
+      rerender(makeDefaultInput({ provider: second, requestVersion: 0 }));
+      await waitFor(() => expect(result.current.refinementStatus).toBe('unavailable'));
+
+      act(() => resolveFirst?.('ready'));
+      await act(async () => { await Promise.resolve(); });
+      expect(result.current.refinementStatus).toBe('unavailable');
+      expect(result.current.canRequestRefinement).toBe(false);
+      expect(first.getCallHistory()).toHaveLength(0);
+      expect(second.getCallHistory()).toHaveLength(0);
+    });
+
+    it('fails closed when availability throws synchronously', async () => {
+      const provider = new FakeBriefingProvider();
+      provider.getAvailability = vi.fn(() => {
+        throw new Error('native bridge setup failed');
+      });
+
+      const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion: 0,
+      })));
+
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      await waitFor(() => expect(result.current.refinementStatus).toBe('unavailable'));
+      expect(result.current.canRequestRefinement).toBe(false);
+      expect(provider.getCallHistory()).toHaveLength(0);
+    });
+
+    it('reports fallback rather than applied when a ready preflight yields only deterministic output', async () => {
+      let availabilityCalls = 0;
+      const provider = new FakeBriefingProvider({
+        availability: () => {
+          availabilityCalls += 1;
+          return availabilityCalls === 1 ? 'ready' : 'model_unavailable';
+        },
+      });
+
+      const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
+        provider,
+        requestVersion: 1,
+      })));
+
+      await waitFor(() => expect(result.current.refinementStatus).toBe('fallback'));
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.canRequestRefinement).toBe(true);
+      expect(provider.getCallHistory()).toHaveLength(0);
+    });
+
     it('does not invoke the provider before the user requests refinement', async () => {
       const provider = new FakeBriefingProvider();
       const { result } = renderHook(() => usePartnerBriefing(makeDefaultInput({
@@ -49,8 +166,8 @@ describe('usePartnerBriefing (Phase B1)', () => {
       expect(result.current.status).toBe('ready');
       expect(result.current.briefing?.generation).toBe('deterministic');
       expect(result.current.refinementStatus).toBe('idle');
-      expect(result.current.canRequestRefinement).toBe(true);
-      await act(async () => { await Promise.resolve(); });
+      expect(result.current.canRequestRefinement).toBe(false);
+      await waitFor(() => expect(result.current.canRequestRefinement).toBe(true));
       expect(provider.getCallHistory()).toHaveLength(0);
     });
 
@@ -516,6 +633,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
           return req.items[0].candidates[0].text.includes('기록A') ? 150 : 20;
         },
       });
+      const cancel = vi.spyOn(provider, 'cancel');
 
       const recordA = makeValidRecord({
         id: 'rec_A',
@@ -538,6 +656,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       expect(result.current.status).toBe('ready');
       expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_A']);
+      await waitFor(() => expect(provider.getCallHistory()).toHaveLength(1));
 
       // Rerender with input B
       act(() => {
@@ -549,6 +668,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
           }),
         );
       });
+      await waitFor(() => expect(cancel).toHaveBeenCalled());
 
       // Immediately shows baseline B
       expect(result.current.status).toBe('ready');
@@ -556,6 +676,7 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       // Wait for B to finish and verify B is active
       await waitFor(() => {
+        expect(provider.getCallHistory()).toHaveLength(2);
         expect(result.current.briefing?.generation).toBe('on_device');
         expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_B']);
       });
@@ -571,6 +692,8 @@ describe('usePartnerBriefing (Phase B1)', () => {
       const provider = new FakeBriefingProvider({
         delayMs: 100,
       });
+      const cancel = vi.spyOn(provider, 'cancel');
+      const selectExtracts = vi.spyOn(provider, 'selectExtracts');
 
       const { unmount } = renderHook(() =>
         usePartnerBriefing(
@@ -581,16 +704,24 @@ describe('usePartnerBriefing (Phase B1)', () => {
         ),
       );
 
+      await waitFor(() => expect(selectExtracts).toHaveBeenCalledTimes(1));
+      const runOptions = selectExtracts.mock.calls[0][1] as { signal?: AbortSignal };
+      expect(runOptions.signal?.aborted).toBe(false);
       unmount();
+      expect(runOptions.signal?.aborted).toBe(true);
+      await waitFor(() => expect(cancel).toHaveBeenCalled());
 
       // Wait past provider delay to ensure no unhandled exceptions or console errors
       await new Promise((resolve) => setTimeout(resolve, 150));
+      expect(selectExtracts).toHaveBeenCalledTimes(1);
     });
 
-    it('cancels active provider execution when enabled transitions to false', () => {
+    it('cancels active provider execution when enabled transitions to false', async () => {
       const provider = new FakeBriefingProvider({
         delayMs: 200,
       });
+      const cancel = vi.spyOn(provider, 'cancel');
+      const selectExtracts = vi.spyOn(provider, 'selectExtracts');
 
       const { result, rerender } = renderHook(
         (props: UsePartnerBriefingInput) => usePartnerBriefing(props),
@@ -604,6 +735,9 @@ describe('usePartnerBriefing (Phase B1)', () => {
       );
 
       expect(result.current.status).toBe('ready');
+      await waitFor(() => expect(selectExtracts).toHaveBeenCalledTimes(1));
+      const runOptions = selectExtracts.mock.calls[0][1] as { signal?: AbortSignal };
+      expect(runOptions.signal?.aborted).toBe(false);
 
       act(() => {
         rerender(
@@ -617,6 +751,10 @@ describe('usePartnerBriefing (Phase B1)', () => {
 
       expect(result.current.status).toBe('disabled');
       expect(result.current.briefing).toBeNull();
+      expect(runOptions.signal?.aborted).toBe(true);
+      await waitFor(() => expect(cancel).toHaveBeenCalled());
+      await act(async () => { await Promise.resolve(); });
+      expect(selectExtracts).toHaveBeenCalledTimes(1);
     });
   });
 

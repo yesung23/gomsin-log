@@ -560,7 +560,7 @@ export async function runRecordMediaCleanup(
   } catch {
     throw new Error('E_CLEANUP_CONTRACT_UNAVAILABLE');
   }
-  if (contractVersion !== 3) {
+  if (contractVersion !== 4) {
     throw new Error('E_CLEANUP_CONTRACT_UNAVAILABLE');
   }
 

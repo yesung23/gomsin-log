@@ -291,7 +291,7 @@ Deno.test({
   },
 });
 
-Deno.test('account deletion rejects stale cleanup contract 2 before any flag or destructive phase', async () => {
+Deno.test('account deletion rejects stale cleanup contract 3 before any flag or destructive phase', async () => {
   const userId = '10000000-0000-4000-8000-000000000001';
   let flagWrites = 0;
   let tableReads = 0;
@@ -320,7 +320,7 @@ Deno.test('account deletion rejects stale cleanup contract 2 before any flag or 
     },
     rpc: async (name: string) => {
       rpcCalls.push(name);
-      return { data: 2, error: null };
+      return { data: 3, error: null };
     },
   };
 
@@ -401,7 +401,7 @@ Deno.test('account deletion relies on the database cleanup barrier and never del
     rpc: async (name: string, args: Record<string, unknown>) => {
       rpcCalls.push(name);
       if (name === 'record_media_cleanup_contract_version') {
-        return { data: 3, error: null };
+        return { data: 4, error: null };
       }
       if (name === 'begin_account_deletion_v2') {
         attemptId = String(args.p_attempt_id);

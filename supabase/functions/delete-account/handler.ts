@@ -244,10 +244,9 @@ export async function handleDeleteAccountRequest(
 
   const userId = user.id;
 
-  // This Edge artifact is unsafe against a database that only has the
-  // pre-reconciliation cleanup contracts: record preparation could delete rows
-  // while historical or unledgered Storage work is still unknown to the
-  // account barrier.
+  // This Edge artifact is unsafe against a database that lacks the live-record
+  // prefix fence: record preparation could otherwise coexist with a stale
+  // broad cleanup namespace.
   // Probe the exact contract before writing even the recoverable Auth flag or
   // reading a record. A missing, stale, malformed, or unreachable contract is
   // therefore a clean no-op from the user's point of view.
@@ -256,7 +255,7 @@ export async function handleDeleteAccountRequest(
     const { data, error } = await admin.rpc(
       'record_media_cleanup_contract_version',
     );
-    mediaCleanupContractReady = !error && data === 3;
+    mediaCleanupContractReady = !error && data === 4;
   } catch {
     mediaCleanupContractReady = false;
   }

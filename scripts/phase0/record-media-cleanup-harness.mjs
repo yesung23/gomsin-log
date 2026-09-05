@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * PostgreSQL actor/race harness for migrations 083 through 086.
+ * PostgreSQL actor/race harness for migrations 083 through 088.
  *
  * This runs the migration against a minimal current-schema fixture and proves
  * behavior with real roles, RLS, triggers, transactions, record-scoped
@@ -20,6 +20,7 @@ const MIGRATION_083 = join(ROOT, 'supabase/migrations/083_record_media_cleanup_j
 const MIGRATION_084 = join(ROOT, 'supabase/migrations/084_record_media_object_lifecycle.sql');
 const MIGRATION_085 = join(ROOT, 'supabase/migrations/085_harden_record_media_cleanup.sql');
 const MIGRATION_086 = join(ROOT, 'supabase/migrations/086_reconcile_record_media_cleanup.sql');
+const MIGRATION_088 = join(ROOT, 'supabase/migrations/088_block_live_record_prefix_cleanup.sql');
 const DB = 'record_media_cleanup_harness';
 // PostgreSQL's Unix socket path is capped at roughly 100 bytes. macOS tmpdir()
 // is already deeply nested, so keep this harness-owned path deliberately short.
@@ -118,6 +119,17 @@ const PREFLIGHT = {
   otherCouple: '86100000-0000-4000-8000-000000000004',
   record: '86100000-0000-4000-8000-000000000005',
   otherRecord: '86100000-0000-4000-8000-000000000006',
+};
+
+const LIVE_PREFIX_FENCE = {
+  pendingRecord: '86200000-0000-4000-8000-000000000001',
+  expiredRecord: '86200000-0000-4000-8000-000000000002',
+  normalRecord: '86200000-0000-4000-8000-000000000003',
+  completionRecord: '86200000-0000-4000-8000-000000000004',
+  pendingLease: '86200000-0000-4000-8000-000000000005',
+  expiredLease: '86200000-0000-4000-8000-000000000006',
+  normalLease: '86200000-0000-4000-8000-000000000007',
+  completionLease: '86200000-0000-4000-8000-000000000008',
 };
 
 let serverStarted = false;
@@ -967,6 +979,170 @@ UPDATE public.record_media_cleanup_jobs
 SET state = 'completed', completed_at = coalesce(completed_at, clock_timestamp())
 WHERE owner_user_id = '${RECONCILE.owner}' AND state <> 'completed';
 `), 'retire migration 086 reconciliation fixtures');
+
+// 088 must refuse the exact legacy shape that exposed a live prefix to broad
+// cleanup. The failed migration is atomic and its content-free error must not
+// disclose a record, couple, owner or Storage path.
+expectOk(sql(`INSERT INTO public.record_media_cleanup_jobs(
+  record_id, couple_id, owner_user_id, state, lease_id, completed_at
+) VALUES (
+  '${RECONCILE.liveRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+  'completed', '${LIVE_PREFIX_FENCE.completionLease}', clock_timestamp()
+)`), 'seed same-identity live record cleanup conflict');
+const migration088Conflict = expectFail(
+  psql(['-q', '-f', MIGRATION_088]),
+  'reject migration 088 live-record prefix conflict',
+  /migration_088_live_record_cleanup_conflict/i,
+);
+for (const secretValue of [
+  RECONCILE.liveRecord,
+  RECONCILE.couple,
+  RECONCILE.owner,
+  `${RECONCILE.couple}/${RECONCILE.liveRecord}`,
+]) {
+  if (migration088Conflict.includes(secretValue)) {
+    throw new Error('migration 088 conflict disclosed cleanup identity');
+  }
+}
+checks += 1;
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT count(*) FROM public.daily_records WHERE id = '${RECONCILE.liveRecord}'),
+    (SELECT state FROM public.record_media_cleanup_jobs WHERE record_id = '${RECONCILE.liveRecord}'),
+    (SELECT count(*) FROM storage.objects
+      WHERE name LIKE '${RECONCILE.couple}/${RECONCILE.liveRecord}/%'))`),
+  'read atomic migration 088 rejection'),
+  '1|completed|0',
+  '088 rejection must preserve the live record and cleanup job without deleting Storage',
+);
+expectOk(sql(`DELETE FROM public.record_media_cleanup_jobs
+  WHERE record_id = '${RECONCILE.liveRecord}'`), 'remove migration 088 conflict');
+expectOk(psql(['-q', '-f', MIGRATION_088]), 'apply migration 088 after conflict removal');
+
+// The queue must skip both pending and expired-leased poison rows, then claim
+// the oldest normal recordless namespace in the same invocation.
+expectOk(sql(`
+INSERT INTO public.daily_records(id, user_id, couple_id, is_private) VALUES
+  ('${LIVE_PREFIX_FENCE.pendingRecord}', '${RECONCILE.owner}', '${RECONCILE.couple}', false),
+  ('${LIVE_PREFIX_FENCE.expiredRecord}', '${RECONCILE.owner}', '${RECONCILE.couple}', false);
+INSERT INTO public.record_media_cleanup_jobs(
+  record_id, couple_id, owner_user_id, state, lease_id, lease_expires_at,
+  next_attempt_at, created_at, updated_at
+) VALUES
+  (
+    '${LIVE_PREFIX_FENCE.pendingRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+    'pending', NULL, NULL, clock_timestamp() - interval '3 hours',
+    clock_timestamp() - interval '3 hours', clock_timestamp() - interval '3 hours'
+  ),
+  (
+    '${LIVE_PREFIX_FENCE.expiredRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+    'leased', '${LIVE_PREFIX_FENCE.expiredLease}', clock_timestamp() - interval '1 minute',
+    clock_timestamp() - interval '2 hours', clock_timestamp() - interval '2 hours',
+    clock_timestamp() - interval '2 hours'
+  ),
+  (
+    '${LIVE_PREFIX_FENCE.normalRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+    'pending', NULL, NULL, clock_timestamp() - interval '1 hour',
+    clock_timestamp() - interval '1 hour', clock_timestamp() - interval '1 hour'
+  );
+`), 'seed live poison and normal prefix jobs');
+expectEqual(
+  expectOk(asActor('service_role', null, `SELECT record_id::text
+    FROM public.claim_record_media_cleanup_job('${LIVE_PREFIX_FENCE.normalLease}', 120)`),
+  'claim while earlier live poison jobs exist').split('\n').at(-1),
+  LIVE_PREFIX_FENCE.normalRecord,
+  'claim must skip every live pending or expired-leased prefix job',
+);
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|',
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${LIVE_PREFIX_FENCE.pendingRecord}'),
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${LIVE_PREFIX_FENCE.expiredRecord}'),
+    (SELECT state FROM public.record_media_cleanup_jobs
+      WHERE record_id = '${LIVE_PREFIX_FENCE.normalRecord}'))`),
+  'read skipped live prefix states'),
+  'pending|leased|leased',
+  'skipped poison jobs must remain untouched while normal work is leased',
+);
+
+// Force the impossible post-088 anomaly directly: the original lease trigger
+// accepts the prefix, then 088 must veto deletion because its record is live.
+const livePrefixPath = `${RECONCILE.couple}/${LIVE_PREFIX_FENCE.pendingRecord}/live.jpg`;
+expectOk(sql(`
+UPDATE public.record_media_cleanup_jobs
+SET state = 'leased', lease_id = '${LIVE_PREFIX_FENCE.pendingLease}',
+    lease_expires_at = clock_timestamp() + interval '2 minutes'
+WHERE record_id = '${LIVE_PREFIX_FENCE.pendingRecord}';
+INSERT INTO storage.objects(bucket_id, name, owner_id)
+VALUES ('couple-media', '${livePrefixPath}', '${RECONCILE.owner}');
+`), 'force anomalous live leased prefix');
+const liveDeleteConflict = expectFail(
+  asActor('service_role', null, `DELETE FROM storage.objects WHERE name = '${livePrefixPath}'`),
+  'block live-record prefix Storage delete',
+  /record_media_cleanup_live_record_conflict/i,
+);
+for (const secretValue of [
+  LIVE_PREFIX_FENCE.pendingRecord,
+  RECONCILE.couple,
+  RECONCILE.owner,
+  livePrefixPath,
+]) {
+  if (liveDeleteConflict.includes(secretValue)) {
+    throw new Error('live prefix deletion failure disclosed cleanup identity');
+  }
+}
+checks += 1;
+expectEqual(
+  expectOk(sql(`SELECT count(*)::text FROM storage.objects
+    WHERE name = '${livePrefixPath}'`), 'read object after live prefix veto'),
+  '1',
+  'live-record prefix veto must preserve the physical object',
+);
+
+// Completed response replay is also fenced before 086 can reopen any state.
+expectOk(sql(`INSERT INTO public.daily_records(id, user_id, couple_id, is_private)
+  VALUES ('${LIVE_PREFIX_FENCE.completionRecord}', '${RECONCILE.owner}', '${RECONCILE.couple}', false);
+INSERT INTO public.record_media_cleanup_jobs(
+  record_id, couple_id, owner_user_id, state, lease_id, completed_at
+) VALUES (
+  '${LIVE_PREFIX_FENCE.completionRecord}', '${RECONCILE.couple}', '${RECONCILE.owner}',
+  'completed', '${LIVE_PREFIX_FENCE.completionLease}', clock_timestamp()
+)`), 'seed live completed replay anomaly');
+const liveCompletionConflict = expectFail(
+  asActor('service_role', null, `SELECT public.complete_record_media_cleanup_job(
+    '${LIVE_PREFIX_FENCE.completionRecord}', '${LIVE_PREFIX_FENCE.completionLease}')`),
+  'block live-record completed replay',
+  /record_media_cleanup_live_record_conflict/i,
+);
+if (liveCompletionConflict.includes(LIVE_PREFIX_FENCE.completionRecord)) {
+  throw new Error('live completion failure disclosed record identity');
+}
+checks += 1;
+expectEqual(
+  expectOk(sql(`SELECT concat_ws('|', state, lease_id, completed_at IS NOT NULL)
+    FROM public.record_media_cleanup_jobs
+    WHERE record_id = '${LIVE_PREFIX_FENCE.completionRecord}'`),
+  'read state after live completed replay veto'),
+  `completed|${LIVE_PREFIX_FENCE.completionLease}|t`,
+  'live completed replay veto must not reopen or mutate the cleanup job',
+);
+
+expectOk(sql(`
+DELETE FROM storage.objects WHERE name = '${livePrefixPath}';
+DELETE FROM public.record_media_cleanup_jobs WHERE record_id IN (
+  '${LIVE_PREFIX_FENCE.pendingRecord}', '${LIVE_PREFIX_FENCE.expiredRecord}',
+  '${LIVE_PREFIX_FENCE.normalRecord}', '${LIVE_PREFIX_FENCE.completionRecord}'
+);
+DELETE FROM public.daily_records WHERE id IN (
+  '${LIVE_PREFIX_FENCE.pendingRecord}', '${LIVE_PREFIX_FENCE.expiredRecord}',
+  '${LIVE_PREFIX_FENCE.completionRecord}'
+);
+DELETE FROM public.record_media_cleanup_jobs WHERE record_id IN (
+  '${LIVE_PREFIX_FENCE.pendingRecord}', '${LIVE_PREFIX_FENCE.expiredRecord}',
+  '${LIVE_PREFIX_FENCE.completionRecord}'
+);
+`), 'retire migration 088 live-prefix fixtures');
 expectOk(psql(['-q', '-c', `
 CREATE FUNCTION public.fixture_log_cleanup_job() RETURNS TRIGGER
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$
@@ -1494,8 +1670,8 @@ expectEqual(
 );
 expectEqual(
   expectOk(asActor('service_role', null, 'SELECT public.record_media_cleanup_contract_version()::text'), 'service contract probe').split('\n').at(-1),
-  '3',
-  'service cleanup contract must expose exact version 3',
+  '4',
+  'service cleanup contract must expose exact version 4',
 );
 expectFail(
   asActor('authenticated', IDS.owner, 'SELECT public.record_media_cleanup_contract_version()'),

@@ -68,7 +68,7 @@ function createFixture(initialObjects: string[] = []) {
   const failed: Array<[string, string, string]> = [];
   const value: RecordMediaCleanupDeps = {
     createLeaseId: () => LEASE_ID,
-    contractVersion: async () => 3,
+    contractVersion: async () => 4,
     claim: async () => JOB,
     list: async (path, { limit, offset }) => {
       listed.push(path);
@@ -110,10 +110,10 @@ Deno.test('record media cleanup: timeout ordering stays below the database lease
   );
 });
 
-Deno.test('record media cleanup: exact contract 3 is required before either lane claims', async () => {
+Deno.test('record media cleanup: exact contract 4 is required before either lane claims', async () => {
   const fixture = createFixture();
   let claims = 0;
-  fixture.value.contractVersion = async () => 2;
+  fixture.value.contractVersion = async () => 3;
   fixture.value.claim = async () => {
     claims += 1;
     return null;

@@ -109,7 +109,7 @@ Deno.serve(async (request) => {
           {},
           signal,
         );
-        if (error || data !== 3) throw new Error('E_CLEANUP_CONTRACT_UNAVAILABLE');
+        if (error || data !== 4) throw new Error('E_CLEANUP_CONTRACT_UNAVAILABLE');
         return data;
       },
       claim: async (leaseId, leaseSeconds, signal) => {

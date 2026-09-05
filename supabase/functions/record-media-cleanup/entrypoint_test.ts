@@ -97,13 +97,13 @@ Deno.test({
 });
 
 Deno.test({
-  name: 'record media cleanup entrypoint: contract 3 is probed before concurrent queue claims',
+  name: 'record media cleanup entrypoint: contract 4 is probed before concurrent queue claims',
   permissions: { net: true, env: true, read: true, run: true },
   fn: async () => {
     const stub = startSupabaseStub((request) => {
       const path = new URL(request.url).pathname;
       if (path.endsWith('/rest/v1/rpc/record_media_cleanup_contract_version')) {
-        return new Response('3', {
+        return new Response('4', {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -193,7 +193,7 @@ Deno.test({
       if (!seen) throw new Error('the current request must be captured');
 
       if (path.endsWith('/rest/v1/rpc/record_media_cleanup_contract_version')) {
-        return new Response('3', {
+        return new Response('4', {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });

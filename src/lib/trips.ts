@@ -1,4 +1,4 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import { runServerMutationBehindDeletionBarrier } from '@/lib/accountDeletion';
 import { isSchemaCacheMiss, schemaCacheMissLog } from '@/lib/serverErrors';
 import { supabase } from '@/lib/supabase';
 import type { DailyRecord, Trip, TripChecklist, TripItem, TripStatus } from '@/types';
@@ -205,21 +205,24 @@ export async function saveTripToDB(
   createdBy: string,
 ): Promise<Trip | null> {
   if (!supabase) return null;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  const { data, error } = await supabase.from('trips').insert([{
-    couple_id: coupleId,
-    created_by: createdBy,
-    title: trip.title,
-    start_date: trip.startDate,
-    end_date: trip.endDate,
-    status: 'planned',
-  }]).select().single();
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save trip.');
-    return null;
-  }
-  return mapTrip(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trips').insert([{
+      couple_id: coupleId,
+      created_by: createdBy,
+      title: trip.title,
+      start_date: trip.startDate,
+      end_date: trip.endDate,
+      status: 'planned',
+    }]).select().single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save trip.');
+      return null;
+    }
+    return mapTrip(data);
+  }, { expectedUserId: createdBy });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 /**
@@ -238,20 +241,23 @@ export async function updateTripInDB(
   coupleId: string,
 ): Promise<Trip | null> {
   if (!supabase || !tripId || !coupleId) return null;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
   const payload: Record<string, string> = { updated_at: new Date().toISOString() };
   if (updates.title !== undefined) payload.title = updates.title;
   if (updates.startDate !== undefined) payload.start_date = updates.startDate;
   if (updates.endDate !== undefined) payload.end_date = updates.endDate;
   if (updates.status !== undefined) payload.status = updates.status;
-  const { data, error } = await supabase.from('trips').update(payload)
-    .eq('id', tripId).eq('couple_id', coupleId).select().maybeSingle();
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to update trip.');
-    return null;
-  }
-  return mapTrip(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trips').update(payload)
+      .eq('id', tripId).eq('couple_id', coupleId).select().maybeSingle();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to update trip.');
+      return null;
+    }
+    return mapTrip(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 export const updateTrip = updateTripInDB;
@@ -265,15 +271,18 @@ export const updateTrip = updateTripInDB;
  */
 export async function deleteTripFromDB(tripId: string, coupleId: string): Promise<boolean> {
   if (!supabase || !coupleId) return false;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trips').delete().eq('id', tripId)
-    .eq('couple_id', coupleId).select('id').maybeSingle();
-  if (error) {
-    console.error('[gomsinlog] Failed to delete trip.');
-    return false;
-  }
-  return !!data;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trips').delete().eq('id', tripId)
+      .eq('couple_id', coupleId).select('id').maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete trip.');
+      return false;
+    }
+    return !!data;
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }
 
 export async function fetchTripItemsResultFromDB(tripId: string): Promise<TripItemsFetchResult> {
@@ -294,29 +303,32 @@ export async function fetchTripItemsFromDB(tripId: string): Promise<TripItem[]> 
 
 export async function saveTripItemToDB(item: Omit<TripItem, 'id'>): Promise<TripItem | null> {
   if (!supabase) return null;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  const { data, error } = await supabase.from('trip_items').insert([{
-    trip_id: item.tripId,
-    item_date: item.itemDate,
-    start_time: item.startTime || null,
-    title: item.title,
-    category: item.category,
-    memo: item.memo || null,
-    talk_about: item.talkAbout === true,
-    url: item.url || null,
-    address: item.address || null,
-    business_hours: item.businessHours || null,
-    latitude: item.latitude ?? null,
-    longitude: item.longitude ?? null,
-    source: item.source || 'manual',
-    sort_order: item.sortOrder,
-  }]).select().single();
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save trip item.');
-    return null;
-  }
-  return mapTripItem(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_items').insert([{
+      trip_id: item.tripId,
+      item_date: item.itemDate,
+      start_time: item.startTime || null,
+      title: item.title,
+      category: item.category,
+      memo: item.memo || null,
+      talk_about: item.talkAbout === true,
+      url: item.url || null,
+      address: item.address || null,
+      business_hours: item.businessHours || null,
+      latitude: item.latitude ?? null,
+      longitude: item.longitude ?? null,
+      source: item.source || 'manual',
+      sort_order: item.sortOrder,
+    }]).select().single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save trip item.');
+      return null;
+    }
+    return mapTripItem(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 /**
@@ -334,26 +346,29 @@ export async function updateTripItemInDB(item: TripItem): Promise<TripItem | nul
   // like `deleteTripItemFromDB`. Without it a stale item id was the only thing
   // standing between this statement and another couple's row.
   if (!supabase || !item.tripId) return null;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  const { data, error } = await supabase.from('trip_items').update({
-    title: item.title,
-    category: item.category,
-    memo: item.memo || null,
-    talk_about: item.talkAbout === true,
-    url: item.url || null,
-    address: item.address || null,
-    business_hours: item.businessHours || null,
-    latitude: item.latitude ?? null,
-    longitude: item.longitude ?? null,
-    source: item.source || 'manual',
-    updated_at: new Date().toISOString(),
-  }).eq('id', item.id).eq('trip_id', item.tripId).select().maybeSingle();
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to update trip item.');
-    return null;
-  }
-  return mapTripItem(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_items').update({
+      title: item.title,
+      category: item.category,
+      memo: item.memo || null,
+      talk_about: item.talkAbout === true,
+      url: item.url || null,
+      address: item.address || null,
+      business_hours: item.businessHours || null,
+      latitude: item.latitude ?? null,
+      longitude: item.longitude ?? null,
+      source: item.source || 'manual',
+      updated_at: new Date().toISOString(),
+    }).eq('id', item.id).eq('trip_id', item.tripId).select().maybeSingle();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to update trip item.');
+      return null;
+    }
+    return mapTripItem(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 export const updateTripItem = updateTripItemInDB;
@@ -361,24 +376,27 @@ export const updateTripItem = updateTripItemInDB;
 export async function reorderTripItemsInDB(items: Array<Pick<TripItem, 'id' | 'sortOrder'>>): Promise<boolean> {
   if (!supabase) return false;
   if (items.length === 0) return true;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
-  const { error } = await supabase.rpc('reorder_trip_items', {
-    p_item_ids: items.map((item) => item.id),
-    p_sort_orders: items.map((item) => item.sortOrder),
-  });
-  if (error) {
-    // The RPC is the ONLY way to permute ranks (015 blocks direct topology
-    // updates), so a missing schema reload disables reordering entirely. Say
-    // which deploy step is missing instead of returning a bare `false`.
-    if (isSchemaCacheMiss(error)) {
-      console.error(schemaCacheMissLog('reorder_trip_items', '015'));
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { error } = await supabase!.rpc('reorder_trip_items', {
+      p_item_ids: items.map((item) => item.id),
+      p_sort_orders: items.map((item) => item.sortOrder),
+    });
+    assertCurrent();
+    if (error) {
+      // The RPC is the ONLY way to permute ranks (015 blocks direct topology
+      // updates), so a missing schema reload disables reordering entirely. Say
+      // which deploy step is missing instead of returning a bare `false`.
+      if (isSchemaCacheMiss(error)) {
+        console.error(schemaCacheMissLog('reorder_trip_items', '015'));
+        return false;
+      }
+      console.error('[gomsinlog] Failed to reorder trip items.');
       return false;
     }
-    console.error('[gomsinlog] Failed to reorder trip items.');
-    return false;
-  }
-  return true;
+    return true;
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }
 
 export const reorderTripItems = reorderTripItemsInDB;
@@ -393,15 +411,18 @@ export const reorderTripItems = reorderTripItemsInDB;
  */
 export async function deleteTripItemFromDB(itemId: string, tripId: string): Promise<boolean> {
   if (!supabase || !tripId) return false;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trip_items').delete().eq('id', itemId)
-    .eq('trip_id', tripId).select('id').maybeSingle();
-  if (error) {
-    console.error('[gomsinlog] Failed to delete trip item.');
-    return false;
-  }
-  return !!data;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_items').delete().eq('id', itemId)
+      .eq('trip_id', tripId).select('id').maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete trip item.');
+      return false;
+    }
+    return !!data;
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }
 
 export async function fetchTripChecklistsResultFromDB(tripId: string): Promise<TripChecklistsFetchResult> {
@@ -422,18 +443,21 @@ export async function fetchTripChecklistsFromDB(tripId: string): Promise<TripChe
 
 export async function saveTripChecklistToDB(tripId: string, itemName: string): Promise<TripChecklist | null> {
   if (!supabase) return null;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return null;
-  const { data, error } = await supabase.from('trip_checklists').insert([{
-    trip_id: tripId,
-    item_name: itemName,
-    completed: false,
-  }]).select().single();
-  if (error || !data) {
-    console.error('[gomsinlog] Failed to save trip checklist.');
-    return null;
-  }
-  return mapTripChecklist(data);
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_checklists').insert([{
+      trip_id: tripId,
+      item_name: itemName,
+      completed: false,
+    }]).select().single();
+    assertCurrent();
+    if (error || !data) {
+      console.error('[gomsinlog] Failed to save trip checklist.');
+      return null;
+    }
+    return mapTripChecklist(data);
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : null;
 }
 
 /** Toggle one checklist entry of a specific trip. Scoped like the delete below. */
@@ -443,17 +467,20 @@ export async function toggleTripChecklistInDB(
   tripId: string,
 ): Promise<boolean> {
   if (!supabase || !tripId) return false;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trip_checklists').update({
-    completed,
-    updated_at: new Date().toISOString(),
-  }).eq('id', checklistId).eq('trip_id', tripId).select('id').maybeSingle();
-  if (error) {
-    console.error('[gomsinlog] Failed to toggle trip checklist.');
-    return false;
-  }
-  return !!data;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_checklists').update({
+      completed,
+      updated_at: new Date().toISOString(),
+    }).eq('id', checklistId).eq('trip_id', tripId).select('id').maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to toggle trip checklist.');
+      return false;
+    }
+    return !!data;
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }
 
 /** Delete one checklist entry of a specific trip. Scoped like the items above. */
@@ -462,13 +489,16 @@ export async function deleteTripChecklistFromDB(
   tripId: string,
 ): Promise<boolean> {
   if (!supabase || !tripId) return false;
-  // Pre-flight: a pending deletion aborts this write before it is issued.
-  if (await serverCallBlockedByPendingDeletion()) return false;
-  const { data, error } = await supabase.from('trip_checklists').delete().eq('id', checklistId)
-    .eq('trip_id', tripId).select('id').maybeSingle();
-  if (error) {
-    console.error('[gomsinlog] Failed to delete trip checklist.');
-    return false;
-  }
-  return !!data;
+  const result = await runServerMutationBehindDeletionBarrier(async ({ assertCurrent }) => {
+    assertCurrent();
+    const { data, error } = await supabase!.from('trip_checklists').delete().eq('id', checklistId)
+      .eq('trip_id', tripId).select('id').maybeSingle();
+    assertCurrent();
+    if (error) {
+      console.error('[gomsinlog] Failed to delete trip checklist.');
+      return false;
+    }
+    return !!data;
+  }, { expectedUserId: 'current' });
+  return result.kind === 'executed' ? result.value : false;
 }

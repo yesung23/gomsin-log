@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Lock,
   Pencil,
@@ -272,7 +274,7 @@ function DiaryRecord({ record, coupleId, layout }: {
         : '이 기기의 열쇠로는 읽을 수 없어요'}
     </p>
   ) : body ? (
-    <p className="hand-text whitespace-pre-wrap break-keep text-body" style={{ color: 'var(--ink)' }}>
+    <p className="hand-text record-copy whitespace-pre-wrap break-keep [overflow-wrap:anywhere]" style={{ color: 'var(--ink)' }}>
       {body}
     </p>
   ) : null;
@@ -283,7 +285,15 @@ function DiaryRecord({ record, coupleId, layout }: {
       className={layout === 'compact' ? 'border-b pb-3 last:border-0' : ''}
       style={{ borderColor: 'var(--ink-faint)' }}
     >
-      <p className="mb-2 text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>{record.time}</p>
+      <Link
+        to={`/record?record=${encodeURIComponent(record.id)}`}
+        aria-label={`${dayLabel(record.date)}${record.time ? ` ${record.time.slice(0, 5)}` : ''} 기록 열기`}
+        className="press-response inline-flex min-h-11 min-w-11 items-center gap-1 text-caption tabular-nums"
+        style={{ color: 'var(--ink-soft)' }}
+      >
+        {record.time?.slice(0, 5) || dayLabel(record.date)}
+        <ChevronRight size={12} aria-hidden="true" />
+      </Link>
       <div className="space-y-3">
         {layout === 'photo-first' ? <>{media}{text}</> : <>{text}{media}</>}
       </div>

@@ -63,7 +63,12 @@ export function CallBriefingWidget() {
   */
   useEffect(() => {
     if (briefing.topics.length === 0) return;
-    void recordProductEvent({ kind: 'briefing_opened', screen: 'home' });
+    if (userId) {
+      void recordProductEvent(
+        { kind: 'briefing_opened', screen: 'home' },
+        { expectedUserId: userId },
+      );
+    }
     // Mount-scoped on purpose: re-firing as the list changes would inflate the
     // denominator every time a record arrived.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -77,11 +82,13 @@ export function CallBriefingWidget() {
       §19 permits the event kind and an opaque id. The record's text is not read
       here and there is no field it could travel in.
     */
-    void recordProductEvent({
-      kind: 'briefing_to_original',
-      screen: 'home',
-      subjectId: recordId,
-    });
+    if (userId) {
+      void recordProductEvent({
+        kind: 'briefing_to_original',
+        screen: 'home',
+        subjectId: recordId,
+      }, { expectedUserId: userId });
+    }
     setHighlightedRecordId(recordId);
     /*
       줄에서 스토리의 그 순간으로.

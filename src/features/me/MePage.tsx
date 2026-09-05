@@ -3,12 +3,12 @@ import { ChevronRight, Clock, Shield } from 'lucide-react';
 import { AppBar } from '@/components/ui/AppBar';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
-import { CyclePartnerCard } from '@/components/cycle/CyclePartnerCard';
 import { computeServiceProgress } from '@/lib/milestones';
 import { localToday } from '@/lib/cycle';
 import { useStore } from '@/lib/useStore';
 import type { MilitaryInfo, ContactPreferences } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 /**
  * 나 — 지금 상대에게 연락해도 되나. 상대는 지금 어떤 상태인가.
@@ -46,8 +46,14 @@ function MePageBody() {
   const authenticated = Boolean(authenticatedUser?.id);
   const connected = profile.couple.connected;
   const isGomsin = profile.role === 'gomsin';
+  const isMilitaryRelationship = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  ) === 'military';
 
-  const progress = computeServiceProgress(profile.military, localToday());
+  const progress = computeServiceProgress(
+    isMilitaryRelationship ? profile.military : undefined,
+    localToday(),
+  );
   /*
     복무 카드를 그릴 것인가.
 
@@ -63,9 +69,11 @@ function MePageBody() {
     전역이라는 사건 자체는 축하받아야 하고, 그 자리는 따로 있다 -- `우리` 의 하이라이트와
     `일기장` 의 마일스톤(`BUSINESS` §9.2가 1순위로 검증하겠다고 한 바로 그것)이다.
   */
-  const discharged = progress?.isDischarged === true
-    || profile.military.militaryStatus === 'discharged';
-  const serving = progress !== null && !discharged;
+  const discharged = isMilitaryRelationship && (
+    progress?.isDischarged === true
+    || profile.military.militaryStatus === 'discharged'
+  );
+  const serving = isMilitaryRelationship && progress !== null && !discharged;
 
   return (
     <div className="min-h-full pb-24">
@@ -85,6 +93,7 @@ function MePageBody() {
           userId={authenticatedUser?.id}
           coupleId={profile.couple.coupleId}
           connected={connected}
+          recipientLabel={isMilitaryRelationship ? '군화' : '상대방'}
         />
 
         {/*
@@ -105,23 +114,16 @@ function MePageBody() {
         {/*
           주기.
 
-          아직 곰신에게만 열려 있다. 몸의 일이지 역할의 일이 아니므로 이것도 풀려야
-          하지만, 배려 신호와 달리 HRK 도메인의 건강 데이터라 §21 을 다시 읽고 판단할
-          일이다. 이 화면이 그 판단을 앞질러 하지 않는다.
+          군 복무 맥락에서는 기존 공개 범위를 보존한다. 일반 커플에서는 내부 멤버 슬롯이나
+          선택 성별로 건강 도구를 막지 않는다. 원본은 계속 소유자에게만 보이고, 상대에게는
+          사용자가 그날 직접 보낸 배려 신호만 전달된다.
         */}
-        {isGomsin ? (
+        {(!isMilitaryRelationship || isGomsin) ? (
           <CycleTrackerSection
             key={authenticatedUser?.id || 'signed-out'}
             userId={authenticatedUser?.id}
           />
-        ) : (
-          <CyclePartnerCard
-            key={authenticatedUser?.id || 'signed-out'}
-            authenticated={authenticated}
-            userId={authenticatedUser?.id}
-            connected={connected}
-          />
-        )}
+        ) : null}
 
         {serving ? (
           <ServiceCard

@@ -54,6 +54,7 @@ interface CycleSupportSectionProps {
   userId?: string;
   coupleId?: string;
   connected: boolean;
+  recipientLabel?: string;
 }
 
 function failureMessage(
@@ -82,6 +83,7 @@ export function CycleSupportSection({
   userId,
   coupleId,
   connected,
+  recipientLabel = '군화',
 }: CycleSupportSectionProps) {
   const owner = mine;
   const identityKey = `${authenticated ? userId || '' : ''}:${connected ? coupleId || '' : ''}:${mine ? 'mine' : 'partner'}`;
@@ -503,7 +505,7 @@ export function CycleSupportSection({
                   data-testid="signal-send-preview"
                   className="rounded-surface bg-muted/40 p-3.5 space-y-1"
                 >
-                  <p className="text-caption font-bold text-foreground">군화에게 이렇게 보여요</p>
+                  <p className="text-caption font-bold text-foreground">{recipientLabel}에게 이렇게 보여요</p>
                   <p className="text-label text-foreground">{kindLabels[kind]}</p>
                   {message.trim() && (
                     <p className="text-caption text-muted-foreground">“{message.trim()}”</p>

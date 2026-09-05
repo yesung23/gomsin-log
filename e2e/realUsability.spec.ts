@@ -18,12 +18,23 @@
  */
 import { test, expect, type Page } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
-import { CREATOR, NO_SPACE, PARTNER, SHARED_LOG } from './scenarios';
+import { CREATOR, NO_SPACE, PARTNER, PARTNER_LOG, SHARED_LOG } from './scenarios';
 
 /** Wait for the shell, which is the only reliable "the app booted" signal. */
 async function bootedInto(page: Page, route: string) {
   await page.goto(route);
   await expect(page.locator('#root')).not.toBeEmpty();
+}
+
+async function readOwnedAccessories(page: Page): Promise<string[]> {
+  return page.evaluate((storageKey) => {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return [];
+    const stored = JSON.parse(raw) as { ownedAccessories?: unknown };
+    return Array.isArray(stored.ownedAccessories)
+      ? stored.ownedAccessories.filter((item): item is string => typeof item === 'string')
+      : [];
+  }, `gomsin.diary.shop.${CREATOR.userId}`);
 }
 
 test('a signed-in account with no space is offered a way to make one, not a dead end', async ({ browser }) => {
@@ -35,7 +46,7 @@ test('a signed-in account with no space is offered a way to make one, not a dead
 
   /*
    * The failure this guards: an account that authenticated but has no couple used to
-   * be the worst state in the app, because every tab gates on a coupleId and a
+   * be the worst state in the app, because every destination gates on a coupleId and a
    * screen that only says "연결이 필요해요" with no button is indistinguishable from
    * a broken app.
    */
@@ -70,7 +81,7 @@ test('the connected pair sees the same shared record, which is the entire produc
   await b.close();
 });
 
-test('every bottom tab reaches a working screen, with no dead tab', async ({ browser }) => {
+test('every bottom-navigation destination reaches a working screen, with no dead end', async ({ browser }) => {
   const context = await browser.newContext();
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
@@ -80,36 +91,37 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   await bootedInto(page, '/home');
 
   /*
-   * Clicking the real tabs rather than calling `goto` for each route: a tab that
+   * Clicking the real destination links rather than calling `goto` for each route: a link that
    * navigates nowhere, or lands on a blank screen, is invisible to a route-by-route
    * check but is exactly what a user hits.
    */
   /*
     V4의 다섯 칸은 `홈 · 찾기 · 일기장 · 일정 · 우리`다 (`MobileShell`).
   */
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
   for (const label of ['찾기', '일기장', '일정', '우리', '홈']) {
-    await page.getByRole('tab', { name: label }).click();
+    await navigation.getByRole('link', { name: label }).click();
     await expect(page.locator('main')).not.toBeEmpty();
     // A screen with no interactive control is a dead end even if it rendered.
     const controls = await page.locator('main button, main a[href], main input').count();
-    expect(controls, `${label} tab has no operable control`).toBeGreaterThan(0);
+    expect(controls, `${label} destination has no operable control`).toBeGreaterThan(0);
   }
 
   /*
     일기장(/diary)에서 상점(/shop) 진입과 복귀를 확인한다.
   */
-  await page.getByRole('tab', { name: '일기장' }).click();
+  await navigation.getByRole('link', { name: '일기장' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
-  await page.getByRole('button', { name: '종이 고르기' }).click();
+  await page.getByRole('button', { name: '상점 열기' }).click();
   await page.waitForURL(/\/shop$/, { timeout: 20_000 });
-  await expect(page.getByRole('radiogroup', { name: '기본 종이' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: '종이 바탕' })).toBeVisible();
   await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
   await page.waitForURL(/\/diary$/, { timeout: 20_000 });
 
   /*
     기록 작성 진입점(홈 스토리 레일의 + 배지)이 컴포저(/compose)를 열고 닫는 것을 확인한다.
   */
-  await page.getByRole('tab', { name: '홈' }).click();
+  await navigation.getByRole('link', { name: '홈' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
   await page.getByRole('button', { name: '기록 남기기' }).click();
   await page.waitForURL(/\/compose$/, { timeout: 20_000 });
@@ -118,7 +130,7 @@ test('every bottom tab reaches a working screen, with no dead tab', async ({ bro
   await page.getByRole('button', { name: '닫기' }).click();
   await page.waitForURL(/\/(home)?$/, { timeout: 20_000 });
 
-  expect(errors, 'errors while walking the tab bar').toEqual([]);
+  expect(errors, 'errors while walking the bottom navigation').toEqual([]);
   await context.close();
 });
 
@@ -131,7 +143,9 @@ for (const width of [320, 390, 430]) {
     page.on('pageerror', (error) => errors.push(error.message));
 
     await bootedInto(page, '/diary');
-    await page.getByRole('button', { name: /지면 열기$/ }).first().click();
+    const month = page.getByRole('button', { name: /지면 열기$/ }).first();
+    await expect(month).toContainText(PARTNER_LOG);
+    await month.click();
     await page.getByRole('button', { name: '페이지 편집' }).click();
     await page.getByRole('radio', { name: '모눈 종이' }).click();
     await page.getByRole('radio', { name: '사진 먼저' }).click();
@@ -150,17 +164,143 @@ for (const width of [320, 390, 430]) {
   });
 }
 
-test('paper chosen in the library becomes the default for an uncustomized diary page', async ({ browser }) => {
-  const context = await browser.newContext();
+for (const width of [320, 375]) {
+  test(`schedule calendar fits and keeps date targets at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 } });
+    await installMockBackend(context, CREATOR);
+    const page = await context.newPage();
+
+    await bootedInto(page, '/schedule');
+    await expect(page.getByRole('button', { name: '일정 추가' })).toBeVisible({ timeout: 20_000 });
+    const layout = await page.locator('[data-cal-date]').evaluateAll((days) => {
+      const rects = days.map((day) => day.getBoundingClientRect());
+      const rows = new Map<number, Array<{ left: number; right: number }>>();
+      for (const rect of rects) {
+        const row = Math.round(rect.top);
+        rows.set(row, [...(rows.get(row) ?? []), { left: rect.left, right: rect.right }]);
+      }
+      const week = [...rows.values()]
+        .sort((a, b) => b.length - a.length)[0]
+        ?.sort((a, b) => a.left - b.left) ?? [];
+      return {
+        widths: rects.map((rect) => rect.width),
+        left: Math.min(...rects.map((rect) => rect.left)),
+        right: Math.max(...rects.map((rect) => rect.right)),
+        week,
+        pageWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      };
+    });
+
+    expect(layout.scrollWidth - layout.pageWidth, 'schedule should not overflow horizontally').toBeLessThanOrEqual(1);
+    expect(Math.min(...layout.widths), 'every calendar date keeps a 44px target').toBeGreaterThanOrEqual(44);
+    expect(
+      layout.week.every((day, index) => index === 0 || day.left >= layout.week[index - 1].right - 0.5),
+      'calendar date targets must not overlap each other',
+    ).toBe(true);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.pageWidth);
+    await context.close();
+  });
+}
+
+for (const width of [320, 393, 768]) {
+  test(`finite free Shop choice stays explicit, accessible, and persistent at ${width}px`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 852 } });
+    const { unrouted } = await installMockBackend(context, CREATOR);
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+
+    await bootedInto(page, '/shop');
+    await expect(page.getByRole('heading', { level: 2, name: '액세서리 컬렉션' })).toBeVisible();
+    const shopCopy = await page.locator('main').innerText();
+    expect(shopCopy).not.toMatch(/오늘|매일|마감|자정|기회|코인|포인트|재화|₩|￦/);
+    await expect(page.getByRole('button', { name: /결제|구매|충전|구독|코인|포인트/ })).toHaveCount(0);
+    await expect(page.getByText('지금 상점은 모두 무료이며 결제 기능이 없어요.')).toBeVisible();
+
+    const starterChoices = page.getByRole('button', { name: /선택$/ });
+    const collectPlaceholder = page.getByRole('button', { name: '장식을 골라 주세요' });
+    await expect(starterChoices).toHaveCount(5);
+    await expect(collectPlaceholder).toBeDisabled();
+    await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
+    const accessoryGrid = page.locator('[aria-label="액세서리 목록"]');
+    const choiceBoxes = await starterChoices.evaluateAll((buttons) => (
+      buttons.map((button) => {
+        const bounds = button.getBoundingClientRect();
+        return { height: bounds.height, width: bounds.width };
+      })
+    ));
+    expect(Math.min(...choiceBoxes.map(({ height }) => height)), 'every starter choice keeps a 44px touch target')
+      .toBeGreaterThanOrEqual(44);
+    expect(Math.min(...choiceBoxes.map(({ width: cardWidth }) => cardWidth)), 'starter labels keep readable card width')
+      .toBeGreaterThanOrEqual(160);
+    expect((await accessoryGrid.boundingBox())?.width ?? width + 1).toBeLessThanOrEqual(width - 32);
+
+    const letterChoice = page.getByRole('button', { name: '하트 편지 선택' });
+    await letterChoice.click();
+    await expect(letterChoice).toHaveAttribute('aria-pressed', 'true');
+    expect(await readOwnedAccessories(page)).toEqual([]);
+    const receiveLetter = page.getByRole('button', { name: '하트 편지 받기' });
+    await expect(receiveLetter).toBeEnabled();
+    expect((await receiveLetter.boundingBox())?.height ?? 0, 'the receive action keeps a 44px touch target')
+      .toBeGreaterThanOrEqual(44);
+    await receiveLetter.click();
+
+    expect(await readOwnedAccessories(page)).toEqual(['letter']);
+    const collectionStatus = page
+      .locator('section[aria-labelledby="accessory-collection-title"]')
+      .getByRole('status');
+    await expect(collectionStatus).toHaveText('하트 편지를 무료로 받았어요.');
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
+    if (width === 393) {
+      await page.screenshot({ path: 'e2e/.artifacts/audit/shop-direct-choice.png' });
+    }
+
+    await page.getByRole('button', { name: '운동화 선택' }).click();
+    expect(await readOwnedAccessories(page)).toEqual(['letter']);
+    await page.getByRole('button', { name: '운동화 받기' }).click();
+    const secondPersisted = await readOwnedAccessories(page);
+    expect(secondPersisted).toEqual(['sneakers', 'letter']);
+    expect(new Set(secondPersisted).size, 'each receive must preserve unique ownership').toBe(2);
+
+    await page.getByRole('button', { name: '크림 편지지 무료로 받기' }).click();
+    await expect(page.getByRole('button', { name: '크림 편지지 적용하기' })).toBeVisible();
+    await page.getByRole('button', { name: '크림 편지지 적용하기' }).click();
+    await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+    await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+
+    await page.reload();
+    await expect(page.getByRole('button', { name: '하트 편지 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '운동화 보유 중' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: '검정 부츠 선택' })).toBeEnabled();
+    await expect(page.getByRole('button', { name: '크림 편지지 사용 중' })).toBeDisabled();
+    await expect(page.locator('html')).toHaveAttribute('data-paper', 'cream');
+
+    expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(false);
+    expect(errors).toEqual([]);
+    expect(unrouted).toEqual([]);
+    await context.close();
+  });
+}
+
+test('the finite free Shop choice never depends on motion to complete', async ({ browser }) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 852 },
+    reducedMotion: 'reduce',
+  });
   await installMockBackend(context, CREATOR);
   const page = await context.newPage();
 
   await bootedInto(page, '/shop');
-  await page.getByRole('radio', { name: '크림 편지지' }).click();
-  await page.getByRole('button', { name: '일기장으로 돌아가기' }).click();
-  await page.getByRole('button', { name: /지면 열기$/ }).first().click();
-  await expect(page.getByTestId('diary-paper')).toHaveAttribute('data-paper', 'cream');
+  await expect.poll(() => page.evaluate(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true);
 
+  await expect(page.getByTestId('accessory-draw-roulette')).toHaveCount(0);
+  await page.getByRole('button', { name: '검정 부츠 선택' }).click();
+  expect(await readOwnedAccessories(page)).toEqual([]);
+  await page.getByRole('button', { name: '검정 부츠 받기' }).click();
+  expect(await readOwnedAccessories(page)).toEqual(['boots']);
+  await expect(page.getByRole('button', { name: '검정 부츠 보유 중' })).toBeDisabled();
   await context.close();
 });
 
@@ -176,7 +316,7 @@ test('the primary action on each core screen is present and enabled for a real c
    */
   const checks: Array<{ route: string; name: RegExp; what: string }> = [
     // `기록 남기기` is the one name the authoring action carries everywhere
-    // (CTA, tab-bar action, sheet) since the one-tap-everywhere unification.
+    // (CTA, navigation action, sheet) since the one-tap-everywhere unification.
     // Matching a stale label here reports the record screen as having no way
     // to write -- a false alarm about the app's single most important action.
     { route: '/record', name: /기록 남기기/, what: '기록 작성' },
@@ -187,17 +327,18 @@ test('the primary action on each core screen is present and enabled for a real c
   for (const { route, name, what } of checks) {
     await bootedInto(page, route);
     /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
     const control = page.getByRole('button', { name }).first();
     await expect(control, `${what}: control missing on ${route}`).toBeVisible();
     await expect(control, `${what}: control disabled for a connected couple`).toBeEnabled();
@@ -256,7 +397,7 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
   const pageErrors: string[] = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
   await bootedInto(page, '/trips/trip-ocr');
-  await expect(page.getByRole('button', { name: '사진으로 바로 추가' })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole('button', { name: '사진에서 불러오기' })).toBeVisible({ timeout: 20_000 });
 
   await page.getByLabel('지도 캡처 선택').setInputFiles({
     name: 'map-capture.png',
@@ -264,6 +405,11 @@ test('one map screenshot becomes an editable trip item instead of hanging at zer
     buffer: screenshot,
   });
 
+  const draftDialog = page.getByRole('dialog', { name: /일차 일정 추가/ });
+  await expect(draftDialog).toBeVisible({ timeout: 45_000 });
+  await expect(draftDialog.getByRole('textbox', { name: '장소 또는 제목 *' })).not.toHaveValue('');
+  await draftDialog.getByRole('button', { name: '저장' }).click();
+  await expect(draftDialog).toHaveCount(0);
   await expect(page.getByText('사진에서 자동 추가 · 눌러서 수정')).toBeVisible({ timeout: 45_000 });
   await expect(page.getByText(/사진 읽는 중/)).toHaveCount(0);
   const editButton = page.locator('button[aria-label$="일정 수정"]');
@@ -384,17 +530,18 @@ test('every interactive control clears the 44px tap target, hit area included', 
   for (const route of ['/home', '/record', '/schedule', '/trips', '/us', '/service', '/my', '/settings']) {
     await bootedInto(page, route);
     /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 
     const bad = await page.evaluate(() => {
       const out: string[] = [];

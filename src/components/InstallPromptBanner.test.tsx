@@ -204,6 +204,20 @@ describe('M-7: InstallPromptBanner is web-only', () => {
     expect(container.textContent).toContain('곰신로그를 앱으로 설치해보세요');
   });
 
+  it('treats a web runtime without matchMedia as not standalone', async () => {
+    mockIsNativePlatform.mockReturnValue(false);
+    setUserAgent(IOS_UA);
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: undefined,
+    });
+
+    const container = await renderBanner();
+
+    expect(container.textContent).toContain('곰신로그를 앱으로 설치해보세요');
+  });
+
   it('PRESERVATION: on web it still respects the already-dismissed flag', async () => {
     mockIsNativePlatform.mockReturnValue(false);
     setUserAgent(IOS_UA);

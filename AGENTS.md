@@ -353,7 +353,7 @@ during convergence.
 
 | Question | Canonical source |
 |---|---|
-| What should the active product do? | latest user-approved V4 direction + `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
+| What should the active product do? | `docs/PRODUCT_V5_MASTER_DECISION.md`; current V4 facts remain in `docs/V4_AS_BUILT.md` / `docs/V4_BACKLOG.md` |
 | What did the superseded product direction say? | `docs/PRODUCT_V3.md` (legacy history only) |
 | What is the approved business strategy? | `docs/BUSINESS_MEMORY_ROADMAP_V1.md` |
 | What is currently implemented / blocked? | the repository, then `docs/CURRENT_STATE.md` |
@@ -454,16 +454,16 @@ and historical implementation notes,
 decisions, `docs/SECURITY_TEST_PLAN.md` and `docs/rls-test-matrix.md` for
 security/RLS coverage, and `docs/operations/rollback-runbook.md` for rollback.
 
-### Abandoned-strategy guard
+### Superseded-strategy guard
 
-The following are superseded strategy, not active defaults. If a request reintroduces one,
+The following remain superseded strategy, not active defaults. If a request reintroduces one,
 mark `DIRECTION CONFLICT`, stop before changing the canonical plan, and ask whether the user
 is intentionally changing strategy:
 
 - Free 5GB / Plus 100GB / Archive 300GB or any storage-capacity subscription
 - paid high-quality photo or paid long video
 - E2EE or privacy as a premium gate
-- subscription-first initial business model
+- subscription-first initial business model or a subscription that gates the free core
 - company-server-only media architecture
 - AI selecting important memories automatically
 - relationship score, affection score, breakup prediction, or hidden relationship analysis
@@ -471,6 +471,12 @@ is intentionally changing strategy:
 - military population treated as the entire customer market
 - CloudKit described as already implemented
 - audio/video described as currently complete
+
+The 2026-09-03 product-owner override in `docs/PRODUCT_V5_MASTER_DECISION.md` explicitly allows
+activation-ready, default-off Apple IAP for original/licensed garden accessories, buildings, and
+paper packs, plus an optional ongoing-value Plus subscription. This does **not** reactivate
+storage-capacity pricing, paid privacy/E2EE, paid normal photo quality, paid core connection, or
+client-authoritative entitlements. Book Studio begins only after the GomsinLog RC safety gate.
 
 Historical `WORK_LOG` entries and superseded source packets remain for traceability, but they
 must not be used as current business direction without an explicit user decision.
@@ -573,3 +579,10 @@ Review는 특정 exact commit에 대한 판정이다. HEAD가 바뀌면 이전 r
 리뷰 대상 PR의 보안 의미를 바꾸지 않는 별도 docs-only branch는 그 PR의 HEAD에
 WORK_LOG-only commit을 추가하지 않는다. READ-ONLY Kiro Reviewer/Sol Architect는
 저장소를 수정하지 않으며, 다음 write-capable owner가 복사할 수 있는 결과만 남긴다.
+
+## 20. Context7 Documentation Lookup
+
+버전에 따라 달라질 수 있는 외부 라이브러리/API를 구현하거나 수정할 때는 사용 가능한
+경우 Context7 MCP의 `resolve-library-id`와 `query-docs`로 현재 문서를 먼저 확인한다.
+Context7 결과는 보조 근거이며, 보안·결제·데이터 변경은 반드시 공식 문서와 현재 코드,
+실행한 테스트로 다시 검증한다. Context7을 사용할 수 없으면 공식 문서를 직접 확인한다.

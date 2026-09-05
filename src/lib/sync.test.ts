@@ -70,6 +70,7 @@ const profileRow = {
   username: 'test_user',
   profile_caption: '테스트 소개',
   profile_date_type: 'together',
+  gender_identity: 'woman',
 };
 
 function setupProfileMock(data: unknown, error: unknown = null) {
@@ -79,12 +80,29 @@ function setupProfileMock(data: unknown, error: unknown = null) {
   return { select, eq, maybeSingle };
 }
 
-function setupMemberMock(data: unknown, error: unknown = null) {
+function setupMemberMock(
+  data: unknown,
+  error: unknown = null,
+  partnerLookup?: () => Promise<{ data: unknown; error: unknown }>,
+) {
   const maybeSingle = vi.fn().mockResolvedValue({ data, error });
-  const eqStatus = vi.fn().mockReturnValue({ maybeSingle });
-  const eqUserId = vi.fn().mockReturnValue({ eq: eqStatus });
-  const select = vi.fn().mockReturnValue({ eq: eqUserId });
-  return { select, eqUserId, eqStatus, maybeSingle };
+  const defaultPartnerRows = data
+    && typeof data === 'object'
+    && typeof (data as { couple_id?: unknown }).couple_id === 'string'
+    ? [{ user_id: 'partner-001', joined_at: '2026-08-20T12:00:00Z' }]
+    : [];
+  const query = {
+    eq: vi.fn(),
+    neq: vi.fn(),
+    limit: vi.fn(() => partnerLookup
+      ? partnerLookup()
+      : Promise.resolve({ data: defaultPartnerRows, error: null })),
+    maybeSingle,
+  };
+  query.eq.mockReturnValue(query);
+  query.neq.mockReturnValue(query);
+  const select = vi.fn().mockReturnValue(query);
+  return { select, eq: query.eq, neq: query.neq, limit: query.limit, maybeSingle };
 }
 
 function setupCoupleMock(data: unknown, error: unknown = null) {
@@ -161,9 +179,14 @@ describe('fetchFullStateFromDB', () => {
     const coupleId = 'couple-resume-1';
     const profileChain = setupProfileMock(null);
     const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'soldier' });
+    const coupleChain = setupCoupleMock({
+      id: coupleId,
+      relationship_context: 'general',
+    });
     mockFrom.mockImplementation((table: string) => {
       if (table === 'profiles') return { select: profileChain.select };
       if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
       return { select: vi.fn() };
     });
 
@@ -172,6 +195,7 @@ describe('fetchFullStateFromDB', () => {
     expect(result.profile!.couple.coupleId).toBe(coupleId);
     expect(result.profile!.couple.status).toBe('pending');
     expect(result.profile!.couple.connected).toBe(false);
+    expect(result.profile!.couple.relationshipContext).toBe('general');
     expect(result.profile!.role).toBe('soldier');
     // The profile row genuinely is missing, so onboarding must still finish.
     expect(result.setupComplete).toBe(false);
@@ -252,7 +276,11 @@ describe('fetchFullStateFromDB', () => {
   it('returns a pending couple when no partner exists', async () => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);
-    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
     const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
     const contactChain = setupContactMock();
 
@@ -271,6 +299,7 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.profile!.couple.connected).toBe(false);
     expect(result.profile!.couple.status).toBe('pending');
+    expect(result.profile!.couple.partnerUserId).toBeUndefined();
   });
 
   it('maps profile identity fields when the new schema is available', async () => {
@@ -290,11 +319,44 @@ describe('fetchFullStateFromDB', () => {
       username: 'test_user',
       profileCaption: '테스트 소개',
       profileDateType: 'together',
+      genderIdentity: 'woman',
     });
+  });
+
+  it('keeps current profile identity fields when only migration 075 is absent', async () => {
+    const maybeSingle = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: '42703', message: 'missing gender_identity' } })
+      .mockResolvedValueOnce({
+        data: { ...profileRow, gender_identity: undefined },
+        error: null,
+      });
+    const eq = vi.fn().mockReturnValue({ maybeSingle });
+    const select = vi.fn().mockReturnValue({ eq });
+    const memberChain = setupMemberMock(null);
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(select).toHaveBeenNthCalledWith(1, expect.stringContaining('gender_identity'));
+    expect(select).toHaveBeenNthCalledWith(2, expect.stringContaining('username'));
+    expect(select.mock.calls[1][0]).not.toContain('gender_identity');
+    expect(result.profile).toMatchObject({
+      username: 'test_user',
+      profileCaption: '테스트 소개',
+      profileDateType: 'together',
+    });
+    expect(result.profile?.genderIdentity).toBeUndefined();
   });
 
   it('retries the old profile columns when migration 057 is not applied', async () => {
     const maybeSingle = vi.fn()
+      .mockResolvedValueOnce({ data: null, error: { code: '42703', message: 'missing column' } })
       .mockResolvedValueOnce({ data: null, error: { code: '42703', message: 'missing column' } })
       .mockResolvedValueOnce({ data: { ...profileRow, username: undefined, profile_caption: undefined, profile_date_type: undefined }, error: null });
     const eq = vi.fn().mockReturnValue({ maybeSingle });
@@ -312,10 +374,59 @@ describe('fetchFullStateFromDB', () => {
     const result = requireState(await fetchFullStateFromDB(userId));
 
     expect(profileChain.select).toHaveBeenNthCalledWith(1, expect.stringContaining('username'));
-    expect(profileChain.select).toHaveBeenNthCalledWith(2, 'id, display_name, role, avatar_path, military_info, onboarding_completed_at');
+    expect(profileChain.select).toHaveBeenNthCalledWith(2, expect.stringContaining('username'));
+    expect(profileChain.select).toHaveBeenNthCalledWith(3, 'id, display_name, role, avatar_path, military_info, onboarding_completed_at');
     expect(result.profile?.username).toBeUndefined();
     expect(result.profile?.profileCaption).toBeUndefined();
     expect(result.profile?.profileDateType).toBeUndefined();
+  });
+
+  it('hydrates a general couple without reading military partner projection', async () => {
+    const coupleId = 'couple-general';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const coupleChain = setupCoupleMock({
+      id: coupleId,
+      anniversary_date: '2025-06-01',
+      status: 'active',
+      relationship_context: 'general',
+    });
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc.mockResolvedValueOnce({
+      data: [{ display_name: 'Partner', username: 'partner_id' }],
+      error: null,
+    });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile?.couple.relationshipContext).toBe('general');
+    expect(result.profile?.genderIdentity).toBe('woman');
+    expect(result.profile?.couple.partnerMilitary).toBeUndefined();
+    expect(mockRpc).not.toHaveBeenCalledWith('get_partner_service_info');
+  });
+
+  it('fails hydration closed for a malformed relationship context', async () => {
+    const coupleId = 'couple-malformed';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const coupleChain = setupCoupleMock({ id: coupleId, relationship_context: 'woman' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      return { select: vi.fn() };
+    });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result).toMatchObject({ ok: false, stage: 'couple' });
   });
 
   it('returns an active couple when a partner exists', async () => {
@@ -352,6 +463,8 @@ describe('fetchFullStateFromDB', () => {
 
     expect(result.profile!.couple.connected).toBe(true);
     expect(result.profile!.couple.status).toBe('active');
+    expect(result.profile!.couple.partnerUserId).toBe('partner-001');
+    expect(result.profile!.couple.partnerJoinedAt).toBe('2026-08-20T12:00:00Z');
     expect(result.profile!.couple.partnerUsername).toBe('partner_id');
     expect(result.profile!.couple.partnerMilitary).toEqual({
       branch: 'army',
@@ -362,6 +475,195 @@ describe('fetchFullStateFromDB', () => {
     });
     expect('memo' in (result.profile!.couple.partnerMilitary ?? {})).toBe(false);
     expect(mockRpc).toHaveBeenNthCalledWith(2, 'get_partner_service_info');
+    expect(memberChain.limit).toHaveBeenCalledTimes(2);
+    expect(memberChain.limit.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRpc.mock.invocationCallOrder[0],
+    );
+    expect(memberChain.limit.mock.invocationCallOrder[1]).toBeGreaterThan(
+      mockRpc.mock.invocationCallOrder[1],
+    );
+  });
+
+  it.each([
+    {
+      label: 'a different partner',
+      after: {
+        data: [{ user_id: 'partner-c', joined_at: '2026-09-03T12:00:00Z' }],
+        error: null,
+      },
+    },
+    {
+      label: 'zero partners',
+      after: { data: [], error: null },
+    },
+    {
+      label: 'a lookup error',
+      after: { data: null, error: { code: '42501', message: 'permission denied' } },
+    },
+  ])('rejects presentation when post-projection membership reports $label', async ({ after }) => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const partnerLookup = vi.fn()
+      .mockResolvedValueOnce({
+        data: [{ user_id: 'partner-b', joined_at: '2026-08-20T12:00:00Z' }],
+        error: null,
+      })
+      .mockResolvedValueOnce(after);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      partnerLookup,
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ display_name: 'Partner B', username: 'partner_b' }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          branch: 'army',
+          military_status: 'serving',
+          discharge_date_source: 'manual',
+        }],
+        error: null,
+      });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result).toMatchObject({ ok: false, stage: 'partner-membership' });
+    expect(mockFetchRecordsResultFromDB).not.toHaveBeenCalled();
+  });
+
+  it('keeps exact membership identity when the presentation profile has no row', async () => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc.mockResolvedValue({ data: [], error: null });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple).toMatchObject({
+      coupleId,
+      connected: true,
+      status: 'active',
+      partnerName: '',
+      partnerUserId: 'partner-001',
+      partnerJoinedAt: '2026-08-20T12:00:00Z',
+    });
+  });
+
+  it('does not read partner presentation when initial membership authority has zero rows', async () => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    const contactChain = setupContactMock();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      if (table === 'contact_preferences') return { select: contactChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc
+      .mockResolvedValueOnce({
+        data: [{ display_name: 'Former Partner', username: 'former_partner' }],
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: [{
+          branch: 'army',
+          military_status: 'serving',
+          discharge_date_source: 'manual',
+        }],
+        error: null,
+      });
+
+    const result = requireState(await fetchFullStateFromDB(userId));
+
+    expect(result.profile!.couple).toMatchObject({
+      coupleId,
+      connected: false,
+      status: 'pending',
+      partnerName: '',
+    });
+    expect(result.profile!.couple.partnerUserId).toBeUndefined();
+    expect(result.profile!.couple.partnerJoinedAt).toBeUndefined();
+    expect(result.profile!.couple.partnerUsername).toBeUndefined();
+    expect(result.profile!.couple.partnerMilitary).toBeUndefined();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'query error',
+      lookup: async () => ({
+        data: null,
+        error: { code: '42501', message: 'permission denied' },
+      }),
+    },
+    {
+      label: 'throw',
+      lookup: async () => { throw new TypeError('Failed to fetch'); },
+    },
+    {
+      label: 'malformed row',
+      lookup: async () => ({ data: [{ user_id: '', joined_at: null }], error: null }),
+    },
+    {
+      label: 'multiple rows',
+      lookup: async () => ({
+        data: [
+          { user_id: 'partner-001', joined_at: null },
+          { user_id: 'partner-002', joined_at: null },
+        ],
+        error: null,
+      }),
+    },
+  ])('reports $label as retryable partner-membership failure', async ({ lookup }) => {
+    const coupleId = 'couple-123';
+    const profileChain = setupProfileMock(profileRow);
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      lookup,
+    );
+    const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'profiles') return { select: profileChain.select };
+      if (table === 'couple_members') return { select: memberChain.select };
+      if (table === 'couples') return { select: coupleChain.select };
+      return { select: vi.fn() };
+    });
+    mockRpc.mockResolvedValue({ data: [{ display_name: 'Partner' }], error: null });
+
+    const result = await fetchFullStateResultFromDB(userId);
+
+    expect(result).toMatchObject({ ok: false, stage: 'partner-membership' });
+    expect(mockFetchRecordsResultFromDB).not.toHaveBeenCalled();
   });
 
   it('falls back to the existing partner profile RPC before migration 060 is applied', async () => {
@@ -526,7 +828,11 @@ describe('fetchFullStateFromDB', () => {
   it('fetches records and trips for a pending couple', async () => {
     const coupleId = 'couple-123';
     const profileChain = setupProfileMock(profileRow);
-    const memberChain = setupMemberMock({ couple_id: coupleId, status: 'active', role: 'gomsin' });
+    const memberChain = setupMemberMock(
+      { couple_id: coupleId, status: 'active', role: 'gomsin' },
+      null,
+      async () => ({ data: [], error: null }),
+    );
     const coupleChain = setupCoupleMock({ id: coupleId, anniversary_date: '2025-06-01', status: 'active' });
     const contactChain = setupContactMock();
 

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { AppState, DailyRecord, EmotionFlowItem, TalkAboutMark } from '@/types';
 
@@ -217,6 +217,114 @@ describe('RecordPage ownership controls', () => {
   });
 });
 
+describe('RecordPage dialog keyboard contract', () => {
+  it('focuses the detail dialog and restores the exact opener after Escape', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    const opener = screen.getByRole('button', { name: /자세히 보기/ });
+
+    await user.click(opener);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(screen.getByRole('button', { name: '닫기' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    expect(dialog).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  it('cancels editing before Escape can close the detail dialog', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await user.click(screen.getByRole('button', { name: /자세히 보기/ }));
+    await user.click(await screen.findByRole('button', { name: '수정' }));
+
+    expect(screen.getByRole('textbox', { name: '기록 내용 수정' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '기록 내용 수정' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '수정' })).toHaveFocus();
+  });
+
+  it('cancels delete confirmation before Escape can close the detail dialog', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await user.click(screen.getByRole('button', { name: /자세히 보기/ }));
+    await user.click(await screen.findByRole('button', { name: '삭제' }));
+
+    expect(screen.getByText('이 기록을 삭제할까요?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '취소' })).toHaveFocus();
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.queryByText('이 기록을 삭제할까요?')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '삭제' })).toHaveFocus();
+  });
+
+  it('pulls focus back into the detail dialog when Tab starts outside it', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await user.click(screen.getByRole('button', { name: /자세히 보기/ }));
+
+    const outside = document.createElement('button');
+    outside.textContent = 'outside';
+    document.body.appendChild(outside);
+    try {
+      outside.focus();
+      expect(outside).toHaveFocus();
+
+      await user.keyboard('{Tab}');
+      expect(screen.getByRole('button', { name: '닫기' })).toHaveFocus();
+    } finally {
+      outside.remove();
+    }
+  });
+
+  it('restores the accessible detail opener after the pointer-only time rail opens it', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    const accessibleOpener = screen.getByRole('button', { name: /자세히 보기/ });
+
+    await user.click(screen.getByText('10:00'));
+    await user.keyboard('{Escape}');
+
+    expect(accessibleOpener).toHaveFocus();
+  });
+
+  it('does not close the detail dialog while a delete write is pending', async () => {
+    let finishDelete: ((result: { ok: true }) => void) | undefined;
+    deleteRecord.mockImplementationOnce(() => new Promise((resolve) => {
+      finishDelete = resolve;
+    }));
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await user.click(screen.getByRole('button', { name: /자세히 보기/ }));
+    await user.click(await screen.findByRole('button', { name: '삭제' }));
+    await user.click(screen.getByRole('button', { name: '삭제' }));
+
+    const close = screen.getByRole('button', { name: '닫기' });
+    await waitFor(() => expect(close).toBeDisabled());
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const outside = document.createElement('button');
+    outside.textContent = 'outside during delete';
+    document.body.appendChild(outside);
+    try {
+      outside.focus();
+      expect(outside).toHaveFocus();
+      await user.keyboard('{Tab}');
+      expect(screen.getByRole('dialog')).toHaveFocus();
+    } finally {
+      outside.remove();
+    }
+
+    finishDelete?.({ ok: true });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+});
+
 /**
  * P5: a record the viewer is authorized to see but this device cannot decrypt.
  *
@@ -392,6 +500,36 @@ describe('RecordPage editing', () => {
     expect(updates).toEqual({ log: 'hello' });
     expect(updates).not.toHaveProperty('emotionFlow');
     expect(updates).not.toHaveProperty('emotionUpdatedAt');
+  });
+
+  it('freezes the submitted edit and deduplicates saves until the write settles', async () => {
+    let finishEdit: ((result: { ok: true }) => void) | undefined;
+    updateRecord.mockImplementationOnce(() => new Promise((resolve) => {
+      finishEdit = resolve;
+    }));
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+    await user.click(await screen.findByRole('button', { name: '수정' }));
+
+    const textarea = screen.getByRole('textbox', { name: '기록 내용 수정' });
+    await user.clear(textarea);
+    await user.type(textarea, '서버에 보낼 내용');
+    const save = screen.getByRole('button', { name: '저장' });
+    fireEvent.click(save);
+    fireEvent.click(save);
+
+    await waitFor(() => expect(textarea).toHaveAttribute('readonly'));
+    expect(updateRecord).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '닫기' })).toBeDisabled();
+
+    fireEvent.change(textarea, { target: { value: '요청 뒤에 사라질 내용' } });
+    expect(textarea).toHaveValue('서버에 보낼 내용');
+
+    finishEdit?.({ ok: true });
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: '기록 내용 수정' })).not.toBeInTheDocument();
+    });
   });
 });
 
@@ -569,8 +707,10 @@ describe('RecordPage period summary', () => {
  */
 describe('RecordPage: the composer sheet is a reliable, non-removable entry point', () => {
   beforeEach(() => {
-    addRecordWithMedia.mockClear();
-    queueRecordForLater.mockClear();
+    addRecordWithMedia.mockReset();
+    addRecordWithMedia.mockResolvedValue({ ok: true, failedFiles: [] });
+    queueRecordForLater.mockReset();
+    queueRecordForLater.mockResolvedValue({ queued: true });
   });
 
   it('is closed by default and opens from the floating CTA', async () => {
@@ -627,6 +767,64 @@ describe('RecordPage: the composer sheet is a reliable, non-removable entry poin
 
     expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
     expect(addRecordWithMedia).not.toHaveBeenCalled();
+  });
+
+  it('keeps the sheet and its in-memory attachment while a save is pending', async () => {
+    let finishSave: ((result: { ok: false; failedFiles: string[]; error: string }) => void) | undefined;
+    addRecordWithMedia.mockImplementationOnce(() => new Promise((resolve) => {
+      finishSave = resolve;
+    }));
+    const user = userEvent.setup({ delay: null });
+    const view = renderPage([]);
+    await user.click(screen.getByRole('button', { name: /기록 남기기/ }));
+    await user.click(screen.getByRole('button', { name: '사진' }));
+    const fileInput = view.container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    await user.upload(fileInput!, new File(['photo'], 'kept.jpg', { type: 'image/jpeg' }));
+    expect(screen.getByRole('button', { name: 'kept.jpg 첨부 제거' })).toBeInTheDocument();
+    const text = screen.getByRole('textbox', { name: '오늘의 기록' });
+    await user.type(text, '처음 쓴 내용');
+
+    await user.click(screen.getByRole('button', { name: '저장' }));
+    const composer = screen.getByRole('dialog', { name: '기록 남기기' });
+    const close = composer.querySelector<HTMLButtonElement>('button[aria-label="닫기"]');
+    expect(close).not.toBeNull();
+    await waitFor(() => expect(close!).toBeDisabled());
+    expect(text).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: '사진' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '좋았어' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '공유하기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'kept.jpg 첨부 제거' })).toBeDisabled();
+
+    // Programmatic events must not bypass the disabled presentation contract.
+    fireEvent.change(text, { target: { value: '저장 요청 뒤에 바뀐 내용' } });
+    fireEvent.change(fileInput!, {
+      target: { files: [new File(['late'], 'late.jpg', { type: 'image/jpeg' })] },
+    });
+    expect(text).toHaveValue('처음 쓴 내용');
+    expect(screen.queryByRole('button', { name: 'late.jpg 첨부 제거' })).not.toBeInTheDocument();
+
+    await user.click(close!);
+    await user.keyboard('{Escape}');
+
+    expect(screen.getByRole('dialog', { name: '기록 남기기' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'kept.jpg 첨부 제거' })).toBeInTheDocument();
+
+    finishSave?.({ ok: false, failedFiles: [], error: 'save failed' });
+    await waitFor(() => expect(close!).toBeEnabled());
+    expect(screen.getByRole('dialog', { name: '기록 남기기' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'kept.jpg 첨부 제거' })).toBeInTheDocument();
+  });
+
+  it('restores focus to the record CTA after a direct compose URL closes', async () => {
+    const user = userEvent.setup({ delay: null });
+    renderPage([], '/records?compose=1');
+    expect(await screen.findByRole('dialog', { name: '기록 남기기' })).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: '기록 남기기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /기록 남기기/ })).toHaveFocus();
   });
 });
 
@@ -743,6 +941,52 @@ describe('RecordPage: 이따 이야기하기 on a record', () => {
     await user.click(await screen.findByRole('button', { name: /이따 이야기하기/ }));
     await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('rec-mine'));
     expect(unmarkTalkAbout).not.toHaveBeenCalled();
+  });
+
+  it('locks every detail mutation and deduplicates mark writes while one is pending', async () => {
+    let finishMark: ((result: { ok: true }) => void) | undefined;
+    markTalkAbout.mockImplementationOnce(() => new Promise((resolve) => {
+      finishMark = resolve;
+    }));
+    const user = userEvent.setup({ delay: null });
+    renderPage([record()]);
+    await openRecord(user, '10:00');
+
+    const mark = await screen.findByRole('button', { name: /^이따 이야기하기$/ });
+    fireEvent.click(mark);
+    fireEvent.click(mark);
+
+    await waitFor(() => expect(mark).toBeDisabled());
+    expect(markTalkAbout).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '닫기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '수정' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '삭제' })).toBeDisabled();
+
+    finishMark?.({ ok: true });
+    await waitFor(() => expect(mark).toBeEnabled());
+  });
+
+  it('locks every detail mutation and deduplicates mood writes while one is pending', async () => {
+    let finishMood: ((result: { ok: true }) => void) | undefined;
+    updateRecord.mockImplementationOnce(() => new Promise((resolve) => {
+      finishMood = resolve;
+    }));
+    const user = userEvent.setup({ delay: null });
+    renderPage([record({ emotionFlow: [flowItem()] })]);
+    await openRecord(user, '10:00');
+
+    const sadness = await screen.findByTestId('record-mood-option-sadness');
+    fireEvent.click(sadness);
+    fireEvent.click(sadness);
+
+    await waitFor(() => expect(sadness).toBeDisabled());
+    expect(updateRecord).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '닫기' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '수정' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '삭제' })).toBeDisabled();
+
+    finishMood?.({ ok: true });
+    await waitFor(() => expect(sadness).toBeEnabled());
   });
 
   it('an already-marked record offers to unmark instead, and unmarks only the viewer\'s own flag', async () => {

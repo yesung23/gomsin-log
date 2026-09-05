@@ -5,8 +5,9 @@ import {
 } from '@/lib/handwritingPreference';
 import {
   applyPaperTextureAttribute,
-  loadPaperTexture,
+  reconcileOwnedPaperTexture,
 } from '@/lib/paperTexturePreference';
+import { loadCompanionShopState } from '@/lib/companionShopLocalState';
 import {
   applyRecordTextSizeAttribute,
   loadRecordTextSize,
@@ -15,8 +16,13 @@ import { listenForPushTaps } from '@/lib/pushNotifications';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { useStore } from '@/lib/useStore';
 import { NotificationReentryBridge } from '@/components/NotificationReentryBridge';
+import { AppleIapSessionBridge } from '@/components/AppleIapSessionBridge';
+import { RouteAccessibilityManager } from '@/components/RouteAccessibilityManager';
+import { MilitaryOnlyRoute } from '@/components/MilitaryOnlyRoute';
+import { AppLoadingState } from '@/components/ui/AppLoadingState';
 import type { ServerErrorKind } from '@/lib/serverErrors';
 import type { AuthSyncStage } from '@/lib/sync';
+import { authSyncFailureCopy } from '@/lib/authSyncFailureCopy';
 
 // Eagerly loaded: auth callback must resolve immediately on redirect.
 import { AuthCallbackPage } from '@/pages/AuthCallbackPage';
@@ -88,9 +94,10 @@ const HomePage = lazy(() =>
 
 function PageLoader() {
   return (
-    <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-      <div className="w-8 h-8 border-3 border-coral border-t-transparent rounded-full animate-spin" />
-    </div>
+    <AppLoadingState
+      label="화면을 불러오고 있어요"
+      description="잠시만 기다려 주세요."
+    />
   );
 }
 
@@ -111,7 +118,7 @@ function AccountDeletionRecovery() {
     setBusy('retry');
     setMessage(null);
     const outcome = await retryAccountDeletion();
-    if (outcome.status !== 'deleted') {
+    if (outcome.status !== 'deleted' && outcome.status !== 'cancelled') {
       setMessage('아직 탈퇴를 완료하지 못했어요. 잠시 후 다시 시도해 주세요.');
     }
     setBusy(null);
@@ -130,10 +137,10 @@ function AccountDeletionRecovery() {
         role="alert"
         className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3"
       >
-        <h1 className="text-heading text-foreground">탈퇴가 완료되지 않았어요</h1>
+        <h1 className="text-heading text-foreground">탈퇴 처리를 확인하고 있어요</h1>
         <p className="text-body text-muted-foreground">
-          기록과 프로필 데이터는 이미 삭제되었지만 로그인 계정이 아직 남아 있어요.
-          탈퇴를 끝내려면 아래에서 다시 시도해 주세요.
+          안전하게 완료되기 전까지 계정 이용이 잠시 제한돼요.
+          아래에서 탈퇴를 다시 시도하거나 로그아웃할 수 있어요.
         </p>
         {message && (
           <p className="text-body text-destructive">{message}</p>
@@ -189,25 +196,13 @@ function AuthSyncUnavailable({
 }) {
   const { signOut } = useStore();
   const [busy, setBusy] = useState(false);
-  const isSessionProblem = reason === 'auth_expired';
-  const title = isSessionProblem ? '세션이 만료되었어요' : '계정 정보를 확인하지 못했어요';
-  const description = isSessionProblem
-    ? '다시 로그인해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-    : reason === 'forbidden'
-      ? '계정 권한을 확인하지 못했어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-      : reason === 'offline'
-        ? '인터넷 연결을 확인한 뒤 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-        : reason === 'server'
-          ? '서비스 설정을 확인하지 못했어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-          : reason === 'unreachable'
-            ? '서버에 요청이 닿지 않았어요. 잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.'
-            : '잠시 후 다시 시도해 주세요. 확인이 끝날 때까지 계정 데이터는 표시하지 않아요.';
+  const copy = authSyncFailureCopy(reason, stage);
 
   return (
-    <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
-      <section role="alert" className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3">
-        <h1 className="text-heading text-foreground">{title}</h1>
-        <p className="text-body text-muted-foreground">{description}</p>
+    <main className="paper-texture-layer min-h-[100dvh] flex items-center justify-center px-6 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+      <section role="alert" className="ink-box w-full max-w-sm p-6 text-center space-y-3">
+        <h1 className="text-heading text-foreground">{copy.title}</h1>
+        <p className="text-body text-muted-foreground">{copy.description}</p>
         {/*
           The diagnostic, in this app's vocabulary only.
 
@@ -236,9 +231,9 @@ function AuthSyncUnavailable({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="press-response w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground"
+          className="press-response ink-fill w-full min-h-[44px] px-4 py-3 text-label font-bold"
         >
-          {isSessionProblem ? '다시 로그인' : '다시 시도'}
+          {copy.actionLabel}
         </button>
         <button
           type="button"
@@ -256,7 +251,7 @@ function AuthSyncUnavailable({
   );
 }
 
-export function App() {
+function AppContent() {
   const {
     state,
     isReady,
@@ -322,15 +317,17 @@ export function App() {
   const viewerId = state.authenticatedUser?.id || state.profile.id || '';
   useEffect(() => {
     applyHandwritingAttribute(loadHandwritingEnabled(viewerId));
-    applyPaperTextureAttribute(loadPaperTexture(viewerId));
+    const shopState = loadCompanionShopState(viewerId);
+    applyPaperTextureAttribute(reconcileOwnedPaperTexture(viewerId, shopState.ownedPapers));
     applyRecordTextSizeAttribute(loadRecordTextSize(viewerId));
   }, [viewerId]);
 
   if (!isReady) {
     return (
-      <div className="min-h-[100dvh] bg-background flex items-center justify-center">
-        <div className="w-10 h-10 border-4 border-coral border-t-transparent rounded-full animate-spin" />
-      </div>
+      <AppLoadingState
+        label="곰신로그를 준비하고 있어요"
+        description="계정과 기록을 확인하는 중이에요."
+      />
     );
   }
 
@@ -378,6 +375,7 @@ export function App() {
             MobileShell, so shell-level accessibility tests and isolated routes
             remain usable without a StoreProvider. */}
         <NotificationReentryBridge />
+        <AppleIapSessionBridge />
         <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           {/* Legal documents must be reachable before sign-in too (store listing requirement). */}
@@ -412,7 +410,14 @@ export function App() {
               <Route path="/diary/garden" element={<CompanionGardenPage />} />
               <Route path="/shop" element={<ShopPage />} />
               <Route path="/schedule" element={<SchedulePage />} />
-              <Route path="/service" element={<ServicePage />} />
+              <Route
+                path="/service"
+                element={(
+                  <MilitaryOnlyRoute>
+                    <ServicePage />
+                  </MilitaryOnlyRoute>
+                )}
+              />
               <Route path="/us" element={<UsPage />} />
               <Route path="/my" element={<MyPage />} />
               <Route path="/settings" element={<SettingsPage />} />
@@ -430,5 +435,13 @@ export function App() {
         </Routes>
       </>
     </Suspense>
+  );
+}
+
+export function App() {
+  return (
+    <RouteAccessibilityManager>
+      <AppContent />
+    </RouteAccessibilityManager>
   );
 }

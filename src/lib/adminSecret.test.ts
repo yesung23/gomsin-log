@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import {
   parseAdminSecretKey,
   parseNamedSecretKey,
@@ -147,6 +147,56 @@ describe('timingSafeEqualSecret - constant-time string comparison', () => {
 describe('createAdminClientFetch - safe header rewriting for admin clients', () => {
   const SUPABASE_URL = 'https://mock-project.supabase.co';
   const SECRET_KEY = 'sb_secret_test_admin_key_999';
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('aborts a same-origin Supabase request when its bounded database timeout expires', async () => {
+    vi.useFakeTimers();
+    const customFetch = createAdminClientFetch(SUPABASE_URL, SECRET_KEY, 25);
+    const originalFetch = globalThis.fetch;
+    let seenSignal: AbortSignal | null | undefined;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      seenSignal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        seenSignal?.addEventListener('abort', () => reject(seenSignal?.reason), { once: true });
+      });
+    }) as typeof fetch;
+
+    try {
+      const pending = customFetch(`${SUPABASE_URL}/rest/v1/rpc/iap_claim`);
+      const rejection = expect(pending).rejects.toMatchObject({ name: 'TimeoutError' });
+      await vi.advanceTimersByTimeAsync(25);
+      await rejection;
+      expect(seenSignal?.aborted).toBe(true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('preserves an earlier caller abort instead of waiting for the database timeout', async () => {
+    vi.useFakeTimers();
+    const customFetch = createAdminClientFetch(SUPABASE_URL, SECRET_KEY, 10_000);
+    const caller = new AbortController();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal;
+      return await new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    }) as typeof fetch;
+
+    try {
+      const pending = customFetch(`${SUPABASE_URL}/rest/v1/rpc/iap_settle`, {
+        signal: caller.signal,
+      });
+      caller.abort(new DOMException('caller cancelled', 'AbortError'));
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   it('forces redirect: error on same-origin Supabase requests', async () => {
     const customFetch = createAdminClientFetch(SUPABASE_URL, SECRET_KEY);

@@ -1,7 +1,13 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  serverCallBlockedByPendingDeletion,
+  type AccountDeletionLockLease,
+} from '@/lib/accountDeletion';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { isMissingTable } from '@/lib/serverErrors';
 import type { TalkAboutMark } from '@/types';
+
+export const TALK_ABOUT_SYNC_PENDING_MESSAGE =
+  '저장은 됐지만 화면 반영이 늦어지고 있어요. 잠시 후 다시 확인해 주세요.';
 
 /**
  * "이따 이야기하기" — the client half of the bilateral conversation marks.
@@ -97,6 +103,8 @@ export async function fetchTalkAboutMarksResultFromDB(
 export interface TalkAboutWriteResult {
   ok: boolean;
   error?: string;
+  /** Whether this request actually transitioned at least one pending row. */
+  changed?: boolean;
 }
 
 /**
@@ -111,6 +119,7 @@ export async function markTalkAboutInDB(
   recordId: string,
   coupleId: string,
   actorUserId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 표시할 수 없어요.' };
@@ -118,7 +127,7 @@ export async function markTalkAboutInDB(
   if (!recordId || !coupleId || !actorUserId) {
     return { ok: false, error: '지금은 표시할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 표시할 수 없어요.' };
   }
 
@@ -157,11 +166,12 @@ export async function markTalkAboutInDB(
 export async function unmarkTalkAboutInDB(
   recordId: string,
   actorUserId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 해제할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 해제할 수 없어요.' };
   }
 
@@ -189,24 +199,26 @@ export async function unmarkTalkAboutInDB(
 export async function resolveTalkAboutInDB(
   recordId: string,
   coupleId: string,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<TalkAboutWriteResult> {
   if (!isSupabaseConfigured || !supabase) {
     return { ok: false, error: '지금은 처리할 수 없어요.' };
   }
-  if (await serverCallBlockedByPendingDeletion()) {
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
     return { ok: false, error: '계정 삭제가 진행 중이라 처리할 수 없어요.' };
   }
 
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('talk_about_marks')
     .update({ is_completed: true })
     .eq('record_id', recordId)
     .eq('couple_id', coupleId)
-    .eq('is_completed', false);
+    .eq('is_completed', false)
+    .select('id');
 
   if (error) {
     console.error('[gomsinlog] Failed to resolve talk-about.');
     return { ok: false, error: '처리하지 못했어요. 잠시 후 다시 시도해 주세요.' };
   }
-  return { ok: true };
+  return { ok: true, changed: Array.isArray(data) && data.length > 0 };
 }

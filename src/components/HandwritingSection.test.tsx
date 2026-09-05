@@ -10,38 +10,12 @@ describe('보기 설정', () => {
     document.documentElement.removeAttribute('data-record-text-size');
   });
 
-  it('무지 종이를 고르면 즉시 적용하고 계정별로 저장한다', async () => {
-    render(<HandwritingSection userId="user-1" />);
-    const plain = screen.getByRole('button', { name: '무지 종이' });
-    expect(plain).toHaveAttribute('aria-pressed', 'false');
-
-    await userEvent.click(plain);
-
-    expect(plain).toHaveAttribute('aria-pressed', 'true');
-    expect(document.documentElement).toHaveAttribute('data-paper', 'plain');
-    expect(localStorage.getItem('gomsin.display.paper.user-1')).toBe('plain');
-  });
-
-  it('줄 종이로 되돌릴 수 있다', async () => {
-    localStorage.setItem('gomsin.display.paper.user-1', 'plain');
-    document.documentElement.setAttribute('data-paper', 'plain');
+  it('does not expose a contradictory two-choice paper owner after Shop/Profile adds more papers', () => {
+    localStorage.setItem('gomsin.display.paper.user-1', 'grid');
     render(<HandwritingSection userId="user-1" />);
 
-    await userEvent.click(screen.getByRole('button', { name: '줄 종이' }));
-
-    expect(document.documentElement).not.toHaveAttribute('data-paper');
-    expect(localStorage.getItem('gomsin.display.paper.user-1')).toBe('ruled');
-  });
-
-  it('계정이 바뀌면 새 계정의 보기 설정을 다시 읽는다', () => {
-    localStorage.setItem('gomsin.display.paper.user-1', 'plain');
-    const view = render(<HandwritingSection userId="user-1" />);
-    expect(screen.getByRole('button', { name: '무지 종이' })).toHaveAttribute('aria-pressed', 'true');
-
-    view.rerender(<HandwritingSection userId="user-2" />);
-
-    expect(screen.getByRole('button', { name: '줄 종이' })).toHaveAttribute('aria-pressed', 'true');
-    expect(screen.getByRole('button', { name: '무지 종이' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByRole('button', { name: '무지 종이' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '줄 종이' })).not.toBeInTheDocument();
   });
 
   it('게시물·스토리 글자 크기를 즉시 적용하고 계정별로 저장한다', async () => {

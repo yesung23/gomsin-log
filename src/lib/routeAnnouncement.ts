@@ -34,6 +34,7 @@ const ROUTES: { prefix: string; name: string; exact?: boolean }[] = [
   { prefix: '/settings', name: '설정' },
   { prefix: '/onboarding', name: '시작하기' },
   { prefix: '/legal', name: '약관 및 정책' },
+  { prefix: '/support', name: '고객지원' },
   { prefix: '/auth/callback', name: '로그인 처리 중' },
 ];
 

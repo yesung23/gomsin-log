@@ -122,10 +122,12 @@ describe('코퍼스에 들어갈 수 없는 것', () => {
     const result = select([
       ...twoPartnerRecords(),
       record({ id: 'secret', isPrivate: true, log: '나에게만' }),
+      record({ id: 'privacy-missing', isPrivate: undefined as unknown as boolean }),
+      record({ id: 'privacy-null', isPrivate: null as unknown as boolean }),
     ]);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.records.map((r) => r.id)).not.toContain('secret');
+    expect(result.records.map((r) => r.id)).toEqual(['a', 'b']);
   });
 
   it('이 기기가 열 수 없는 기록', () => {

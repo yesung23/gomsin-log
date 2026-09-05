@@ -1,4 +1,7 @@
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  serverCallBlockedByPendingDeletion,
+  type AccountDeletionLockLease,
+} from '@/lib/accountDeletion';
 import { isMissingTable } from '@/lib/serverErrors';
 import { isSupabaseConfigured, supabase } from '@/lib/supabase';
 import type { CoupleHighlight } from '@/types';
@@ -87,6 +90,7 @@ export async function fetchCoupleHighlightsResultFromDB(coupleId?: string): Prom
 
 export async function saveCoupleHighlightToDB(
   draft: CoupleHighlightDraft,
+  deletionLease?: AccountDeletionLockLease,
 ): Promise<HighlightMutationResult> {
   const title = draft.title.trim();
   const recordIds = normalizeRecordIds(draft.recordIds);
@@ -97,7 +101,9 @@ export async function saveCoupleHighlightToDB(
   if (!coverRecordId || !recordIds.includes(coverRecordId)) {
     return { ok: false, reason: 'invalid' };
   }
-  if (await serverCallBlockedByPendingDeletion()) return { ok: false, reason: 'forbidden' };
+  if (await serverCallBlockedByPendingDeletion(deletionLease)) {
+    return { ok: false, reason: 'forbidden' };
+  }
   if (!isSupabaseConfigured || !supabase) return { ok: false, reason: 'unavailable' };
 
   // The first item is the cover in the database. Reordering here is the only
@@ -123,8 +129,12 @@ export async function saveCoupleHighlightToDB(
   };
 }
 
-export async function deleteCoupleHighlightFromDB(coupleId: string, highlightId: string): Promise<boolean> {
-  if (!coupleId || !highlightId || await serverCallBlockedByPendingDeletion()) return false;
+export async function deleteCoupleHighlightFromDB(
+  coupleId: string,
+  highlightId: string,
+  deletionLease?: AccountDeletionLockLease,
+): Promise<boolean> {
+  if (!coupleId || !highlightId || await serverCallBlockedByPendingDeletion(deletionLease)) return false;
   if (!isSupabaseConfigured || !supabase) return false;
 
   const { data, error } = await supabase

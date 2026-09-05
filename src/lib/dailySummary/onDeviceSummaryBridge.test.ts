@@ -106,6 +106,15 @@ describe('패키징: iOS 전용 로컬 플러그인 하나', () => {
 });
 
 describe('브리지 이름이 세 곳에서 같다', () => {
+  it('TypeScript availability reason union이 Swift raw value와 정확히 같다', () => {
+    const union = definitions.match(/export type OnDeviceSummaryUnavailableReason\s*=([\s\S]*?);/)?.[1] ?? '';
+    const typeReasons = [...union.matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+    const swiftReasons = [...swiftEngine.matchAll(/case\s+\w+\s*=\s*"([^"]+)"/g)]
+      .map((match) => match[1]);
+    expect(typeReasons).toEqual(['apple_intelligence_disabled', 'device_not_eligible', 'locale_unsupported', 'model_not_ready', 'platform_unsupported', 'ready']);
+    expect(swiftReasons.sort()).toEqual(typeReasons.filter((reason) => reason !== 'ready'));
+  });
+
   it('TypeScript registerPlugin · Swift jsName · 어댑터 상수', () => {
     expect(ON_DEVICE_SUMMARY_PLUGIN_NAME).toBe('GomsinlogOnDeviceSummary');
     expect(jsPlugin).toMatch(
@@ -134,6 +143,33 @@ describe('브리지 이름이 세 곳에서 같다', () => {
 });
 
 describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
+  it('native 입력은 120, 생성된 excerpt는 40 UTF-16 단위로 각각 검증한다', () => {
+    expect(swiftEngine).toContain('maxSourceCharacters = 120');
+    expect(swiftEngine).toContain('maxExcerptCharacters = 40');
+    expect(swiftBridge).toContain('maxSourceCharacters');
+    expect(swiftEngine).toContain('maxExcerptCharacters');
+  });
+
+  it('native bridge도 각 item의 key를 index와 text 두 개로 고정한다', () => {
+    expect(swiftBridge).toContain('Set(entry.keys) == Set(["index", "text"])');
+    expect(swiftBridge).toContain('items entry must contain only index and text');
+  });
+
+  it('fractional number나 JSON boolean을 ordinal index로 축소 변환하지 않는다', () => {
+    expect(swiftBridge).toContain('CFGetTypeID(indexNumber) != CFBooleanGetTypeID()');
+    expect(swiftBridge).toContain('indexNumber.doubleValue == Double(parsed.count)');
+    expect(swiftBridge).not.toContain('.intValue');
+  });
+
+  it('prompt와 Guide가 완전한 trailing sentence suffix를 요구하고 rewriting/inference를 금지한다', () => {
+    expect(swiftEngine).toContain('완전한 마지막 문장');
+    expect(swiftEngine).toContain('원문 suffix');
+    expect(swiftEngine).toContain('원문을 다시 쓰거나 추론하지 않는다');
+    expect(swiftEngine).toContain('문맥을 덧붙이지 않는다');
+    expect(swiftEngine).toContain('8~38 UTF-16 단위');
+    expect(swiftEngine).toContain('문장·인용·괄호·단어·이모지·결합문자 중간');
+  });
+
   it('FoundationModels를 canImport와 @available로만 만진다', () => {
     expect(swiftEngine).toContain('#if canImport(FoundationModels)');
     expect(swiftEngine).toMatch(/@available\(iOS 26\.0, \*\)/);
@@ -152,11 +188,23 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(bridgeCode).not.toContain('FoundationModels');
   });
 
-  it('모델과 로케일 가용성을 둘 다 확인한다', () => {
+  it('SystemLanguageModel.availability의 세 원인과 로케일을 각각 구분한다', () => {
     expect(swiftEngine).toContain('SystemLanguageModel.default');
-    expect(swiftEngine).toMatch(/model\.isAvailable/);
+    expect(swiftEngine).toMatch(/switch model\.availability/);
+    expect(swiftEngine).toContain('case .deviceNotEligible');
+    expect(swiftEngine).toContain('case .appleIntelligenceNotEnabled');
+    expect(swiftEngine).toContain('case .modelNotReady');
+    expect(swiftEngine).toContain('device_not_eligible');
+    expect(swiftEngine).toContain('apple_intelligence_disabled');
+    expect(swiftEngine).toContain('model_not_ready');
+    expect(swiftEngine).not.toMatch(/model\.isAvailable/);
     expect(swiftEngine).toMatch(/model\.supportsLocale\(Locale\(identifier: localeIdentifier\)\)/);
     expect(swiftEngine).toContain('"ko_KR"');
+  });
+
+  it('native generation은 40 UTF-16 단위를 넘는 긴 문장 1~5개만 받는다', () => {
+    expect(swiftEngine).toContain('items.count <= maxLines');
+    expect(swiftEngine).toContain('$0.text.utf16.count > maxExcerptCharacters');
   });
 
   it('요청마다 새 세션을 만들고 도구를 주지 않는다', () => {
@@ -181,15 +229,41 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(swiftEngine).toContain('guard produced.count == items.count');
     expect(swiftEngine).toContain('guard line.index == items[position].index');
     expect(swiftEngine).toContain('trimmingCharacters(in: .whitespacesAndNewlines)');
-    expect(swiftEngine).toContain('line.text.utf16.count <= OnDeviceSummary.maxLineCharacters');
+    expect(swiftEngine).toContain('line.text.utf16.count <= OnDeviceSummary.maxExcerptCharacters');
   });
 
   it('취소를 requestId 단위로 다루고 single-flight를 유지한다', () => {
     expect(swiftEngine).toContain('actor OnDeviceSummaryEngine');
     expect(swiftEngine).toMatch(/func cancel\(requestId: String\)/);
-    expect(swiftEngine).toMatch(/guard let current = inFlight, current\.requestId == requestId/);
+    expect(swiftEngine).toMatch(/(?:guard|if) let current = inFlight, current\.requestId == requestId/);
     expect(swiftEngine).toMatch(/Task\.checkCancellation\(\)/);
     expect(swiftBridge).toMatch(/OnDeviceSummaryEngine\.shared\.cancel\(requestId: requestId\)/);
+  });
+
+  it('actor 등록 전 취소를 bounded exact requestId로 기억하고 시작 전에 소비한다', () => {
+    expect(swiftEngine).toContain('private static let maximumPendingCancellations = 32');
+    expect(swiftEngine).toContain('private var cancelledBeforeStart: [String] = []');
+    expect(swiftEngine).toContain('guard !cancelledBeforeStart.contains(requestId) else { return }');
+    expect(swiftEngine).toContain('cancelledBeforeStart.append(requestId)');
+    expect(swiftEngine).toContain('cancelledBeforeStart.removeFirst(');
+    expect(swiftEngine).toContain('cancelledBeforeStart.firstIndex(of: requestId)');
+    expect(swiftEngine).toContain('throw CancellationError()');
+
+    const refineStart = engineCode.indexOf('func refine(\n        requestId: String');
+    const preCancelCheck = engineCode.indexOf(
+      'if let cancelledIndex = cancelledBeforeStart.firstIndex(of: requestId)',
+      refineStart,
+    );
+    const competingFlightCancellation = engineCode.indexOf('if let current = inFlight {', refineStart);
+    const availabilityCheck = engineCode.indexOf('OnDeviceSummary.availability(', refineStart);
+    const taskCreation = engineCode.indexOf('let task = Task<[OnDeviceSummaryLine], Error>', refineStart);
+
+    expect(refineStart).toBeGreaterThanOrEqual(0);
+    expect(preCancelCheck).toBeGreaterThan(refineStart);
+    // A의 pending cancel은 A만 소비하고 즉시 끝나야 이미 실행 중인 B를 취소하지 않는다.
+    expect(preCancelCheck).toBeLessThan(competingFlightCancellation);
+    expect(preCancelCheck).toBeLessThan(availabilityCheck);
+    expect(preCancelCheck).toBeLessThan(taskCreation);
   });
 
   it('입력·출력을 로그하지 않는다', () => {
@@ -232,7 +306,7 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
 
   it('경계 상한이 TypeScript 상한과 같은 숫자다', () => {
     expect(swiftEngine).toContain(`static let maxLines = ${ON_DEVICE_SUMMARY_BATCH_SIZE}`);
-    expect(swiftEngine).toContain(`static let maxLineCharacters = ${MAX_DAILY_SUMMARY_LINE_CHARS}`);
+    expect(swiftEngine).toContain(`static let maxExcerptCharacters = ${MAX_DAILY_SUMMARY_LINE_CHARS}`);
   });
 
   it('payload에 식별자를 받을 자리가 없다', () => {

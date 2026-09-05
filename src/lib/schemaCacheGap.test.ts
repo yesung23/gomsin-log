@@ -59,6 +59,16 @@ async function loadSupabase(rpc: ReturnType<typeof vi.fn>) {
     serverCallBlockedByPendingDeletion: vi.fn().mockResolvedValue(false),
     classifyDeletionErrorBody: vi.fn(),
     classifyDeletionSuccess: vi.fn(),
+    runServerMutationBehindDeletionBarrier: async (
+      operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+      options: { expectedUserId: string | 'current' },
+    ) => ({
+      kind: 'executed',
+      value: await operation({
+        userId: options.expectedUserId === 'current' ? 'user-a' : options.expectedUserId,
+        assertCurrent: () => {},
+      }),
+    }),
   }));
   vi.stubEnv('VITE_SUPABASE_URL', 'https://fake.supabase.co');
   vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'fake-anon-key');

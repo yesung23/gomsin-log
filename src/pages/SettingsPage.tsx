@@ -9,7 +9,7 @@ import { AppBar } from '@/components/ui/AppBar';
 import {
   Shield, Unlink, Trash2, User, FileText, LogOut, Smartphone, AlertTriangle, ChevronRight,
   Sun, Moon, Copy, Check, RefreshCw, Download,
-  CalendarDays, Plane, X, HelpCircle,
+  CalendarDays, Plane, X, HelpCircle, Heart,
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -22,7 +22,7 @@ import {
   regenerateCoupleInvitation,
   supabase,
 } from '@/lib/supabase';
-import { useEscapeKey } from '@/lib/hooks';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import { buildPersonalExport } from '@/lib/dataExport';
 import { DeviceProtectionSection } from '@/components/DeviceProtectionSection';
 import { activeCoupleScopeId, loadSettingsBootstrapFacts } from '@/app/e2ee/settingsFacts';
@@ -47,7 +47,9 @@ import type { BootstrapResult } from '@/app/e2ee/useCases';
 import { NotificationPreferencesSection } from '@/components/NotificationPreferencesSection';
 import { ProfileCaptionEditor } from '@/components/ProfileCaptionEditor';
 import { isValidUsername, normalizeUsername } from '@/lib/profileCaption';
-import type { ProfileDateType } from '@/types';
+import type { GenderIdentity, ProfileDateType } from '@/types';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
+import { restoreApplePurchases } from '@/lib/iap/runtime';
 
 function nativeProtectionPlatform(): DeviceProtectionPlatform | null {
   const platform = Capacitor.getPlatform();
@@ -137,7 +139,15 @@ export function SettingsPage() {
   );
   const myName = profile.myName || '나';
   const partnerName = profile.couple.partnerName || '상대방';
+  const relationshipContext = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  );
+  const isMilitaryRelationship = relationshipContext === 'military';
+  const isGeneralRelationship = relationshipContext === 'general';
   const roleLabel = profile.role === 'gomsin' ? '곰신' : '군화';
+  const partnerRoleLabel = isMilitaryRelationship
+    ? profile.role === 'gomsin' ? '군화' : '곰신'
+    : '상대방';
   const ownRecords = records.filter((record) => record.userId === settingsIdentityKey);
   const hasCoupleSpace = !!profile.couple.coupleId;
   const protectionCoupleId = activeCoupleScopeId(profile.couple);
@@ -146,6 +156,7 @@ export function SettingsPage() {
     status: 'TEMPORARILY_UNAVAILABLE',
   });
   const [isProtectionBusy, setIsProtectionBusy] = useState(false);
+  const [isRestoringPurchases, setIsRestoringPurchases] = useState(false);
   const [setupResult, setSetupResult] = useState<BootstrapResult | null>(null);
   const [recoveryCodeInput, setRecoveryCodeInput] = useState('');
   const [recoveryArtifactInput, setRecoveryArtifactInput] = useState('');
@@ -154,6 +165,17 @@ export function SettingsPage() {
   const [pairingCeremony, setPairingCeremony] = useState<CoupleProtectionCeremony | null>(null);
   const [showPairingDialog, setShowPairingDialog] = useState(false);
   const dialogIdentityRef = useRef(settingsIdentityKey);
+  const dialogPanelRef = useRef<HTMLDivElement>(null);
+  const dialogTriggerRef = useRef<HTMLElement | null>(null);
+  const dialogInitialFocusRef = useRef<HTMLElement | null>(null);
+  const setDialogInitialFocus = useCallback((element: HTMLElement | null) => {
+    dialogInitialFocusRef.current = element;
+  }, []);
+  const rememberDialogTrigger = useCallback(() => {
+    dialogTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+  }, []);
 
   useLayoutEffect(() => {
     if (dialogIdentityRef.current === settingsIdentityKey) return;
@@ -247,6 +269,7 @@ export function SettingsPage() {
       toast.error('이 빌드에서는 기록 보호 설정이 아직 열려 있지 않아요.');
       return;
     }
+    rememberDialogTrigger();
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
@@ -299,6 +322,7 @@ export function SettingsPage() {
 
   const startProtectionRecovery = () => {
     if (!deviceProtectionEnabled) return;
+    rememberDialogTrigger();
     setSetupResult(null);
     setRecoveryCodeInput('');
     setRecoveryArtifactInput('');
@@ -324,6 +348,7 @@ export function SettingsPage() {
   const openCoupleProtection = async () => {
     if (!deviceProtectionEnabled) return;
     if (!protectionCoupleId || isProtectionBusy) return;
+    rememberDialogTrigger();
     const identity = captureIdentity();
     setIsProtectionBusy(true);
     try {
@@ -441,7 +466,14 @@ export function SettingsPage() {
   const [editName, setEditName] = useState(profile.myName);
   const [editAnniversary, setEditAnniversary] = useState(profile.couple.anniversaryDate || '');
   const [editProfileCaption, setEditProfileCaption] = useState(profile.profileCaption || '');
-  const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(profile.profileDateType || '');
+  const [editProfileDateType, setEditProfileDateType] = useState<ProfileDateType | ''>(() => (
+    !isMilitaryRelationship && profile.profileDateType === 'discharge'
+      ? ''
+      : profile.profileDateType || ''
+  ));
+  const [editGenderIdentity, setEditGenderIdentity] = useState<GenderIdentity | ''>(
+    profile.genderIdentity || '',
+  );
   const [editPartnerUsername, setEditPartnerUsername] = useState(profile.couple.partnerUsername || '');
 
   const closeProfileModal = useCallback(() => {
@@ -451,7 +483,23 @@ export function SettingsPage() {
     }
   }, [navigate, searchParams]);
 
-  useEscapeKey(() => {
+  const activeDialog = showPairingDialog
+    ? 'pairing'
+    : showProtectionDialog
+      ? 'protection'
+      : showDeleteAccountModal
+        ? 'delete-account'
+        : showDeleteRecordsModal
+          ? 'delete-records'
+          : showDisconnectModal
+            ? 'disconnect'
+            : showPWAModal
+              ? 'pwa'
+              : showProfileModal
+                ? 'profile'
+                : null;
+
+  const closeActiveDialog = useCallback(() => {
     if (showPairingDialog) {
       if (!isProtectionBusy) setShowPairingDialog(false);
     } else if (showProtectionDialog) {
@@ -469,8 +517,34 @@ export function SettingsPage() {
     } else if (showProfileModal) {
       if (!isSavingProfile) closeProfileModal();
     }
-  }, showPairingDialog || showProtectionDialog || showDeleteAccountModal
-    || showDeleteRecordsModal || showDisconnectModal || showPWAModal || showProfileModal);
+  }, [
+    closeProfileModal,
+    isDeletingAccount,
+    isDeletingRecords,
+    isDisconnecting,
+    isProtectionBusy,
+    isSavingProfile,
+    showDeleteAccountModal,
+    showDeleteRecordsModal,
+    showDisconnectModal,
+    showPWAModal,
+    showPairingDialog,
+    showProfileModal,
+    showProtectionDialog,
+  ]);
+
+  useDialogFocus({
+    active: activeDialog !== null,
+    panelRef: dialogPanelRef,
+    restoreFocusRef: dialogTriggerRef,
+    initialFocusRef: dialogInitialFocusRef,
+    onClose: closeActiveDialog,
+    closeDisabled: (showPairingDialog || showProtectionDialog) && isProtectionBusy
+      || showDeleteAccountModal && isDeletingAccount
+      || showDeleteRecordsModal && isDeletingRecords
+      || showDisconnectModal && isDisconnecting
+      || showProfileModal && isSavingProfile,
+  });
 
   useLayoutEffect(() => {
     instanceActiveRef.current = true;
@@ -530,7 +604,12 @@ export function SettingsPage() {
         myName: nextName,
         couple: { ...profile.couple, anniversaryDate: editAnniversary || undefined },
         profileCaption: editProfileCaption.trim() || undefined,
-        profileDateType: editProfileDateType || undefined,
+        profileDateType: !isMilitaryRelationship && editProfileDateType === 'discharge'
+          ? undefined
+          : editProfileDateType || undefined,
+        ...(isGeneralRelationship
+          ? { genderIdentity: editGenderIdentity || undefined }
+          : {}),
       });
       if (!isCurrentIdentity(identity)) return;
       if (!saved) {
@@ -585,10 +664,14 @@ export function SettingsPage() {
       toast.error('로그인한 계정에서만 커플 공간을 만들 수 있어요.');
       return;
     }
+    if (!relationshipContext) {
+      toast.error('우리 공간 유형을 확인하지 못했어요. 다시 로그인한 뒤 시도해 주세요.');
+      return;
+    }
 
     setIsCreatingSpace(true);
     try {
-      const result = await createCoupleInvitation(profile.role);
+      const result = await createCoupleInvitation(profile.role, relationshipContext);
       if (!isCurrentIdentity(identity)) return;
       if (result.error || !result.coupleId || !result.code) {
         toast.error(result.error || '커플 공간을 만들지 못했어요.');
@@ -630,10 +713,14 @@ export function SettingsPage() {
       toast.error('6자리 초대 코드를 입력해 주세요.');
       return;
     }
+    if (!relationshipContext) {
+      toast.error('우리 공간 유형을 확인하지 못했어요. 다시 로그인한 뒤 시도해 주세요.');
+      return;
+    }
 
     setIsJoiningCouple(true);
     try {
-      const result = await consumeCoupleInvitation(code);
+      const result = await consumeCoupleInvitation(code, relationshipContext);
       if (!isCurrentIdentity(identity)) return;
       if (result.error || !result.coupleId) {
         // An unusable session is not a code problem: route it to the store's
@@ -719,10 +806,16 @@ export function SettingsPage() {
         {/* User Profile Overview */}
         <section className="flex items-center gap-3 py-2">
           <div className="w-11 h-11 rounded-full bg-coral/20 text-coral-strong font-bold flex items-center justify-center text-heading">
-            {profile.role === 'gomsin' ? '🌸' : '🪖'}
+            {isMilitaryRelationship ? (
+              profile.role === 'gomsin' ? '🌸' : '🪖'
+            ) : (
+              <Heart size={22} aria-hidden="true" />
+            )}
           </div>
           <div>
-            <h2 className="text-heading text-foreground">{myName}님 ({roleLabel})</h2>
+            <h2 className="text-heading text-foreground">
+              {myName}님{isMilitaryRelationship ? ` (${roleLabel})` : ''}
+            </h2>
             <p className="text-caption text-muted-foreground mt-0.5">
               {profile.couple.connected
                 ? `파트너 ${partnerName}님과 연결됨`
@@ -893,10 +986,16 @@ export function SettingsPage() {
           <RowGroup boxed>
             <PressableRow
               onClick={() => {
+                rememberDialogTrigger();
                 setEditName(profile.myName);
                 setEditAnniversary(profile.couple.anniversaryDate || '');
                 setEditProfileCaption(profile.profileCaption || '');
-                setEditProfileDateType(profile.profileDateType || '');
+                setEditProfileDateType(
+                  !isMilitaryRelationship && profile.profileDateType === 'discharge'
+                    ? ''
+                    : profile.profileDateType || '',
+                );
+                setEditGenderIdentity(profile.genderIdentity || '');
                 setEditPartnerUsername(profile.couple.partnerUsername || '');
                 setShowProfileModal(true);
               }}
@@ -906,7 +1005,7 @@ export function SettingsPage() {
               <span className="text-label font-semibold text-foreground">내 프로필 수정</span>
             </PressableRow>
 
-            {profile.role === 'soldier' && (
+            {isMilitaryRelationship && profile.role === 'soldier' && (
               <PressableRow
                 onClick={() => navigate('/service')}
                 leading={<Shield size={18} className="text-coral" />}
@@ -917,12 +1016,32 @@ export function SettingsPage() {
             )}
 
             <PressableRow
-              onClick={() => setShowPWAModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowPWAModal(true);
+              }}
               leading={<Smartphone size={18} className="text-coral" />}
               trailing={<span className="text-caption text-muted-foreground">Safari/Chrome</span>}
             >
               <span className="text-label font-semibold text-foreground">PWA 홈 화면 설치 방법</span>
             </PressableRow>
+
+            {Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios' ? (
+              <PressableRow
+                onClick={() => {
+                  if (!settingsIdentityKey || isRestoringPurchases) return;
+                  setIsRestoringPurchases(true);
+                  void restoreApplePurchases(settingsIdentityKey)
+                    .then(() => toast.success('App Store 구매 내역을 확인했어요.'))
+                    .catch(() => toast.error('구매 내역을 복원하지 못했어요. 잠시 후 다시 시도해 주세요.'))
+                    .finally(() => setIsRestoringPurchases(false));
+                }}
+                leading={<RefreshCw size={18} className="text-coral" aria-hidden="true" />}
+                trailing={<span className="text-caption text-muted-foreground">{isRestoringPurchases ? '확인 중…' : 'App Store'}</span>}
+              >
+                <span className="text-label font-semibold text-foreground">구매 복원</span>
+              </PressableRow>
+            ) : null}
           </RowGroup>
         </section>
 
@@ -931,7 +1050,7 @@ export function SettingsPage() {
             <SectionHeader title="상대방 아이디" />
             <div className="rounded-surface border border-border bg-card p-4 space-y-3">
               <div>
-                <h2 className="text-label font-semibold text-foreground">{profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디 정하기</h2>
+                <h2 className="text-label font-semibold text-foreground">{partnerRoleLabel} 아이디 정하기</h2>
                 <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
                   상대방 계정의 아이디를 이 화면에서 정해요. 내 아이디는 상대방이 정해요.
                 </p>
@@ -940,7 +1059,7 @@ export function SettingsPage() {
                 inputId="partner-username"
                 value={editPartnerUsername}
                 currentUsername={profile.couple.partnerUsername}
-                partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                partnerLabel={partnerRoleLabel}
                 isSaving={isSavingPartnerUsername}
                 onChange={setEditPartnerUsername}
                 onSave={() => void handleSavePartnerUsername()}
@@ -970,7 +1089,9 @@ export function SettingsPage() {
             {[
               { to: '/schedule', label: '일정 관리', icon: CalendarDays },
               { to: '/trips', label: '여행 플래너', icon: Plane },
-              { to: '/service', label: '복무 현황 · D-Day', icon: Shield },
+              ...(isMilitaryRelationship
+                ? [{ to: '/service', label: '복무 현황 · D-Day', icon: Shield }]
+                : []),
             ].map(({ to, label, icon: Icon }) => (
               <PressableRow
                 key={to}
@@ -1013,7 +1134,10 @@ export function SettingsPage() {
             </PressableRow>
 
             <PressableRow
-              onClick={() => setShowDeleteRecordsModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDeleteRecordsModal(true);
+              }}
               leading={<Trash2 size={18} className="text-foreground" />}
               trailing={<span className="text-caption text-muted-foreground">{ownRecords.length}개 보유</span>}
             >
@@ -1027,7 +1151,10 @@ export function SettingsPage() {
           <SectionHeader title="연결 해제" />
           <RowGroup boxed>
             <PressableRow
-              onClick={() => setShowDisconnectModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDisconnectModal(true);
+              }}
               leading={<Unlink size={18} className="text-destructive" />}
               trailing={<ChevronRight size={16} className="text-destructive/60" />}
             >
@@ -1073,7 +1200,10 @@ export function SettingsPage() {
             </PressableRow>
 
             <PressableRow
-              onClick={() => setShowDeleteAccountModal(true)}
+              onClick={() => {
+                rememberDialogTrigger();
+                setShowDeleteAccountModal(true);
+              }}
               leading={<Trash2 size={18} className="text-destructive" />}
               trailing={<ChevronRight size={16} className="text-destructive/60" />}
             >
@@ -1090,14 +1220,14 @@ export function SettingsPage() {
         {/* Profile Edit Modal */}
         {showProfileModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="profile-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center justify-between">
                 <h3 id="profile-modal-title" className="text-heading text-foreground">내 프로필 수정</h3>
                 <button
                   type="button"
                   onClick={closeProfileModal}
                   disabled={isSavingProfile}
-                  className="press-response inline-flex h-9 w-9 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+                  className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control text-muted-foreground hover:text-foreground"
                   aria-label="프로필 수정 닫기"
                 >
                   <X size={18} aria-hidden="true" />
@@ -1109,6 +1239,7 @@ export function SettingsPage() {
                   내 닉네임 (2~12자)
                 </label>
                 <input
+                  ref={setDialogInitialFocus}
                   id="edit-nickname"
                   value={editName}
                   onChange={(event) => setEditName(event.target.value.slice(0, 12))}
@@ -1128,14 +1259,14 @@ export function SettingsPage() {
                   <div>
                     <p className="text-caption text-muted-foreground">상대방 아이디 정하기</p>
                     <p className="mt-0.5 text-caption text-muted-foreground">
-                      {profile.role === 'gomsin' ? '군화' : '곰신'}의 아이디를 내가 정해요.
+                      {partnerRoleLabel} 아이디를 내가 정해요.
                     </p>
                   </div>
                   <PartnerUsernameEditor
                     inputId="profile-modal-partner-username"
                     value={editPartnerUsername}
                     currentUsername={profile.couple.partnerUsername}
-                    partnerLabel={profile.role === 'gomsin' ? '군화' : '곰신'}
+                    partnerLabel={partnerRoleLabel}
                     isSaving={isSavingPartnerUsername}
                     onChange={setEditPartnerUsername}
                     onSave={() => void handleSavePartnerUsername()}
@@ -1148,7 +1279,27 @@ export function SettingsPage() {
                 dateType={editProfileDateType}
                 onCaptionChange={setEditProfileCaption}
                 onDateTypeChange={setEditProfileDateType}
+                allowDischarge={isMilitaryRelationship}
               />
+
+              {isGeneralRelationship ? (
+                <div className="space-y-2">
+                  <label htmlFor="edit-gender-identity" className="text-label font-semibold text-muted-foreground">
+                    성별 (선택)
+                  </label>
+                  <select
+                    id="edit-gender-identity"
+                    value={editGenderIdentity}
+                    onChange={(event) => setEditGenderIdentity(event.target.value as GenderIdentity | '')}
+                    className="w-full min-h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40"
+                  >
+                    <option value="">선택 안 함</option>
+                    <option value="woman">여성</option>
+                    <option value="man">남성</option>
+                  </select>
+                  <p className="text-caption text-muted-foreground">상대방에게 보이지 않아요.</p>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <label htmlFor="edit-anniversary" className="text-label font-semibold text-muted-foreground">
@@ -1187,13 +1338,14 @@ export function SettingsPage() {
         {/* Disconnect Modal */}
         {showDisconnectModal && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-5 animate-in fade-in">
-            <div role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="bg-card rounded-surface p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="disconnect-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 w-full max-w-sm border border-border space-y-4 shadow-xl text-center">
               <h3 id="disconnect-modal-title" className="text-heading text-foreground">정말 커플 연결을 해제하시겠어요?</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 연결을 해제하면 상대방은 내 공유 기록을 더 이상 볼 수 없게 됩니다.
               </p>
               <div className="grid grid-cols-2 gap-2 pt-2">
                 <button
+                  ref={setDialogInitialFocus}
                   onClick={() => setShowDisconnectModal(false)}
                   disabled={isDisconnecting}
                   className="press-response py-2.5 rounded-control border border-border text-label font-semibold min-h-[44px] disabled:opacity-50"
@@ -1235,13 +1387,14 @@ export function SettingsPage() {
         {/* Delete Records Modal */}
         {showDeleteRecordsModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="delete-records-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <h3 id="delete-records-modal-title" className="text-heading text-foreground">내 기록 전체 삭제</h3>
               <p className="text-caption text-muted-foreground leading-relaxed">
                 내가 작성한 총 {ownRecords.length}개의 일상 기록이 삭제됩니다. 정말 삭제하시겠습니까?
               </p>
               <div className="flex gap-2 pt-2">
                 <button
+                  ref={setDialogInitialFocus}
                   onClick={() => setShowDeleteRecordsModal(false)}
                   disabled={isDeletingRecords}
                   className="press-response-row flex-1 py-3 bg-muted text-foreground font-bold rounded-control text-label active:bg-muted/80 min-h-[44px] disabled:opacity-50"
@@ -1288,7 +1441,7 @@ export function SettingsPage() {
         {/* Delete Account Modal */}
         {showDeleteAccountModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="delete-account-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-destructive text-heading">
                 <AlertTriangle size={20} />
                 <span id="delete-account-modal-title">계정 삭제 (회원 탈퇴)</span>
@@ -1303,6 +1456,7 @@ export function SettingsPage() {
                   계속하려면 아래에 <b>탈퇴</b>를 입력하세요.
                 </label>
                 <input
+                  ref={setDialogInitialFocus}
                   id="delete-account-confirmation"
                   value={deleteAccountConfirmation}
                   onChange={(event) => setDeleteAccountConfirmation(event.target.value)}
@@ -1333,6 +1487,20 @@ export function SettingsPage() {
                         // deleted, which is the opposite of what happened.
                         toast.error(
                           '기록과 프로필 데이터는 삭제되었지만 로그인 계정은 삭제되지 못했습니다. 탈퇴를 완료해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'recovery_required') {
+                        toast.error(
+                          '탈퇴 처리를 안전하게 확인하지 못했습니다. 안내 화면에서 다시 시도해 주세요.',
+                          { duration: 12000 },
+                        );
+                        return;
+                      }
+                      if (result.status === 'cancelled') {
+                        toast.error(
+                          '공유 기록을 안전하게 보존하기 위해 탈퇴를 중단했습니다. 기록은 삭제되지 않았습니다.',
                           { duration: 12000 },
                         );
                         return;
@@ -1382,7 +1550,7 @@ export function SettingsPage() {
         {/* PWA Modal */}
         {showPWAModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="pwa-modal-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
                 <Smartphone size={20} className="text-coral" />
                 <span id="pwa-modal-title">PWA 앱 설치 안내</span>
@@ -1401,7 +1569,7 @@ export function SettingsPage() {
 
         {deviceProtectionEnabled && showPairingDialog && pairingCeremony && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="pairing-dialog-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               <div className="flex items-center gap-2 text-foreground text-heading">
                 <Shield size={20} className="text-coral" aria-hidden="true" />
                 <span id="pairing-dialog-title">둘의 보호 코드 확인</span>
@@ -1423,6 +1591,7 @@ export function SettingsPage() {
               </div>
               <div className="flex gap-2 pt-1">
                 <button
+                  ref={setDialogInitialFocus}
                   type="button"
                   onClick={() => setShowPairingDialog(false)}
                   disabled={isProtectionBusy}
@@ -1446,7 +1615,7 @@ export function SettingsPage() {
 
         {deviceProtectionEnabled && showProtectionDialog && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border max-h-[90vh] overflow-y-auto">
+            <div ref={dialogPanelRef} role="dialog" aria-modal="true" aria-labelledby="protection-dialog-title" className="max-h-[calc(100dvh-2rem)] overflow-y-auto bg-card rounded-surface p-6 max-w-sm w-full space-y-4 shadow-xl border border-border">
               {protectionDialogMode === 'setup' && setupResult ? (
                 <>
                   <div className="flex items-center gap-2 text-foreground text-heading">
@@ -1483,6 +1652,7 @@ export function SettingsPage() {
                       저장한 복구 코드를 다시 입력해 주세요
                     </label>
                     <input
+                      ref={setDialogInitialFocus}
                       id="protection-confirm-code"
                       value={recoveryCodeInput}
                       onChange={(event) => setRecoveryCodeInput(event.target.value)}
@@ -1517,7 +1687,7 @@ export function SettingsPage() {
                   </p>
                   <div className="space-y-2">
                     <label htmlFor="protection-recovery-code" className="text-label font-semibold text-foreground">복구 코드</label>
-                    <input id="protection-recovery-code" value={recoveryCodeInput} onChange={(event) => setRecoveryCodeInput(event.target.value)} autoComplete="off" className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
+                    <input ref={setDialogInitialFocus} id="protection-recovery-code" value={recoveryCodeInput} onChange={(event) => setRecoveryCodeInput(event.target.value)} autoComplete="off" className="w-full h-11 px-3 rounded-control bg-muted border border-border text-body text-foreground outline-none focus:ring-2 focus:ring-coral/40" />
                   </div>
                   <div className="space-y-2">
                     <label htmlFor="protection-recovery-artifact" className="text-label font-semibold text-foreground">복구 정보</label>

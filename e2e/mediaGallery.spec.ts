@@ -54,9 +54,26 @@ const PNG = Buffer.from(
   'base64',
 );
 
+const ENRICHED_RECORD_ID = '11111111-1111-4111-8111-111111111111';
+const ENRICHED_MASTER_ID = '33333333-3333-4333-8333-333333333333';
+const ENRICHED_THUMBNAIL_ID = '44444444-4444-4444-8444-444444444444';
+const ENRICHED_SOURCE_REVISION = '55555555-5555-4555-8555-555555555555';
+const ENRICHED_MASTER_PATH = `couple-1/${ENRICHED_RECORD_ID}/${ENRICHED_MASTER_ID}.jpg`;
+const ENRICHED_THUMBNAIL_PATH = `couple-1/${ENRICHED_RECORD_ID}/${ENRICHED_THUMBNAIL_ID}.jpg`;
+
+const ENRICHED_PHOTO_RECORD = record({
+  id: ENRICHED_RECORD_ID,
+  user_id: 'user-creator',
+  record_date: `${TODAY.slice(0, 8)}01`,
+  log_text: '과거 썸네일 경로 확인',
+  attachments: [{ type: 'photo', name: 'past-thumbnail.jpg', path: ENRICHED_MASTER_PATH }],
+  cipher_format: 0,
+  media_contract_version: 1,
+});
+
 const PHOTO_RECORD = record({
   id: 'rec-photos',
-  user_id: 'user-creator',
+  user_id: 'user-partner',
   log_text: '오늘 본 노을',
   record_time: '18:40:37',
   attachments: [
@@ -82,9 +99,38 @@ const WITH_MEDIA = {
 async function boot(
   browser: import('@playwright/test').Browser,
   viewport = { width: 390, height: 844 },
+  scenario: Parameters<typeof installMockBackend>[1] = WITH_MEDIA,
 ): Promise<Page> {
   const context = await browser.newContext({ viewport });
-  await installMockBackend(context, WITH_MEDIA);
+  await installMockBackend(context, scenario);
+  await context.route('**/rest/v1/rpc/get_record_photo_metadata', async (route) => {
+    const body = route.request().postDataJSON() as { p_record_ids?: string[] } | null;
+    const requested = Array.isArray(body?.p_record_ids) ? body.p_record_ids : [];
+    const data = requested.includes(ENRICHED_RECORD_ID)
+      ? [{
+          record_id: ENRICHED_RECORD_ID,
+          media_id: ENRICHED_MASTER_ID,
+          source_revision: ENRICHED_SOURCE_REVISION,
+          screen_master: {
+            media_object_id: ENRICHED_MASTER_ID,
+            width_px: 2048,
+            height_px: 1536,
+            byte_size: 900_000,
+            sha256: 'a'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+          thumbnail: {
+            media_object_id: ENRICHED_THUMBNAIL_ID,
+            width_px: 640,
+            height_px: 480,
+            byte_size: 90_000,
+            sha256: 'b'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+        }]
+      : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
+  });
   /*
    * The mock backend signs every object to `/storage/v1/object/signed-stub`,
    * which returns nothing. An `<img>` pointed at it fires `error`, the gallery
@@ -99,21 +145,22 @@ async function boot(
 
 async function ready(page: Page) {
   /*
-    앱이 떴다는 표식은 **탭바 자체**다 (2026-08-23).
+    앱이 떴다는 표식은 **하단 내비게이션 자체**다 (2026-08-23).
 
-    앞선 판은 `마이` 라는 글자를 찾았다. V4가 탭바에서 눈으로 읽는 글자를 걷어내면서
+    앞선 판은 `마이` 라는 글자를 찾았다. V4가 하단 내비게이션에서 눈으로 읽는 글자를 걷어내면서
     (인스타의 근육 기억을 빌리려면 글자가 없어야 한다) 그 글자가 사라졌고, 이 헬퍼를
     지나는 거의 모든 스펙이 한꺼번에 멈췄다.
 
     이름이 아니라 **구조**를 본다: 하단 내비게이션이 다섯 칸을 그렸는가. 라벨이 또
     바뀌어도 이 단언은 같은 것을 지킨다 -- 그리고 칸 하나가 사라지면 여기서 걸린다.
   */
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole('tablist', { name: '하단 내비게이션' }).getByRole('tab')).toHaveCount(5);
+  const navigation = page.getByRole('navigation', { name: '하단 내비게이션' });
+  await expect(navigation).toBeVisible({ timeout: 20_000 });
+  await expect(navigation.getByRole('link')).toHaveCount(5);
 }
 
 /**
- * The tab bar exists before the records arrive.
+ * The bottom navigation exists before the records arrive.
  *
  * Waiting only for `ready()` and then switching lenses photographed an empty
  * grid: the shared-sync banner was still up, the day had zero records, and the
@@ -152,7 +199,6 @@ test('홈 사진 포스트는 사진, 이름 없는 글, 분 단위 시간과 �
   const media = article.getByTestId('record-media-carousel');
   const body = article.getByText('오늘 본 노을', { exact: true });
   const time = article.getByText('오늘 18:40', { exact: true });
-  const original = article.getByRole('button', { name: '춘향의 기록 열기' });
   const bookmark = article.getByRole('button', { name: '이따 이야기하기' });
 
   await expect(article).toBeVisible({ timeout: 20_000 });
@@ -162,21 +208,18 @@ test('홈 사진 포스트는 사진, 이름 없는 글, 분 단위 시간과 �
   const mediaBox = await media.boundingBox();
   const bodyBox = await body.boundingBox();
   const timeBox = await time.boundingBox();
-  const originalBox = await original.boundingBox();
   const bookmarkBox = await bookmark.boundingBox();
 
   expect(mediaBox).not.toBeNull();
   expect(bodyBox).not.toBeNull();
   expect(timeBox).not.toBeNull();
-  expect(originalBox).not.toBeNull();
   expect(bookmarkBox).not.toBeNull();
   expect(mediaBox!.y + mediaBox!.height).toBeLessThanOrEqual(bodyBox!.y);
   expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(bookmarkBox!.y + bookmarkBox!.height);
   expect(timeBox!.y).toBeGreaterThanOrEqual(bodyBox!.y + bodyBox!.height);
-  expect(originalBox!.width).toBeGreaterThanOrEqual(44);
-  expect(originalBox!.height).toBeGreaterThanOrEqual(44);
   expect(bookmarkBox!.width).toBeGreaterThanOrEqual(44);
   expect(bookmarkBox!.height).toBeGreaterThanOrEqual(44);
+  await expect(article.getByText('원문 보기')).toHaveCount(0);
   expect(await horizontalOverflow(page)).toBe(0);
 
   await page.screenshot({ path: './ui-audit-results/after/home-post-clean-390.png', fullPage: true });
@@ -265,6 +308,38 @@ test('the photo lens shows a grid, and opens a photo full-screen', async ({ brow
   await page.context().close();
 });
 
+test('the archive requests a thumbnail first and the exact master only after expansion', async ({ browser }) => {
+  const scenario = { ...WITH_MEDIA, records: [...WITH_MEDIA.records, ENRICHED_PHOTO_RECORD] };
+  const page = await boot(browser, { width: 390, height: 844 }, scenario);
+  const requestedPaths: string[] = [];
+  const metadataRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/rest/v1/rpc/get_record_photo_metadata')) {
+      metadataRequests.push(request.postData() ?? '');
+    }
+    const path = url.searchParams.get('p');
+    if (url.pathname.includes('signed-stub') && path) requestedPaths.push(decodeURIComponent(path));
+  });
+
+  await page.goto('/record');
+  await ready(page);
+  await recordsLoaded(page);
+  await lens(page, '사진').click();
+
+  const cell = page.getByRole('button', { name: /past-thumbnail\.jpg 크게 보기/ });
+  await expect(cell).toBeVisible();
+  await expect.poll(() => metadataRequests.length).toBeGreaterThan(0);
+  await expect.poll(() => requestedPaths.join('\n')).toContain(ENRICHED_THUMBNAIL_PATH);
+  expect(requestedPaths).not.toContain(ENRICHED_MASTER_PATH);
+
+  await cell.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(() => requestedPaths.includes(ENRICHED_MASTER_PATH)).toBe(true);
+
+  await page.context().close();
+});
+
 test('a photo opens full-screen, and Escape closes it', async ({ browser }) => {
   /*
    * Opened from the TIMELINE lens rather than the grid, and as the first action
@@ -338,20 +413,16 @@ test('nothing overflows at 320px, in either lens', async ({ browser }) => {
 test("상대방의 오늘 shows the partner's photo at full width", async ({ browser }) => {
   /*
    * The partner's own record carries the media here, so this exercises the home
-   * feed's copy of the gallery rather than the 기록 tab's.
+   * feed's copy of the gallery rather than the 기록 screen's.
    *
-   * V4 이전에는 `widget-partner-day` 위젯이 그 사본을 갖고 있었다. 홈이 피드가 되면서
-   * 상대의 오늘은 **스토리**가 되었다 -- 그리고 홈의 피드는 스토리에 있는 기록을
-   * 일부러 제외한다(`PaperHome.feed`). 같은 하루가 두 번 나오면 피드가 스토리의
-   * 그림자가 되기 때문이다.
-   *
-   * 그래서 사진을 보는 자리도 스토리 안이다. 지키는 것은 그대로다 -- 상대의 사진이
-   * 본문 폭을 채우는가.
+   * 스토리는 아직 읽지 않은 구간을 알려 주는 보조 흐름이다. 그 surface에 들어간 기록도
+   * 홈에서는 사라지지 않아야 하므로, 사진을 홈에서 직접 확인한다.
    */
   const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
   await installMockBackend(context, {
     ...CREATOR,
     userId: 'user-partner',
+    partnerUserId: 'user-creator',
     displayName: '몽룡',
     role: 'soldier',
     partnerName: '춘향',
@@ -373,9 +444,6 @@ test("상대방의 오늘 shows the partner's photo at full width", async ({ bro
 
   await page.goto('/home');
   await ready(page);
-
-  await page.getByRole('button', { name: '춘향의 스토리' }).click();
-  await expect(page).toHaveURL(/\/story\/partner$/);
 
   const media = page.getByTestId('record-attachment').first();
   await expect(media).toBeVisible({ timeout: 15_000 });

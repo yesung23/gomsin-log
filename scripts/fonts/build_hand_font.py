@@ -95,6 +95,7 @@ def build(src, outdir):
         css.append('@font-face{\n'
                    '  font-family:"Gomsin Hand";\n  font-style:normal;\n'
                    '  font-weight:400;\n  font-display:swap;\n'
+                   '  size-adjust:120%;\n'
                    f'  src:url("./hand-{i}.woff2") format("woff2");\n'
                    f'  unicode-range:{fmt(rngs)};\n}}')
     (outdir / 'hand.css').write_text('\n'.join(css) + '\n', encoding='utf-8')

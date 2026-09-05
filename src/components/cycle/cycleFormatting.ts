@@ -14,7 +14,7 @@ import type { CycleDailyLog, CycleFlow, CycleMood, CyclePainLevel, CycleSymptom 
  * `aria-label` and the glyph cannot drift into three different words for the same
  * day -- the same reason the symptom labels are here.
  */
-export type CycleDayMark = 'period' | 'period_predicted' | 'fertile' | 'ovulation';
+export type CycleDayMark = 'period' | 'period_predicted';
 
 export const cycleDayMarkLabels: Record<CycleDayMark, string> = {
   period: '생리 기록',
@@ -25,13 +25,6 @@ export const cycleDayMarkLabels: Record<CycleDayMark, string> = {
    * legend and the label, so the two cannot drift.
    */
   period_predicted: '생리 예상 기간',
-  /*
-   * `가임 가능성 높게 추정`, and never 안전한 날 or its cousins. This is arithmetic on
-   * past start dates: it knows nothing about this cycle, and any phrasing that
-   * implies a day is safe would be a medical claim the estimate cannot support.
-   */
-  fertile: '가임 가능성 높게 추정',
-  ovulation: '배란 예상일',
 };
 
 export const symptomLabels: Record<CycleSymptom, string> = {
@@ -84,12 +77,6 @@ export function formatKoreanDate(date: string): string {
   if (!month || !day) return date;
   return `${Number(month)}월 ${Number(day)}일`;
 }
-
-export const confidenceLabels = {
-  low: '낮음',
-  medium: '보통',
-  high: '높음',
-} as const;
 
 /** A short human summary of a day's log, for the day sheet. */
 export function summariseDailyLog(log: CycleDailyLog): string[] {

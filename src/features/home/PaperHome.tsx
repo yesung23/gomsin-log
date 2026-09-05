@@ -1,25 +1,140 @@
-import { useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Bookmark, MoreHorizontal, Phone, Plus } from 'lucide-react';
+import {
+  Component,
+  lazy,
+  Suspense,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Bookmark as BookmarkIcon, ChevronRight, Phone, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
-import { visibleRecordsForViewer } from '@/lib/privacy';
+import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
 import { usePartnerDay } from '@/lib/usePartnerDay';
 import { localToday } from '@/lib/cycle';
-import { InkCircle, PenFace } from '@/components/paper';
+import { isRecordContentAvailable } from '@/lib/recordAvailability';
+import { parseLocalDate, toLocalDateString } from '@/lib/utils';
+import { Bookmark, InkCircle, PenFace } from '@/components/paper';
+import { BrandMark } from '@/components/BrandMark';
+import { ProfileAvatar } from '@/components/ProfileAvatar';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
-import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
-import { CYCLE_SUPPORT_LABEL } from '@/lib/cycleSupportLabels';
-import type { DailyRecord } from '@/types';
+import { selectHomeFocus } from '@/features/home/homeFocus';
+import type { Attachment, DailyRecord } from '@/types';
+import {
+  buildTalkAboutTopics,
+  getTalkAboutActorState,
+  type TalkAboutActorState,
+} from '@/lib/talkAboutList';
+import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
+
+const loadRecordMediaGallery = () =>
+  import('@/components/media/RecordMediaGallery')
+    .then(({ RecordMediaGallery: Gallery }) => ({ default: Gallery }));
+
+function DeferredRecordMediaGallery({
+  attachments,
+  recordId,
+}: {
+  attachments: Attachment[];
+  recordId: string;
+}) {
+  // A new component type is created only after an explicit retry. React.lazy
+  // caches a rejected loader, so merely remounting one top-level lazy constant
+  // would make a retry button cosmetic.
+  const [Gallery] = useState(() => lazy(loadRecordMediaGallery));
+  return (
+    <Suspense
+      fallback={(
+        <div
+          role="status"
+          aria-label="사진을 불러오는 중"
+          className="aspect-[4/5] w-full animate-pulse motion-reduce:animate-none"
+          style={{ background: 'var(--paper-soft)', borderRadius: '10px 3px 12px 3px / 3px 12px 3px 10px' }}
+        />
+      )}
+    >
+      <Gallery attachments={attachments} recordId={recordId} />
+    </Suspense>
+  );
+}
+
+class MediaLoadBoundary extends Component<{
+  children: ReactNode;
+  onRetry: () => void;
+}, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  componentDidCatch(_error: Error, _info: ErrorInfo) {
+    console.error('[gomsinlog] A record media module failed to load.');
+  }
+
+  private retry = () => {
+    this.setState({ failed: false });
+    this.props.onRetry();
+  };
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div
+        role="alert"
+        aria-label="사진을 불러오지 못했어요"
+        className="flex aspect-[4/5] w-full flex-col items-center justify-center gap-3 px-5 text-center"
+        style={{ background: 'var(--paper-soft)', borderRadius: '10px 3px 12px 3px / 3px 12px 3px 10px' }}
+      >
+        <p className="text-label" style={{ color: 'var(--ink-soft)' }}>
+          사진을 불러오지 못했어요
+        </p>
+        <button
+          type="button"
+          onClick={this.retry}
+          className="press-response-row ink-chip min-h-11 px-4 text-caption font-semibold"
+          style={{ color: 'var(--ink)' }}
+        >
+          사진 다시 불러오기
+        </button>
+      </div>
+    );
+  }
+}
+
+function RetryableRecordMediaGallery({
+  attachments,
+  recordId,
+}: {
+  attachments: Attachment[];
+  recordId: string;
+}) {
+  const [attempt, setAttempt] = useState(0);
+  return (
+    <MediaLoadBoundary onRetry={() => setAttempt((current) => current + 1)}>
+      <DeferredRecordMediaGallery
+        key={attempt}
+        attachments={attachments}
+        recordId={recordId}
+      />
+    </MediaLoadBoundary>
+  );
+}
 
 /**
  * 홈 — 노트에 그린 인스타그램.
  *
- *     헤더 56px        곰신로그 · 이야기할 것 · 통화
+ *     헤더 56px        곰신로그 · 책갈피 · 통화
  *     스토리 레일 106px 내 스토리(+) · 상대
  *     ─────────────
- *     포스트           사진/글 → 캡션 → 시간·원본·책갈피 44px
+ *     포스트           사진/글 → 캡션 → 시간·책갈피 44px
  *
  * 이 숫자들이 인스타를 인스타로 보이게 한다. 글자 크기는 임의 픽셀이 아니라 앱의 타입
  * 스케일을 쓴다 -- 둘이 거의 겹치기 때문이다(22 title · 17 heading · 15 body · 13 label ·
@@ -39,8 +154,8 @@ import type { DailyRecord } from '@/types';
  *
  * ## 피드가 담는 구간
  *
- * §6.1 -- 아직 확인하지 않은 것은 **스토리**가, 확인했고 오늘이 아닌 것은 이 지면이,
- * 지난 달은 `우리` 가 갖는다. 같은 기록이 두 자리에 동시에 있지 않는다.
+ * 최근 이레 동안 현재 상대가 공유한 기록을 보여 준다. 스토리는 아직 읽지 않은 구간을
+ * 알려 주지만, 그 사실이 홈에서 상대의 기록을 숨기는 조건이 되지는 않는다.
  */
 
 /** 지면이 담는 구간. 그 앞은 `우리` 의 격자가 갖는다. */
@@ -61,8 +176,17 @@ function timeAgo(record: DailyRecord, todayStr: string): string {
 
 export function PaperHome() {
   const navigate = useNavigate();
-  const { state, markTalkAbout, unmarkTalkAbout } = useStore();
+  const {
+    state,
+    coupleLifecycle,
+    sharedSyncStatus,
+    markTalkAbout,
+    unmarkTalkAbout,
+  } = useStore();
   const { profile, talkAboutMarks } = state;
+  const isOnline = useOnlineStatus();
+  const pendingTalkAboutRef = useRef<string | null>(null);
+  const [pendingTalkAboutRecordId, setPendingTalkAboutRecordId] = useState<string | null>(null);
   const todayStr = localToday();
 
   const partnerDay = usePartnerDay();
@@ -75,53 +199,137 @@ export function PaperHome() {
     [state.records, profile.id, profile.role],
   );
 
-  /*
-    지면에 오는 것.
-
-    스토리가 가진 것 -- 상대의 아직 확인하지 않은 구간 -- 은 빼고, 최근 7일만 남긴다.
-    경계가 날짜가 아니라 **확인 여부**인 이유는 §6.1의 놓친 구간이 어제·그제까지 뻗을 수
-    있기 때문이다. 날짜로 자르면 겹친다.
-  */
-  const inStory = useMemo(
-    () => new Set(partnerDay.surface.map((record) => record.id)),
-    [partnerDay.surface],
-  );
+  const activePartnerUserId = coupleLifecycle === 'connected'
+    && profile.couple.connected
+    && profile.couple.status === 'active'
+    && profile.couple.partnerUserId
+    && profile.couple.partnerUserId !== profile.id
+    ? profile.couple.partnerUserId
+    : undefined;
+  const sharedPartnerContentAvailable = !!activePartnerUserId
+    && sharedSyncStatus !== 'unavailable';
 
   const feed = useMemo(() => {
-    const from = new Date(`${todayStr}T00:00:00`);
+    if (!sharedPartnerContentAvailable) return [];
+    const from = parseLocalDate(todayStr);
     from.setDate(from.getDate() - (FEED_DAYS - 1));
-    const fromStr = from.toISOString().slice(0, 10);
+    const fromStr = toLocalDateString(from);
     return records
-      .filter((record) => record.date >= fromStr && !inStory.has(record.id))
+      .filter((record) => (
+        record.date >= fromStr
+        && record.date <= todayStr
+        && record.userId === activePartnerUserId
+        && isRecordContentAvailable(record)
+      ))
       .sort((a, b) => (a.date === b.date ? b.time.localeCompare(a.time) : b.date.localeCompare(a.date)));
-  }, [records, inStory, todayStr]);
+  }, [records, activePartnerUserId, sharedPartnerContentAvailable, todayStr]);
 
   /*
     1년 전 오늘. 지면 위 조용한 한 줄(계획 #29).
 
-    `records` 를 쓴다 -- 이미 보는 사람 기준으로 걸러진 목록이라, 상대의 비공개 기록이
-    여기로 새어 나올 길이 없다. 피드의 7일 창과 달리 이것은 **오래된 것일수록 값이
-    있으므로** 창을 두지 않는다.
+    내 기록은 연결 상태와 무관하게 남기되, 상대 기록은 서버가 현재 연결을 확인하고 그
+    상대의 id가 정확히 일치할 때만 남긴다. 로컬 캐시에 이전 상대의 공유 기록이 남아도
+    홈으로 되돌아오지 않아야 한다. 피드의 7일 창과 달리 이것은 **오래된 것일수록 값이
+    있으므로** 날짜 창은 두지 않는다.
   */
-  const onThisDay = useMemo(() => selectOnThisDay(records, todayStr), [records, todayStr]);
-
-  const markedIds = useMemo(
-    () => new Set((talkAboutMarks ?? []).map((mark) => mark.recordId)),
-    [talkAboutMarks],
+  const memoryRecords = useMemo(() => records.filter((record) => (
+    isRecordContentAvailable(record)
+    && (
+      isOwnRecord(record, { userId: profile.id, role: profile.role })
+      || (sharedPartnerContentAvailable && record.userId === activePartnerUserId)
+    )
+  )), [
+    records,
+    profile.id,
+    profile.role,
+    activePartnerUserId,
+    sharedPartnerContentAvailable,
+  ]);
+  const onThisDay = useMemo(
+    () => selectOnThisDay(memoryRecords, todayStr),
+    [memoryRecords, todayStr],
   );
 
-  const partnerName = profile.couple.partnerName || '상대';
+  const talkTopics = useMemo(
+    () => buildTalkAboutTopics(talkAboutMarks ?? [], records, {
+      userId: profile.id,
+      role: profile.role,
+    }),
+    [talkAboutMarks, records, profile.id, profile.role],
+  );
+  const talkAboutStateByRecordId = useMemo(() => {
+    const marks = talkAboutMarks ?? [];
+    const states = new Map<string, TalkAboutActorState>();
+    for (const topic of talkTopics) {
+      states.set(topic.recordId, getTalkAboutActorState(marks, topic.recordId, profile.id));
+    }
+    return states;
+  }, [talkAboutMarks, talkTopics, profile.id]);
+
+  const toggleTalkAbout = useCallback((recordId: string, actorState: TalkAboutActorState) => {
+    if (pendingTalkAboutRef.current) return;
+    if (!isOnline) {
+      toast.error(OFFLINE_READONLY_MESSAGE);
+      return;
+    }
+
+    pendingTalkAboutRef.current = recordId;
+    setPendingTalkAboutRecordId(recordId);
+    void (async () => {
+      try {
+        const result = actorState === 'mine' || actorState === 'both'
+          ? await unmarkTalkAbout(recordId)
+          : await markTalkAbout(recordId);
+        if (!result.ok) toast.error(result.error || '책갈피를 바꾸지 못했어요.');
+        else if (result.syncPending) toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+      } catch {
+        toast.error('책갈피를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        pendingTalkAboutRef.current = null;
+        setPendingTalkAboutRecordId(null);
+      }
+    })();
+  }, [isOnline, markTalkAbout, unmarkTalkAbout]);
+
+  const partnerName = activePartnerUserId
+    ? profile.couple.partnerName?.trim() || '상대'
+    : null;
   /*
     상대가 오늘 보낸 배려 신호. 계획서 #30이 이 자리를 요구했고, 지금까지는
     `우리 → 오늘 내 상태` 로 두 번 들어가야 나왔다.
   */
   const careNote = usePartnerCareNote({
     coupleId: profile.couple.coupleId,
-    connected: profile.couple.connected,
+    connected: sharedPartnerContentAvailable,
     userId: profile.id,
   });
-  const hasUnseen = partnerDay.surface.length > 0;
-  const hasMarks = (talkAboutMarks?.length ?? 0) > 0;
+  const hasUnseen = sharedPartnerContentAvailable && partnerDay.surface.length > 0;
+  const hasMarks = sharedPartnerContentAvailable && talkTopics.length > 0;
+  const hasOwnRecordToday = records.some((record) => (
+    record.date === todayStr
+    && isRecordContentAvailable(record)
+    && isOwnRecord(record, { userId: profile.id, role: profile.role })
+  ));
+  const focus = selectHomeFocus({
+    partnerName: partnerName ?? '',
+    careKind: activePartnerUserId ? careNote?.kind ?? null : null,
+    hasPartnerDay: hasUnseen,
+    hasTalkAboutMarks: hasMarks,
+    hasOwnRecordToday,
+  });
+
+  const feedStatus = coupleLifecycle === 'unknown'
+    || (coupleLifecycle === 'connected' && !activePartnerUserId)
+    ? 'identity'
+    : coupleLifecycle === 'connected'
+      && activePartnerUserId
+      && sharedSyncStatus === 'unavailable'
+      ? 'unavailable'
+      : coupleLifecycle === 'connected'
+        && activePartnerUserId
+        && feed.length === 0
+        ? 'empty'
+        : null;
 
   return (
     /*
@@ -135,42 +343,44 @@ export function PaperHome() {
     <div className="min-h-full pb-6" data-testid="home-core">
       <header
         data-testid="home-sticky-header"
-        className="sticky top-0 z-40 flex h-14 items-center justify-between px-4"
-        style={{ background: 'var(--paper)' }}
+        className="paper-texture-layer sticky top-0 z-40 flex h-14 items-center justify-between px-4"
       >
         {/*
           로고 자리. 이 앱의 이름은 손글씨다 -- 인스타의 로고가 그 앱의 손글씨인 것과
           같은 자리이고, 사람이 쓴 글은 아니지만 **간판**이라 인쇄체로 두면 서식이 된다.
         */}
-        <span className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
-          곰신로그
-        </span>
+        <div className="flex shrink-0 items-center gap-2">
+          <BrandMark width={28} height={28} className="h-7 w-7" />
+          <h1 className="hand-text text-title leading-none" style={{ color: 'var(--ink)' }}>
+            곰신로그
+          </h1>
+        </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             aria-label="이야기할 것"
             onClick={() => navigate('/saved')}
-            className="relative flex h-11 w-11 items-center justify-center"
+            className="press-response inline-flex h-11 w-11 items-center justify-center"
           >
-            <Bookmark size={22} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
-            {/* 인스타의 빨간 점과 같은 자리. 개수를 적지 않는다 -- 개수는 부채다. */}
-            {hasMarks ? (
-              <span
-                aria-hidden="true"
-                className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full"
-                style={{ background: 'var(--ink-accent)' }}
-              />
-            ) : null}
+            <BookmarkIcon
+              size={18}
+              className="pen-icon"
+              color="var(--ink)"
+              fill={hasMarks ? 'currentColor' : 'none'}
+              aria-hidden="true"
+            />
           </button>
-          <button
-            type="button"
-            aria-label="통화 모드"
-            onClick={() => navigate('/call')}
-            className="flex h-11 w-11 items-center justify-center"
-          >
-            <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
-          </button>
+          {hasMarks ? (
+            <button
+              type="button"
+              aria-label="통화 모드"
+              onClick={() => navigate('/call')}
+              className="press-response flex h-11 w-11 items-center justify-center"
+            >
+              <Phone size={21} className="pen-icon" color="var(--ink)" fill="none" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -187,14 +397,14 @@ export function PaperHome() {
         링은 둘에서 끝난다. 인스타라면 여기부터 팔로우한 사람들이 이어지지만 이 앱에는
         두 사람뿐이라 그 자리가 비고, **비는 것이 맞다**(§5.2: 링은 정확히 두 개다).
       */}
-      <section aria-label="스토리" className="flex h-[106px] items-start gap-5 px-4 pt-1">
+      <section aria-label="스토리" className="flex min-h-[106px] items-start gap-5 px-4 pb-2 pt-1">
         <div className="relative">
           <button
             type="button"
             onClick={() => navigate('/story/mine')}
-            className="flex w-[72px] flex-col items-center gap-1.5"
+            className="press-response flex w-[72px] flex-col items-center gap-1.5"
           >
-            <InkCircle size={66} ring="seen"><PenFace size={44} tone="b" /></InkCircle>
+            <InkCircle size={66} ring="seen"><ProfileAvatar userId={profile.id} size={54}><PenFace size={44} tone="b" /></ProfileAvatar></InkCircle>
             <span className="text-caption leading-none" style={{ color: 'var(--ink-soft)' }}>내 스토리</span>
           </button>
           <button
@@ -202,7 +412,7 @@ export function PaperHome() {
             aria-label="기록 남기기"
             onClick={() => navigate('/compose')}
             /*
-              눈에 보이는 것은 22px 이지만 **누르는 곳은 46px** 이다.
+              눈에 보이는 것은 22px 이지만 **버튼 자체는 44px** 이다.
 
               인스타의 `+` 배지도 이만큼 작게 그려진다 -- 작게 보이는 것이 이 배지의
               일이다. 하지만 그리는 크기와 닿는 크기는 다른 값이어야 한다(DESIGN_V2
@@ -210,82 +420,130 @@ export function PaperHome() {
               문이므로, 22px 그대로 두면 앱에서 가장 중요한 동작이 가장 놓치기 쉬운
               표적이 된다.
             */
-            className="absolute left-[46px] top-[42px] flex h-[22px] w-[22px] items-center justify-center rounded-full before:absolute before:-inset-3 before:content-['']"
-            style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
+            className="press-response absolute left-[35px] top-[31px] z-10 flex h-11 w-11 items-center justify-center"
           >
-            <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />
+            <span
+              data-compose-badge-art
+              className="flex h-[22px] w-[22px] items-center justify-center rounded-full"
+              style={{ background: 'var(--ink)', border: '2px solid var(--paper)' }}
+            >
+              <Plus size={13} color="var(--paper)" strokeWidth={2.6} aria-hidden="true" />
+            </span>
           </button>
         </div>
 
-        {/*
-          상대의 쪽지 — 인스타의 노트(Notes) 자리.
-
-          계획서(#30)가 이 자리를 못 박은 이유는 배려 신호가 **매일 보여야** 쓸모가 있기
-          때문이다. `우리 → 오늘 내 상태` 로 두 번 들어가야 나오면 궁금해서 찾아본
-          사람에게만 보이고, 궁금하지 않았던 날에는 없는 것과 같다 -- 그런데 그날이야말로
-          상대가 힘들다고 말한 날일 수 있다.
-
-          링 **위**에 뜬다. 인스타의 노트가 아바타 위 말풍선인 것과 같은 자리이고, 링
-          자체는 스토리를 열어야 하므로 쪽지가 그 위를 덮으면 안 된다.
-
-          없으면 자리 자체가 없다. "오늘은 신호가 없어요" 라고 말하면 상대가 보내지
-          않았다는 사실이 새어 나간다(§16).
-        */}
         <div className="relative">
-          {careNote ? (
+          {activePartnerUserId && partnerName ? (
             <button
               type="button"
-              onClick={() => navigate('/me')}
-              aria-label={`${partnerName}의 쪽지: ${CYCLE_SUPPORT_LABEL[careNote.kind]}`}
-              /*
-                링을 **덮지 않고 걸린다.** 링 자체는 스토리를 여는 곳이므로 쪽지가 그
-                위에 앉으면 상대의 하루로 가는 길을 쪽지가 막는다. 그래서 레일의 위
-                여백(`pt-1`)으로 올라가 앉고, 누르는 곳은 `::before` 로 넓힌다 --
-                보이는 것은 작아도 닿는 곳은 44px 이어야 한다.
-              */
-              className="absolute -top-2 left-1/2 z-10 w-[104px] -translate-x-1/2 px-2 py-1 before:absolute before:-inset-2 before:content-['']"
-              style={{
-                background: 'var(--paper)',
-                border: 'var(--stroke-thin) solid var(--ink-faint)',
-                borderRadius: '80px 8px 90px 8px / 8px 90px 8px 80px',
-              }}
+              onClick={() => navigate('/story/partner')}
+              aria-label={`${partnerName}의 스토리${hasUnseen ? ', 새 기록 있음' : ''}`}
+              className="press-response flex w-[72px] flex-col items-center gap-1"
             >
               {/*
-                `text-caption` 이다. 처음에 11px 을 골랐다가 타입 스케일 가드가 잡았고,
-                가드가 옳다 -- 12px 이 이 앱이 읽을 수 있다고 정한 바닥이다. 쪽지가
-                작아 보여야 한다는 이유로 그 바닥을 뚫으면, 정작 몸이 힘들다고 말한
-                문장이 가장 안 읽히는 글자가 된다.
+                링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
+
+                열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
+                말한다 -- 상대는 내가 봤는지 알 수 없다.
               */}
-              <span className="block truncate text-caption leading-none" style={{ color: 'var(--ink)' }}>
-                {CYCLE_SUPPORT_LABEL[careNote.kind]}
+              <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><ProfileAvatar userId={activePartnerUserId} size={54}><PenFace size={44} /></ProfileAvatar></InkCircle>
+              <span
+                className="max-w-[72px] truncate text-caption leading-none"
+                style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
+              >
+                {partnerName}
               </span>
             </button>
-          ) : null}
-
-        <button
-          type="button"
-          onClick={() => navigate('/story/partner')}
-          aria-label={`${partnerName}의 스토리`}
-          className="flex w-[72px] flex-col items-center gap-1.5"
-        >
-          {/*
-            링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
-
-            열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
-            말한다 -- 상대는 내가 봤는지 알 수 없다.
-          */}
-          <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
-          <span
-            className="max-w-[72px] truncate text-caption leading-none"
-            style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
-          >
-            {partnerName}
-          </span>
-        </button>
+          ) : (
+            <div className="flex w-[72px] flex-col items-center gap-1" aria-hidden="true">
+              <InkCircle size={66} ring="seen"><PenFace size={44} /></InkCircle>
+              <span className="text-caption leading-none" style={{ color: 'var(--ink-soft)' }}>
+                확인 중
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
       <div className="ink-rule mx-4" aria-hidden="true" />
+
+      {focus ? (
+        <section aria-label="지금 가장 필요한 것" className="px-4">
+          <button
+            type="button"
+            onClick={() => navigate(focus.to)}
+            aria-label={`${focus.title}: ${focus.actionLabel}`}
+            className="press-response flex min-h-[60px] w-full items-center gap-3 py-2 text-left"
+          >
+            <span
+              className="min-w-0 flex-1 break-words text-body font-semibold [overflow-wrap:anywhere]"
+              style={{ color: 'var(--ink)' }}
+            >
+              {focus.title}
+            </span>
+            <ChevronRight
+              size={19}
+              className="pen-icon ml-auto shrink-0"
+              color="var(--ink-accent)"
+              aria-hidden="true"
+            />
+          </button>
+          <div className="ink-rule" aria-hidden="true" />
+        </section>
+      ) : null}
+
+      {sharedPartnerContentAvailable && partnerName ? (
+        <section aria-labelledby="home-partner-feed-title">
+          <div className="px-4 pb-2 pt-5">
+            <h2
+              id="home-partner-feed-title"
+              className="break-words text-headline font-semibold [overflow-wrap:anywhere]"
+              style={{ color: 'var(--ink)' }}
+            >
+              {partnerName}의 최근 기록
+            </h2>
+          </div>
+
+          {feedStatus === 'empty' ? (
+            <p className="px-8 py-6 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
+              최근 {FEED_DAYS}일에 공유된 기록이 없어요
+            </p>
+          ) : (
+            feed.map((record, index) => (
+              <Post
+                key={record.id}
+                record={record}
+                index={index}
+                partnerName={partnerName}
+                todayStr={todayStr}
+                talkAboutState={talkAboutStateByRecordId.get(record.id) ?? 'none'}
+                talkAboutBusy={pendingTalkAboutRecordId !== null}
+                talkAboutDisabled={!isOnline || pendingTalkAboutRecordId !== null}
+                talkAboutDisabledReason={!isOnline
+                  ? OFFLINE_READONLY_MESSAGE
+                  : pendingTalkAboutRecordId !== null
+                    ? '다른 책갈피를 바꾸는 중이에요.'
+                    : undefined}
+                onToggleTalkAbout={() => toggleTalkAbout(
+                  record.id,
+                  talkAboutStateByRecordId.get(record.id) ?? 'none',
+                )}
+              />
+            ))
+          )}
+
+        </section>
+      ) : feedStatus ? (
+        <p
+          role="status"
+          className="px-8 py-6 text-center text-label leading-relaxed"
+          style={{ color: 'var(--ink-soft)' }}
+        >
+          {feedStatus === 'identity'
+            ? '상대 정보를 확인하고 있어요'
+            : '공유 정보를 아직 확인하지 못했어요'}
+        </p>
+      ) : null}
 
       {/*
         쌓인 것이 스스로 돌아오는 유일한 자리.
@@ -301,47 +559,18 @@ export function PaperHome() {
         <button
           type="button"
           onClick={() => navigate(`/record?record=${encodeURIComponent(onThisDay.record.id)}`)}
-          className="flex min-h-11 w-full items-baseline gap-2 px-4 text-left"
+          className="press-response flex min-h-11 w-full items-baseline gap-2 px-4 text-left"
         >
           <span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>
             {onThisDayLabel(onThisDay)}
           </span>
-          <span className="hand-text truncate text-caption" style={{ color: 'var(--ink-soft)' }}>
+          <span
+            className="hand-text min-w-0 truncate text-caption"
+            style={{ color: 'var(--ink-soft)' }}
+          >
             {onThisDay.record.log}
           </span>
         </button>
-      ) : null}
-
-      {feed.length === 0 ? (
-        <p className="px-8 pt-12 text-center text-label leading-relaxed" style={{ color: 'var(--ink-soft)' }}>
-          지난 이레는 조용했어요.
-          <br />
-          오늘 있었던 일을 하나 남기면 여기 쌓여요.
-        </p>
-      ) : (
-        feed.map((record, index) => (
-          <Post
-            key={record.id}
-            record={record}
-            index={index}
-            mine={record.userId === profile.id}
-            myName={profile.myName || '나'}
-            partnerName={partnerName}
-            todayStr={todayStr}
-            onOpen={() => navigate(`/record?record=${encodeURIComponent(record.id)}`)}
-            marked={markedIds.has(record.id)}
-            onToggleTalkAbout={() => {
-              if (markedIds.has(record.id)) void unmarkTalkAbout(record.id);
-              else void markTalkAbout(record.id);
-            }}
-          />
-        ))
-      )}
-
-      {feed.length > 0 ? (
-        <p className="px-4 pt-4 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
-          여기까지가 지난 {FEED_DAYS}일이에요
-        </p>
       ) : null}
     </div>
   );
@@ -350,29 +579,33 @@ export function PaperHome() {
 function Post({
   record,
   index,
-  mine,
-  myName,
   partnerName,
   todayStr,
-  onOpen,
-  marked,
+  talkAboutState,
+  talkAboutBusy,
+  talkAboutDisabled,
+  talkAboutDisabledReason,
   onToggleTalkAbout,
 }: {
   record: DailyRecord;
   index: number;
-  mine: boolean;
-  myName: string;
   partnerName: string;
   todayStr: string;
-  onOpen: () => void;
-  marked: boolean;
+  talkAboutState: TalkAboutActorState;
+  talkAboutBusy: boolean;
+  talkAboutDisabled: boolean;
+  talkAboutDisabledReason?: string;
   onToggleTalkAbout: () => void;
 }) {
-  const author = mine ? myName : partnerName;
   const hasMedia = (record.attachments?.length ?? 0) > 0;
+  const marked = talkAboutState === 'mine' || talkAboutState === 'both';
+  const partnerMarked = talkAboutState === 'partner_only' || talkAboutState === 'both';
 
   return (
-    <article className="pb-2">
+    <article
+      aria-busy={talkAboutBusy || undefined}
+      className={index === 0 ? 'pb-2 pt-3' : 'pb-2'}
+    >
       {/*
         작성자 이름은 홈 상단과 스토리 레일에 이미 있다. 포스트마다 반복하지 않고 사진부터
         보여 준다. 사진이 없으면 **글이 그 자리를 차지한다.**
@@ -381,7 +614,10 @@ function Post({
       */}
       <div className="px-4">
         {hasMedia ? (
-          <RecordMediaGallery attachments={record.attachments ?? []} recordId={record.id} />
+          <RetryableRecordMediaGallery
+            attachments={record.attachments ?? []}
+            recordId={record.id}
+          />
         ) : record.contentUnavailable ? (
           <div
             className="flex items-center px-5 py-6"
@@ -404,7 +640,7 @@ function Post({
             }}
           >
             <p
-              className="hand-text record-copy whitespace-pre-wrap break-keep"
+              className="hand-text record-copy whitespace-pre-wrap break-words [overflow-wrap:anywhere]"
               style={{ color: 'var(--ink)' }}
             >
               {record.log}
@@ -414,13 +650,16 @@ function Post({
       </div>
 
       {hasMedia && record.log ? (
-        <p className="hand-text record-copy px-4 pt-3" style={{ color: 'var(--ink)' }}>
+        <p
+          className="hand-text record-copy whitespace-pre-wrap break-words px-4 pt-3 [overflow-wrap:anywhere]"
+          style={{ color: 'var(--ink)' }}
+        >
           {record.log}
         </p>
       ) : null}
 
       {/*
-        글 아래의 액션 줄. 시간은 초를 버리고 분까지만, 원본과 책갈피는 44px 표적이다.
+        글 아래의 액션 줄. 시간은 초를 버리고 분까지만, 책갈피는 44px 표적이다.
         **숫자가 없다.**
 
         좋아요 수·조회 수·본 사람은 §16의 비목표다. 세는 순간 두 사람 사이에 점수가
@@ -436,34 +675,24 @@ function Post({
         줄 아는 사람에게 거짓말**이고, 이 제품에서 그것은 상대가 내 반응을 봤을 것이라고
         믿게 만드는 종류의 거짓말이다. 자리는 비워 두고 되는 것만 답한다.
       */}
-      <div className="flex h-11 items-center gap-1 px-3">
-        <p className="px-1 text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>
+      <div className="flex min-h-11 flex-wrap items-center gap-x-2 gap-y-2 px-3 py-1">
+        <Link
+          to={`/record?record=${encodeURIComponent(record.id)}`}
+          aria-label={`${timeAgo(record, todayStr)} 기록 열기`}
+          className="press-response mr-auto flex min-h-11 min-w-11 items-center gap-1 px-1 text-caption tabular-nums"
+          style={{ color: 'var(--ink-soft)' }}
+        >
           {timeAgo(record, todayStr)}
-        </p>
-        <span className="flex-1" />
-        <button
-          type="button"
-          aria-label={`${author}의 기록 열기`}
-          onClick={onOpen}
-          className="flex h-11 w-11 items-center justify-center"
-        >
-          <MoreHorizontal size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          aria-label={marked ? '이따 이야기하기 취소' : '이따 이야기하기'}
-          aria-pressed={marked}
-          onClick={onToggleTalkAbout}
-          className="flex h-11 w-11 items-center justify-center"
-        >
-          <Bookmark
-            size={21}
-            className="pen-icon"
-            color="var(--ink)"
-            fill={marked ? 'var(--ink)' : 'none'}
-            aria-hidden="true"
-          />
-        </button>
+          <ChevronRight size={12} aria-hidden="true" />
+        </Link>
+        <Bookmark
+          marked={marked}
+          partnerMarked={partnerMarked}
+          partnerName={partnerName}
+          onToggle={onToggleTalkAbout}
+          disabled={talkAboutDisabled}
+          disabledReason={talkAboutDisabledReason}
+        />
       </div>
     </article>
   );

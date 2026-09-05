@@ -100,24 +100,102 @@ describe('TripsPage workspace isolation', () => {
   });
 
   it('ignores a create response after switching to another workspace', async () => {
+    currentState = { ...activeState(), trips: [plannedTrip('trip-old-workspace')] };
     const view = render(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
     await waitFor(() => expect(fetchRequests).toHaveLength(1));
-    await act(async () => fetchRequests[0].resolve({ ok: true, trips: [] }));
-    expect(await screen.findByText('등록된 여행이 없어요')).toBeInTheDocument();
+    await act(async () => fetchRequests[0].resolve({ ok: true, trips: [plannedTrip('trip-old-workspace')] }));
+    expect(await screen.findByTestId('trip-card-trip-old-workspace')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByText('새 여행 만들기'));
+    fireEvent.click(screen.getByLabelText('새 여행'));
     fireEvent.change(screen.getByLabelText('여행 이름'), { target: { value: 'Old workspace trip' } });
     fireEvent.change(screen.getByLabelText('가는 날'), { target: { value: '2026-08-01' } });
     fireEvent.change(screen.getByLabelText('오는 날'), { target: { value: '2026-08-02' } });
     fireEvent.click(screen.getByText('만들기'));
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
-    currentState = activeState('user-b', 'couple-b');
+    currentState = {
+      ...activeState('user-b', 'couple-b'),
+      trips: [plannedTrip('trip-new-workspace', 'couple-b')],
+    };
     view.rerender(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+    expect(screen.queryByTestId('trip-card-trip-old-workspace')).not.toBeInTheDocument();
+    expect(screen.getByTestId('trip-card-trip-new-workspace')).toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('새 여행'));
+    expect(screen.getByLabelText('여행 이름')).toHaveValue('');
+    expect(screen.getByLabelText('가는 날')).toHaveValue('');
+    expect(screen.getByLabelText('오는 날')).toHaveValue('');
     await act(async () => saveRequests[0].resolve(plannedTrip('trip-old')));
 
     expect(screen.getByTestId('location')).toHaveTextContent('/trips');
-    expect(screen.queryByText('Secret shared trip')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('trip-card-trip-old-workspace')).not.toBeInTheDocument();
+    expect(screen.getByTestId('trip-card-trip-new-workspace')).toBeInTheDocument();
+  });
+});
+
+describe('TripsPage same-workspace refresh', () => {
+  beforeEach(() => {
+    currentState = activeState();
+    fetchRequests.length = 0;
+    saveRequests.length = 0;
+  });
+
+  it('keeps an open draft when a realtime trip snapshot replaces the array', async () => {
+    const view = render(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+    await waitFor(() => expect(fetchRequests).toHaveLength(1));
+    await act(async () => fetchRequests[0].resolve({ ok: true, trips: [] }));
+
+    fireEvent.click(screen.getByText('새 여행 만들기'));
+    fireEvent.change(screen.getByLabelText('여행 이름'), { target: { value: 'Draft survives refresh' } });
+
+    currentState = { ...currentState, trips: [plannedTrip('trip-from-realtime')] };
+    view.rerender(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+
+    expect(await screen.findByText('Secret shared trip')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByLabelText('여행 이름')).toHaveValue('Draft survives refresh');
+  });
+
+  it('keeps an in-flight create visible when a realtime trip snapshot replaces the array', async () => {
+    const view = render(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+    await waitFor(() => expect(fetchRequests).toHaveLength(1));
+    await act(async () => fetchRequests[0].resolve({ ok: true, trips: [] }));
+
+    fireEvent.click(screen.getByText('새 여행 만들기'));
+    fireEvent.change(screen.getByLabelText('여행 이름'), { target: { value: 'Creating survives refresh' } });
+    fireEvent.change(screen.getByLabelText('가는 날'), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText('오는 날'), { target: { value: '2026-08-02' } });
+    fireEvent.click(screen.getByText('만들기'));
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    currentState = { ...currentState, trips: [plannedTrip('trip-from-realtime')] };
+    view.rerender(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+
+    expect(await screen.findByText('Secret shared trip')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('만드는 중...')).toBeDisabled();
+  });
+
+  it('keeps a refused-create error when a realtime trip snapshot replaces the array', async () => {
+    const view = render(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+    await waitFor(() => expect(fetchRequests).toHaveLength(1));
+    await act(async () => fetchRequests[0].resolve({ ok: true, trips: [] }));
+
+    fireEvent.click(screen.getByText('새 여행 만들기'));
+    fireEvent.change(screen.getByLabelText('여행 이름'), { target: { value: 'Error survives refresh' } });
+    fireEvent.change(screen.getByLabelText('가는 날'), { target: { value: '2026-08-01' } });
+    fireEvent.change(screen.getByLabelText('오는 날'), { target: { value: '2026-08-02' } });
+    fireEvent.click(screen.getByText('만들기'));
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    await act(async () => saveRequests[0].resolve(null));
+
+    currentState = { ...currentState, trips: [plannedTrip('trip-from-realtime')] };
+    view.rerender(<MemoryRouter initialEntries={['/trips']}><Harness /></MemoryRouter>);
+
+    expect(await screen.findByText('Secret shared trip')).toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByText('여행을 만들지 못했어요. 입력 내용은 유지되니 다시 시도해 주세요.')).toBeInTheDocument();
+    expect(screen.getByLabelText('여행 이름')).toHaveValue('Error survives refresh');
   });
 });
 

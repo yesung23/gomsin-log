@@ -79,7 +79,6 @@ describe('one shape for one job', () => {
     'src/pages/SchedulePage.tsx',
     'src/pages/TripsPage.tsx',
     'src/pages/TripDetailPage.tsx',
-    'src/components/cycle/CycleSharingSettings.tsx',
     'src/components/CycleSupportSection.tsx',
     'src/components/CycleTrackerSection.tsx',
   ];

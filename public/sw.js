@@ -22,6 +22,45 @@ const CACHEABLE_DESTINATIONS = new Set([
   'manifest',
 ]);
 
+function responseMatchesDestination(request, response) {
+  const contentType = (response.headers.get('Content-Type') || '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+  const pathname = new URL(request.url).pathname;
+
+  switch (request.destination) {
+    case 'script':
+      return pathname.startsWith('/assets/') && (
+        contentType === 'text/javascript'
+        || contentType === 'application/javascript'
+        || contentType === 'application/ecmascript'
+        || contentType === 'text/ecmascript'
+        || contentType === 'application/wasm'
+      );
+    case 'style':
+      return pathname.startsWith('/assets/') && contentType === 'text/css';
+    case 'font':
+      return pathname.startsWith('/assets/') && (
+        contentType.startsWith('font/')
+        || contentType === 'application/font-woff'
+        || contentType === 'application/font-sfnt'
+        || (contentType === 'application/octet-stream' && /\.woff2?$/.test(pathname))
+      );
+    case 'image':
+      return contentType.startsWith('image/');
+    case 'manifest':
+      return contentType === 'application/manifest+json' || contentType === 'application/json';
+    default:
+      return false;
+  }
+}
+
+async function matchCurrentCache(request) {
+  const cache = await caches.open(CACHE_NAME);
+  return cache.match(request);
+}
+
 // Installation must fail if the offline shell cannot be cached. Silently
 // accepting a partial cache installs a worker that promises offline support but
 // cannot provide it.
@@ -64,7 +103,7 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request).catch(async () =>
-        (await caches.match('/index.html')) ?? caches.match('/offline.html')),
+        (await matchCurrentCache('/index.html')) ?? matchCurrentCache('/offline.html')),
     );
     return;
   }
@@ -77,7 +116,12 @@ self.addEventListener('fetch', (event) => {
     fetch(request)
       .then((response) => {
         const cacheControl = response.headers.get('Cache-Control') || '';
-        if (response.ok && response.type === 'basic' && !/\bno-store\b/i.test(cacheControl)) {
+        if (
+          response.ok
+          && response.type === 'basic'
+          && !/\bno-store\b/i.test(cacheControl)
+          && responseMatchesDestination(request, response)
+        ) {
           // Clone synchronously, before returning the original response to the
           // browser. Cloning inside the later `caches.open().then(...)` callback
           // races with the browser consuming the body and throws
@@ -89,6 +133,6 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       })
-      .catch(async () => (await caches.match(request)) ?? Response.error()),
+      .catch(async () => (await matchCurrentCache(request)) ?? Response.error()),
   );
 });

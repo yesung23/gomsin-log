@@ -6,6 +6,10 @@ export interface PartnerMembershipSnapshot {
   joinedAt?: string;
 }
 
+export type PartnerMembershipLookupResult =
+  | { ok: true; partner: PartnerMembershipSnapshot | null }
+  | { ok: false; error: unknown };
+
 /** 요청을 시작한 active workspace와 여전히 같을 때만 상대 신원을 결속한다. */
 export function bindPartnerMembership(
   couple: CoupleInfo,
@@ -44,25 +48,14 @@ export function bindPartnerMembership(
  * Nothing else about the partner is selected. These two membership facts answer
  * the two product questions, and a wider select would have no purpose.
  */
-export async function fetchPartnerMembership(
+export async function fetchPartnerMembershipResult(
   coupleId: string,
   myUserId: string,
-): Promise<PartnerMembershipSnapshot | undefined> {
-  if (!isSupabaseConfigured || !supabase || !coupleId || !myUserId) return undefined;
+): Promise<PartnerMembershipLookupResult> {
+  if (!isSupabaseConfigured || !supabase || !coupleId || !myUserId) {
+    return { ok: false, error: new Error('Partner membership lookup unavailable') };
+  }
 
-  /*
-    Wrapped, because this is an ancillary lookup and an ancillary lookup must not
-    be able to break the app.
-
-    A rejected error is not the same as `{ error }`: the client can throw outright
-    on a transport failure, and this runs inside a `useEffect` where an unhandled
-    rejection is exactly that -- unhandled. `recordProductEvent` already takes this
-    shape for the same reason; this one did not, and the test run said so.
-
-    Every failure path returns `undefined`, which means §7.6's prompt is simply not
-    offered. That is the safe direction in every case: the prompt reveals nothing on
-    its own, so not showing it can only ever be conservative.
-  */
   try {
     const { data, error } = await supabase
       .from('couple_members')
@@ -70,21 +63,59 @@ export async function fetchPartnerMembership(
       .eq('couple_id', coupleId)
       .eq('status', 'active')
       .neq('user_id', myUserId)
-      .maybeSingle();
+      .limit(2);
 
-    if (error) {
-      console.warn('[gomsinlog] Could not read the partner join time.');
-      return undefined;
+    if (error) return { ok: false, error };
+    if (!Array.isArray(data)) {
+      return { ok: false, error: new Error('Malformed partner membership response') };
     }
-    if (typeof data?.user_id !== 'string' || !data.user_id) return undefined;
+    if (data.length === 0) return { ok: true, partner: null };
+    if (data.length !== 1) {
+      return { ok: false, error: new Error('Multiple active partner memberships') };
+    }
+
+    const row = data[0] as { user_id?: unknown; joined_at?: unknown };
+    if (
+      typeof row.user_id !== 'string'
+      || !row.user_id
+      || row.user_id === myUserId
+      || (row.joined_at !== null
+        && row.joined_at !== undefined
+        && (typeof row.joined_at !== 'string'
+          || !row.joined_at
+          || Number.isNaN(Date.parse(row.joined_at))))
+    ) {
+      return { ok: false, error: new Error('Malformed partner membership row') };
+    }
+
     return {
-      userId: data.user_id,
-      ...(typeof data.joined_at === 'string' ? { joinedAt: data.joined_at } : {}),
+      ok: true,
+      partner: {
+        userId: row.user_id,
+        ...(typeof row.joined_at === 'string' ? { joinedAt: row.joined_at } : {}),
+      },
     };
-  } catch {
-    console.warn('[gomsinlog] The partner join-time lookup threw.');
+  } catch (error) {
+    return { ok: false, error };
+  }
+}
+
+/**
+ * Fail-closed compatibility projection for ancillary callers.
+ *
+ * Full hydration consumes the strict result above so verified absence and an
+ * unavailable authority can never be confused.
+ */
+export async function fetchPartnerMembership(
+  coupleId: string,
+  myUserId: string,
+): Promise<PartnerMembershipSnapshot | undefined> {
+  const result = await fetchPartnerMembershipResult(coupleId, myUserId);
+  if (!result.ok) {
+    console.warn('[gomsinlog] Could not read partner membership.');
     return undefined;
   }
+  return result.partner ?? undefined;
 }
 
 /** 기존 호출부를 위한 최소 projection. */

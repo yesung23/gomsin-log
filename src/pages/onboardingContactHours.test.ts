@@ -21,12 +21,16 @@ const SOURCE = readFileSync(resolve(process.cwd(), 'src/pages/OnboardingPage.tsx
 
 describe('both roles are asked when they want to hear from the app', () => {
   it('gives 곰신 five steps, not four', () => {
-    expect(SOURCE).toContain("const totalSteps = role === 'gomsin' ? 5 : 6;");
+    expect(SOURCE).toContain(
+      "const totalSteps = usesMilitaryFeatures(relationshipContext) && role === 'soldier' ? 6 : 5;",
+    );
   });
 
   it('skips 복무 정보 for 곰신 but lands them on contact hours', () => {
     // The whole change in one line: jump to 6, not past it to 7.
-    expect(SOURCE).toContain("if (role === 'gomsin' && step === 4) {\n      setStep(6);");
+    expect(SOURCE).toContain(
+      "if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 4) {\n      setStep(6);",
+    );
     expect(SOURCE).not.toContain("if (role === 'gomsin' && step === 4) {\n      setStep(7);");
   });
 
@@ -38,7 +42,10 @@ describe('both roles are asked when they want to hear from the app', () => {
   });
 
   it('lets 곰신 go back to the anniversary, not into 복무 정보', () => {
-    expect(SOURCE).toContain("if (role === 'gomsin' && step === 6) {\n      setStep(4);");
+    expect(SOURCE).toContain(
+      "if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 6) {",
+    );
+    expect(SOURCE).toContain("setStep(spaceMode === 'join' ? 3 : 4);");
   });
 });
 

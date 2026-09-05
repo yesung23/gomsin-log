@@ -19,6 +19,7 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: () => 'ios',
     isNativePlatform: () => true,
   },
+  registerPlugin: vi.fn(() => ({})),
 }));
 
 vi.mock('@/components/MobileShell', () => ({

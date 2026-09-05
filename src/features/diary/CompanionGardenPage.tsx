@@ -7,11 +7,14 @@ import { togetherDays } from '@/lib/coupleStats';
 import { isCalendarDate } from '@/lib/trips';
 import { deriveCompanionGardenState } from './companionGarden';
 import {
+  loadGardenState,
+  saveGardenPlanting,
   loadGardenAccessories,
   saveGardenAccessory,
   type GardenAccessory,
   type GardenCompanionId,
 } from '@/lib/companionGardenLocalState';
+import { loadCompanionShopState } from '@/lib/companionShopLocalState';
 import { CompanionGardenView } from './CompanionGardenView';
 
 function CompanionGardenPageBody() {
@@ -20,14 +23,33 @@ function CompanionGardenPageBody() {
   const couple = state.profile.couple;
   const anniversaryDate = couple.anniversaryDate;
   const userId = state.authenticatedUser?.id || state.profile.id || '';
+  const [gardenLocalState, setGardenLocalState] = useState(() => loadGardenState(userId));
   const [accessories, setAccessories] = useState(() => loadGardenAccessories(userId));
+  const [ownedAccessories, setOwnedAccessories] = useState(
+    () => loadCompanionShopState(userId).ownedAccessories,
+  );
 
   useEffect(() => {
+    setGardenLocalState(loadGardenState(userId));
     setAccessories(loadGardenAccessories(userId));
+    setOwnedAccessories(loadCompanionShopState(userId).ownedAccessories);
   }, [userId]);
 
-  const changeAccessory = (companion: GardenCompanionId, accessory: GardenAccessory) => {
-    setAccessories(saveGardenAccessory(userId, companion, accessory));
+  const plantTree = (): boolean => {
+    const next = saveGardenPlanting(userId);
+    if (!next.planted) return false;
+    setGardenLocalState(next);
+    setAccessories(next.accessories);
+    return true;
+  };
+
+  const changeAccessory = (companion: GardenCompanionId, accessory: GardenAccessory): boolean => {
+    if (!userId || (accessory !== 'none' && !ownedAccessories.includes(accessory))) return false;
+    if (accessories[companion] === accessory) return true;
+    const next = saveGardenAccessory(userId, companion, accessory);
+    if (next[companion] !== accessory) return false;
+    setAccessories(next);
+    return true;
   };
 
   const hasLocalActiveCouple = couple.connected && couple.status === 'active';
@@ -61,15 +83,19 @@ function CompanionGardenPageBody() {
       state={gardenState}
       unavailableReason={unavailableReason}
       accessories={accessories}
+      planted={gardenLocalState.planted}
+      ownedAccessories={ownedAccessories}
       onAccessoryChange={changeAccessory}
+      onPlantTree={plantTree}
       onBack={() => navigate('/diary')}
+      onOpenShop={() => navigate('/shop')}
     />
   );
 }
 
 export function CompanionGardenPage() {
   return (
-    <MobileShell>
+    <MobileShell hideNav surface="garden">
       <CompanionGardenPageBody />
     </MobileShell>
   );

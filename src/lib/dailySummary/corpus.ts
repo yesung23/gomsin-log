@@ -85,7 +85,8 @@ export function selectDailySummaryCorpus(input: DailySummaryCorpusInput): DailyS
     // active membership에서 확인한 정확한 현재 상대만 허용한다. "내가 아님"은 충분하지 않다.
     && record.userId === partnerUserId
     && !isOwnRecord(record, { userId: viewerUserId })
-    && !record.isPrivate
+    // 부분 hydration/corrupted cache에서 privacy 값이 없으면 shared라고 추측하지 않는다.
+    && record.isPrivate === false
     && isRecordContentAvailable(record)
     && record.date === todayStr
   ));

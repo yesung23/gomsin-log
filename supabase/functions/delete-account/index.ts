@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.111.0';
 import { handleDeleteAccountRequest } from './handler.ts';
 import { createAdminClientFetch } from '../_shared/adminSecret.ts';
+import { revokeAppleCredentialForDeletion } from '../_shared/appleAuthCredentials.ts';
 
 /**
  * Thin Deno entrypoint.
@@ -15,4 +16,12 @@ Deno.serve((request) => handleDeleteAccountRequest(request, {
     auth: { autoRefreshToken: false, persistSession: false },
     global: { fetch: createAdminClientFetch(url, secretKey) },
   }),
+  prepareAppleCredentialDeletion: ({ admin, user, attemptId }) => (
+    revokeAppleCredentialForDeletion({
+      admin,
+      user,
+      attemptId,
+      env: (key) => Deno.env.get(key),
+    })
+  ),
 }));

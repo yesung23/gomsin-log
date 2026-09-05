@@ -40,7 +40,21 @@ import {
  *    stops account B from replaying account A's writes into B's couple space.
  */
 
-export const OUTBOX_SCHEMA_VERSION = 1;
+export const OUTBOX_SCHEMA_VERSION = 2;
+export const OUTBOX_MEDIA_PLAN_VERSION = 1 as const;
+
+export type QueuedMediaSlot = {
+  /** Stable object basename reused after an upload response is lost. */
+  objectId: string;
+  fileIndex: number;
+  byteLength: number;
+  mimeType: string;
+};
+
+export type QueuedMediaPlan = {
+  version: typeof OUTBOX_MEDIA_PLAN_VERSION;
+  slots: QueuedMediaSlot[];
+};
 
 /**
  * Why a queued write could not be delivered.
@@ -92,6 +106,8 @@ export type QueuedRecord = {
    * Legacy entries omit this and retain the normal partial-media behaviour.
    */
   allOrNothingMedia?: boolean;
+  /** Immutable file-to-object mapping; generated and persisted before upload. */
+  mediaPlan?: QueuedMediaPlan;
   /**
    * The queued record.
    *
@@ -111,6 +127,66 @@ export type QueuedRecord = {
   files: File[];
 };
 
+const OUTBOX_OBJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function createQueuedMediaPlan(
+  files: File[],
+  randomId: () => string = () => crypto.randomUUID(),
+): QueuedMediaPlan {
+  return {
+    version: OUTBOX_MEDIA_PLAN_VERSION,
+    slots: files.map((file, fileIndex) => ({
+      objectId: randomId(),
+      fileIndex,
+      byteLength: file.size,
+      mimeType: file.type,
+    })),
+  };
+}
+
+export function isValidQueuedMediaPlan(
+  plan: QueuedMediaPlan | undefined,
+  files: File[],
+): plan is QueuedMediaPlan {
+  if (!plan || plan.version !== OUTBOX_MEDIA_PLAN_VERSION || plan.slots.length !== files.length) {
+    return false;
+  }
+  const objectIds = new Set<string>();
+  return plan.slots.every((slot, index) => {
+    const file = files[index];
+    if (!file
+      || slot.fileIndex !== index
+      || !OUTBOX_OBJECT_ID_PATTERN.test(slot.objectId)
+      || objectIds.has(slot.objectId)
+      || slot.byteLength !== file.size
+      || slot.mimeType !== file.type) return false;
+    objectIds.add(slot.objectId);
+    return true;
+  });
+}
+
+export type QueuedMediaPlanResult =
+  | { kind: 'ready'; entry: QueuedRecord; created: boolean }
+  | { kind: 'invalid' };
+
+/** Upgrade a legacy entry before any remote upload; never replace a corrupt plan. */
+export async function ensureQueuedMediaPlan(
+  persistence: OutboxPersistence,
+  entry: QueuedRecord,
+  canApply: () => boolean = () => true,
+): Promise<QueuedMediaPlanResult> {
+  if (entry.files.length === 0) return { kind: 'ready', entry, created: false };
+  if (entry.mediaPlan) {
+    return isValidQueuedMediaPlan(entry.mediaPlan, entry.files)
+      ? { kind: 'ready', entry, created: false }
+      : { kind: 'invalid' };
+  }
+  const upgraded = { ...entry, mediaPlan: createQueuedMediaPlan(entry.files) };
+  if (!canApply()) return { kind: 'invalid' };
+  await persistence.put(upgraded);
+  return { kind: 'ready', entry: upgraded, created: true };
+}
+
 /**
  * Where entries live between sessions.
  *
@@ -123,8 +199,15 @@ export type QueuedRecord = {
  */
 export interface OutboxPersistence {
   all(): Promise<QueuedRecord[]>;
+  /** Insert a brand-new queue id. Must reject rather than replace a duplicate. */
+  add(entry: QueuedRecord): Promise<void>;
+  /** Update an entry already owned by the delivery/retry workflow. */
   put(entry: QueuedRecord): Promise<void>;
+  /** Atomically update several already-owned entries in one durable transaction. */
+  putMany(entries: QueuedRecord[]): Promise<void>;
   remove(id: string): Promise<void>;
+  /** Atomically remove several entries in one durable transaction. */
+  removeMany(ids: string[]): Promise<void>;
 }
 
 /** Entries for one account, oldest first, so a day is replayed in the order written. */
@@ -231,8 +314,10 @@ export async function readQueuedRecord(
 export async function enqueueRecord(
   persistence: OutboxPersistence,
   entry: Omit<QueuedRecord, 'attempts' | 'queuedAt' | 'sealedRecord'> & { queuedAt?: string },
+  canInsert: () => boolean = () => true,
 ): Promise<QueuedRecord> {
   const queuedAt = entry.queuedAt ?? new Date().toISOString();
+  const mediaPlan = entry.files.length > 0 ? createQueuedMediaPlan(entry.files) : undefined;
   let queued: QueuedRecord;
 
   if (localCacheKey && entry.record) {
@@ -244,13 +329,17 @@ export async function enqueueRecord(
     });
     // The plaintext is dropped from the stored entry, not kept alongside the
     // ciphertext. Keeping both would make the encryption decorative.
-    queued = { ...entry, record: undefined, sealedRecord, queuedAt, attempts: 0 };
+    queued = { ...entry, record: undefined, sealedRecord, mediaPlan, queuedAt, attempts: 0 };
     delete queued.record;
   } else {
-    queued = { ...entry, queuedAt, attempts: 0 };
+    queued = { ...entry, mediaPlan, queuedAt, attempts: 0 };
   }
 
-  await persistence.put(queued);
+  // Sealing is asynchronous. The caller's cooperative lock still owns the
+  // operation, but identity or an out-of-contract writer may have changed the
+  // local fence while crypto was running. Re-check before touching IndexedDB.
+  if (!canInsert()) throw new Error('Outbox insert authorization changed.');
+  await persistence.add(queued);
   return queued;
 }
 
@@ -268,14 +357,25 @@ export type DeliveryOutcome =
  * exhausting the cap blocks it too. Nothing here ever silently discards an entry --
  * only a successful delivery removes one.
  */
-export type EntryDisposition = 'delivered' | 'requeued' | 'blocked';
+export type EntryDisposition = 'delivered' | 'requeued' | 'blocked' | 'preserved';
 
 export async function applyDeliveryOutcome(
   persistence: OutboxPersistence,
   entry: QueuedRecord,
   outcome: DeliveryOutcome,
+  canApply: () => boolean = () => true,
   now: () => string = () => new Date().toISOString(),
 ): Promise<EntryDisposition> {
+  // The caller owns the cooperative account lock. This final synchronous guard
+  // catches a fence or identity change observed after the remote/decrypt await;
+  // preserving the original object is safer than guessing whether an uncertain
+  // response committed. It is not a claim of protection from arbitrary writers.
+  try {
+    if (!canApply()) return 'preserved';
+  } catch {
+    return 'preserved';
+  }
+
   if (outcome.ok) {
     await persistence.remove(entry.id);
     return 'delivered';
@@ -336,6 +436,6 @@ export async function purgeAccount(
   userId: string,
 ): Promise<number> {
   const mine = await pendingForAccount(persistence, userId);
-  for (const entry of mine) await persistence.remove(entry.id);
+  await persistence.removeMany(mine.map((entry) => entry.id));
   return mine.length;
 }

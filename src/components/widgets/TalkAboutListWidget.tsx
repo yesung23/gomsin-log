@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageCircle, Check, ChevronDown, ChevronUp, Phone } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,6 +6,7 @@ import { useStore } from '@/lib/useStore';
 import { buildTalkAboutTopics } from '@/lib/talkAboutList';
 import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus';
 import { recordProductEvent } from '@/lib/productEvents';
+import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 
 /**
  * "오늘 이야기할 것" — the short list the marks add up to.
@@ -22,7 +23,13 @@ import { recordProductEvent } from '@/lib/productEvents';
 const VISIBLE_LIMIT = 5;
 
 export function TalkAboutListWidget() {
-  const { state, sharedSyncStatus, resolveTalkAbout, setHighlightedRecordId } = useStore();
+  const {
+    state,
+    sharedSyncStatus,
+    talkAboutSyncStatus,
+    resolveTalkAbout,
+    setHighlightedRecordId,
+  } = useStore();
   /*
     Quarantine empties `records` -- one's OWN records included (`store.tsx`, the
     `nextState` that assigns `records: []`). A surface that reads only the length
@@ -49,6 +56,8 @@ export function TalkAboutListWidget() {
    * adding the separate tab §8 explicitly rules out.
    */
   const [expanded, setExpanded] = useState(false);
+  const pendingRef = useRef<string | null>(null);
+  const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
 
   const topics = useMemo(
     () => buildTalkAboutTopics(
@@ -61,71 +70,103 @@ export function TalkAboutListWidget() {
 
   const visible = expanded ? topics : topics.slice(0, VISIBLE_LIMIT);
   const hiddenCount = topics.length - visible.length;
+  const coordinationUnavailable =
+    sharedSyncStatus === 'unavailable' || talkAboutSyncStatus === 'unavailable';
 
   return (
     <div data-testid="widget-talk-about-list">
       <h3 className="text-heading text-foreground mb-2 flex items-center gap-1.5">
         <MessageCircle size={14} className="text-coral" aria-hidden="true" />
-        오늘 이야기할 것 · {topics.length}
+        오늘 이야기할 것{coordinationUnavailable ? null : <> · {topics.length}</>}
       </h3>
 
-      {topics.length === 0 ? (
+      {coordinationUnavailable ? (
         <p className="text-caption text-muted-foreground py-2 break-keep">
           {sharedSyncStatus === 'unavailable'
-            ? '기록을 확인하는 중이에요.'
-            : <>아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.</>}
+            ? '공유 기록을 확인하는 중이에요.'
+            : '책갈피를 확인하는 중이에요. 확인되면 다시 보여드려요.'}
+        </p>
+      ) : topics.length === 0 ? (
+        <p className="text-caption text-muted-foreground py-2 break-keep">
+          아직 표시한 기록이 없어요. 기록에서 &apos;이따 이야기하기&apos;를 눌러두면 여기 모여요.
         </p>
       ) : (
         <ul className="divide-y divide-border">
           {visible.map((topic) => (
-            <li key={topic.recordId} className="py-2 flex items-start gap-2">
+            <li
+              key={topic.recordId}
+              aria-busy={pendingRecordId === topic.recordId || undefined}
+              className="py-2 flex items-start gap-2"
+            >
               <button
                 type="button"
                 onClick={() => {
                   setHighlightedRecordId(topic.recordId);
                   // Durable addressing from P2, so a reload still lands here.
-                  navigate(`/record?record=${topic.recordId}`);
+                  navigate(`/record?record=${encodeURIComponent(topic.recordId)}`);
                 }}
                 /* The row that opens 정확한 원본. Tinted, not scaled -- it shares a line
                    with the 이야기했어요 control and the two must not move apart. */
                 className="press-response-row flex-1 min-w-0 text-left min-h-11 rounded-control px-1 -mx-1"
               >
                 <span className="block text-body text-foreground break-keep line-clamp-2">
-                  {topic.record
-                    ? (topic.record.log
-                      || (topic.record.attachments?.length ? '사진·음성으로 남긴 순간' : '남긴 순간'))
-                    : '이 기록은 더 이상 볼 수 없어요'}
+                  {topic.record.log
+                    || (topic.record.attachments?.length ? '사진·음성으로 남긴 순간' : '남긴 순간')}
                 </span>
                 <span className="block text-caption text-muted-foreground mt-0.5">
-                  {topic.record
-                    ? `${topic.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${topic.record.date}`
-                    : '원본을 확인할 수 없어요'}
-                  {topic.markedByViewer ? ' · 내가 표시' : ` · ${profile.couple.partnerName || '상대방'}가 표시`}
+                  {`${topic.record.userId === profile.id ? profile.myName : profile.couple.partnerName || '상대방'} · ${topic.record.date}`}
+                  {topic.actorState === 'both'
+                    ? ' · 함께 표시'
+                    : topic.markedByViewer
+                      ? ' · 내가 표시'
+                      : ` · ${profile.couple.partnerName || '상대방'}가 표시`}
                 </span>
                 <span className="block text-caption text-coral mt-0.5">원본 보기</span>
               </button>
               <button
                 type="button"
                 onClick={async () => {
+                  if (pendingRef.current) return;
                   if (isOffline) {
                     toast.error(OFFLINE_READONLY_MESSAGE);
                     return;
                   }
-                  const result = await resolveTalkAbout(topic.recordId);
-                  if (!result.ok) {
-                    toast.error(result.error || '처리하지 못했어요.');
-                    return;
+                  pendingRef.current = topic.recordId;
+                  setPendingRecordId(topic.recordId);
+                  try {
+                    const result = await resolveTalkAbout(topic.recordId);
+                    if (!result.ok) {
+                      toast.error(result.error || '처리하지 못했어요.');
+                      return;
+                    }
+                    if (result.syncPending) {
+                      toast.warning(TALK_ABOUT_SYNC_PENDING_MESSAGE);
+                      return;
+                    }
+                    if (result.changed === false) {
+                      toast.info('이미 목록에서 정리된 이야기거리예요.');
+                    } else {
+                      const eventUserId = state.authenticatedUser?.id || profile.id;
+                      if (eventUserId) {
+                        void recordProductEvent({
+                          kind: 'talk_about_resolved',
+                          screen: 'home',
+                          subjectId: topic.recordId,
+                        }, { expectedUserId: eventUserId });
+                      }
+                      toast.success('이야기한 걸로 정리했어요.');
+                    }
+                  } catch {
+                    toast.error('처리하지 못했어요. 잠시 후 다시 시도해 주세요.');
+                  } finally {
+                    pendingRef.current = null;
+                    setPendingRecordId(null);
                   }
-                  void recordProductEvent({
-                    kind: 'talk_about_resolved',
-                    screen: 'home',
-                    subjectId: topic.recordId,
-                  });
-                  toast.success('이야기한 걸로 정리했어요.');
                 }}
+                disabled={pendingRecordId !== null || isOffline}
                 aria-label="이야기했어요"
                 /* Square and small, so this one scales. 0.95 was a flinch at 44px. */
-                className="press-response shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground"
+                className="press-response shrink-0 min-h-11 min-w-11 flex items-center justify-center rounded-control text-muted-foreground disabled:opacity-50"
               >
                 <Check size={16} aria-hidden="true" />
               </button>
@@ -145,7 +186,7 @@ export function TalkAboutListWidget() {
         what someone came here to read; this is what they do next, and only
         sometimes.
       */}
-      {topics.length > 0 && (
+      {!coordinationUnavailable && topics.length > 0 && (
         <button
           type="button"
           onClick={() => navigate('/call')}
@@ -157,7 +198,7 @@ export function TalkAboutListWidget() {
         </button>
       )}
 
-      {(hiddenCount > 0 || expanded) && (
+      {!coordinationUnavailable && (hiddenCount > 0 || expanded) && (
         <button
           type="button"
           onClick={() => setExpanded((open) => !open)}

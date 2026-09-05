@@ -54,7 +54,10 @@ export function NotificationPreferencesSection({ userId }: { userId: string }) {
       .some((key) => preferences[key] === true && patch[key] === false);
     update(patch);
     if (turnedSomethingOff) {
-      void recordProductEvent({ kind: 'notifications_disabled', screen: 'settings' });
+      void recordProductEvent(
+        { kind: 'notifications_disabled', screen: 'settings' },
+        { expectedUserId: userId },
+      );
     }
   };
 

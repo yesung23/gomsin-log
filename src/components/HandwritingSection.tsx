@@ -7,12 +7,6 @@ import {
   saveHandwritingEnabled,
 } from '@/lib/handwritingPreference';
 import {
-  applyPaperTextureAttribute,
-  loadPaperTexture,
-  savePaperTexture,
-  type PaperTexture,
-} from '@/lib/paperTexturePreference';
-import {
   applyRecordTextSizeAttribute,
   loadRecordTextSize,
   saveRecordTextSize,
@@ -42,14 +36,12 @@ import {
  */
 export function HandwritingSection({ userId }: { userId: string }) {
   const [enabled, setEnabled] = useState(() => loadHandwritingEnabled(userId));
-  const [paper, setPaper] = useState<PaperTexture>(() => loadPaperTexture(userId));
   const [recordTextSize, setRecordTextSize] = useState<RecordTextSize>(
     () => loadRecordTextSize(userId),
   );
 
   useEffect(() => {
     setEnabled(loadHandwritingEnabled(userId));
-    setPaper(loadPaperTexture(userId));
     setRecordTextSize(loadRecordTextSize(userId));
   }, [userId]);
 
@@ -57,12 +49,6 @@ export function HandwritingSection({ userId }: { userId: string }) {
     setEnabled(next);
     saveHandwritingEnabled(userId, next);
     applyHandwritingAttribute(next);
-  };
-
-  const choosePaper = (next: PaperTexture) => {
-    setPaper(next);
-    savePaperTexture(userId, next);
-    applyPaperTextureAttribute(next);
   };
 
   const chooseRecordTextSize = (next: RecordTextSize) => {
@@ -75,31 +61,6 @@ export function HandwritingSection({ userId }: { userId: string }) {
     <section className="space-y-2" data-testid="handwriting-preference">
       <h2 className="text-heading text-foreground">보기</h2>
       <Card className="space-y-3">
-        <div>
-          <p className="text-label font-semibold text-foreground">종이 바탕</p>
-          <div className="mt-2 grid grid-cols-2 gap-2 rounded-control bg-muted p-1">
-            <button
-              type="button"
-              onClick={() => choosePaper('plain')}
-              aria-pressed={paper === 'plain'}
-              className={`press-response min-h-11 rounded-control text-label font-semibold ${paper === 'plain' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
-            >
-              무지 종이
-            </button>
-            <button
-              type="button"
-              onClick={() => choosePaper('ruled')}
-              aria-pressed={paper === 'ruled'}
-              className={`press-response min-h-11 rounded-control text-label font-semibold ${paper === 'ruled' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
-            >
-              줄 종이
-            </button>
-          </div>
-          <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
-            무지 종이는 가로줄을 없애 글과 사진에 더 집중할 수 있어요.
-          </p>
-        </div>
-        <div className="ink-rule" aria-hidden="true" />
         <div>
           <p className="text-label font-semibold text-foreground">게시물·스토리 글자 크기</p>
           <div className="mt-2 grid grid-cols-3 gap-2 rounded-control bg-muted p-1">

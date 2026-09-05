@@ -6,8 +6,6 @@ import {
   periodRangesOnDate,
 } from '@/lib/cycle';
 import {
-  fertilityOccursOnDate,
-  ovulationOccursOnDate,
   predictionOccursOnDate,
   type CyclePrediction,
 } from '@/lib/cyclePrediction';
@@ -31,18 +29,10 @@ interface CycleCalendarProps {
 /**
  * The month view, and the only place every kind of day is shown together.
  *
- * Four states now, not two. The fertility window and the estimated ovulation day
- * were computed by `predictCycle` from the beginning and drawn nowhere -- they
- * reached the PARTNER projection while the owner's own calendar stayed silent
- * about them, which meant the person the estimate describes was the only one who
- * could not see it.
- *
  * Every state carries a non-colour cue, because colour alone fails for
  * colour-blind users and in high-contrast modes:
  *   actual period    -> filled surface + a SOLID 물방울
  *   predicted window -> dashed outline + an OUTLINED 물방울
- *   fertile window   -> quiet tint + an outlined 씨앗
- *   ovulation day    -> outlined heart
  *   condition logged -> small hollow dot, alongside any of the above
  *   today            -> thin ring
  *   selected         -> high-emphasis outline
@@ -50,8 +40,8 @@ interface CycleCalendarProps {
  * Solid means recorded and outlined means estimated, consistently, so the one
  * distinction with the highest cost of being misread does not depend on hue.
  * `CycleLegend` names all of it, and the full meaning is written into `aria-label`
- * too, so a screen reader hears "8월 25일, 배란 예상일, 컨디션 기록 있음" rather than
- * a bare number.
+ * too, so a screen reader hears "2026-08-25, 생리 예상 범위, 컨디션 기록 있음"
+ * rather than a bare number.
  */
 export function CycleCalendar({
   year,
@@ -118,9 +108,8 @@ export function CycleCalendar({
             One mark per day, resolved by precedence rather than stacking.
 
             A recorded period outranks every estimate -- what happened beats what was
-            guessed. Ovulation outranks the fertile window it sits inside, because a
-            single day is more specific than the six around it. Two glyphs in a 44px
-            cell would collide under a two-digit date anyway.
+            guessed. Two glyphs in a 44px cell would collide under a two-digit date,
+            so the independent condition marker is the only allowed companion.
 
             Days with no mark are left blank ON PURPOSE. Drawing a "low likelihood"
             symbol would turn an absence of information into a reassurance, and this
@@ -128,15 +117,7 @@ export function CycleCalendar({
           */
           const mark: CycleDayMark | null = isActual
             ? 'period'
-            : ovulationOccursOnDate(prediction, date)
-              ? 'ovulation'
-              : isPredicted
-                ? 'period_predicted'
-                : fertilityOccursOnDate(prediction, date)
-                  ? 'fertile'
-                  : null;
-
-          const isFertile = mark === 'fertile' || mark === 'ovulation';
+            : isPredicted ? 'period_predicted' : null;
 
           const label = [
             date,
@@ -172,10 +153,7 @@ export function CycleCalendar({
                 'press-response border',
                 isActual && 'bg-coral/20 border-coral/40 text-coral-strong font-bold',
                 isPredicted && 'border-dashed border-coral/50 text-coral-strong',
-                /* A tint one step quieter than the period's: the fertile window is
-                   an estimate and must not compete with a recorded day. */
-                isFertile && 'border-transparent bg-muted/50 text-foreground',
-                !isActual && !isPredicted && !isFertile
+                !isActual && !isPredicted
                   && 'border-transparent text-foreground hover:bg-muted',
                 isToday && !isSelected && 'ring-1 ring-coral/60',
                 isSelected && 'ring-2 ring-navy ring-offset-1',
@@ -185,7 +163,7 @@ export function CycleCalendar({
               {/*
                 The marker row. One state glyph plus, independently, the hollow dot
                 for a logged condition -- a condition note can coexist with any of
-                the four states, so it is the one thing allowed to sit alongside.
+                either period state, so it is the one thing allowed to sit alongside.
                 Fixed height so a day with no marks keeps the same baseline as one
                 with two, and the number grid stays straight.
               */}

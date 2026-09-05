@@ -1,7 +1,12 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { emotionFlowForStorage } from '@/lib/privacy';
 import { classifyServerError, type ServerErrorKind } from '@/lib/serverErrors';
-import { sanitizePhotoForUpload } from '@/lib/imageSanitization';
+import {
+  SANITIZED_PHOTO_EXTENSION,
+  SANITIZED_PHOTO_MIME,
+  sanitizePhotoForUpload,
+} from '@/lib/imageSanitization';
+import { isPreparedRecordPhotoRendition, type PreparedRecordPhotoRendition } from '@/lib/recordPhotoRenditions';
 import {
   RECORD_CIPHER_GLE1,
   RECORD_CIPHER_PLAINTEXT,
@@ -11,7 +16,7 @@ import {
   type RecordCryptoEnvironment,
 } from '@/app/records/contentCrypto';
 import { fromBase64 } from '@/crypto/bytes';
-import { DailyRecord, Attachment } from '@/types';
+import { DailyRecord, Attachment, type PhotoRenditionDescriptor } from '@/types';
 
 // ==========================================
 // E2EE routing (P5)
@@ -61,7 +66,7 @@ export function encryptionRefusalReason(): ServerErrorKind {
  */
 export type RecordWriteIntent =
   | { kind: 'create' }
-  | { kind: 'update'; expectedRevision: number };
+  | { kind: 'update'; expectedRevision: number; mediaOperationId?: string };
 
 /** The five protected fields, as the sealed document carries them. */
 function documentForRecord(record: DailyRecord, coupleId: string) {
@@ -150,6 +155,12 @@ export type RecordsFetchResult =
   | { ok: true; records: DailyRecord[]; mediaUnavailable?: ServerErrorKind }
   | { ok: false; records: []; error: unknown };
 
+/** Stay below Supabase/PostgREST's configurable response-row ceiling. */
+export const RECORDS_PAGE_SIZE = 500;
+
+/** Keep Storage signing requests small enough to retry and diagnose independently. */
+export const SIGNED_URL_BATCH_SIZE = 100;
+
 const ATTACHMENT_TYPES: ReadonlySet<Attachment['type']> = new Set([
   'photo',
   'video',
@@ -201,6 +212,165 @@ function mapAuthenticatedAttachment(
   };
 }
 
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_TEXT = /^[0-9a-f]{64}$/;
+const PHOTO_METADATA_BATCH_SIZE = 100;
+
+function recordPhotoMediaId(
+  attachment: Attachment,
+  coupleId: string,
+  recordId: string,
+): string | null {
+  if (attachment.type !== 'photo' || !isCanonicalRecordMediaPath(attachment.path, coupleId, recordId)) {
+    return null;
+  }
+  const filename = attachment.path.split('/')[2];
+  const match = /^([0-9a-f-]+)\.jpg$/i.exec(filename);
+  return match && UUID_TEXT.test(match[1]) ? match[1].toLowerCase() : null;
+}
+
+function readPhotoDescriptor(
+  value: unknown,
+  maximumPixels: number,
+  maximumBytes: number,
+): PhotoRenditionDescriptor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const mediaObjectId = typeof candidate.media_object_id === 'string'
+    ? candidate.media_object_id.toLowerCase()
+    : '';
+  const widthPx = candidate.width_px;
+  const heightPx = candidate.height_px;
+  const byteSize = candidate.byte_size;
+  if (
+    !UUID_TEXT.test(mediaObjectId)
+    || typeof widthPx !== 'number' || !Number.isSafeInteger(widthPx) || widthPx < 1 || widthPx > maximumPixels
+    || typeof heightPx !== 'number' || !Number.isSafeInteger(heightPx) || heightPx < 1 || heightPx > maximumPixels
+    || typeof byteSize !== 'number' || !Number.isSafeInteger(byteSize) || byteSize < 1 || byteSize > maximumBytes
+    || typeof candidate.sha256 !== 'string' || !SHA256_TEXT.test(candidate.sha256)
+    || candidate.mime_type !== SANITIZED_PHOTO_MIME
+  ) return null;
+  return {
+    mediaObjectId,
+    widthPx,
+    heightPx,
+    byteSize,
+    sha256: candidate.sha256,
+    mimeType: SANITIZED_PHOTO_MIME,
+  };
+}
+
+type ValidPhotoMetadata = {
+  recordId: string;
+  masterMediaObjectId: string;
+  sourceRevision: string;
+  screenMaster: PhotoRenditionDescriptor;
+  thumbnail: PhotoRenditionDescriptor;
+};
+
+function readPhotoMetadata(value: unknown): ValidPhotoMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const recordId = typeof candidate.record_id === 'string' ? candidate.record_id.toLowerCase() : '';
+  const masterMediaObjectId = typeof candidate.media_id === 'string'
+    ? candidate.media_id.toLowerCase()
+    : '';
+  const sourceRevision = typeof candidate.source_revision === 'string'
+    ? candidate.source_revision.toLowerCase()
+    : '';
+  const screenMaster = readPhotoDescriptor(candidate.screen_master, 2048, 10_485_760);
+  const thumbnail = readPhotoDescriptor(candidate.thumbnail, 640, 1_048_576);
+  if (
+    !UUID_TEXT.test(recordId)
+    || !UUID_TEXT.test(masterMediaObjectId)
+    || !UUID_TEXT.test(sourceRevision)
+    || !screenMaster
+    || !thumbnail
+    || screenMaster.mediaObjectId !== masterMediaObjectId
+    || thumbnail.mediaObjectId === masterMediaObjectId
+    || thumbnail.widthPx > screenMaster.widthPx
+    || thumbnail.heightPx > screenMaster.heightPx
+  ) return null;
+  return { recordId, masterMediaObjectId, sourceRevision, screenMaster, thumbnail };
+}
+
+function isMissingRecordPhotoMetadataRpc(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as Record<string, unknown>;
+  const code = typeof candidate.code === 'string' ? candidate.code : '';
+  const message = typeof candidate.message === 'string' ? candidate.message : '';
+  const exactPostgrestMissing = /^Could not find the function public\.get_record_photo_metadata\(p_record_ids\) in the schema cache$/;
+  const exactPostgresMissing = /^function public\.get_record_photo_metadata\(uuid\[\]\) does not exist$/;
+  return (code === 'PGRST202' && exactPostgrestMissing.test(message))
+    || (code === '42883' && exactPostgresMissing.test(message));
+}
+
+type PhotoMetadataAvailability = {
+  byRecordAndMaster: Map<string, ValidPhotoMetadata>;
+  unavailable?: ServerErrorKind;
+  legacyMasterAllowed?: boolean;
+};
+
+function photoMetadataKey(recordId: string, masterMediaObjectId: string): string {
+  return `${recordId.toLowerCase()}\u0000${masterMediaObjectId.toLowerCase()}`;
+}
+
+async function fetchRecordPhotoMetadata(recordIds: string[]): Promise<PhotoMetadataAvailability> {
+  const byRecordAndMaster = new Map<string, ValidPhotoMetadata>();
+  const seenMasterIds = new Set<string>();
+  const seenThumbnailIds = new Set<string>();
+  const requested = new Set(recordIds.map((id) => id.toLowerCase()));
+  for (let offset = 0; offset < recordIds.length; offset += PHOTO_METADATA_BATCH_SIZE) {
+    const batch = recordIds.slice(offset, offset + PHOTO_METADATA_BATCH_SIZE);
+    let data: unknown;
+    let error: unknown;
+    try {
+      const response = await supabase!.rpc('get_record_photo_metadata', { p_record_ids: batch });
+      data = response.data;
+      error = response.error;
+    } catch (caught) {
+      return { byRecordAndMaster: new Map(), unavailable: classifyServerError(caught).kind };
+    }
+    if (error) {
+      if (isMissingRecordPhotoMetadataRpc(error)) {
+        return { byRecordAndMaster: new Map(), legacyMasterAllowed: true };
+      }
+      return { byRecordAndMaster: new Map(), unavailable: classifyServerError(error).kind };
+    }
+    if (!Array.isArray(data)) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+
+    const valid = data.map(readPhotoMetadata).filter((item): item is ValidPhotoMetadata => !!item);
+    if (valid.length !== data.length) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+    const keyCounts = new Map<string, number>();
+    const masterCounts = new Map<string, number>();
+    const thumbnailCounts = new Map<string, number>();
+    for (const item of valid) {
+      const key = photoMetadataKey(item.recordId, item.masterMediaObjectId);
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+      masterCounts.set(item.masterMediaObjectId, (masterCounts.get(item.masterMediaObjectId) ?? 0) + 1);
+      thumbnailCounts.set(item.thumbnail.mediaObjectId, (thumbnailCounts.get(item.thumbnail.mediaObjectId) ?? 0) + 1);
+    }
+    for (const item of valid) {
+      const key = photoMetadataKey(item.recordId, item.masterMediaObjectId);
+      if (
+        !requested.has(item.recordId)
+        || keyCounts.get(key) !== 1
+        || masterCounts.get(item.masterMediaObjectId) !== 1
+        || thumbnailCounts.get(item.thumbnail.mediaObjectId) !== 1
+        || byRecordAndMaster.has(key)
+        || seenMasterIds.has(item.masterMediaObjectId)
+        || seenThumbnailIds.has(item.thumbnail.mediaObjectId)
+        || seenThumbnailIds.has(item.masterMediaObjectId)
+        || seenMasterIds.has(item.thumbnail.mediaObjectId)
+      ) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+      byRecordAndMaster.set(key, item);
+      seenMasterIds.add(item.masterMediaObjectId);
+      seenThumbnailIds.add(item.thumbnail.mediaObjectId);
+    }
+  }
+  return { byRecordAndMaster };
+}
+
 /**
  * Sign a validated attachment list.
  *
@@ -210,40 +380,210 @@ function mapAuthenticatedAttachment(
  * in `urlUnavailable`, which is what lets a surface explain itself. The record
  * itself is still returned: a signing failure must not escalate into data loss.
  */
-async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
-  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return attachments;
+type SignedUrlAvailability =
+  | { url: string; urlUnavailable?: undefined }
+  | { url?: undefined; urlUnavailable: ServerErrorKind };
+
+async function buildSignedUrlAvailability(
+  attachments: Attachment[],
+): Promise<Map<string, SignedUrlAvailability>> {
+  const availability = new Map<string, SignedUrlAvailability>();
+  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return availability;
 
   const paths = Array.from(new Set(
     attachments.map((attachment) => attachment.path).filter((path): path is string => !!path),
   ));
-  if (paths.length === 0) return attachments;
+  if (paths.length === 0) return availability;
 
-  const { data, error } = await supabase.storage
-    .from(MEDIA_BUCKET)
-    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+  for (let offset = 0; offset < paths.length; offset += SIGNED_URL_BATCH_SIZE) {
+    const batch = paths.slice(offset, offset + SIGNED_URL_BATCH_SIZE);
+    let data: unknown;
+    let responseError: unknown;
+    try {
+      const response = await supabase.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrls(batch, SIGNED_URL_TTL_SECONDS);
+      data = response.data;
+      responseError = response.error;
+    } catch (error) {
+      console.error('[gomsinlog] Failed to sign media URLs.');
+      const reason = classifyServerError(error).kind;
+      batch.forEach((path) => availability.set(path, { urlUnavailable: reason }));
+      continue;
+    }
 
-  if (error) {
-    console.error('[gomsinlog] Failed to sign media URLs.');
-    const reason = classifyServerError(error).kind;
-    return attachments.map((attachment) => ({ ...attachment, url: undefined, urlUnavailable: reason }));
+    if (responseError) {
+      console.error('[gomsinlog] Failed to sign media URLs.');
+      const reason = classifyServerError(responseError).kind;
+      batch.forEach((path) => availability.set(path, { urlUnavailable: reason }));
+      continue;
+    }
+
+    batch.forEach((path) => availability.set(path, { urlUnavailable: 'unknown' }));
+    const seen = new Set<string>();
+    (Array.isArray(data) ? data : []).forEach((rawEntry) => {
+      if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) return;
+      const entry = rawEntry as Record<string, unknown>;
+      const path = entry.path;
+      if (typeof path !== 'string' || !batch.includes(path)) return;
+      if (seen.has(path)) {
+        availability.set(path, { urlUnavailable: 'unknown' });
+        return;
+      }
+      seen.add(path);
+
+      const hasError = entry.error !== null && entry.error !== undefined;
+      const hasUrl = typeof entry.signedUrl === 'string' && entry.signedUrl.length > 0;
+      if (hasError && hasUrl) {
+        availability.set(path, { urlUnavailable: 'unknown' });
+      } else if (hasError) {
+        const reason = typeof entry.error === 'object' && entry.error !== null
+          ? classifyServerError(entry.error, { online: true }).kind
+          : 'unknown';
+        availability.set(path, { urlUnavailable: reason });
+      } else if (hasUrl) {
+        availability.set(path, { url: entry.signedUrl as string, urlUnavailable: undefined });
+      }
+    });
   }
 
-  const byPath = new Map<string, string>();
-  (data || []).forEach((entry) => {
-    if (entry.path && entry.signedUrl) byPath.set(entry.path, entry.signedUrl);
-  });
+  return availability;
+}
 
+function applySignedUrlAvailability(
+  attachment: Attachment,
+  availability: ReadonlyMap<string, SignedUrlAvailability>,
+): Attachment {
+  const resolved = attachment.path ? availability.get(attachment.path) : undefined;
+  return resolved ? { ...attachment, ...resolved } : attachment;
+}
+
+async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
+  const availability = await buildSignedUrlAvailability(
+    attachments.filter((attachment) => !attachment.photoMetadataUnavailable),
+  );
   return attachments.map((attachment) => {
-    if (attachment.path && byPath.has(attachment.path)) {
-      return { ...attachment, url: byPath.get(attachment.path), urlUnavailable: undefined };
+    if (attachment.photoMetadataUnavailable) {
+      return {
+        ...attachment,
+        url: undefined,
+        urlUnavailable: attachment.photoMetadataUnavailable,
+      };
     }
-    // Signing was attempted for this path and the batch came back without it,
-    // e.g. the storage SELECT policy withheld that single object.
-    if (attachment.path) {
-      return { ...attachment, url: undefined, urlUnavailable: 'forbidden' as ServerErrorKind };
-    }
-    return attachment;
+    return applySignedUrlAvailability(attachment, availability);
   });
+}
+
+type RecordsPageCursor = { createdAt: string; timestampKey: string; id: string };
+
+// `daily_records.id` is a UUID in PostgreSQL, but this boundary only needs to
+// guarantee that a returned value cannot alter PostgREST's `.or(...)` grammar.
+// Keeping that security property separate from the schema type also lets the
+// browser backend use readable fixture ids without weakening Production, where
+// the UUID column remains authoritative.
+const POSTGREST_SAFE_CURSOR_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+const UTC_RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|\+00:00)$/;
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function canonicalTimestampKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const match = UTC_RFC3339.exec(value);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = ''] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (
+    year < 1
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth[month - 1]
+    || hour > 23
+    || minute > 59
+    || second > 59
+  ) return null;
+  return `${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText}.${fraction.padEnd(6, '0')}Z`;
+}
+
+function cursorForRecordRow(row: unknown): RecordsPageCursor | null {
+  if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
+  const candidate = row as Record<string, unknown>;
+  const timestampKey = canonicalTimestampKey(candidate.created_at);
+  if (!timestampKey || typeof candidate.created_at !== 'string') return null;
+  if (typeof candidate.id !== 'string' || !POSTGREST_SAFE_CURSOR_ID.test(candidate.id)) return null;
+  return { createdAt: candidate.created_at, timestampKey, id: candidate.id };
+}
+
+function isStrictlyOlderCursor(next: RecordsPageCursor, previous: RecordsPageCursor): boolean {
+  const timestampOrder = next.timestampKey.localeCompare(previous.timestampKey);
+  return timestampOrder < 0 || (timestampOrder === 0 && next.id.localeCompare(previous.id) < 0);
+}
+
+/**
+ * Read the complete authorized couple slice with a stable keyset cursor.
+ *
+ * A single PostgREST response is capped by the project's `max_rows`; treating
+ * that response as the whole diary silently erases older records on a fresh
+ * device. `created_at, id` is immutable and unique as a pair, so it remains a
+ * safe cursor while new records arrive. Any later-page failure discards the
+ * in-progress snapshot and lets the store keep its last complete one.
+ */
+async function fetchAllRecordRows(coupleId: string): Promise<
+  | { ok: true; rows: any[] }
+  | { ok: false; error: unknown }
+> {
+  const rowsById = new Map<string, any>();
+  let cursor: RecordsPageCursor | null = null;
+
+  while (true) {
+    let query = supabase!
+      .from('daily_records')
+      .select('*')
+      .eq('couple_id', coupleId);
+    if (cursor) {
+      query = query.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`,
+      );
+    }
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(RECORDS_PAGE_SIZE);
+
+    if (error) return { ok: false, error };
+    if (!Array.isArray(data)) {
+      return { ok: false, error: new Error('Records page returned invalid data') };
+    }
+    const page = data;
+    if (page.length === 0) break;
+
+    const nextCursor = cursorForRecordRow(page.at(-1));
+    if (!nextCursor || (cursor && !isStrictlyOlderCursor(nextCursor, cursor))) {
+      return { ok: false, error: new Error('Records pagination did not advance') };
+    }
+    for (const row of page) {
+      if (typeof row?.id === 'string' && !rowsById.has(row.id)) rowsById.set(row.id, row);
+    }
+    cursor = nextCursor;
+  }
+
+  return { ok: true, rows: [...rowsById.values()] };
+}
+
+function compareRecordsForDisplay(left: DailyRecord, right: DailyRecord): number {
+  return right.date.localeCompare(left.date)
+    || (right.time || '').localeCompare(left.time || '')
+    || (right.createdAt || '').localeCompare(left.createdAt || '')
+    || right.id.localeCompare(left.id);
 }
 
 export async function fetchRecordsResultFromDB(coupleId: string): Promise<RecordsFetchResult> {
@@ -251,30 +591,75 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
     return { ok: false, records: [], error: new Error('Records database is unavailable') };
   }
 
-  const { data, error } = await supabase
-    .from('daily_records')
-    .select('*')
-    .eq('couple_id', coupleId)
-    .order('record_date', { ascending: false })
-    .order('record_time', { ascending: false });
-
-  if (error) {
+  const fetched = await fetchAllRecordRows(coupleId);
+  if (!fetched.ok) {
     console.error('[gomsinlog] Failed to fetch records.');
-    return { ok: false, records: [], error };
+    return { ok: false, records: [], error: fetched.error };
   }
 
   const records: DailyRecord[] = await Promise.all(
-    (data || []).map((row: any) => mapRow(row, coupleId)),
+    fetched.rows.map((row: any) => mapRow(row, coupleId)),
   );
+  records.sort(compareRecordsForDisplay);
 
   const allAttachments = records.flatMap((record) => record.attachments || []);
   if (allAttachments.length === 0) return { ok: true, records };
 
-  const signed = await signValidatedAttachments(allAttachments);
-  const signedByPath = new Map<string, Attachment>();
-  signed.forEach((attachment) => {
-    if (attachment.path) signedByPath.set(attachment.path, attachment);
-  });
+  const eligibleRecordIds = Array.from(new Set(
+    fetched.rows
+      .filter((row: any) => row?.cipher_format === RECORD_CIPHER_PLAINTEXT && row?.media_contract_version === 1)
+      .map((row: any) => String(row.id).toLowerCase())
+      .filter((recordId) => UUID_TEXT.test(recordId))
+      .filter((recordId) => {
+        const record = records.find((candidate) => candidate.id.toLowerCase() === recordId);
+        return record?.attachments?.some((attachment) => !!recordPhotoMediaId(attachment, coupleId, record.id));
+      }),
+  ));
+  const photoMetadata = eligibleRecordIds.length > 0
+    ? await fetchRecordPhotoMetadata(eligibleRecordIds)
+    : { byRecordAndMaster: new Map<string, ValidPhotoMetadata>() };
+  const eligibleRecordIdSet = new Set(eligibleRecordIds);
+  const enriched = records.map((record) => ({
+    ...record,
+    attachments: record.attachments?.map((attachment) => {
+      const masterMediaObjectId = recordPhotoMediaId(attachment, coupleId, record.id);
+      const metadata = masterMediaObjectId
+        ? photoMetadata.byRecordAndMaster.get(photoMetadataKey(record.id, masterMediaObjectId))
+        : undefined;
+      if (!metadata) {
+        const requiresAuthoritativeMetadata = !!masterMediaObjectId
+          && eligibleRecordIdSet.has(record.id.toLowerCase());
+        if (!requiresAuthoritativeMetadata || photoMetadata.legacyMasterAllowed) return attachment;
+        const unavailable = photoMetadata.unavailable ?? 'forbidden';
+        return {
+          ...attachment,
+          urlUnavailable: unavailable,
+          photoMetadataUnavailable: unavailable,
+        };
+      }
+      const thumbnailPath = `${coupleId}/${record.id}/${metadata.thumbnail.mediaObjectId}.jpg`;
+      if (!isCanonicalRecordMediaPath(thumbnailPath, coupleId, record.id)) return attachment;
+      return {
+        ...attachment,
+        photoRendition: {
+          sourceRevision: metadata.sourceRevision,
+          screenMaster: { ...metadata.screenMaster, path: attachment.path },
+          thumbnail: { ...metadata.thumbnail, path: thumbnailPath },
+        },
+      };
+    }),
+  }));
+
+  const signTargets = enriched.flatMap((record) => (record.attachments || []).flatMap((attachment) => {
+    if (attachment.photoMetadataUnavailable || attachment.urlUnavailable) return [];
+    return [
+      attachment,
+      ...(attachment.photoRendition
+        ? [{ type: 'photo' as const, name: attachment.name, path: attachment.photoRendition.thumbnail.path }]
+        : []),
+    ];
+  }));
+  const signedUrlAvailability = await buildSignedUrlAvailability(signTargets);
 
   /**
    * The records themselves loaded, so this stays `ok: true` -- a media-signing
@@ -283,18 +668,33 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
    * classified cause so a surface can tell the user why the media will not open,
    * and each affected attachment carries the same reason.
    */
-  const withUrls = records.map((record) => ({
+  const withUrls = enriched.map((record) => ({
     ...record,
-    attachments: record.attachments?.map((attachment) =>
-      attachment.path && signedByPath.has(attachment.path)
-        ? signedByPath.get(attachment.path)!
-        : attachment,
-    ),
+    attachments: record.attachments?.map((attachment) => {
+      const withMasterUrl = applySignedUrlAvailability(attachment, signedUrlAvailability);
+      if (!withMasterUrl.photoRendition) return withMasterUrl;
+      const thumbnailAvailability = signedUrlAvailability.get(withMasterUrl.photoRendition.thumbnail.path);
+      return {
+        ...withMasterUrl,
+        photoRendition: {
+          ...withMasterUrl.photoRendition,
+          thumbnail: thumbnailAvailability
+            ? { ...withMasterUrl.photoRendition.thumbnail, ...thumbnailAvailability }
+            : withMasterUrl.photoRendition.thumbnail,
+        },
+      };
+    }),
   }));
 
-  const mediaUnavailable = withUrls
+  const signedMediaUnavailable = withUrls
     .flatMap((record) => record.attachments || [])
-    .find((attachment) => !!attachment.urlUnavailable)?.urlUnavailable;
+    .flatMap((attachment) => [
+      attachment.photoMetadataUnavailable,
+      attachment.urlUnavailable,
+      attachment.photoRendition?.thumbnail.urlUnavailable,
+    ])
+    .find((reason): reason is ServerErrorKind => !!reason);
+  const mediaUnavailable = photoMetadata.unavailable ?? signedMediaUnavailable;
 
   return mediaUnavailable
     ? { ok: true, records: withUrls, mediaUnavailable }
@@ -347,6 +747,13 @@ async function mapRow(row: any, coupleId: string): Promise<DailyRecord> {
     contentRevision: Number.isSafeInteger(contentRevision) && contentRevision >= 1
       ? contentRevision
       : 1,
+    mediaContractVersion: row.media_contract_version === 1 ? 1 : 0,
+    mediaManifestRevision: Number.isSafeInteger(Number(row.media_manifest_revision))
+      ? Number(row.media_manifest_revision)
+      : 0,
+    ...(typeof row.last_media_operation_id === 'string'
+      ? { lastMediaOperationId: row.last_media_operation_id }
+      : {}),
   };
 
   const cipherFormat = typeof row.cipher_format === 'number' ? row.cipher_format : RECORD_CIPHER_PLAINTEXT;
@@ -422,6 +829,217 @@ function unconfiguredReason(): ServerErrorKind {
     : 'server';
 }
 
+export type RecordMediaMutationState =
+  | 'pending'
+  | 'committed'
+  | 'abandoned'
+  | 'unavailable';
+
+export type RecordMediaMutationRequest = {
+  operationId: string;
+  recordId: string;
+  userId: string;
+  coupleId: string;
+  baseContentRevision: number;
+  existingPaths: string[];
+  newMediaIds: string[];
+};
+
+export type RecordPhotoMutationDescriptor = {
+  mediaObjectId: string;
+  widthPx: number;
+  heightPx: number;
+  byteSize: number;
+  sha256: string;
+};
+
+export type RecordPhotoMutationRequest = Omit<RecordMediaMutationRequest, 'newMediaIds'> & {
+  newPhotos: Array<{
+    screenMaster: RecordPhotoMutationDescriptor;
+    thumbnail: RecordPhotoMutationDescriptor;
+  }>;
+};
+
+export type RecordMediaMutationIdentity = Pick<
+  RecordMediaMutationRequest,
+  'operationId' | 'recordId' | 'userId' | 'coupleId'
+> & Partial<Pick<RecordMediaMutationRequest, 'baseContentRevision' | 'existingPaths' | 'newMediaIds'>>;
+
+export type RecordMediaMutationResult =
+  | {
+      ok: true;
+      state: RecordMediaMutationState;
+      targetContentRevision?: number;
+    }
+  | { ok: false; reason: ServerErrorKind };
+
+function readMediaMutationResult(data: unknown): RecordMediaMutationResult | null {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const candidate = data as Record<string, unknown>;
+  if (!['pending', 'committed', 'abandoned', 'unavailable'].includes(String(candidate.state))) {
+    return null;
+  }
+  const target = Number(candidate.target_content_revision);
+  return {
+    ok: true,
+    state: candidate.state as RecordMediaMutationState,
+    ...(Number.isSafeInteger(target) && target >= 1 ? { targetContentRevision: target } : {}),
+  };
+}
+
+function validMutationIdentity(request: RecordMediaMutationIdentity): boolean {
+  return Boolean(request.operationId && request.recordId && request.userId && request.coupleId);
+}
+
+const RECORD_PHOTO_CAPABILITY_TIMEOUT_MS = 10_000;
+
+export type RecordPhotoRenditionCapabilityResult =
+  | { ok: true; supported: boolean }
+  | { ok: false; reason: ServerErrorKind };
+
+/** Probe the optional 090 API with a read-only empty request before any mutation. */
+export async function getRecordPhotoRenditionCapability(): Promise<RecordPhotoRenditionCapabilityResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const timeout = Symbol('record-photo-capability-timeout');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      supabase.rpc('get_record_photo_metadata', { p_record_ids: [] }),
+      new Promise<typeof timeout>((resolve) => {
+        timer = setTimeout(() => resolve(timeout), RECORD_PHOTO_CAPABILITY_TIMEOUT_MS);
+      }),
+    ]);
+    if (result === timeout) return { ok: false, reason: 'unreachable' };
+    const { data, error } = result;
+    if (!error) return Array.isArray(data) && data.length === 0
+      ? { ok: true, supported: true }
+      : { ok: false, reason: 'server' };
+    if (isMissingRecordPhotoMetadataRpc(error)) {
+      return { ok: true, supported: false };
+    }
+    return { ok: false, reason: classifyServerError(error).kind };
+  } catch (error) {
+    return { ok: false, reason: classifyServerError(error).kind };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function beginRecordMediaMutation(
+  request: RecordMediaMutationRequest,
+): Promise<RecordMediaMutationResult> {
+  if (
+    !isSupabaseConfigured
+    || !supabase
+    || !validMutationIdentity(request)
+    || !Number.isSafeInteger(request.baseContentRevision)
+    || request.baseContentRevision < 1
+  ) return { ok: false, reason: unconfiguredReason() };
+
+  const { data, error } = await supabase.rpc('begin_record_media_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+    p_base_content_revision: request.baseContentRevision,
+    p_target_content_revision: request.baseContentRevision + 1,
+    p_existing_paths: [...request.existingPaths],
+    p_new_media_ids: [...request.newMediaIds],
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to begin record media mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
+export async function beginRecordPhotoMutation(
+  request: RecordPhotoMutationRequest,
+): Promise<RecordMediaMutationResult> {
+  if (
+    !isSupabaseConfigured
+    || !supabase
+    || !validMutationIdentity(request)
+    || !Number.isSafeInteger(request.baseContentRevision)
+    || request.baseContentRevision < 1
+  ) return { ok: false, reason: unconfiguredReason() };
+
+  try {
+  const { data, error } = await supabase.rpc('begin_record_photo_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+    p_base_content_revision: request.baseContentRevision,
+    p_target_content_revision: request.baseContentRevision + 1,
+    p_existing_paths: [...request.existingPaths],
+    p_new_photos: request.newPhotos.map(({ screenMaster, thumbnail }) => ({
+      screen_master: {
+        media_object_id: screenMaster.mediaObjectId,
+        width_px: screenMaster.widthPx,
+        height_px: screenMaster.heightPx,
+        byte_size: screenMaster.byteSize,
+        sha256: screenMaster.sha256,
+      },
+      thumbnail: {
+        media_object_id: thumbnail.mediaObjectId,
+        width_px: thumbnail.widthPx,
+        height_px: thumbnail.heightPx,
+        byte_size: thumbnail.byteSize,
+        sha256: thumbnail.sha256,
+      },
+    })),
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to begin record photo mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+  } catch (error) {
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+}
+
+export async function getRecordMediaMutationStatus(
+  request: RecordMediaMutationIdentity,
+): Promise<RecordMediaMutationResult> {
+  if (!isSupabaseConfigured || !supabase || !validMutationIdentity(request)) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const { data, error } = await supabase.rpc('record_media_mutation_status', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to read record media mutation status.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
+export async function abandonRecordMediaMutation(
+  request: RecordMediaMutationIdentity,
+): Promise<RecordMediaMutationResult> {
+  if (!isSupabaseConfigured || !supabase || !validMutationIdentity(request)) {
+    return { ok: false, reason: unconfiguredReason() };
+  }
+  const { data, error } = await supabase.rpc('abandon_record_media_mutation', {
+    p_operation_id: request.operationId,
+    p_record_id: request.recordId,
+    p_expected_user_id: request.userId,
+    p_expected_couple_id: request.coupleId,
+  });
+  if (error) {
+    console.error('[gomsinlog] Failed to abandon record media mutation.');
+    return { ok: false, reason: classifyServerError(error).kind };
+  }
+  return readMediaMutationResult(data) ?? { ok: false, reason: 'server' };
+}
+
 export async function saveRecordToDB(
   record: DailyRecord,
   coupleId: string,
@@ -454,6 +1072,9 @@ export async function saveRecordToDB(
     talk_about: !record.isPrivate && record.talkAbout === true,
     emotion_updated_at: record.emotionUpdatedAt || null,
     updated_at: new Date().toISOString(),
+    ...(intent.kind === 'update' && intent.mediaOperationId
+      ? { last_media_operation_id: intent.mediaOperationId }
+      : {}),
   };
 
   const environment = recordCryptoEnvironment;
@@ -534,7 +1155,12 @@ export async function saveRecordToDB(
       console.error('[gomsinlog] Failed to save record.');
       return { ok: false, reason: classifyServerError(error).kind };
     }
-    return { ok: true, contentRevision: record.contentRevision ?? 1 };
+    return {
+      ok: true,
+      contentRevision: intent.kind === 'update'
+        ? intent.expectedRevision + 1
+        : record.contentRevision ?? 1,
+    };
   }
 
   const { data, error } = await request
@@ -564,22 +1190,19 @@ export async function deleteRecordFromDB(
     || !expectedCoupleId
   ) return { ok: false, reason: unconfiguredReason() };
 
-  const { data, error } = await supabase
-    .from('daily_records')
-    .delete()
-    .eq('id', recordId)
-    .eq('user_id', expectedUserId)
-    .eq('couple_id', expectedCoupleId)
-    .select('id')
-    .maybeSingle();
+  const { data, error } = await supabase.rpc('delete_my_record', {
+    p_record_id: recordId,
+    p_expected_user_id: expectedUserId,
+    p_expected_couple_id: expectedCoupleId,
+  });
 
   if (error) {
     console.error('[gomsinlog] Failed to delete record.');
     return { ok: false, reason: classifyServerError(error).kind };
   }
-  // No matching row came back. The filters pin id + owner + couple, so this is
-  // an ownership/visibility answer, not a transport failure.
-  if (data?.id !== recordId) return { ok: false, reason: 'not_found' };
+  // The SECURITY DEFINER RPC deliberately collapses missing, stale-couple and
+  // non-owner targets to the same false result so record existence is private.
+  if (data !== true) return { ok: false, reason: 'not_found' };
   return { ok: true };
 }
 
@@ -677,11 +1300,58 @@ export function classifyMediaFile(
   return match;
 }
 
-export function buildMediaPath(coupleId: string, recordId: string, ext: string): string {
+const MEDIA_OBJECT_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isValidMediaObjectId(value: string): boolean {
+  return MEDIA_OBJECT_ID_PATTERN.test(value);
+}
+
+export function buildMediaPath(
+  coupleId: string,
+  recordId: string,
+  ext: string,
+  stableObjectId?: string,
+): string {
   // Must stay in sync with the storage RLS policies:
   // foldername[1] = coupleId, foldername[2] = recordId (migration 007).
-  return `${coupleId}/${recordId}/${crypto.randomUUID()}.${ext}`;
+  const objectId = stableObjectId && isValidMediaObjectId(stableObjectId)
+    ? stableObjectId
+    : crypto.randomUUID();
+  return `${coupleId}/${recordId}/${objectId}.${ext}`;
 }
+
+function isAlreadyUploadedStableObject(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { status?: unknown; statusCode?: unknown; code?: unknown; message?: unknown };
+  const status = Number(candidate.statusCode ?? candidate.status);
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : '';
+  const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
+  return status === 409
+    || code === 'duplicate'
+    || code === 'resource_already_exists'
+    || message.includes('already exists')
+    || message.includes('duplicate');
+}
+
+const UNCERTAIN_MEDIA_UPLOAD_REASONS: ReadonlySet<ServerErrorKind> = new Set([
+  'offline',
+  'unreachable',
+  'server',
+  'unknown',
+]);
+
+type RecordMediaUploadResult =
+  | { attachment: Attachment }
+  | {
+      error: string;
+      reason: ServerErrorKind;
+      /**
+       * Exact deterministic object identity for a stable-id upload whose
+       * response was ambiguous. The caller may submit this candidate to the
+       * record CAS; the database accepts it only if Storage actually committed.
+       */
+      uncertainAttachment?: Attachment;
+    };
 
 /**
  * Upload one attachment for an already-persisted record.
@@ -695,50 +1365,139 @@ export async function uploadRecordMedia(
   coupleId: string,
   recordId: string,
   displayName?: string,
-): Promise<{ attachment: Attachment } | { error: string }> {
+  stableObjectId?: string,
+): Promise<RecordMediaUploadResult> {
   if (!isSupabaseConfigured || !supabase) {
-    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.' };
+    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.', reason: 'server' };
   }
   if (!coupleId || !recordId) {
-    return { error: '커플 공간이 연결된 뒤에 파일을 올릴 수 있어요.' };
+    return { error: '커플 공간이 연결된 뒤에 파일을 올릴 수 있어요.', reason: 'unknown' };
+  }
+  if (stableObjectId && !isValidMediaObjectId(stableObjectId)) {
+    return {
+      error: '첨부 파일 식별자가 올바르지 않아 업로드하지 않았어요.',
+      reason: 'unknown',
+    };
   }
 
   const classified = classifyMediaFile(file);
-  if ('error' in classified) return classified;
+  if ('error' in classified) return { ...classified, reason: 'unknown' };
 
   let uploadFile = file;
   let uploadExtension = classified.ext;
   if (classified.type === 'photo') {
     const sanitized = await sanitizePhotoForUpload(file);
-    if ('error' in sanitized) return sanitized;
+    if ('error' in sanitized) return { ...sanitized, reason: 'unknown' };
     uploadFile = sanitized.file;
     uploadExtension = sanitized.ext;
     if (uploadFile.size > MAX_BYTES.photo) {
-      return { error: '사진을 변환한 뒤에도 파일이 너무 커요. 다른 사진을 선택해 주세요.' };
+      return {
+        error: '사진을 변환한 뒤에도 파일이 너무 커요. 다른 사진을 선택해 주세요.',
+        reason: 'unknown',
+      };
     }
   }
 
-  const path = buildMediaPath(coupleId, recordId, uploadExtension);
+  const path = buildMediaPath(coupleId, recordId, uploadExtension, stableObjectId);
+  const attachment: Attachment = {
+    type: classified.type,
+    // The source basename can contain a person's name, location or date. The
+    // photo sanitizer has already replaced it with a neutral filename, so use
+    // that value unless the user deliberately supplied a display label.
+    name: displayName?.trim() || uploadFile.name || `${classified.type}.${uploadExtension}`,
+    path,
+  };
   const { error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, uploadFile, {
     contentType: uploadFile.type,
     upsert: false,
   });
 
-  if (error) {
+  if (error && !(stableObjectId && isAlreadyUploadedStableObject(error))) {
     console.error('[gomsinlog] Media upload failed.');
     // Classified from the real Storage error. This used to hard-code
     // "연결 상태를 확인하고" while holding the actual cause, so an RLS rejection,
     // a 413 and an expired JWT all told the user to check a working connection.
-    return { error: `파일을 올리지 못했어요. ${classifyServerError(error).message}` };
+    const classifiedError = classifyServerError(error);
+    return {
+      error: `파일을 올리지 못했어요. ${classifiedError.message}`,
+      reason: classifiedError.kind,
+      ...(stableObjectId && UNCERTAIN_MEDIA_UPLOAD_REASONS.has(classifiedError.kind)
+        ? { uncertainAttachment: attachment }
+        : {}),
+    };
   }
 
-  return {
-    attachment: {
-      type: classified.type,
-      name: displayName || file.name || `${classified.type}.${classified.ext}`,
-      path,
-    },
-  };
+  return { attachment };
+}
+
+export type RecordPhotoRenditionKind = 'screen_master' | 'thumbnail';
+
+function validPreparedPhotoRendition(
+  rendition: PreparedRecordPhotoRendition,
+  kind: RecordPhotoRenditionKind,
+): boolean {
+  const maxEdge = kind === 'screen_master' ? 2048 : 640;
+  const maxBytes = kind === 'screen_master' ? MAX_BYTES.photo : 1024 * 1024;
+  return isPreparedRecordPhotoRendition(rendition, kind)
+    && rendition.file.type === SANITIZED_PHOTO_MIME
+    && rendition.file.size === rendition.byteSize
+    && rendition.byteSize > 0
+    && rendition.byteSize <= maxBytes
+    && Number.isSafeInteger(rendition.widthPx)
+    && Number.isSafeInteger(rendition.heightPx)
+    && rendition.widthPx > 0
+    && rendition.heightPx > 0
+    && rendition.widthPx <= maxEdge
+    && rendition.heightPx <= maxEdge
+    && /^[0-9a-f]{64}$/.test(rendition.sha256);
+}
+
+/** Upload one already-sanitized 090 rendition without any second encode step. */
+export async function uploadRecordPhotoRendition(
+  rendition: PreparedRecordPhotoRendition,
+  kind: RecordPhotoRenditionKind,
+  coupleId: string,
+  recordId: string,
+  stableObjectId: string,
+): Promise<RecordMediaUploadResult> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { error: '서버에 연결되지 않아 파일을 올릴 수 없어요.', reason: 'server' };
+  }
+  if (
+    !coupleId
+    || !recordId
+    || !isValidMediaObjectId(stableObjectId)
+    || !validPreparedPhotoRendition(rendition, kind)
+  ) {
+    return {
+      error: '사진 렌디션 정보를 확인하지 못해 업로드하지 않았어요.',
+      reason: 'unknown',
+    };
+  }
+
+  const path = buildMediaPath(coupleId, recordId, SANITIZED_PHOTO_EXTENSION, stableObjectId);
+  const attachment: Attachment = { type: 'photo', name: 'photo.jpg', path };
+  let error: unknown;
+  try {
+    ({ error } = await supabase.storage.from(MEDIA_BUCKET).upload(path, rendition.file, {
+      contentType: SANITIZED_PHOTO_MIME,
+      upsert: false,
+    }));
+  } catch (transportError) {
+    error = transportError;
+  }
+  if (error && !isAlreadyUploadedStableObject(error)) {
+    console.error('[gomsinlog] Photo rendition upload failed.');
+    const classifiedError = classifyServerError(error);
+    return {
+      error: `파일을 올리지 못했어요. ${classifiedError.message}`,
+      reason: classifiedError.kind,
+      ...(UNCERTAIN_MEDIA_UPLOAD_REASONS.has(classifiedError.kind)
+        ? { uncertainAttachment: attachment }
+        : {}),
+    };
+  }
+  return { attachment };
 }
 
 /**
@@ -787,13 +1546,6 @@ export async function downloadRecordPhotoForReuse(
   return { file };
 }
 
-/** Remove uploaded objects. Throws on error so callers can decide how to handle failure. */
-export async function removeRecordMedia(paths: string[]): Promise<void> {
-  if (!isSupabaseConfigured || !supabase || paths.length === 0) return;
-  const { error } = await supabase.storage.from(MEDIA_BUCKET).remove(paths);
-  if (error) throw new Error(`Failed to clean up media objects: ${error.message}`);
-}
-
 /**
  * Turn storage paths into temporary view URLs.
  *
@@ -807,9 +1559,18 @@ export async function resolveAttachmentUrls(
   recordId: string,
 ): Promise<Attachment[]> {
   const validated = attachments
-    .map((attachment) =>
-      mapAuthenticatedAttachment(attachment, coupleId, recordId, false),
-    )
+    .map((attachment) => {
+      // Read the transient metadata authority result before normalization strips
+      // every non-persisted member. Storage signing cannot overrule this gate.
+      const metadataUnavailable = attachment.photoMetadataUnavailable;
+      const normalized = mapAuthenticatedAttachment(attachment, coupleId, recordId, false);
+      if (!normalized || !metadataUnavailable) return normalized;
+      return {
+        ...normalized,
+        urlUnavailable: metadataUnavailable,
+        photoMetadataUnavailable: metadataUnavailable,
+      };
+    })
     .filter((attachment: Attachment | null): attachment is Attachment => !!attachment);
   return signValidatedAttachments(validated);
 }

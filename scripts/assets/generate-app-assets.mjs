@@ -35,6 +35,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 
 const repoRoot = resolve(import.meta.dirname, '..', '..');
@@ -43,7 +44,7 @@ const GENERATOR = 'scripts/assets/generate-app-assets.mjs';
 const MANIFEST = 'scripts/assets/app-assets.manifest.json';
 
 /** Brand background. Must equal the `fill` of the backing <rect> in the source. */
-const BRAND_BACKGROUND = '#1B2340';
+const BRAND_BACKGROUND = '#FCFBF7';
 
 /** Density buckets Android ships, and the launcher-icon size each one wants. */
 const ANDROID_DENSITIES = [
@@ -76,27 +77,88 @@ const written = [];
  * The mark on its own, with the backing plate removed.
  *
  * The Android adaptive-icon foreground layer and the splash screens draw the
- * heart over a separately declared background, so the source's <rect> plate and
- * its decorative <circle> have to go. Both removals are asserted: if the source
- * is redrawn in a way that breaks these selectors, this throws instead of
- * silently emitting an icon with a plate baked into the foreground.
+ * mark over a separately declared background. The source names both boundaries
+ * explicitly, so extraction never depends on tag order or decorative shapes.
+ * Keep the complete SVG tree and remove only the self-closing element marked
+ * `data-brand-background`; nested SVG/group content inside the mark is untouched.
  */
-function markOnlySvg(source) {
-  let svg = source;
-  const before = svg;
-  svg = svg.replace(/\s*<rect\b[^>]*\/>/, '');
-  if (svg === before) {
-    throw new Error(`${SOURCE}: expected a self-closing <rect> backing plate to strip.`);
+function openingTags(source) {
+  const tags = [];
+  let cursor = 0;
+
+  while (cursor < source.length) {
+    const start = source.indexOf('<', cursor);
+    if (start === -1) break;
+
+    if (source.startsWith('<!--', start)) {
+      const commentEnd = source.indexOf('-->', start + 4);
+      if (commentEnd === -1) throw new Error(`${SOURCE}: unterminated SVG comment.`);
+      cursor = commentEnd + 3;
+      continue;
+    }
+
+    let quote = null;
+    let end = start + 1;
+    for (; end < source.length; end += 1) {
+      const character = source[end];
+      if (quote) {
+        if (character === quote) quote = null;
+      } else if (character === '"' || character === "'") {
+        quote = character;
+      } else if (character === '>') {
+        break;
+      }
+    }
+    if (end >= source.length) throw new Error(`${SOURCE}: unterminated SVG tag.`);
+
+    const raw = source.slice(start, end + 1);
+    cursor = end + 1;
+    if (/^<\s*[!?/]/.test(raw)) continue;
+
+    const name = raw.match(/^<\s*([^\s/>]+)/)?.[1];
+    if (!name) throw new Error(`${SOURCE}: malformed SVG tag.`);
+    tags.push({
+      start,
+      end: end + 1,
+      name,
+      raw,
+      selfClosing: /\/\s*>$/.test(raw),
+    });
   }
-  const afterRect = svg;
-  svg = svg.replace(/\s*<circle\b[^>]*\/>/, '');
-  if (svg === afterRect) {
-    throw new Error(`${SOURCE}: expected a self-closing decorative <circle> to strip.`);
+
+  return tags;
+}
+
+function attributeValue(tag, name) {
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = tag.raw.match(
+    new RegExp(`\\s${escapedName}\\s*=\\s*(?:"([^"]*)"|'([^']*)')(?=\\s|/?>)`),
+  );
+  return match ? (match[1] ?? match[2]) : undefined;
+}
+
+export function markOnlySvg(source) {
+  const tags = openingTags(source);
+  const markTags = tags.filter((tag) => attributeValue(tag, 'data-brand-mark') !== undefined);
+  if (markTags.length !== 1 || markTags[0].selfClosing) {
+    throw new Error(`${SOURCE}: expected exactly one non-empty data-brand-mark wrapper.`);
   }
-  if (!source.includes(`fill="${BRAND_BACKGROUND}"`)) {
+
+  const backgroundTags = tags.filter(
+    (tag) => attributeValue(tag, 'data-brand-background') !== undefined,
+  );
+  if (backgroundTags.length !== 1) {
+    throw new Error(`${SOURCE}: expected exactly one data-brand-background element.`);
+  }
+
+  const background = backgroundTags[0];
+  if (background.name !== 'rect' || !background.selfClosing) {
+    throw new Error(`${SOURCE}: data-brand-background must be a self-closing <rect>.`);
+  }
+  if (attributeValue(background, 'fill')?.toUpperCase() !== BRAND_BACKGROUND) {
     throw new Error(`${SOURCE}: backing plate is no longer ${BRAND_BACKGROUND}; update BRAND_BACKGROUND.`);
   }
-  return svg;
+  return source.slice(0, background.start) + source.slice(background.end);
 }
 
 const PNG_OPTIONS = { compressionLevel: 9, effort: 10, palette: false, adaptiveFiltering: false };
@@ -338,59 +400,59 @@ async function main() {
   if (checkOnly) {
     await validateCommittedAssets(sourceBuffer);
   } else {
-  const markSvg = markOnlySvg(source);
+    const markSvg = markOnlySvg(source);
 
-  // --- Web / PWA ---------------------------------------------------------
-  await emit('public/icons/icon-192.png', await encode(square(source, 192), { opaque: false }));
-  // 512x512 32-bit PNG: also exactly what the Play Console listing wants.
-  await emit('public/icons/icon-512.png', await encode(square(source, 512), { opaque: false }));
-  // Maskable: full bleed. The mark SVG's heart occupies 63% of its own
-  // viewBox width, so a 0.85 canvas coverage puts the heart at ~54% of the
-  // icon -- comfortably inside the inner 80% safe circle every launcher mask
-  // preserves, and large enough not to look lost.
-  await emit(
-    'public/icons/icon-maskable-512.png',
-    await encode(await plate(markSvg, 512, 512, 0.85), { opaque: true }),
-  );
-  // 180x180 and opaque: iOS masks the corners itself and paints alpha black.
-  await emit(
-    'public/icons/apple-touch-icon.png',
-    await encode(square(source, 180), { opaque: true }),
-  );
-
-  // --- Android launcher icons -------------------------------------------
-  for (const density of ANDROID_DENSITIES) {
-    const base = `android/app/src/main/res/mipmap-${density.dir}`;
-    // Legacy (pre-API-26) launcher slot: alpha kept so the rounded silhouette
-    // shows instead of a navy square in launchers that do not mask.
-    await emit(`${base}/ic_launcher.png`, await encode(square(source, density.launcher), { opaque: false }));
-    await emit(`${base}/ic_launcher_round.png`, await encode(await circular(source, density.launcher), { opaque: false }));
-    // Adaptive foreground: transparent. 0.85 canvas coverage puts the heart at
-    // ~54% of the 108dp canvas, inside the 72/108 (66.7%) safe zone.
+    // --- Web / PWA ---------------------------------------------------------
+    await emit('public/icons/icon-192.png', await encode(square(source, 192), { opaque: false }));
+    // 512x512 32-bit PNG: also exactly what the Play Console listing wants.
+    await emit('public/icons/icon-512.png', await encode(square(source, 512), { opaque: false }));
+    // Maskable: full bleed. The mark SVG's heart occupies 63% of its own
+    // viewBox width, so a 0.85 canvas coverage puts the heart at ~54% of the
+    // icon -- comfortably inside the inner 80% safe circle every launcher mask
+    // preserves, and large enough not to look lost.
     await emit(
-      `${base}/ic_launcher_foreground.png`,
-      await encode(await transparentLayer(markSvg, density.foreground, 0.85), { opaque: false }),
+      'public/icons/icon-maskable-512.png',
+      await encode(await plate(markSvg, 512, 512, 0.85), { opaque: true }),
     );
-  }
-
-  // --- Android splash ---------------------------------------------------
-  for (const splash of ANDROID_SPLASHES) {
+    // 180x180 and opaque: iOS masks the corners itself and paints alpha black.
     await emit(
-      `android/app/src/main/res/${splash.dir}/splash.png`,
-      await encode(await plate(markSvg, splash.width, splash.height, 0.42), { opaque: true }),
+      'public/icons/apple-touch-icon.png',
+      await encode(square(source, 180), { opaque: true }),
     );
-  }
 
-  // --- iOS --------------------------------------------------------------
-  // 1024x1024, OPAQUE. An alpha channel here fails App Store validation.
-  await emit(
-    'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png',
-    await encode(square(source, 1024), { opaque: true }),
-  );
-  const iosSplash = await encode(await plate(markSvg, 2732, 2732, 0.18), { opaque: true });
-  for (const name of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
-    await emit(`ios/App/App/Assets.xcassets/Splash.imageset/${name}`, iosSplash);
-  }
+    // --- Android launcher icons -------------------------------------------
+    for (const density of ANDROID_DENSITIES) {
+      const base = `android/app/src/main/res/mipmap-${density.dir}`;
+      // Legacy (pre-API-26) launcher slot: alpha kept so the rounded silhouette
+      // shows instead of a square in launchers that do not mask.
+      await emit(`${base}/ic_launcher.png`, await encode(square(source, density.launcher), { opaque: false }));
+      await emit(`${base}/ic_launcher_round.png`, await encode(await circular(source, density.launcher), { opaque: false }));
+      // Adaptive foreground: transparent. 0.85 canvas coverage puts the heart at
+      // ~54% of the 108dp canvas, inside the 72/108 (66.7%) safe zone.
+      await emit(
+        `${base}/ic_launcher_foreground.png`,
+        await encode(await transparentLayer(markSvg, density.foreground, 0.85), { opaque: false }),
+      );
+    }
+
+    // --- Android splash ---------------------------------------------------
+    for (const splash of ANDROID_SPLASHES) {
+      await emit(
+        `android/app/src/main/res/${splash.dir}/splash.png`,
+        await encode(await plate(markSvg, splash.width, splash.height, 0.42), { opaque: true }),
+      );
+    }
+
+    // --- iOS --------------------------------------------------------------
+    // 1024x1024, OPAQUE. An alpha channel here fails App Store validation.
+    await emit(
+      'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png',
+      await encode(square(source, 1024), { opaque: true }),
+    );
+    const iosSplash = await encode(await plate(markSvg, 2732, 2732, 0.18), { opaque: true });
+    for (const name of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
+      await emit(`ios/App/App/Assets.xcassets/Splash.imageset/${name}`, iosSplash);
+    }
   }
 
   const label = checkOnly ? 'verified' : 'wrote';
@@ -426,4 +488,6 @@ async function main() {
     : `${written.length} assets generated from ${SOURCE}; updated ${MANIFEST}.`);
 }
 
-await main();
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await main();
+}

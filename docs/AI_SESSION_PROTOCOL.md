@@ -4,7 +4,7 @@ Claude Code · Codex · Cursor · Antigravity · ChatGPT · Kiro · Grok 가 **�
 했는지 확인하고**, 같은 것을 두 번 하지 않고, 끊긴 자리에서 이어받기 위한 절차.
 
 > 이 문서는 **도구 간 공유 절차 하나만** 소유한다. 상태 사실은 하나도 소유하지 않는다.
-> 제품 의도는 [`PRODUCT_V3.md`](PRODUCT_V3.md), 구현 순서는
+> 제품 의도는 최신 사용자 승인과 [`PRODUCT_V5_MASTER_DECISION.md`](PRODUCT_V5_MASTER_DECISION.md), 구현 순서는
 > [`ENGINEERING_ROADMAP.md`](ENGINEERING_ROADMAP.md), 현재 현실은 저장소 코드와
 > [`CURRENT_STATE.md`](CURRENT_STATE.md), 엔지니어링 계약은 [`../AGENTS.md`](../AGENTS.md)가
 > 그대로 canonical이다. ONE FACT → ONE AUTHORITATIVE HOME.

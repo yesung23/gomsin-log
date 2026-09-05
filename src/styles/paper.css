@@ -99,7 +99,8 @@
    * 괘선이 화면 전체에 깔린다. UI가 그 위에 그려지므로 카드에 배경을 채우지 않는다 --
    * 채우는 순간 종이가 사라지고 다시 앱 화면이 된다.
    */
-  .notebook {
+  .notebook,
+  .paper-texture-layer {
     background-color: var(--paper);
     background-image:
       /*
@@ -128,7 +129,8 @@
    *
    * 종이의 결이 안 보이면 공책이 아니라 그냥 어두운 화면이 된다.
    */
-  [data-theme='dark'] .notebook {
+  [data-theme='dark'] .notebook,
+  [data-theme='dark'] .paper-texture-layer {
     background-image:
       linear-gradient(90deg, transparent 0 10px, var(--margin-rule) 10px 12px, transparent 12px),
       repeating-linear-gradient(
@@ -140,7 +142,56 @@
 
   /* Device-local display preference: keep the warm paper, remove every rule. */
   [data-paper='plain'] .notebook,
-  [data-theme='dark'][data-paper='plain'] .notebook {
+  [data-paper='plain'] .paper-texture-layer,
+  [data-theme='dark'][data-paper='plain'] .notebook,
+  [data-theme='dark'][data-paper='plain'] .paper-texture-layer {
+    background-image: none;
+  }
+
+  [data-paper='grid'] .notebook,
+  [data-paper='grid'] .paper-texture-layer {
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  [data-paper='dot'] .notebook,
+  [data-paper='dot'] .paper-texture-layer {
+    background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
+
+  [data-paper='cream'] .notebook,
+  [data-paper='cream'] .paper-texture-layer {
+    background-color: color-mix(in srgb, var(--paper) 86%, #e6c98f 14%);
+    background-image: none;
+  }
+
+  /* Small, truthful samples used by paper pickers without changing the app-wide choice. */
+  .paper-texture-preview {
+    background-color: var(--paper);
+    background-image:
+      linear-gradient(90deg, transparent 0 8px, var(--margin-rule) 8px 9px, transparent 9px),
+      repeating-linear-gradient(180deg, transparent 0 10px, var(--rule) 10px 11px);
+  }
+
+  .paper-texture-preview[data-paper='plain'] { background-image: none; }
+
+  .paper-texture-preview[data-paper='grid'] {
+    background-image:
+      linear-gradient(var(--rule) 1px, transparent 1px),
+      linear-gradient(90deg, var(--rule) 1px, transparent 1px);
+    background-size: 10px 10px;
+  }
+
+  .paper-texture-preview[data-paper='dot'] {
+    background-image: radial-gradient(circle, var(--rule) 1px, transparent 1px);
+    background-size: 9px 9px;
+  }
+
+  .paper-texture-preview[data-paper='cream'] {
+    background-color: color-mix(in srgb, var(--paper) 86%, #e6c98f 14%);
     background-image: none;
   }
 

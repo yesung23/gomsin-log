@@ -149,7 +149,7 @@ describe('a user with no couple space can create one from settings', () => {
 
     await user.click(screen.getByRole('button', { name: CREATE_LABEL }));
 
-    await waitFor(() => expect(createCoupleInvitation).toHaveBeenCalledWith(currentRole));
+    await waitFor(() => expect(createCoupleInvitation).toHaveBeenCalledWith(currentRole, 'military'));
     const [patch] = updateProfile.mock.calls[0] as [{ couple: Record<string, unknown> }];
     expect(patch.couple.coupleId).toBe('couple-new');
     expect(patch.couple.coupleCode).toBe('123456');

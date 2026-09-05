@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
@@ -138,7 +138,11 @@ describe('the push client has no function that only its own tests call', () => {
     .split('\n')
     .filter((file) => (file.endsWith('.ts') || file.endsWith('.tsx'))
       && !file.includes('.test.')
-      && !file.startsWith('src/test/'))
+      && !file.startsWith('src/test/')
+      // `git ls-files` still names an intentionally deleted tracked file until
+      // the deletion is committed. A repository gate must inspect the current
+      // working tree rather than trying to open that historical path.
+      && existsSync(resolve(process.cwd(), file)))
 
   for (const module of MODULES) {
     const exported = [...read(module).matchAll(/^export (?:async )?function (\w+)/gm)].map((m) => m[1])

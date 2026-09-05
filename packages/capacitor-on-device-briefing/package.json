@@ -1,0 +1,12 @@
+{
+  "name": "@gomsinlog/capacitor-on-device-briefing",
+  "version": "0.1.0",
+  "description": "On-device closed-extract Partner Briefing selection with Foundation Models / GenAI Prompt API.",
+  "private": true,
+  "capacitor": {
+    "ios": { "src": "ios" },
+    "android": { "src": "android" }
+  },
+  "peerDependencies": { "@capacitor/core": "^7.0.0" },
+  "files": ["ios/", "android/", "GomsinlogCapacitorOnDeviceBriefing.podspec"]
+}

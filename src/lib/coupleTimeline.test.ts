@@ -1,6 +1,4 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 
 /**
  * The partner join-time lookup.
@@ -12,10 +10,12 @@ import { resolve } from 'node:path';
  */
 
 const maybeSingle = vi.fn();
+const strictLookup = vi.fn();
 const chain = {
-  select: () => chain,
-  eq: () => chain,
-  neq: () => chain,
+  select: vi.fn(() => chain),
+  eq: vi.fn(() => chain),
+  neq: vi.fn(() => chain),
+  limit: vi.fn(() => strictLookup()),
   maybeSingle: () => maybeSingle(),
 };
 const from = vi.fn(() => chain);
@@ -25,16 +25,48 @@ vi.mock('@/lib/supabase', () => ({
   isSupabaseConfigured: true,
 }));
 
+const coupleTimeline = await import('@/lib/coupleTimeline');
 const {
   bindPartnerMembership,
   fetchPartnerJoinedAt,
   fetchPartnerMembership,
-} = await import('@/lib/coupleTimeline');
+} = coupleTimeline;
+
+type StrictLookupResult =
+  | { ok: true; partner: { userId: string; joinedAt?: string } | null }
+  | { ok: false; error: unknown };
+
+const fetchPartnerMembershipResult = (
+  coupleTimeline as typeof coupleTimeline & {
+    fetchPartnerMembershipResult?: (
+      coupleId: string,
+      myUserId: string,
+    ) => Promise<StrictLookupResult>;
+  }
+).fetchPartnerMembershipResult;
+
+async function readStrictMembership(
+  coupleId: string,
+  myUserId: string,
+): Promise<StrictLookupResult> {
+  if (!fetchPartnerMembershipResult) {
+    return { ok: false, error: new Error('strict membership result is not implemented') };
+  }
+  return fetchPartnerMembershipResult(coupleId, myUserId);
+}
 
 beforeEach(() => {
   from.mockClear();
+  chain.select.mockClear();
+  chain.eq.mockClear();
+  chain.neq.mockClear();
+  chain.limit.mockClear();
   maybeSingle.mockReset().mockResolvedValue({
     data: { user_id: 'partner', joined_at: '2026-08-20T12:00:00Z' },
+    error: null,
+  });
+  strictLookup.mockReset().mockResolvedValue({
+    data: [{ user_id: 'partner', joined_at: '2026-08-20T12:00:00Z' }],
     error: null,
   });
 });
@@ -52,15 +84,82 @@ describe('reading the join time', () => {
     });
   });
 
-  it('asks only for the two membership facts used by the product', () => {
-    /*
-      A wider select would be a place partner data could reach a client that has
-      no product reason to hold it. Asserted on the source: the chain is mocked
-      here, so a runtime check would be checking the mock.
-    */
-    const text = readFileSync(resolve(process.cwd(), 'src/lib/coupleTimeline.ts'), 'utf8');
-    expect(text).toContain(".select('user_id, joined_at')");
-    expect(text.match(/\.select\(/g) ?? []).toHaveLength(1);
+  it('asks the exact active couple for only the two authoritative membership facts', async () => {
+    await readStrictMembership('couple-1', 'me');
+
+    expect(chain.select).toHaveBeenCalledWith('user_id, joined_at');
+    expect(chain.eq).toHaveBeenCalledWith('couple_id', 'couple-1');
+    expect(chain.eq).toHaveBeenCalledWith('status', 'active');
+    expect(chain.neq).toHaveBeenCalledWith('user_id', 'me');
+  });
+});
+
+describe('strict partner membership authority', () => {
+  it.each([
+    {
+      label: 'A reads B with joined_at',
+      viewer: 'user-a',
+      row: { user_id: 'user-b', joined_at: '2026-08-20T12:00:00Z' },
+      partner: { userId: 'user-b', joinedAt: '2026-08-20T12:00:00Z' },
+    },
+    {
+      label: 'B reads A without joined_at',
+      viewer: 'user-b',
+      row: { user_id: 'user-a', joined_at: null },
+      partner: { userId: 'user-a' },
+    },
+  ])('returns the reciprocal exact identity when $label', async ({ viewer, row, partner }) => {
+    strictLookup.mockResolvedValue({ data: [row], error: null });
+
+    await expect(readStrictMembership('couple-1', viewer)).resolves.toEqual({
+      ok: true,
+      partner,
+    });
+  });
+
+  it('distinguishes a verified zero-row pending couple from lookup failure', async () => {
+    strictLookup.mockResolvedValue({ data: [], error: null });
+
+    await expect(readStrictMembership('couple-1', 'user-a')).resolves.toEqual({
+      ok: true,
+      partner: null,
+    });
+  });
+
+  it('returns the query error instead of collapsing it into partner absence', async () => {
+    const error = { code: '42501', message: 'permission denied' };
+    strictLookup.mockResolvedValue({ data: null, error });
+
+    const result = await readStrictMembership('couple-1', 'user-a');
+
+    expect(result).toEqual({ ok: false, error });
+  });
+
+  it('returns a thrown transport error instead of collapsing it into partner absence', async () => {
+    const error = new TypeError('Failed to fetch');
+    strictLookup.mockRejectedValue(error);
+
+    const result = await readStrictMembership('couple-1', 'user-a');
+
+    expect(result).toEqual({ ok: false, error });
+  });
+
+  it.each([
+    ['a non-array response', null],
+    ['an empty user id', [{ user_id: '', joined_at: null }]],
+    ['the requesting user', [{ user_id: 'user-a', joined_at: null }]],
+    ['a malformed join time', [{ user_id: 'user-b', joined_at: 123 }]],
+    ['an invalid join-time string', [{ user_id: 'user-b', joined_at: 'not-a-timestamp' }]],
+    ['multiple active partners', [
+      { user_id: 'user-b', joined_at: null },
+      { user_id: 'user-c', joined_at: null },
+    ]],
+  ])('fails closed for %s', async (_label, data) => {
+    strictLookup.mockResolvedValue({ data, error: null });
+
+    const result = await readStrictMembership('couple-1', 'user-a');
+
+    expect(result.ok).toBe(false);
   });
 });
 
@@ -98,6 +197,7 @@ describe('binding belongs to the exact active workspace', () => {
 describe('nothing about a failure escapes', () => {
   it('returns undefined when the query reports an error', async () => {
     maybeSingle.mockResolvedValue({ data: null, error: { message: 'denied' } });
+    strictLookup.mockResolvedValue({ data: null, error: { message: 'denied' } });
     await expect(fetchPartnerJoinedAt('couple-1', 'me')).resolves.toBeUndefined();
   });
 
@@ -108,11 +208,13 @@ describe('nothing about a failure escapes', () => {
       able to do that. `recordProductEvent` already had this shape; this did not.
     */
     maybeSingle.mockRejectedValue(new Error('transport gone'));
+    strictLookup.mockRejectedValue(new Error('transport gone'));
     await expect(fetchPartnerJoinedAt('couple-1', 'me')).resolves.toBeUndefined();
   });
 
   it('returns undefined when there is no partner row yet', async () => {
     maybeSingle.mockResolvedValue({ data: null, error: null });
+    strictLookup.mockResolvedValue({ data: [], error: null });
     await expect(fetchPartnerJoinedAt('couple-1', 'me')).resolves.toBeUndefined();
   });
 

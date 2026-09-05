@@ -4,7 +4,12 @@
 > - **문서 상태**: DRAFT (로컬 검증 및 교정 초안)
 > - **App Store Connect 반영 상태**: **미적용 (NOT APPLIED / UNVERIFIED)**
 > - **목적**: Apple App Store (iOS) 정식 제출을 위한 정직하고 일관된 메타데이터 및 심사 대응 정보 정리
-> - **기준 커밋**: `a633ccb0d194159d81c061add70fab4aa348eda1` (`codex/profile-post-composer`)
+> - **기준 상태**: Release Candidate exact HEAD가 확정되지 않음. 제출 직전 branch·HEAD·binary를
+>   다시 기록해야 하며 아래 과거 수치를 현재 사실로 승계하지 않습니다.
+> - **제출 HOLD**: 승인된 verified-email 연속 로그인의 hosted UID 유지·relay 분리 실측과
+>   Sign in with Apple 삭제 token revoke가 아직 검증되지 않았습니다. Google 로그인을
+>   제공하는 현재 제품은 Guideline 4.8 검토 대상이므로 이 게이트 전에는 App Store 제출을
+>   진행하지 않습니다.
 > - **식별자 및 빌드 사양**:
 >   - Bundle ID (`PRODUCT_BUNDLE_IDENTIFIER`): `app.gomsinlog`
 >   - Display Name (`CFBundleDisplayName`): `곰신로그`
@@ -37,12 +42,10 @@
   `군 복무 중인 연인과 하루의 순간을 가볍게 기록하고 공유하세요. 복무 디데이 계산부터 둘만의 사진 기록까지, 둘만의 아늑한 공간에서 소중한 일상을 이어갑니다.` (88자 / 218 바이트)
 
 ### 1.4 검색 키워드 (Keywords)
-- **공식 필드 정의**: 최대 100자 (Up to 100 characters, 쉼표로 구분, 불필요한 공백 제외)
+- **공식 필드 정의**: 최대 100바이트 (Up to 100 bytes, 쉼표로 구분, 불필요한 공백 제외)
 - **초안**:
   `곰신로그,군인,커플,디데이,전역일,군화,교환일기,복무일,곰신,군인커플`
-- **실측 검증**: 38자 (96 바이트).
-  - Apple 공식 문자 수 기준: 38/100자 준수.
-  - 레거시 시스템 UTF-8 바이트 기준: 96/100 바이트 준수.
+- **실측 검증**: 38자, UTF-8 96바이트로 공식 100바이트 제한 이내.
   - 앱 이름 추천안('곰신로그')에서 생략된 '군인', '군화', '곰신', '커플', '디데이' 맥락을 밀도 있게 보완합니다.
 
 ### 1.5 카테고리 (Categories)
@@ -77,7 +80,7 @@
 - '지금찍기' 카메라로 지금 이 순간의 생생한 사진을 촬영하거나, 기기 앨범에서 사진을 선택해 올립니다.
 - 한 줄 글과 함께 부담 없이 오늘의 순간을 기록할 수 있습니다.
 
-4. 둘만의 소중한 사진 모아보기 (My 게시물 작성기)
+4. 둘만의 소중한 사진 모아보기 (우리 프로필 게시물 작성기)
 - 기기 앨범의 사진뿐만 아니라 우리가 함께 나눈 스토리와 여행 기록의 사진 중에서 최대 10장까지 선택해 게시물을 만듭니다.
 - 사진 순서를 자유롭게 변경하고, 함께 나눈 소중한 기억에 캡션을 남길 수 있습니다.
 - 둘만의 '공개' 또는 나만 볼 수 있는 '나만 보기'로 게시물 공개 범위를 설정할 수 있습니다.
@@ -106,7 +109,10 @@
   `https://gomsin-log.vercel.app/legal/terms` [UNVERIFIED - 새 약관/방침 문구 master/Production 배포 전]
   - 실제 구현 경로: `/legal/terms` (소스코드 구현 확인 완료)
 - **지원 URL (Support URL, 필수)**:
-  **[BLOCKED / REQUIRED]** — 현재 공개 고객지원 웹페이지가 개설되어 있지 않습니다. App Store 심사 제출을 위해서는 외부에서 접근 가능한 공식 고객지원 페이지(예: `https://gomsin-log.vercel.app/support` 또는 문의 접수 이메일/폼 링크가 포함된 공개 페이지)의 신설 및 프로덕션 배포가 필수적입니다. (존재하지 않는 가상 도메인 `gomsinlog.app`은 사용하지 않습니다.)
+  `https://gomsin-log.vercel.app/support` [UNVERIFIED]
+  - 코드의 공개 `/support` 경로와 문의·개인정보 안내 화면은 확인됨.
+  - Production에 같은 빌드가 배포되어 외부 비로그인 접근·실제 문의 채널이 동작하는지는
+    제출 직전 확인해야 합니다.
 - **마케팅 URL (Marketing URL, 선택)**:
   `https://gomsin-log.vercel.app` [UNVERIFIED]
 
@@ -149,59 +155,53 @@
 ---
 
 ## 3. 심사 참고 사항 (App Review Notes)
-- **공식 필드 정의**: 최대 4,000자 (Up to 4,000 characters)
-- **실측 검증**: 2,138자 (3,990 바이트, 공식 4,000자 및 UTF-8 4,000 바이트 제한 모두 충족)
+- **공식 필드 정의**: 최대 4,000바이트 (Up to 4,000 bytes)
+- **상태**: 아래는 여유 폭을 둔 초안입니다. RC binary의 실제 기능·경로와 대조하고 다시
+  측정하기 전에는 `READY`가 아닙니다.
 - **App Store Connect '메모(Notes)' 입력 텍스트 초안**:
 
 ```text
 [App Review Notes - GomsinLog]
 
-곰신로그 심사를 진행해 주셔서 감사합니다. 원활한 심사 및 기능 검증을 위해 핵심 흐름과 기술 정책을 안내합니다.
+곰신로그는 두 사람이 1:1로 연결해 쓰는 비공개 다이어리입니다.
 
-1. 커플 연결 흐름 (Connection Flow)
-- 곰신로그는 연인이 1:1로 연결되어 사용하는 비공개 다이어리입니다.
-- 심사용 사전 페어링 데모 계정 2개를 준비 중입니다. (자격증명은 심사 정보 로그인란 참조, DB 미생성 PLACEHOLDER 상태) 로그인 즉시 홈, 스토리, 공유 일기 확인이 가능합니다.
-- (신규 연결): 온보딩에서 "새 공간 만들기"로 6자리 초대 코드를 생성하고, 다른 기기에서 "초대 코드가 있어요" 입력 시 1:1 연결됩니다.
+1. Review access
+- App Store Connect 로그인란의 사전 연결된 데모 계정으로 로그인해 주세요. 실제 자격증명은 저장소에 넣지 않습니다.
+- 신규 연결은 한 계정이 6자리 초대 코드를 만들고 다른 계정이 입력하는 방식입니다.
 
-2. 원본 기록 상세 이동 (Exact Record Navigation)
-- 홈 기록 카드 또는 스토리 요약 줄 탭 시, 임의 추정 없이 해당 요약의 고유 ID(recordId)를 가진 원본 기록 상세 경로(/record?record=<id>)로 직접 이동합니다. (코드 및 라우트 검증 완료)
-- 대상 기록 삭제 또는 접근 불가 시 대체 없이 "부재" 카드로 정직하게 표시합니다.
+2. Core flow
+- 홈 또는 상대의 오늘 요약을 누르면 그 항목이 참조한 정확한 원본 기록으로 이동합니다.
+- 원본이 삭제됐거나 권한이 없으면 다른 기록으로 대체하지 않고 이용 불가 상태를 표시합니다.
 
-3. 일일 요약 온디바이스 동작 및 프라이버시 (Daily Summary & Privacy)
-- 스토리 표지 요약은 사실 기반 결정론적 규칙 요약이 기본으로 즉시 표시됩니다.
-- Foundation Models 정제는 지원되는 iOS 26+ Apple Intelligence 실기기 및 한국어(ko_KR) 로케일에서 기본 사용 가능하며, 스토리 첫 장의 `AI로 다듬기`를 사용자가 누를 때만 실행됩니다. 웹·Android·미지원·timeout·검증 실패는 기존 규칙 요약으로 fallback합니다. `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=false|0|off`는 긴급 kill switch입니다. Xcode 26.6 Simulator build는 PASS, 실물 iPhone의 한국어 품질·지연·발열·배터리는 UNVERIFIED입니다.
-- [폴백]: 4초 초과, 오류, 취소, 기기/OS 미지원 시 중단 없이 기존 결정론적 규칙 요약이 유지됩니다.
-- [프라이버시]: 외부 AI 서버 전송이 없습니다. 모델 payload에는 recordId, userId, 날짜, 시각, 첨부 URL/파일명, 비공개 여부, 건강/주기 raw data가 일절 제외되며 정규화된 텍스트 줄과 서수 인덱스만 전달됩니다. (단 전체 앱 DB나 미디어 스토리지가 E2EE 상태인 것은 아닙니다.)
+3. Summary privacy
+- 기본 요약은 기기에서 결정론적 규칙으로 만듭니다.
+- 제출 빌드에 `AI로 다듬기`가 보이는 경우에만, 사용자가 누른 뒤 지원 iPhone의 온디바이스 모델이 같은 항목 수·순서·원본 연결을 유지하며 문장만 다듬습니다. 외부 AI 서버 전송은 없고 실패·미지원 시 기본 요약을 유지합니다.
+- 건강·주기 원본, ID, 첨부 URL·파일명, 위치 metadata는 모델 입력에 넣지 않습니다.
 
-4. 카메라 및 사진 접근 정책 (Camera & Photo Policy)
-- "지금찍기" 실시간 촬영 시에만 카메라 권한(NSCameraUsageDescription)을 요청합니다.
-- 기기 앨범 사진 선택은 iOS 표준 PHPickerViewController를 사용하므로 사진 라이브러리 접근 권한(NSPhotoLibraryUsageDescription)을 요구하지 않습니다.
+4. Camera and media
+- `지금찍기`를 누를 때만 카메라 권한을 요청합니다. 앨범 선택은 시스템 picker가 사용자가 고른 파일만 앱에 전달합니다.
+- 신규 첨부는 사진만 지원합니다. 신규 영상·음성 업로드와 마이크 권한은 없습니다.
 
-5. 미디어 업로드 정책 (Media Upload Policy)
-- 현재 신규 미디어 업로드는 "사진"만 지원합니다 (MEDIA_POLICY_REFUSAL).
-- 신규 동영상/오디오 업로드는 차단되며, 마이크 권한(NSMicrophoneUsageDescription)은 바이너리에 없습니다. (기존 등록 미디어 재생만 지원)
+5. Account deletion
+- 경로: `우리` 탭 → 프로필 메뉴 → `설정` → `계정 관리` → `계정 삭제`.
+- 확인 후 본인 계정·프로필·본인 작성 기록과 첨부를 삭제하고 커플 연결을 해제합니다. 상대가 작성한 콘텐츠는 상대 계정에 남습니다. 부분 실패는 완료로 표시하지 않고 복구·재시도 화면을 제공합니다.
 
-6. 게시물 작성기 (Profile Post Composer)
-- 마이 탭 게시물 작성기는 기기 앨범, 스토리, 여행 사진 중 최대 10장을 선택해 순서 변경, 캡션 작성, 공개/나만 보기 설정이 가능합니다.
-- 필터, 위치 태그, 사람 태그, 신규 비디오/오디오 업로드는 미제공합니다.
-
-7. 계정 삭제 및 데이터 처리 정책 (Account Deletion Policy)
-- App Store Guideline 5.1.1(v) 준수: 하단 탭 [마이] -> 상단 [설정] -> 계정 관리의 [계정 삭제 (회원 탈퇴)] -> "탈퇴" 직접 입력 확인.
-- [삭제]: 본인 프로필, auth.users 계정, 본인 작성 기록 및 첨부 사진이 삭제되고 1:1 커플 연결이 해제됩니다.
-- [보존]: 상대방이 작성한 기록과 게시물은 상대방 계정에 보존됩니다.
-- [안정성]: 부분 미디어 삭제 실패 시 recovery 안내 및 재시도를 지원하며, 운영 백업은 검증/취소 후 7일 이내 삭제됩니다.
-
-8. 인증 환경 안내 (Authentication Notes)
-- 원격 Supabase는 Google OAuth 및 이메일 로그인이 활성화되어 있으며, Apple 로그인은 심사 제출 전 활성화 및 리다이렉트 등록 예정인 BLOCKER 상태입니다. (다크/라이트 모드 지원)
+6. Authentication and purchases
+- Apple 로그인은 V5§11의 승인된 verified-email 연속 로그인 계약을 따릅니다. native/default-OFF
+  경로는 로컬에 준비됐으나 실제 hosted UID 유지·relay 분리·미확인 이메일 방어와 signing,
+  계정 삭제 token revocation·실패 복구를 검증하기 전에는 제출하지 않습니다. 현재 설정과
+  exact-commit 증거는 CURRENT_STATE§0에서 확인하고 심사 binary와 다시 대조합니다.
+- IAP가 포함된 빌드는 App Store Connect 상품과 Sandbox 심사 경로, 구매 복원 위치를 별도 메모에 추가합니다. 판매가 꺼진 빌드에는 구매 CTA가 없습니다.
 ```
 
 ---
 
 ## 4. 스크린샷 캡처 매니페스트 (Screenshot Capture Manifest)
 
-### 4.1 규격 사양 (Apple App Store 요구사항)
-- **대상 기기 디스플레이**: 6.9형 디스플레이 (iPhone 16 Pro Max / 15 Pro Max 규격 지원)
-- **이미지 해상도**: 1290 x 2796 픽셀 (세로형, 19.5:9 비율)
+### 4.1 캡처 후보 규격 (제출 시점 공식 요구사항 재확인 필요)
+- **대상 후보**: 6.9형 iPhone 디스플레이
+- **후보 해상도**: 1290 x 2796 픽셀 세로형. App Store Connect가 제출 시점에 허용하는
+  display size와 exact pixel set을 공식 도움말에서 다시 확인합니다.
 - **색상 포맷**: RGB 포맷, **알파 채널(투명도) 없음 (No Alpha Channel)**
 - **파일 형식**: PNG 또는 무손실 고품질 JPEG
 - **허용 매수**: 최소 1장 ~ 최대 10장 (Apple 공식 기준, 본 초안에서는 6장 권장)
@@ -211,7 +211,9 @@
 - **데이터 정결성**: 실제 사용자의 개인정보, 실명, 실제 군부대 명칭, 군사시설/위치 정보가 포함된 스크린샷은 절대 사용하지 마십시오.
 - **예시 데이터**: 따뜻하고 정돈된 가상의 테스트 데이터만 활용합니다. (예: 닉네임 "곰신이", "군화", 일기 "오늘 점심은 맛있는 김치찌개!", "주말 외박 준비 중")
 - **시각적 완성도**: 시스템 상태 표시줄(배터리 100%, Wi-Fi, 시계 9:41 등)이 정돈된 클린 렌더링 화면을 사용합니다.
-- **알파 채널 검사 필수**: 캡처 후 `sips` 또는 그래픽 도구를 통해 알파 채널이 완전히 제거되었는지 확인해야 합니다.
+- **알파 채널 검사 필수**: 투명 PNG의 metadata만 지우는 명령은 알파를 제거하지 않습니다.
+  불투명 배경으로 실제 flatten하거나 고품질 JPEG로 변환한 뒤 `sips -g hasAlpha <파일>`로
+  `hasAlpha: no`인지 확인합니다.
 
 ### 4.3 스크린샷 목록 및 화면 구성표 (권장 6장)
 
@@ -222,29 +224,30 @@
 | 3 | `screenshot-03-record-detail.png` | 기록 상세 (Record) | 소중한 순간이 담긴 사진과 따뜻한 이야기 | 첨부 사진 카드, 원본 일기 본문 텍스트, 함께 나눈 감정 태그, 작성 시각 |
 | 4 | `screenshot-04-today-composer.png` | Today 기록 작성기 | 지금찍기와 사진으로 가볍게 남기는 순간 | 텍스트 작성 영역, '지금찍기' 카메라 및 앨범 첨부 버튼, 감정 선택 칩, 둘만의 공유/비공개 토글 |
 | 5 | `screenshot-05-service.png` | 복무 정보 (Service) | 입대부터 전역까지, 한눈에 보는 복무 일정 | 계급(일병), 다음 진급일 D-14 및 진급 일정표, 정기 휴가 및 외박 디데이 캘린더 |
-| 6 | `screenshot-06-post-composer.png` | My 게시물 작성기 | 둘만의 소중한 사진들을 모아 간직하는 방법 | 기기 앨범/스토리/여행 사진 선택 그리드(최대 10장), 사진 순서 변경, 캡션 작성, 공개/나만 보기 설정 |
+| 6 | `screenshot-06-post-composer.png` | 우리 프로필 게시물 작성기 | 둘만의 소중한 사진들을 모아 간직하는 방법 | 기기 앨범/스토리/여행 사진 선택 그리드(최대 10장), 사진 순서 변경, 캡션 작성, 공개/나만 보기 설정 |
 
 ---
 
 ## 5. 메타데이터 제한 및 실측 검증 요약
 
-본 문서에 기재된 텍스트 및 사양의 Apple 공식 규격 충족 여부를 실제 측정 스크립트로 검증한 결과입니다.
+아래는 초안 길이와 로컬 코드 상태입니다. App Store Connect·Production·RC binary 확인 전
+`READY` 판정으로 사용하지 않습니다.
 
 | 항목 | Apple 공식 필드 정의 | 초안 값 | 실측 검증 결과 | 상태 |
 |---|---|---|---|---|
-| **앱 이름 (App Name) 추천안** | 최대 30자 (Up to 30 characters) | `곰신로그` | **4자 (12 바이트)** — 규격 충족 | READY |
-| **앱 이름 (App Name) 대안** | 최대 30자 (Up to 30 characters) | `곰신로그 - 군인 커플 다이어리` | **17자 (41 바이트)** — 규격 충족 | READY |
-| **부제 (Subtitle)** | 최대 30자 (Up to 30 characters) | `복무 디데이와 둘만의 하루 기록` | **17자 (43 바이트)** — 규격 충족 | READY |
-| **홍보 문구 (Promotional Text)** | 최대 170자 (Up to 170 characters) | 초안 본문 | **88자 (218 바이트)** — 규격 충족 | READY |
-| **검색 키워드 (Keywords)** | 최대 100자 (Up to 100 characters) | 키워드 10개 (쉼표 구분) | **38자 (96 바이트)** — 문자/바이트 모두 충족 | READY |
-| **앱 설명 (Description)** | 최대 4,000자 (Up to 4,000 characters) | 초안 본문 | **1,435자 (3,287 바이트)** — 규격 충족 | READY |
-| **심사 참고 메모 (Review Notes)** | 최대 4,000자 (Up to 4,000 characters) | 초안 본문 | **2,138자 (3,990 바이트)** — 문자/바이트 모두 충족 | READY |
-| **스크린샷 규격** | 6.9형 1290x2796, 1~10장, RGB 무알파 | 1290x2796 6장 매니페스트 | **규격 충족 (실제 6장 미캡처)** | BLOCKED |
+| **앱 이름 (App Name) 추천안** | 최대 30자 (Up to 30 characters) | `곰신로그` | **4자 (12 바이트)** — 길이만 검증 | DRAFT |
+| **앱 이름 (App Name) 대안** | 최대 30자 (Up to 30 characters) | `곰신로그 - 군인 커플 다이어리` | **17자 (41 바이트)** — 길이만 검증 | DRAFT |
+| **부제 (Subtitle)** | 최대 30자 (Up to 30 characters) | `복무 디데이와 둘만의 하루 기록` | **17자 (43 바이트)** — 길이만 검증 | DRAFT |
+| **홍보 문구 (Promotional Text)** | 최대 170자 (Up to 170 characters) | 초안 본문 | RC 기능 대조·재측정 필요 | DRAFT |
+| **검색 키워드 (Keywords)** | 최대 100바이트 (Up to 100 bytes) | 키워드 10개 (쉼표 구분) | UTF-8 96바이트, 제출 locale에서 재검증 필요 | DRAFT |
+| **앱 설명 (Description)** | 최대 4,000자 (Up to 4,000 characters) | 초안 본문 | RC 기능 대조·재측정 필요 | DRAFT |
+| **심사 참고 메모 (Review Notes)** | 최대 4,000바이트 (Up to 4,000 bytes) | 초안 본문 | **1,303자 / UTF-8 2,553바이트**, RC 경로 대조 필요 | DRAFT |
+| **스크린샷 규격** | 제출 시점 공식 규격 재확인 | 1290x2796 6장 후보 | 실제 6장 미캡처·pixel set 재확인 필요 | BLOCKED |
 | **개인정보 처리방침 URL** | 필수 유효 URL | `https://gomsin-log.vercel.app/legal/privacy` | 코드 경로 존재 / 프로덕션 최신 배포 검증 대기 | UNVERIFIED |
 | **서비스 이용약관 URL** | 선택 유효 URL | `https://gomsin-log.vercel.app/legal/terms` | 코드 경로 존재 / 프로덕션 최신 배포 검증 대기 | UNVERIFIED |
-| **고객지원 URL (Support URL)** | 필수 유효 URL | 미개설 상태 (공개 지원 웹페이지 신설 필수) | **미개설 (심사 전 필수 개설)** | BLOCKED |
+| **고객지원 URL (Support URL)** | 필수 유효 URL | `/support` 코드 경로 | Production 외부 접근·실제 문의 채널 미확인 | UNVERIFIED |
 | **심사용 데모 계정** | 로그인 필수 앱 요구사항 | 상호 사전 페어링 계정 2개 | **원격 DB 미생성 (자격증명 미커밋)** | BLOCKED |
-| **Apple 로그인 (Sign in with Apple)** | Guideline 4.8 필수 요건 | Supabase Apple Provider 활성화 | **현재 Provider 비활성(OFF) 상태** | BLOCKED |
+| **Apple 로그인 (Sign in with Apple)** | Google 등 제3자 로그인을 제공하는 현재 구성에서 Guideline 4.8 검토 대상 | native/default-OFF 경로 로컬 준비; 현재 증거는 CURRENT_STATE§0 | hosted UID 유지·relay 분리·signing·실기기·삭제 revoke 미검증 | BLOCKED / SUBMISSION HOLD |
 | **빌드 & SDK 요구사항** | Xcode 26+ / iOS 26 SDK | iOS 15.0 floor, iPhone 전용 | **로컬 빌드/아카이브 미실행** | BLOCKED |
 | **2026 연령 등급 설문** | 2026 Age Rating Questionnaire | 소셜 미디어/스크린타임/건강 설문 | **App Store Connect 미응답** | BLOCKED |
 
@@ -254,12 +257,12 @@
 
 | 구분 | 검토 항목 | 현재 상태 | 상세 내용 및 의존 관계 |
 |---|---|---|---|
-| **메타데이터** | 앱 이름, 부제, 홍보문구, 키워드, 카테고리 | **READY** | 문자 수 및 바이트 수 검증 완료, 즉시 등록 가능 |
-| **메타데이터** | 앱 설명 (Description) | **READY** | 과장 없는 정직한 기능 및 제한사항 명시 완료 |
-| **메타데이터** | 심사 참고 메모 (Review Notes) | **READY** | 8개 핵심 정책 및 기술 설명 완료, 4,000자 이내 준수 |
+| **메타데이터** | 앱 이름, 부제, 홍보문구, 키워드, 카테고리 | **DRAFT** | RC 기능과 keyword locale을 대조한 뒤 확정 |
+| **메타데이터** | 앱 설명 (Description) | **DRAFT** | RC의 실제 탭·기능·제한과 재대조 필요 |
+| **메타데이터** | 심사 참고 메모 (Review Notes) | **DRAFT** | RC binary와 데모 계정/IAP 상태를 반영한 뒤 확정 |
 | **법적 문서** | 개인정보 처리방침 및 서비스 이용약관 | **PARTIAL** | 앱 내 `/legal/privacy`, `/legal/terms` 구현 완료. 최신 master 브랜치 Vercel 프로덕션 배포 확인 필요 |
-| **고객지원** | 고객지원 웹페이지 URL (Support URL) | **BLOCKED** | 외부 접근 가능한 고객지원 페이지 개설 필수 (현재 미개설) |
-| **인증 연동** | Apple 로그인 (Sign in with Apple) | **BLOCKED** | App Store 심사 지침 4.8 필수 요건이나 현재 Supabase Apple Provider 비활성(OFF) 상태. 활성화 및 redirect 등록 필수 |
+| **고객지원** | 고객지원 웹페이지 URL (Support URL) | **UNVERIFIED** | `/support` 구현은 확인됨; Production 비로그인 접근과 실제 문의 채널 검증 필요 |
+| **인증 연동** | Apple 로그인 (Sign in with Apple) | **BLOCKED / SUBMISSION HOLD** | 승인된 verified-email 연결의 hosted UID 유지/negative test, provider·signing·실기기·삭제 revoke 검증 필요 |
 | **심사 계정** | 사전 페어링된 심사용 데모 계정 | **BLOCKED** | 원격 DB에 1:1 연결된 곰신/군화 계정 실제 생성 및 비밀번호 ASC 등록 필요 |
 | **디자인 에셋** | 6.9형 스크린샷 6장 (1290x2796, 무알파) | **BLOCKED** | 매니페스트 수립 완료. 가상 데이터 기반 실기기/시뮬레이터 실제 캡처 및 알파 채널 제거 필요 |
 | **바이너리** | iPhone 전용 빌드 및 iOS 15 floor | **PARTIAL** | `TARGETED_DEVICE_FAMILY = 1`, `IPHONEOS_DEPLOYMENT_TARGET = 15.0` 프로젝트 설정 반영 완료 |
@@ -283,8 +286,9 @@
 
 ### 2단계: 공개 URL 배포 및 지원 채널 개설
 - [ ] **최신 법적 문서 프로덕션 배포 확인**: Vercel 프로덕션(`https://gomsin-log.vercel.app`)에 접속하여 `/legal/privacy` 및 `/legal/terms`의 최신 문구가 정상 노출되는지 확인합니다.
-- [ ] **공개 고객지원 웹페이지 개설 (Support URL)**:
-  - 심사 제출용 고객지원 페이지(예: `https://gomsin-log.vercel.app/support` 또는 문의 접수 이메일/폼 링크가 포함된 공개 페이지)를 제작하여 프로덕션에 배포합니다.
+- [ ] **공개 고객지원 웹페이지 검증·배포 (Support URL)**:
+  - 코드에 있는 공개 `/support`를 Production에 배포하고 비로그인 브라우저에서 실제 문의
+    채널·개인정보 안내·뒤로가기가 동작하는지 확인합니다.
   - 해당 URL을 App Store Connect의 '지원 URL' 필드에 입력합니다.
 
 ### 3단계: 심사용 데모 계정 생성
@@ -300,7 +304,8 @@
   - 시뮬레이터(iPhone 16 Pro Max) 또는 실기기에서 상기 매니페스트 6종 화면을 캡처합니다.
   - 민감 개인정보, 실제 군부대 위치 등이 포함되지 않도록 가상 데이터만 사용합니다.
 - [ ] **알파 채널 제거 검증**:
-  - macOS 터미널에서 `sips -s format png --deleteColorManagementProperties <파일>` 등을 활용하여 알파 채널을 완전히 제거한 후 App Store Connect에 업로드합니다.
+  - 불투명 배경으로 flatten하거나 고품질 JPEG로 변환합니다. metadata 삭제만으로는 알파가
+    제거되지 않습니다. `sips -g hasAlpha <파일>` 결과가 `no`인지 확인합니다.
 
 ### 5단계: Xcode 빌드 및 바이너리 업로드
 - [ ] **Xcode 26+ / iOS 26 SDK 환경 확인**: 최신 공식 요구사항에 맞는 빌드 도구 버전을 확인합니다.

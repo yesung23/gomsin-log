@@ -341,10 +341,11 @@ export async function installE2eeRuntime(input: RuntimeInstallInput): Promise<In
   // Re-installation is single-owner too: a late duplicate bootstrap must not
   // leave two teardown callbacks with different account/device bindings.
   clearE2eeRuntimeCapabilities();
+  let teardownRegistration: ReturnType<typeof registerE2eeRuntimeTeardown> | null = null;
   try {
     setRecordCryptoEnvironment(environment);
     setOutboxLocalCacheKey(lck);
-    registerE2eeRuntimeTeardown(() => {
+    teardownRegistration = registerE2eeRuntimeTeardown(() => {
       setRecordCryptoEnvironment(null);
       setOutboxLocalCacheKey(null);
     });
@@ -359,12 +360,12 @@ export async function installE2eeRuntime(input: RuntimeInstallInput): Promise<In
   return {
     environment,
     deviceId: pending.deviceId,
-    close: () => {
-      if (closed) return;
-      closed = true;
-      clearRuntimeLifecycle();
-    },
-  };
+      close: () => {
+        if (closed) return;
+        closed = true;
+        teardownRegistration?.clear();
+      },
+    };
 }
 
 export function clearE2eeRuntime(): void {

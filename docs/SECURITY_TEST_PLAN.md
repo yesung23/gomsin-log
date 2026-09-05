@@ -88,5 +88,20 @@
 ### 2) 초대 코드 Brute Force 방어
 - 초대 코드는 6자리 숫자(100,000가지 조합)이므로, 연속 시도를 방어하기 위해 Supabase Edge Function 또는 RPC 내에 **IP/User 당 분당 5회 실패 시 15분 차단 Rate Limiting**을 적용해야 합니다. (파일럿 전 필수 구현 항목).
 
-### 3) OAuth Identity Linking (계정 병합)
-- 이메일 Magic Link, Google OAuth, Apple OAuth가 동일한 이메일 주소를 사용하는 경우, Supabase Auth 설정에서 `Automatically link identities`를 활성화하여 동일한 `auth.uid()`로 병합 처리합니다.
+### 3) OAuth Identity Linking (검증된 계정 연결)
+
+2026-09-05 명시 승인을 반영한 [V5 §11](PRODUCT_V5_MASTER_DECISION.md#11-apple-로그인과-계정-경계)이
+제품 계약입니다. 동일 verified-email의 서버 identity 연결 금지 조건은 폐기됐습니다.
+
+- 실제 테스트 계정으로 Google→Apple 및 Apple→Google을 각각 실행해 서버 UID, 기존 프로필,
+  기록 소유자, 커플, 구매 귀속이 유지되는지 확인합니다. 이메일 문자열의 클라이언트 비교나
+  다른 UID 데이터 이동으로 통과시키지 않습니다. 기존 Google/email 경로를 끄지 않습니다.
+- 로컬 Store 회귀: 같은 UID의 provider/identity 갱신은 기록을 초기화하지 않으며, 다른 UID는
+  이메일이 같아도 이전 계정 데이터를 즉시 숨기고 새 계정 데이터만 hydrate합니다.
+- 실제 hosted negative: 미확인 이메일 identity로 계정 탈취 불가, 다른 이메일/private relay의
+  임의 연결 불가, 이미 다른 UID에 귀속된 Apple subject의 소유권 이전 불가. 서로 다른 기존
+  계정의 데이터 병합은 이번 범위가 아닙니다. mock은 hosted 서버의 연결 동작 증거가 아닙니다.
+- 취소·nonce/state 불일치·만료·로그아웃 뒤 늦은 응답·삭제 중 로그인·revoke 실패 및 재시도도
+  검증합니다. 실제 Apple 활성화는 signing/provider/기기와 삭제 복구 gate가 충족될 때까지 HOLD입니다.
+- 다른 이메일의 수동 연결 API는 별도 재인증/충돌 검토 전까지 비활성입니다. 이번 승인으로
+  `Allow manual linking`이나 확인되지 않은 provider-linking 실험 설정을 켜지 않습니다.

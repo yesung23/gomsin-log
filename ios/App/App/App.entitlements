@@ -31,6 +31,21 @@
 	<string>NSFileProtectionComplete</string>
 
 	<!--
+		Sign in with Apple uses the first-party Capacitor bridge backed by
+		AuthenticationServices, so the native App target declares the Default
+		Sign in with Apple entitlement.
+
+		The App ID capability is enabled separately in the Apple Developer
+		portal. A signed development or distribution profile must include this
+		entitlement before device or TestFlight activation; local metadata and
+		unsigned builds do not prove profile matching or hosted login readiness.
+	-->
+	<key>com.apple.developer.applesignin</key>
+	<array>
+		<string>Default</string>
+	</array>
+
+	<!--
 		DELIBERATELY ABSENT ENTITLEMENTS
 
 		aps-environment
@@ -46,22 +61,30 @@
 			TestFlight distribution is set up; see
 			docs/kiro/NATIVE_RELEASE_GUIDE.md.
 
-		com.apple.developer.applesignin
-			`signInWithApple()` (src/lib/supabase.ts) calls
-			`startOAuth('apple')`, the same Supabase web OAuth path as Google:
-			the system browser opens the provider and returns through
-			gomsinlog://auth/callback. Nothing calls
-			ASAuthorizationAppleIDProvider, so the entitlement is not required,
-			and claiming it would make signing fail on any profile that has not
-			enabled the capability. If a future version adopts the native
-			Sign in with Apple sheet, add the capability AND this entitlement
-			together.
-
 		keychain-access-groups
-			The app never touches the Keychain. See the Keychain section of
-			docs/kiro/NATIVE_RELEASE_GUIDE.md. Declaring a shared access group
-			would create a way for another bundle to read whatever ended up
-			there.
+			The app DOES use the Keychain, and this key is still absent on
+			purpose. Getting the reason right matters, because it is where the
+			E2EE device keys live.
+
+			Keychain use is confined to the first-party device-keys plugin:
+			packages/capacitor-device-keys/ios/Sources/DeviceKeysPlugin/
+			DeviceKeys.swift holds the P-256 device key (Secure Enclave via
+			SecAccessControlCreateWithFlags, falling back to a software
+			kSecClassKey item when the Enclave is unavailable), and LocalKeys.swift
+			holds the local content key as a kSecClassGenericPassword item.
+			src/lib/iosPrivacyManifest.test.ts measures that those two files are
+			the ONLY Keychain callers in the compile surface, so the boundary
+			cannot quietly widen.
+
+			Neither call site sets kSecAttrAccessGroup, so both items land in the
+			app's default access group, readable by this bundle alone. That is
+			exactly the property that must not be given up. Declaring
+			keychain-access-groups would place these items in a group any other
+			bundle carrying the same entitlement could read, which for the device
+			key means handing another process the material that authenticates this
+			device. The entitlement is therefore not added, and the plugin must go
+			on setting no access group. See the Keychain section of
+			docs/kiro/NATIVE_RELEASE_GUIDE.md.
 
 		com.apple.developer.associated-domains
 			Deep linking uses the custom `gomsinlog` scheme, not Universal

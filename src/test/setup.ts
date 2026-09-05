@@ -1,6 +1,8 @@
-import { afterEach, vi } from 'vitest';
+import * as jestDomMatchers from '@testing-library/jest-dom/matchers';
 import { cleanup } from '@testing-library/react';
-import '@testing-library/jest-dom/vitest';
+import { afterEach, expect, vi } from 'vitest';
+
+expect.extend(jestDomMatchers);
 
 /*
  * Node 26 ships an experimental built-in `localStorage` whose getter throws or
@@ -133,6 +135,97 @@ if (!('matchMedia' in window)) {
       removeEventListener: () => {},
       dispatchEvent: () => false,
     }),
+  });
+}
+
+/**
+ * jsdom does not implement the Web Locks API. Production mutation paths use an
+ * account-scoped exclusive lock, so tests need the same serialization contract
+ * instead of silently bypassing it. Suites that verify the unsupported-browser
+ * fail-closed path explicitly delete `navigator.locks` for that test.
+ */
+if (!('locks' in navigator)) {
+  type TestLockCallback<T> = (lock: Lock | null) => PromiseLike<T> | T;
+  type QueuedLock = {
+    mode: LockMode;
+    callback: TestLockCallback<unknown>;
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  };
+  type LockState = {
+    activeShared: number;
+    activeExclusive: boolean;
+    queue: QueuedLock[];
+  };
+  const states = new Map<string, LockState>();
+
+  const pump = (name: string, state: LockState): void => {
+    if (state.activeExclusive || state.queue.length === 0) return;
+    const first = state.queue[0];
+    if (first.mode === 'exclusive' && state.activeShared > 0) return;
+
+    const grant = (entry: QueuedLock) => {
+      if (entry.mode === 'exclusive') state.activeExclusive = true;
+      else state.activeShared += 1;
+      void Promise.resolve()
+        .then(() => entry.callback({ name, mode: entry.mode } as Lock))
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          if (entry.mode === 'exclusive') state.activeExclusive = false;
+          else state.activeShared -= 1;
+          if (!state.activeExclusive && state.activeShared === 0 && state.queue.length === 0) {
+            states.delete(name);
+          }
+          pump(name, state);
+        });
+    };
+
+    if (first.mode === 'exclusive') {
+      state.queue.shift();
+      grant(first);
+      return;
+    }
+    while (state.queue[0]?.mode === 'shared' && !state.activeExclusive) {
+      grant(state.queue.shift()!);
+    }
+  };
+
+  const request = async <T,>(
+    name: string,
+    optionsOrCallback: LockOptions | TestLockCallback<T>,
+    optionalCallback?: TestLockCallback<T>,
+  ): Promise<T> => {
+    const options = typeof optionsOrCallback === 'function' ? {} : optionsOrCallback;
+    const callback = typeof optionsOrCallback === 'function'
+      ? optionsOrCallback
+      : optionalCallback;
+    if (!callback) throw new TypeError('A lock callback is required.');
+    const mode = options.mode ?? 'exclusive';
+    const state = states.get(name) ?? {
+      activeShared: 0,
+      activeExclusive: false,
+      queue: [],
+    };
+    states.set(name, state);
+    const canGrantImmediately = state.queue.length === 0
+      && !state.activeExclusive
+      && (mode === 'shared' || state.activeShared === 0);
+    if (options.ifAvailable && !canGrantImmediately) {
+      return callback(null);
+    }
+    return new Promise<T>((resolve, reject) => {
+      state.queue.push({
+        mode,
+        callback: callback as TestLockCallback<unknown>,
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      pump(name, state);
+    });
+  };
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request },
   });
 }
 

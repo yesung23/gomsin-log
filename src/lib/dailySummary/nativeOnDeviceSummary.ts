@@ -3,22 +3,26 @@ import type {
   OnDeviceSummaryFailure,
   OnDeviceSummaryItem,
 } from '@/lib/dailySummary/contract';
+import {
+  MAX_DAILY_SUMMARY_EXCERPT_CHARS,
+  MAX_DAILY_SUMMARY_MODEL_CANDIDATES,
+} from '@/lib/dailySummary/contract';
 
 /**
  * iOS 온디바이스 요약 플러그인으로 가는 유일한 통로.
  *
- * ## 기본값은 켜짐
+ * ## 검증된 빌드에서만 켜짐
  *
- * 지원되는 iOS 네이티브 기기에서는 기본적으로 사용할 수 있다. 운영 중 긴급히 끌 필요가
- * 있을 때만 `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=false|0|off`를 명시한다. 이 값은
- * 브라우저 번들에 인라인되는 공개 kill switch일 뿐 자격증명이 아니다. 실제 생성은 스토리의
- * 사용자 버튼을 눌렀을 때만 시작하고, 웹·Android·미지원 모델은 기존 규칙 요약으로 남는다.
+ * 실제 지원 iPhone에서 한국어 품질·민감정보 경계·오프라인·지연·발열을 검증한 빌드만
+ * `VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED=true`를 명시한다. 값이 없거나 다른 값이면 기능은
+ * 닫히며 기존 규칙 요약만 남는다. 이 값은 브라우저 번들에 인라인되는 공개 기능 스위치일
+ * 뿐 자격증명이 아니다. 실제 생성도 스토리의 사용자 버튼을 눌렀을 때만 시작한다.
  *
  * ## Android 구현이 없다
  *
  * 없는 것이 아니라 **만들지 않는다.** Foundation Models는 Apple 플랫폼 API이고, Android에서
  * 같은 보장(온디바이스, 서버 전송 없음)을 주는 대체 구현은 별개의 결정이다. 그래서
- * `getPlatform() === 'ios'`가 아니면 `not_ios`로 끝내고 규칙 결과를 쓴다. 조용한 downgrade는
+ * `getPlatform() === 'ios'`가 아니면 `platform_unsupported`로 끝내고 규칙 결과를 쓴다. 조용한 downgrade는
  * "어느 경로가 실제로 돌았는가"를 답할 수 없게 만든다.
  *
  * ## 로그
@@ -41,7 +45,7 @@ export const ON_DEVICE_SUMMARY_LOCALE = 'ko_KR';
 export const ON_DEVICE_SUMMARY_TIMEOUT_MS = 4000;
 
 export interface OnDeviceSummaryPlugin {
-  availability(options: { locale: string }): Promise<{ available: boolean; reason: string }>;
+  availability(options: { locale: string }): Promise<{ available: boolean; reason: unknown }>;
   refineLines(options: {
     requestId: string;
     locale: string;
@@ -55,10 +59,29 @@ export type OnDeviceRefineOutcome =
   | { ok: true; items: unknown }
   | { ok: false; reason: OnDeviceSummaryFailure };
 
+export type OnDevicePreflightOutcome =
+  | { ok: true }
+  | { ok: false; reason: OnDeviceSummaryFailure };
+
+const AVAILABILITY_FAILURES = new Set<OnDeviceSummaryFailure>([
+  'device_not_eligible',
+  'apple_intelligence_disabled',
+  'model_not_ready',
+  'locale_unsupported',
+]);
+
+function availabilityFailure(reason: unknown): OnDeviceSummaryFailure {
+  if (typeof reason !== 'string') return 'platform_unsupported';
+  if (AVAILABILITY_FAILURES.has(reason as OnDeviceSummaryFailure)) {
+    return reason as OnDeviceSummaryFailure;
+  }
+  // 이전 네이티브 빌드가 잠깐 공존해도 콘텐츠를 노출하지 않고 보수적으로 접는다.
+  if (reason === 'model_unavailable') return 'model_not_ready';
+  return 'platform_unsupported';
+}
+
 export function isOnDeviceDailySummaryEnabled(): boolean {
-  const value = import.meta.env.VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED;
-  if (value === undefined) return true;
-  return !['false', '0', 'off'].includes(value.trim().toLowerCase());
+  return import.meta.env.VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED === 'true';
 }
 
 let registered: OnDeviceSummaryPlugin | null = null;
@@ -103,12 +126,51 @@ function isPluginRegistered(): boolean {
 /** 호출 전에 확인할 수 있는 모든 게이트. `'ready'`가 아니면 규칙 결과를 쓴다. */
 export function onDeviceSummaryGate(): 'ready' | OnDeviceSummaryFailure {
   if (!isOnDeviceDailySummaryEnabled()) return 'disabled';
-  // 테스트가 주입한 플러그인은 플랫폼 판정을 건너뛴다. 실제 게이트는 위의 flag와 아래의
-  // 네이티브 판정이며, 이 우회는 `injectedForTests`가 설정된 동안에만 존재한다.
+  // 테스트 seam도 플랫폼 판정을 우회하지 않는다. 웹/Android에서 주입된 객체가 실제
+  // Foundation Models처럼 보이면 플랫폼 계약을 테스트가 조용히 무력화한다.
+  if (!isIosNative()) return 'platform_unsupported';
   if (injectedForTests) return 'ready';
-  if (!isIosNative()) return 'not_ios';
-  if (!isPluginRegistered()) return 'plugin_missing';
+  if (!isPluginRegistered()) return 'platform_unsupported';
   return 'ready';
+}
+
+/**
+ * CTA를 보이기 전에 하는 콘텐츠 없는 확인.
+ *
+ * 전달하는 값은 고정 로케일 하나뿐이다. 기록, index, 날짜, 식별자, 요청 id는 만들지도
+ * 않는다. 이 확인이 성공한 뒤에만 사용자가 생성 요청을 선택할 수 있다.
+ */
+export async function preflightOnDeviceSummary(
+  options: { timeoutMs?: number } = {},
+): Promise<OnDevicePreflightOutcome> {
+  const gate = onDeviceSummaryGate();
+  if (gate !== 'ready') return { ok: false, reason: gate };
+
+  const port = plugin();
+  if (!port) return { ok: false, reason: 'platform_unsupported' };
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const timedOut = new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(
+        () => resolve('timeout'),
+        options.timeoutMs ?? ON_DEVICE_SUMMARY_TIMEOUT_MS,
+      );
+    });
+    const support = await Promise.race([
+      port.availability({ locale: ON_DEVICE_SUMMARY_LOCALE }),
+      timedOut,
+    ]);
+    if (support === 'timeout') return { ok: false, reason: 'timeout' };
+    if (support?.available !== true) {
+      return { ok: false, reason: availabilityFailure(support?.reason) };
+    }
+    return { ok: true };
+  } catch {
+    return { ok: false, reason: 'native_error' };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /** 콘텐츠를 담지 않는 불투명 상관관계 id. */
@@ -136,10 +198,14 @@ export async function refineOnDeviceSummary(
 ): Promise<OnDeviceRefineOutcome> {
   const gate = onDeviceSummaryGate();
   if (gate !== 'ready') return { ok: false, reason: gate };
-  if (items.length === 0) return { ok: false, reason: 'rejected' };
+  if (
+    items.length === 0
+    || items.length > MAX_DAILY_SUMMARY_MODEL_CANDIDATES
+    || items.some((item) => item.text.length <= MAX_DAILY_SUMMARY_EXCERPT_CHARS)
+  ) return { ok: false, reason: 'rejected' };
 
   const port = plugin();
-  if (!port) return { ok: false, reason: 'plugin_missing' };
+  if (!port) return { ok: false, reason: 'platform_unsupported' };
 
   const previous = currentRequestId;
   const requestId = newRequestId();
@@ -161,7 +227,9 @@ export async function refineOnDeviceSummary(
       requestCancel(port, requestId);
       return { ok: false, reason: 'timeout' };
     }
-    if (!support?.available) return { ok: false, reason: 'unsupported' };
+    if (support?.available !== true) {
+      return { ok: false, reason: availabilityFailure(support?.reason) };
+    }
     if (currentRequestId !== requestId) return { ok: false, reason: 'cancelled' };
 
     const raced = await Promise.race([

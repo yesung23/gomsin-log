@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { CalendarDays, Grid3x3, Image as ImageIcon, Lock, Menu, Plane, Plus, SquarePen, X } from 'lucide-react';
+import { CalendarDays, Grid3x3, Image as ImageIcon, ImagePlus, Lock, MoreHorizontal, Plane, SquarePen, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { visibleRecordsForViewer } from '@/lib/privacy';
@@ -13,6 +13,7 @@ import type { PostDraftItem } from '@/features/us/postComposition';
 import { ProfileIdentity } from '@/components/ProfileIdentity';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
+import { ProfilePaperMenu } from '@/components/ProfilePaperMenu';
 import { InkCircle, PenFace } from '@/components/paper';
 import { RecordMediaGallery } from '@/components/media/RecordMediaGallery';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
@@ -24,8 +25,16 @@ import { formatLocalDate } from '@/lib/utils';
 import { TRIP_PHASE_ORDER, TRIP_PHASE_PILL, groupTripsByPhase, type TripPhase } from '@/lib/tripPhase';
 import type { Attachment, CoupleHighlight, DailyRecord, Trip } from '@/types';
 import { isDeviceProtectionEnabled } from '@/app/e2ee/featureFlag';
+import { useDialogFocus } from '@/lib/useDialogFocus';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 type ProfileTab = 'grid' | 'photo' | 'trip';
+
+const PROFILE_TABS = [
+  { id: 'grid', Icon: Grid3x3, label: '게시물' },
+  { id: 'photo', Icon: ImageIcon, label: '사진' },
+  { id: 'trip', Icon: Plane, label: '여행' },
+] as const;
 
 export type PostRetryPhase = 'media' | 'publication';
 
@@ -95,13 +104,19 @@ export function SharedProfile() {
   const { profile } = state;
   const todayStr = localToday();
   const [tab, setTab] = useState<ProfileTab>('grid');
+  const profileTabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [selectedPostId, setSelectedPostId] = useState<string | null>(null);
+  const selectedPostTriggerRef = useRef<HTMLElement | null>(null);
   const [editingHighlightId, setEditingHighlightId] = useState<string | null | undefined>(undefined);
+  const highlightTriggerRef = useRef<HTMLElement | null>(null);
   const [highlightTitle, setHighlightTitle] = useState('');
   const [highlightRecordIds, setHighlightRecordIds] = useState<string[]>([]);
   const [highlightCoverId, setHighlightCoverId] = useState<string | undefined>();
   const [isSavingHighlight, setIsSavingHighlight] = useState(false);
   const [composingPost, setComposingPost] = useState(false);
+  const postComposerTriggerRef = useRef<HTMLElement | null>(null);
+  const [isPaperMenuOpen, setIsPaperMenuOpen] = useState(false);
+  const paperMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const [isPublishingPost, setIsPublishingPost] = useState(false);
   const publishPostInFlightRef = useRef(false);
   /*
@@ -395,6 +410,11 @@ export function SharedProfile() {
     discardPostDraft();
   };
 
+  const openPostComposer = (trigger: HTMLElement) => {
+    postComposerTriggerRef.current = trigger;
+    setComposingPost(true);
+  };
+
   const sharedRecords = useMemo(
     () => visibleRecordsForViewer(state.records ?? [], { userId: profile.id, role: profile.role })
       .filter((record) => !record.isPrivate),
@@ -425,7 +445,12 @@ export function SharedProfile() {
     ? profilePostRecords.find((record) => record.id === selectedPostId) ?? null
     : null;
   const highlights = state.coupleHighlights ?? [];
-  const effectiveMilitary = resolveEffectiveMilitary(profile);
+  const isMilitaryRelationship = resolveRelationshipContext(
+    profile.couple.relationshipContext,
+  ) === 'military';
+  const effectiveMilitary = isMilitaryRelationship
+    ? resolveEffectiveMilitary(profile)
+    : undefined;
   const hasMilitary = Boolean(effectiveDischargeDate(effectiveMilitary));
   const stats = useMemo(
     () => buildCoupleStats({
@@ -448,13 +473,38 @@ export function SharedProfile() {
     [effectiveMilitary, profile.couple?.anniversaryDate, profile.profileCaption, sharedEvents, todayStr],
   );
 
+  const selectProfileTab = (nextTab: ProfileTab, focus = false) => {
+    setTab(nextTab);
+    if (focus) {
+      const index = PROFILE_TABS.findIndex(({ id }) => id === nextTab);
+      profileTabRefs.current[index]?.focus();
+    }
+  };
+
+  const moveProfileTab = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowRight') nextIndex = (index + 1) % PROFILE_TABS.length;
+    else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + PROFILE_TABS.length) % PROFILE_TABS.length;
+    else if (event.key === 'Home') nextIndex = 0;
+    else if (event.key === 'End') nextIndex = PROFILE_TABS.length - 1;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    selectProfileTab(PROFILE_TABS[nextIndex].id, true);
+  };
+
   const openCreateHighlight = () => {
+    highlightTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     setEditingHighlightId(null);
     setHighlightTitle('');
     setHighlightRecordIds([]);
     setHighlightCoverId(undefined);
   };
   const openEditHighlight = (highlight: CoupleHighlight) => {
+    highlightTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
     const visibleIds = new Set(photoRecords.map((record) => record.id));
     const recordIds = highlight.recordIds.filter((id) => visibleIds.has(id));
     setEditingHighlightId(highlight.id);
@@ -535,7 +585,7 @@ export function SharedProfile() {
 
   return (
     <div className="min-h-full pb-8">
-      <header data-testid="profile-sticky-header" className="sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4" style={{ background: 'var(--paper)' }}>
+      <header data-testid="profile-sticky-header" className="paper-texture-layer sticky top-0 z-40 grid h-14 grid-cols-[88px_1fr_88px] items-center px-4">
         {/*
           왼쪽 끝이 게시물 만들기다.
 
@@ -552,28 +602,38 @@ export function SharedProfile() {
                 : '게시물 만들기'
             }
             data-testid="open-post-composer"
-            onClick={() => setComposingPost(true)}
-            className="flex h-11 w-11 shrink-0 items-center justify-center"
+            onClick={(event) => openPostComposer(event.currentTarget)}
+            className="press-response flex h-11 w-11 shrink-0 items-center justify-center"
           >
-            <Plus size={22} color="var(--ink)" aria-hidden="true" />
+            <ImagePlus size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
         <div className="flex min-w-0 items-center justify-center gap-1.5" data-testid="profile-header-center">
           {profile.username ? (
             <span className="truncate text-body font-bold" style={{ color: 'var(--ink)' }}>@{profile.username}</span>
           ) : (
-            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
-              아이디 설정하기
+            <button type="button" onClick={() => navigate('/settings?profile=edit')} className="press-response inline-flex min-h-11 items-center truncate text-body font-semibold underline underline-offset-2" style={{ color: 'var(--ink-soft)' }}>
+              @아이디 설정
             </button>
           )}
           <Lock size={13} className="shrink-0" color="var(--ink-soft)" aria-label="둘만 볼 수 있어요" />
         </div>
         <div className="flex items-center justify-end">
-          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="flex h-11 w-11 items-center justify-center">
+          <button type="button" aria-label="기록 남기기" onClick={() => navigate('/compose')} className="press-response flex h-11 w-11 items-center justify-center">
             <SquarePen size={20} color="var(--ink)" aria-hidden="true" />
           </button>
-          <button type="button" aria-label="설정" onClick={() => navigate('/settings')} className="flex h-11 w-11 items-center justify-center">
-            <Menu size={22} color="var(--ink)" aria-hidden="true" />
+          <button
+            ref={paperMenuTriggerRef}
+            type="button"
+            aria-label="마이 메뉴 열기"
+            aria-haspopup="dialog"
+            aria-expanded={isPaperMenuOpen}
+            aria-controls="profile-paper-menu-dialog"
+            data-testid="open-profile-paper-menu"
+            onClick={() => setIsPaperMenuOpen(true)}
+            className="press-response flex h-11 w-11 items-center justify-center"
+          >
+            <MoreHorizontal size={22} color="var(--ink)" aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -635,37 +695,72 @@ export function SharedProfile() {
           onClose={closeHighlightEditor}
           onSave={() => void saveHighlight()}
           onDelete={editingHighlightId ? () => void removeHighlight() : undefined}
+          restoreFocusRef={highlightTriggerRef}
         />
       ) : null}
 
-      <div className="mt-4 flex border-t" style={{ borderColor: 'var(--ink-faint)' }}>
-        {([
-          { id: 'grid', Icon: Grid3x3, label: '격자' },
-          { id: 'photo', Icon: ImageIcon, label: '사진' },
-          { id: 'trip', Icon: Plane, label: '여행' },
-        ] as const).map(({ id, Icon, label }) => (
-          <button key={id} type="button" aria-label={label} aria-pressed={tab === id} onClick={() => setTab(id)} className="profile-tab flex min-h-11 flex-1 items-center justify-center py-3" style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}>
+      <div role="tablist" aria-label="우리의 기억 보기" className="mt-4 flex border-t" style={{ borderColor: 'var(--ink-faint)' }}>
+        {PROFILE_TABS.map(({ id, Icon, label }, index) => (
+          <button
+            key={id}
+            ref={(element) => { profileTabRefs.current[index] = element; }}
+            id={`profile-tab-${id}`}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            aria-controls={`profile-panel-${id}`}
+            tabIndex={tab === id ? 0 : -1}
+            onClick={() => selectProfileTab(id)}
+            onKeyDown={(event) => moveProfileTab(event, index)}
+            className="profile-tab flex min-h-12 flex-1 flex-col items-center justify-center gap-0.5 py-2"
+            style={{ borderBottom: `var(--stroke-bold) solid ${tab === id ? 'var(--ink)' : 'transparent'}` }}
+          >
             <Icon size={20} color={tab === id ? 'var(--ink)' : 'var(--ink-soft)'} aria-hidden="true" />
+            <span className="text-caption font-semibold" style={{ color: tab === id ? 'var(--ink)' : 'var(--ink-soft)' }}>{label}</span>
           </button>
         ))}
       </div>
 
-      {tab === 'trip' ? (
-        <SharedTripList trips={state.trips ?? []} todayStr={todayStr} onOpen={(id) => navigate(`/trips/${encodeURIComponent(id)}`)} onOpenAll={() => navigate('/trips')} />
-      ) : tab === 'photo' ? (
-        <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(id) => navigate(`/record?record=${encodeURIComponent(id)}`)} />
-      ) : (
-        <PostGrid
-          records={profilePostRecords}
-          coupleId={profile.couple.coupleId}
-          onOpen={setSelectedPostId}
-          emptyMessage="아직 게시물이 없어요."
-          ariaLabel="사진 게시물 격자"
-        />
-      )}
+      {PROFILE_TABS.map(({ id }) => (
+        <section
+          key={id}
+          id={`profile-panel-${id}`}
+          role="tabpanel"
+          aria-labelledby={`profile-tab-${id}`}
+          tabIndex={0}
+          hidden={tab !== id}
+        >
+          {tab === id ? (
+            id === 'trip' ? (
+              <SharedTripList trips={state.trips ?? []} todayStr={todayStr} onOpen={(tripId) => navigate(`/trips/${encodeURIComponent(tripId)}`)} onOpenAll={() => navigate('/trips')} />
+            ) : id === 'photo' ? (
+              <SharedRecordList records={sharedRecords} coupleId={profile.couple.coupleId} onOpen={(recordId) => navigate(`/record?record=${encodeURIComponent(recordId)}`)} />
+            ) : (
+              <PostGrid
+                records={profilePostRecords}
+                coupleId={profile.couple.coupleId}
+                onOpen={(recordId) => {
+                  selectedPostTriggerRef.current = document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null;
+                  setSelectedPostId(recordId);
+                }}
+                emptyMessage={profile.couple.connected
+                  ? '아직 게시물이 없어요'
+                  : '상대를 연결하면 둘의 게시물이 보여요'}
+                emptyActionLabel={profile.couple.connected ? '첫 게시물 만들기' : '상대 연결'}
+                onEmptyAction={profile.couple.connected
+                  ? openPostComposer
+                  : () => navigate('/settings')}
+                ariaLabel="사진 게시물 격자"
+              />
+            )
+          ) : null}
+        </section>
+      ))}
 
       {selectedPost ? (
-        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
+        <PhotoPostViewer record={selectedPost} coupleId={profile.couple.coupleId} restoreFocusRef={selectedPostTriggerRef} onClose={() => setSelectedPostId(null)} onOpenRecord={(id) => { setSelectedPostId(null); navigate(`/record?record=${encodeURIComponent(id)}`); }} />
       ) : null}
 
       {composingPost ? (
@@ -682,10 +777,20 @@ export function SharedProfile() {
           setItems={setPostItems}
           caption={postCaption}
           setCaption={setPostCaption}
+          restoreFocusRef={postComposerTriggerRef}
           onClose={() => { void closePostComposer(); }}
           onSubmit={(input) => { void publishPost(input); }}
         />
       ) : null}
+
+      <ProfilePaperMenu
+        isOpen={isPaperMenuOpen}
+        userId={state.authenticatedUser?.id || profile.id || ''}
+        triggerRef={paperMenuTriggerRef}
+        onClose={() => setIsPaperMenuOpen(false)}
+        onOpenMy={() => navigate('/my')}
+        onOpenSettings={() => navigate('/settings')}
+      />
     </div>
   );
 }
@@ -711,7 +816,12 @@ function SharedRecordList({ records, coupleId, onOpen }: { records: DailyRecord[
 
 function SharedRecordRow({ record, coupleId, onOpen }: { record: DailyRecord; coupleId?: string; onOpen: (recordId: string) => void }) {
   const photo = getPhotoAttachments(record)[0];
-  const { url, reportLoadFailure } = useMediaAttachment(photo || EMPTY_RECORD_ATTACHMENT, coupleId, record.id);
+  const { url, reportLoadFailure } = useMediaAttachment(
+    photo || EMPTY_RECORD_ATTACHMENT,
+    coupleId,
+    record.id,
+    'thumbnail',
+  );
   const summary = record.contentUnavailable
     ? '이 기록의 글을 아직 열 수 없어요.'
     : record.log.trim() || (photo ? '사진을 남겼어요.' : '기록을 남겼어요.');
@@ -773,7 +883,7 @@ function ProfileHighlightButton({ highlight, records, coupleId, onOpen, onEdit }
 }
 
 function HighlightMedia({ photo, coupleId, recordId }: { photo: NonNullable<ReturnType<typeof getPhotoAttachments>[number]>; coupleId?: string; recordId: string }) {
-  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId);
+  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId, 'thumbnail');
   return (
     <InkCircle size={60} ring="seen">
       {url ? <img src={url} alt="" onError={reportLoadFailure} className="h-full w-full rounded-full object-cover" /> : <ImageIcon size={22} color="var(--ink-soft)" aria-hidden="true" />}
@@ -795,6 +905,7 @@ function HighlightEditor({
   onClose,
   onSave,
   onDelete,
+  restoreFocusRef,
 }: {
   title: string;
   setTitle: (value: string) => void;
@@ -809,17 +920,29 @@ function HighlightEditor({
   onClose: () => void;
   onSave: () => void;
   onDelete?: () => void;
+  restoreFocusRef: RefObject<HTMLElement | null>;
 }) {
+  const panelRef = useRef<HTMLElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  useDialogFocus({
+    active: true,
+    panelRef,
+    initialFocusRef: titleRef,
+    restoreFocusRef,
+    onClose,
+    closeDisabled: busy,
+  });
+
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-foreground/35 p-3" role="dialog" aria-modal="true" aria-labelledby="highlight-editor-title" data-testid="highlight-editor">
-      <section className="relative w-full rounded-surface border border-border bg-card p-4 shadow-xl">
+      <section ref={panelRef} className="relative w-full rounded-surface border border-border bg-card p-4 shadow-xl">
         <div className="flex items-center justify-between gap-3">
           <h2 id="highlight-editor-title" className="text-heading font-semibold text-foreground">{editing ? '하이라이트 편집' : '새 하이라이트'}</h2>
-          <button type="button" aria-label="하이라이트 편집 닫기" onClick={onClose} disabled={busy} className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button>
+          <button type="button" aria-label="하이라이트 편집 닫기" onClick={onClose} disabled={busy} className="press-response flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button>
         </div>
         <label className="mt-4 block text-label font-semibold text-foreground">
           이름
-          <input value={title} onChange={(event) => setTitle(event.target.value.slice(0, 20))} maxLength={20} autoFocus className="mt-1 h-11 w-full rounded-control border border-border bg-background px-3 text-body font-normal outline-none focus:ring-2 focus:ring-coral/40" placeholder="예: 우리의 봄" />
+          <input ref={titleRef} value={title} onChange={(event) => setTitle(event.target.value.slice(0, 20))} maxLength={20} className="mt-1 h-11 w-full rounded-control border border-border bg-background px-3 text-body font-normal outline-none focus:ring-2 focus:ring-coral/40" placeholder="예: 우리의 봄" />
         </label>
         <p className="mt-3 text-caption leading-relaxed text-muted-foreground">
           게시물 격자에서 고르거나, 스토리를 보다가 ‘하이라이트에 추가’를 눌러 가져올 수 있어요.
@@ -848,13 +971,13 @@ function HighlightPickerTile({ record, coupleId, selected, cover, onToggle, onSe
         {photo ? <HighlightPickerMedia photo={photo} coupleId={coupleId} recordId={record.id} /> : <span className="flex h-full items-center justify-center"><ImageIcon size={20} color="var(--ink-soft)" /></span>}
         <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-white bg-black/40 text-caption text-white">{selected ? '✓' : ''}</span>
       </button>
-      {selected ? <button type="button" onClick={onSetCover} className="absolute bottom-1 left-1 rounded-full bg-black/55 px-2 py-1 text-caption font-semibold text-white">{cover ? '커버' : '커버로'}</button> : null}
+      {selected ? <button type="button" onClick={onSetCover} className="press-response-row absolute bottom-1 left-1 min-h-11 min-w-11 rounded-full bg-black/55 px-2 text-caption font-semibold text-white">{cover ? '커버' : '커버로'}</button> : null}
     </div>
   );
 }
 
 function HighlightPickerMedia({ photo, coupleId, recordId }: { photo: NonNullable<ReturnType<typeof getPhotoAttachments>[number]>; coupleId?: string; recordId: string }) {
-  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId);
+  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId, 'thumbnail');
   return url ? <img src={url} alt="" onError={reportLoadFailure} className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center"><ImageIcon size={20} color="var(--ink-soft)" /></span>;
 }
 
@@ -877,15 +1000,17 @@ function TripRow({ trip, phase, onOpen }: { trip: Trip; phase: TripPhase; onOpen
   return <button type="button" data-testid={`profile-trip-${trip.id}`} aria-label={`${trip.title} 열기`} onClick={() => onOpen(trip.id)} className="press-response flex min-h-16 w-full items-center gap-3 rounded-control px-3 text-left" style={{ background: 'var(--paper)', border: 'var(--stroke-thin) solid var(--ink-faint)' }}><CalendarDays size={18} className="shrink-0" color="var(--ink-soft)" aria-hidden="true" /><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-label font-semibold" style={{ color: 'var(--ink)' }}>{trip.title}</span><span className="shrink-0 text-caption" style={{ color: 'var(--ink-soft)' }}>{TRIP_PHASE_PILL[phase]}</span></span><span className="mt-0.5 block truncate text-caption tabular-nums" style={{ color: 'var(--ink-soft)' }}>{dateLabel}</span></span></button>;
 }
 
-function PhotoPostViewer({ record, coupleId, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; onClose: () => void; onOpenRecord: (id: string) => void }) {
+function PhotoPostViewer({ record, coupleId, restoreFocusRef, onClose, onOpenRecord }: { record: DailyRecord; coupleId?: string; restoreFocusRef: RefObject<HTMLElement | null>; onClose: () => void; onOpenRecord: (id: string) => void }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const photos = getPhotoAttachments(record);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    closeRef.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  useDialogFocus({
+    active: true,
+    panelRef,
+    initialFocusRef: closeRef,
+    restoreFocusRef,
+    onClose,
+  });
   if (photos.length === 0) return null;
-  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="ink-chip min-h-9 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
+  return <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/65 p-0 sm:items-center sm:p-4" onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="photo-post-viewer-title" data-testid="photo-post-viewer" className="max-h-[94dvh] w-full max-w-md overflow-y-auto rounded-t-3xl bg-card p-4 shadow-xl sm:rounded-surface" onPointerDown={(event) => event.stopPropagation()}><header className="flex min-h-11 items-center gap-3"><h2 id="photo-post-viewer-title" className="min-w-0 flex-1 text-label font-semibold text-card-foreground">{formatLocalDate(record.date)}{record.time ? ` ${record.time}` : ''}</h2><button ref={closeRef} type="button" onClick={onClose} aria-label="사진 게시물 닫기" className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-muted-foreground"><X size={19} aria-hidden="true" /></button></header><div className="pt-3"><RecordMediaGallery attachments={photos} coupleId={coupleId} recordId={record.id} /></div>{record.contentUnavailable ? <p className="pt-3 text-caption leading-relaxed text-muted-foreground">이 기록의 글은 이 기기에서 아직 열 수 없어요.</p> : record.log.trim() ? <p className="hand-text record-copy whitespace-pre-wrap break-keep pt-3 text-card-foreground">{record.log}</p> : null}<div className="flex justify-end pt-3"><button type="button" onClick={() => onOpenRecord(record.id)} className="press-response-row ink-chip min-h-11 px-3 text-caption font-semibold" style={{ color: 'var(--ink)' }}>원본 보기</button></div></div></div>;
 }

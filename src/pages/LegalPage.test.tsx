@@ -2,7 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 
-const { LegalPage } = await import('@/pages/LegalPage');
+const { LegalPage, LegalDocumentSheet } = await import('@/pages/LegalPage');
+const { LEGAL_DOC_TITLES, toLegalDocKey } = await import('@/lib/legalDocs');
 
 function renderLegal(doc: 'terms' | 'privacy') {
   return render(
@@ -18,8 +19,10 @@ describe('LegalPage', () => {
   it('states the real service boundaries and fair liability terms', () => {
     renderLegal('terms');
     expect(screen.getByRole('heading', { name: '서비스 이용약관' })).toBeInTheDocument();
-    expect(screen.getByText(/최종 개정일: 2026-08-27 · 시행일: 2026-09-03/)).toBeInTheDocument();
-    expect(screen.getByText(/시행일은 2026-09-03입니다/)).toBeInTheDocument();
+    expect(screen.getByText(/최종 개정일: 2026-09-04 · 시행일: 2026-09-11/)).toBeInTheDocument();
+    expect(screen.getByText(/시행일은 2026-09-11입니다/)).toBeInTheDocument();
+    expect(screen.getByText(/서로 연결을 원하는 두 이용자가 1:1 비공개 공간/)).toBeInTheDocument();
+    expect(screen.getByText(/군 복무 커플은 복무 디데이를 선택적으로 사용/)).toBeInTheDocument();
     expect(screen.getByText(/만 14세 이상만 가입/)).toBeInTheDocument();
     expect(screen.getByText(/군사기밀 또는 군 보안상/)).toBeInTheDocument();
     expect(screen.getByText(/고의 또는 중대한 과실/)).toBeInTheDocument();
@@ -32,8 +35,13 @@ describe('LegalPage', () => {
   it('discloses processors, legacy media preservation, accurate operational backup and E2EE scope', () => {
     renderLegal('privacy');
     expect(screen.getByRole('heading', { name: '개인정보 처리방침' })).toBeInTheDocument();
-    expect(screen.getByText(/최종 개정일: 2026-08-27 · 시행일: 2026-09-03/)).toBeInTheDocument();
-    expect(screen.getByText(/시행일은 2026-09-03이며/)).toBeInTheDocument();
+    expect(screen.getByText(/최종 개정일: 2026-09-04 · 시행일: 2026-09-11/)).toBeInTheDocument();
+    expect(screen.getByText(/시행일은 2026-09-11이며/)).toBeInTheDocument();
+    expect(screen.getByText(/관계 유형\(군 복무\/일반\), 서비스 내부 멤버 구분값/)).toBeInTheDocument();
+    expect(screen.getByText(/성별 응답\(선택\): 여성, 남성 또는 미응답/)).toBeInTheDocument();
+    expect(screen.getByText(/성별 응답은 상대방에게 제공하지 않으며/)).toBeInTheDocument();
+    expect(screen.getByText(/건강 기능이나 접근 권한을 결정하는 데 사용하지 않습니다/)).toBeInTheDocument();
+    expect(screen.getByText(/주기 정보\(선택·민감 가능\)/)).toBeInTheDocument();
     expect(screen.getByText(/Supabase Inc/)).toBeInTheDocument();
     expect(screen.getByText(/Vercel Inc/)).toBeInTheDocument();
     expect(screen.getByText(/지도 캡처의 글자 인식\(OCR\)은 기기 안에서/)).toBeInTheDocument();
@@ -54,6 +62,7 @@ describe('LegalPage', () => {
     expect(document.body.textContent).not.toMatch(/백업 정리 기간/);
     expect(document.body.textContent).not.toMatch(/기록, 사진·영상·음성/);
     expect(document.body.textContent).not.toMatch(/2026-08-09/);
+    expect(document.body.textContent).not.toMatch(/프로필\(필수\): 닉네임, 역할\(곰신\/군화\)/);
     unmount();
 
     renderLegal('privacy');
@@ -69,5 +78,80 @@ describe('LegalPage', () => {
     renderLegal('terms');
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: '홈' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the public /legal/:doc route reachable for both documents', () => {
+    const { unmount } = renderLegal('terms');
+    expect(screen.getByRole('heading', { name: LEGAL_DOC_TITLES.terms })).toBeInTheDocument();
+    unmount();
+
+    renderLegal('privacy');
+    expect(screen.getByRole('heading', { name: LEGAL_DOC_TITLES.privacy })).toBeInTheDocument();
+  });
+
+  it('falls back to the terms for an unrecognised doc parameter', () => {
+    expect(toLegalDocKey('privacy')).toBe('privacy');
+    expect(toLegalDocKey('terms')).toBe('terms');
+    expect(toLegalDocKey('nonsense')).toBe('terms');
+    expect(toLegalDocKey(undefined)).toBe('terms');
+  });
+});
+
+/**
+ * The onboarding sheet and the public route must render ONE document, not two copies
+ * of it. If the legal prose were duplicated for the in-app reader, the text a user
+ * consented to and the text published at /legal/:doc could silently diverge.
+ */
+describe('LegalDocumentSheet shares its text with the public route', () => {
+  function textOf(container: HTMLElement): string {
+    return (container.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  it.each(['terms', 'privacy'] as const)(
+    'renders exactly the %s text the route publishes',
+    (doc) => {
+      const route = renderLegal(doc);
+      const routeText = textOf(route.container);
+      route.unmount();
+
+      const sheetRender = render(
+        <MemoryRouter>
+          <LegalDocumentSheet doc={doc} onClose={vi.fn()} />
+        </MemoryRouter>,
+      );
+      const sheetText = textOf(screen.getByTestId('legal-document-sheet'));
+
+      // Every published clause is present in the sheet. The chrome differs (the route
+      // has a back control, the sheet a close control), so this is containment of the
+      // document body rather than string equality of the whole screen.
+      expect(sheetText).toContain('최종 개정일: 2026-09-04 · 시행일: 2026-09-11');
+      const clauses = routeText
+        .split('·')
+        .map((part) => part.trim())
+        .filter((part) => part.length > 40);
+      expect(clauses.length).toBeGreaterThan(3);
+      for (const clause of clauses) {
+        expect(sheetText).toContain(clause);
+      }
+      sheetRender.unmount();
+    },
+  );
+
+  it('calls onClose from the close control and from Escape', async () => {
+    const { default: userEvent } = await import('@testing-library/user-event');
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <LegalDocumentSheet doc="privacy" onClose={onClose} />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByRole('button', { name: '개인정보 처리방침 닫기' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(2);
   });
 });

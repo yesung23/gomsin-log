@@ -2,27 +2,37 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import React from 'react';
 import type { DailyRecord } from '@/types';
+import {
+  getOrCreateRecordMediaMutationOwnerToken,
+  listRecordMediaMutationJournalEntries,
+  writeRecordMediaMutationJournalEntry,
+} from '@/lib/recordMediaMutationJournal';
 
 /**
  * Media replacement on an EXISTING record.
  *
  * Ordering is not a style choice. Storage RLS requires the `daily_records` row to
  * exist before any object may be written under `{coupleId}/{recordId}/`, and the
- * no-orphans rule requires the removed objects to be deleted only AFTER the row
- * has stopped referencing them:
+ * lifecycle contract requires every upload to be reserved before Storage and
+ * every logical removal to retire its object in the same row transaction:
  *
- *     upload -> patch row -> remove old objects
+ *     begin -> upload -> patch row (activate desired + retire removed)
  *
- * Once the patch request is issued, a failed response is ambiguous: deleting the
- * new object can break a row whose response was merely lost. Read back before
- * claiming success, and prefer a possible orphan over user-visible data loss.
+ * Once the patch request is issued, a failed response is ambiguous. The client
+ * reconciles the operation id and never issues authenticated Storage DELETE.
  */
 
 const {
   mockSupabase,
   saveRecordToDB,
   uploadRecordMedia,
-  removeRecordMedia,
+  uploadRecordPhotoRendition,
+  beginRecordMediaMutation,
+  beginRecordPhotoMutation,
+  getRecordPhotoRenditionCapability,
+  prepareRecordPhotoRenditions,
+  getRecordMediaMutationStatus,
+  abandonRecordMediaMutation,
   fetchRecordsResultFromDB,
   fetchMyCoupleState,
   fetchFullStateFromDB,
@@ -37,7 +47,13 @@ const {
     callOrder,
     saveRecordToDB: vi.fn(),
     uploadRecordMedia: vi.fn(),
-    removeRecordMedia: vi.fn(),
+    uploadRecordPhotoRendition: vi.fn(),
+    beginRecordMediaMutation: vi.fn(),
+    beginRecordPhotoMutation: vi.fn(),
+    getRecordPhotoRenditionCapability: vi.fn(),
+    prepareRecordPhotoRenditions: vi.fn(),
+    getRecordMediaMutationStatus: vi.fn(),
+    abandonRecordMediaMutation: vi.fn(),
     fetchRecordsResultFromDB: vi.fn(),
     fetchMyCoupleState: vi.fn(),
     fetchFullStateFromDB: vi.fn(),
@@ -98,9 +114,30 @@ vi.mock('@/lib/records', () => ({
     callOrder.push(`upload:${(args[0] as File).name}`);
     return uploadRecordMedia(...(args as []));
   },
-  removeRecordMedia: (...args: unknown[]) => {
-    callOrder.push(`remove:${(args[0] as string[]).join('|')}`);
-    return removeRecordMedia(...(args as []));
+  uploadRecordPhotoRendition: (...args: unknown[]) => {
+    callOrder.push(`upload-rendition:${String(args[1])}`);
+    return uploadRecordPhotoRendition(...(args as []));
+  },
+  beginRecordMediaMutation: (...args: unknown[]) => {
+    const request = args[0] as { baseContentRevision: number; newMediaIds: string[] };
+    callOrder.push(`begin:${request.baseContentRevision}:${request.newMediaIds.length}`);
+    return beginRecordMediaMutation(...(args as []));
+  },
+  beginRecordPhotoMutation: (...args: unknown[]) => {
+    const request = args[0] as { baseContentRevision: number; newPhotos: unknown[] };
+    callOrder.push(`begin-photo:${request.baseContentRevision}:${request.newPhotos.length}`);
+    return beginRecordPhotoMutation(...(args as []));
+  },
+  getRecordPhotoRenditionCapability: (...args: unknown[]) => (
+    getRecordPhotoRenditionCapability(...(args as []))
+  ),
+  getRecordMediaMutationStatus: (...args: unknown[]) => {
+    callOrder.push('status');
+    return getRecordMediaMutationStatus(...(args as []));
+  },
+  abandonRecordMediaMutation: (...args: unknown[]) => {
+    callOrder.push('abandon');
+    return abandonRecordMediaMutation(...(args as []));
   },
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
@@ -109,7 +146,16 @@ vi.mock('@/lib/records', () => ({
       : { error: '지원하지 않는 파일 형식이에요.' },
   isCanonicalRecordMediaPath: (path: unknown, coupleId: string, recordId: string) =>
     typeof path === 'string' && path.startsWith(`${coupleId}/${recordId}/`),
+  isValidMediaObjectId: (value: string) => (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ),
   MEDIA_ACCEPT: 'image/png',
+}));
+
+vi.mock('@/lib/recordPhotoRenditions', () => ({
+  prepareRecordPhotoRenditions: (...args: unknown[]) => (
+    prepareRecordPhotoRenditions(...(args as []))
+  ),
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -134,7 +180,12 @@ vi.mock('@/lib/trips', () => ({
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
 
-let lastResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+let lastResult: {
+  ok: boolean;
+  failedFiles: string[];
+  retryableFailedFileIndexes?: number[];
+  error?: string;
+} | null = null;
 
 const EXISTING_PATH = 'couple-1/rec-1/existing.png';
 
@@ -212,13 +263,17 @@ const baseRecord: DailyRecord = {
   log: 'hello',
   isPrivate: false,
   createdAt: '2026-01-01T10:00:00.000Z',
+  contentRevision: 1,
   attachments: [{ type: 'photo', name: 'existing.png', path: EXISTING_PATH }],
 };
 
-async function setup(props: React.ComponentProps<typeof Probe> = {}) {
+async function setup(
+  props: React.ComponentProps<typeof Probe> = {},
+  record: DailyRecord = baseRecord,
+) {
   fetchFullStateFromDB.mockResolvedValue({
     setupComplete: true,
-    records: [baseRecord],
+    records: [record],
     events: [],
     trips: [],
     profile: {
@@ -254,10 +309,30 @@ function pngFile(name: string): File {
   return new File(['x'], name, { type: 'image/png' });
 }
 
+function preparedPhoto() {
+  return {
+    screenMaster: {
+      file: new File(['master'], 'photo.jpg', { type: 'image/jpeg' }),
+      widthPx: 2048,
+      heightPx: 1536,
+      byteSize: 6,
+      sha256: 'a'.repeat(64),
+    },
+    thumbnail: {
+      file: new File(['thumb'], 'photo.jpg', { type: 'image/jpeg' }),
+      widthPx: 640,
+      heightPx: 480,
+      byteSize: 5,
+      sha256: 'b'.repeat(64),
+    },
+  };
+}
+
 describe('updateRecordMedia', () => {
   beforeEach(() => {
     authCallbacks.length = 0;
     localStorage.clear();
+    sessionStorage.clear();
     callOrder.length = 0;
     lastResult = null;
     // The shared setup's `vi.restoreAllMocks()` strips implementations, including
@@ -268,11 +343,55 @@ describe('updateRecordMedia', () => {
         return { data: { subscription: { unsubscribe: vi.fn() } } };
       },
     );
-    saveRecordToDB.mockReset().mockResolvedValue({ ok: true });
-    uploadRecordMedia.mockReset().mockImplementation(async (file: File) => ({
-      attachment: { type: 'photo', name: file.name, path: `couple-1/rec-1/${file.name}` },
+    saveRecordToDB.mockReset().mockImplementation(async (
+      _record: DailyRecord,
+      _coupleId: string,
+      _userId: string,
+      intent: { expectedRevision?: number },
+    ) => ({ ok: true, contentRevision: (intent.expectedRevision ?? 0) + 1 }));
+    uploadRecordMedia.mockReset().mockImplementation(async (
+      file: File,
+      coupleId: string,
+      recordId: string,
+      _displayName: string | undefined,
+      objectId: string,
+    ) => ({
+      attachment: { type: 'photo', name: file.name, path: `${coupleId}/${recordId}/${objectId}.png` },
     }));
-    removeRecordMedia.mockReset().mockResolvedValue(undefined);
+    getRecordPhotoRenditionCapability.mockReset().mockResolvedValue({
+      ok: true,
+      supported: false,
+    });
+    prepareRecordPhotoRenditions.mockReset().mockResolvedValue(preparedPhoto());
+    uploadRecordPhotoRendition.mockReset().mockImplementation(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: {
+        type: 'photo',
+        name: rendition.file.name,
+        path: `${coupleId}/${recordId}/${objectId}.jpg`,
+      },
+    }));
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    beginRecordPhotoMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     fetchMyCoupleState.mockReset().mockResolvedValue({ ok: false, reason: 'server' });
     fetchFullStateFromDB.mockReset();
@@ -285,7 +404,190 @@ describe('updateRecordMedia', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
-  it('uploads, then patches the row, then removes the replaced objects', async () => {
+  it('reserves and uploads a stable pair but persists only the screen master attachment', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(beginRecordPhotoMutation).toHaveBeenCalledTimes(1);
+    const request = beginRecordPhotoMutation.mock.calls[0]?.[0] as {
+      newPhotos: Array<{
+        screenMaster: { mediaObjectId: string; sha256: string };
+        thumbnail: { mediaObjectId: string; sha256: string };
+      }>;
+    };
+    const pair = request.newPhotos[0];
+    expect(pair.screenMaster.mediaObjectId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(pair.thumbnail.mediaObjectId).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(pair.thumbnail.mediaObjectId).not.toBe(pair.screenMaster.mediaObjectId);
+    expect(pair.screenMaster.sha256).toBe('a'.repeat(64));
+    expect(pair.thumbnail.sha256).toBe('b'.repeat(64));
+    expect(uploadRecordPhotoRendition.mock.calls.map((call) => [call[1], call[4]])).toEqual([
+      ['screen_master', pair.screenMaster.mediaObjectId],
+      ['thumbnail', pair.thumbnail.mediaObjectId],
+    ]);
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+    ]);
+    const saved = saveRecordToDB.mock.calls[0]?.[0] as DailyRecord;
+    expect(saved.attachments?.map((attachment) => attachment.path)).toEqual([
+      EXISTING_PATH,
+      `couple-1/rec-1/${pair.screenMaster.mediaObjectId}.jpg`,
+    ]);
+    expect(JSON.stringify(saved.attachments)).not.toContain(pair.thumbnail.mediaObjectId);
+  });
+
+  it('stops before preparation or mutation when the capability probe is not authoritative', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({
+      ok: false,
+      reason: 'auth_expired',
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: false, reason: 'auth_expired' });
+    expect(prepareRecordPhotoRenditions).not.toHaveBeenCalled();
+    expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('re-checks the actor after asynchronous preparation and before durable begin', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    let finishPreparation!: (value: ReturnType<typeof preparedPhoto>) => void;
+    prepareRecordPhotoRenditions.mockImplementationOnce(() => new Promise((resolve) => {
+      finishPreparation = resolve;
+    }));
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(prepareRecordPhotoRenditions).toHaveBeenCalledOnce());
+    await act(async () => { emitAuth('SIGNED_OUT', null); });
+    finishPreparation(preparedPhoto());
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: false, reason: 'stale' });
+    expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('abandons a pair when the thumbnail upload definitively fails', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    uploadRecordPhotoRendition.mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: { type: 'photo', name: rendition.file.name, path: `${coupleId}/${recordId}/${objectId}.jpg` },
+    })).mockResolvedValueOnce({ error: '권한이 없어요.', reason: 'forbidden' });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    // The existing media API reports settled upload failures via failedFiles.
+    // Its callers require both ok and an empty failedFiles list for success.
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'forbidden' });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'abandon',
+    ]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
+  });
+
+  it('continues the exact paired operation after a lost begin response', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    beginRecordPhotoMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 2,
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'status',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+    ]);
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
+  it('lets authoritative CAS reconcile an ambiguous thumbnail upload and lost patch response', async () => {
+    getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: true, supported: true });
+    uploadRecordPhotoRendition.mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      attachment: { type: 'photo', name: rendition.file.name, path: `${coupleId}/${recordId}/${objectId}.jpg` },
+    })).mockImplementationOnce(async (
+      rendition: { file: File },
+      _kind: string,
+      coupleId: string,
+      recordId: string,
+      objectId: string,
+    ) => ({
+      error: '응답을 확인하지 못했어요.',
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: rendition.file.name,
+        path: `${coupleId}/${recordId}/${objectId}.jpg`,
+      },
+    }));
+    saveRecordToDB.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(callOrder).toEqual([
+      'begin-photo:1:1',
+      'upload-rendition:screen_master',
+      'upload-rendition:thumbnail',
+      'patchRow',
+      'status',
+    ]);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+    const saved = saveRecordToDB.mock.calls[0]?.[0] as DailyRecord;
+    expect(saved.attachments).toHaveLength(2);
+  });
+
+  it('retires removals once, then reserves and commits the replacement in the next revision', async () => {
     await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
 
     await act(async () => {
@@ -294,21 +596,27 @@ describe('updateRecordMedia', () => {
     await waitFor(() => expect(lastResult).not.toBeNull());
 
     expect(lastResult?.ok).toBe(true);
-    // The exact ordering storage RLS and the no-orphans rule require.
+    // Logical retirement is in the first DB transaction; physical cleanup is
+    // worker-owned and never appears in the authenticated client call order.
     expect(callOrder).toEqual([
+      'begin:1:0',
+      'patchRow',
+      'begin:2:1',
       'upload:new.png',
       'patchRow',
-      `remove:${EXISTING_PATH}`,
     ]);
+    const replacementId = (beginRecordMediaMutation.mock.calls[1]?.[0] as {
+      newMediaIds: string[];
+    }).newMediaIds[0];
     await waitFor(() =>
-      expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/new.png'),
+      expect(screen.getByTestId('attachments')).toHaveTextContent(replacementId),
     );
     expect(screen.getByTestId('attachments')).not.toHaveTextContent('existing.png');
   });
 
-  it('rolls back uploads after an authoritative forbidden patch failure', async () => {
+  it('abandons an uploaded reservation after an authoritative forbidden patch failure', async () => {
     saveRecordToDB.mockResolvedValue({ ok: false, reason: 'forbidden' });
-    await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
+    await setup({ addFiles: [pngFile('new.png')] });
 
     await act(async () => {
       screen.getByText('edit-media').click();
@@ -317,31 +625,24 @@ describe('updateRecordMedia', () => {
 
     expect(lastResult?.ok).toBe(false);
     expect(callOrder).toEqual([
+      'begin:1:1',
       'upload:new.png',
       'patchRow',
-      'remove:couple-1/rec-1/new.png',
+      'abandon',
     ]);
-    expect(removeRecordMedia).toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
-    // The object the user asked to remove is also retained because the row may
-    // still reference it.
-    expect(removeRecordMedia).not.toHaveBeenCalledWith([EXISTING_PATH]);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
     // Local state is unchanged: no phantom success.
     expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
   });
 
   it('accepts a committed media patch when only its response was lost', async () => {
-    saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
-    fetchRecordsResultFromDB.mockResolvedValue({
+    saveRecordToDB
+      .mockResolvedValueOnce({ ok: true, contentRevision: 2 })
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
       ok: true,
-      records: [{
-        ...baseRecord,
-        contentRevision: 2,
-        attachments: [{
-          type: 'photo',
-          name: 'new.png',
-          path: 'couple-1/rec-1/new.png',
-        }],
-      }],
+      state: 'committed',
+      targetContentRevision: 3,
     });
     await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
 
@@ -349,15 +650,23 @@ describe('updateRecordMedia', () => {
     await waitFor(() => expect(lastResult).not.toBeNull());
 
     expect(lastResult?.ok).toBe(true);
-    expect(removeRecordMedia).not.toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
-    expect(removeRecordMedia).toHaveBeenCalledWith([EXISTING_PATH]);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+    const replacementId = (beginRecordMediaMutation.mock.calls[1]?.[0] as {
+      newMediaIds: string[];
+    }).newMediaIds[0];
     await waitFor(() =>
-      expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/new.png'),
+      expect(screen.getByTestId('attachments')).toHaveTextContent(replacementId),
     );
   });
 
   it('accepts a committed publication update when only its response was lost and adopts the newer revision', async () => {
     saveRecordToDB.mockResolvedValue({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchRecordsResultFromDB.mockResolvedValue({
       ok: true,
       records: [{
@@ -416,7 +725,7 @@ describe('updateRecordMedia', () => {
     saveRecordToDB
       .mockImplementationOnce(() => mediaSave)
       .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
-    await setup({ addFiles: [pngFile('new.png')], removePaths: [EXISTING_PATH] });
+    await setup({ addFiles: [pngFile('new.png')] });
 
     await act(async () => { screen.getByText('edit-media').click(); });
     await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(1));
@@ -438,7 +747,6 @@ describe('updateRecordMedia', () => {
     expect(screen.getByTestId('record-state')).toHaveTextContent('"log":"newer local state"');
     expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
     expect(screen.getByTestId('attachments')).not.toHaveTextContent('new.png');
-    expect(removeRecordMedia).not.toHaveBeenCalledWith([EXISTING_PATH]);
   });
 
   it('does not let an older response-loss read-back overwrite a newer local revision', async () => {
@@ -449,6 +757,11 @@ describe('updateRecordMedia', () => {
     saveRecordToDB
       .mockResolvedValueOnce({ ok: false, reason: 'offline' })
       .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchRecordsResultFromDB.mockImplementationOnce(() => readBack);
     await setup();
 
@@ -488,6 +801,11 @@ describe('updateRecordMedia', () => {
     saveRecordToDB
       .mockResolvedValueOnce({ ok: false, reason: 'offline' })
       .mockResolvedValueOnce({ ok: true, contentRevision: 7 });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchRecordsResultFromDB.mockImplementationOnce(() => readBack);
     await setup();
 
@@ -544,6 +862,11 @@ describe('updateRecordMedia', () => {
     saveRecordToDB
       .mockResolvedValueOnce({ ok: false, reason: 'offline' })
       .mockResolvedValueOnce({ ok: true, contentRevision: 8 });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchRecordsResultFromDB.mockResolvedValue({
       ok: true,
       records: [{
@@ -567,7 +890,11 @@ describe('updateRecordMedia', () => {
 
     await act(async () => { screen.getByText('publish').click(); });
     await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(2));
-    expect(saveRecordToDB.mock.calls[1]?.[3]).toEqual({ kind: 'update', expectedRevision: 7 });
+    expect(saveRecordToDB.mock.calls[1]?.[3]).toMatchObject({
+      kind: 'update',
+      expectedRevision: 7,
+      mediaOperationId: expect.any(String),
+    });
   });
 
   it('keeps an ambiguous publication update failed when read-back is mismatched or unavailable', async () => {
@@ -591,16 +918,128 @@ describe('updateRecordMedia', () => {
     await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
   });
 
+  it('deduplicates lifecycle paths for an ordinary edit without changing duplicate content attachments', async () => {
+    const duplicateRecord: DailyRecord = {
+      ...baseRecord,
+      attachments: [
+        ...(baseRecord.attachments || []),
+        { type: 'photo', name: 'duplicate display.png', path: EXISTING_PATH },
+      ],
+    };
+    await setup({}, duplicateRecord);
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('ok'));
+
+    const request = beginRecordMediaMutation.mock.calls[0]?.[0] as {
+      existingPaths: string[];
+    };
+    expect(request.existingPaths).toEqual([EXISTING_PATH]);
+    expect((saveRecordToDB.mock.calls[0]?.[0] as DailyRecord).attachments).toHaveLength(2);
+  });
+
+  it('continues an ordinary text/visibility operation after its begin response is lost', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 2,
+    });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('ok'));
+
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    const beginRequest = beginRecordMediaMutation.mock.calls[0]?.[0] as { operationId: string };
+    const statusRequest = getRecordMediaMutationStatus.mock.calls[0]?.[0] as { operationId: string };
+    expect(statusRequest.operationId).toBe(beginRequest.operationId);
+    expect((saveRecordToDB.mock.calls[0]?.[3] as { mediaOperationId: string }).mediaOperationId)
+      .toBe(beginRequest.operationId);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
+  it('journals an ordinary update when both begin and status responses are lost', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    await setup();
+
+    await act(async () => { screen.getByText('publish').click(); });
+    await waitFor(() => expect(screen.getByTestId('update-result')).toHaveTextContent('offline'));
+
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken();
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([
+      expect.objectContaining({
+        operationId: (beginRecordMediaMutation.mock.calls[0]?.[0] as { operationId: string }).operationId,
+        recordId: 'rec-1',
+        userId: 'user-1',
+        coupleId: 'couple-1',
+      }),
+    ]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('keeps the exact opaque operation identity when both begin and status responses are lost', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken();
+    expect(ownerToken).not.toBeNull();
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([
+      expect.objectContaining({
+        operationId: (beginRecordMediaMutation.mock.calls[0]?.[0] as { operationId: string }).operationId,
+        recordId: 'rec-1',
+        userId: 'user-1',
+        coupleId: 'couple-1',
+      }),
+    ]);
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+  });
+
+  it('abandons and clears an interrupted same-tab operation after the app resumes online', async () => {
+    const ownerToken = getOrCreateRecordMediaMutationOwnerToken(sessionStorage, () => 'tab-a');
+    expect(ownerToken).toBe('tab-a');
+    const interrupted = {
+      operationId: 'operation-interrupted',
+      recordId: 'rec-1',
+      userId: 'user-1',
+      coupleId: 'couple-1',
+    };
+    expect(writeRecordMediaMutationJournalEntry(interrupted, ownerToken!)).toBe(true);
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockResolvedValueOnce({ ok: true, state: 'abandoned' });
+    await setup();
+
+    await act(async () => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => expect(abandonRecordMediaMutation).toHaveBeenCalledWith(
+      expect.objectContaining(interrupted),
+    ));
+
+    expect(listRecordMediaMutationJournalEntries('user-1', ownerToken!)).toEqual([]);
+    expect(saveRecordToDB).not.toHaveBeenCalled();
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+  });
+
   it('keeps uncertain uploads when response loss cannot be reconciled', async () => {
     saveRecordToDB.mockResolvedValue({ ok: false, reason: 'unreachable' });
-    fetchRecordsResultFromDB.mockResolvedValue({ ok: false, records: [], error: new Error('unreachable') });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'unavailable' });
     await setup({ addFiles: [pngFile('new.png')] });
 
     await act(async () => { screen.getByText('edit-media').click(); });
     await waitFor(() => expect(lastResult).not.toBeNull());
 
     expect(lastResult?.ok).toBe(false);
-    expect(removeRecordMedia).not.toHaveBeenCalledWith(['couple-1/rec-1/new.png']);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
     expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);
   });
 
@@ -628,7 +1067,7 @@ describe('updateRecordMedia', () => {
     expect(lastResult?.ok).toBe(false);
     expect(lastResult?.error).toContain('첨부 파일 경로가 올바르지 않아');
     expect(callOrder).toEqual([]);
-    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(beginRecordMediaMutation).not.toHaveBeenCalled();
     expect(saveRecordToDB).not.toHaveBeenCalled();
   });
 
@@ -653,12 +1092,11 @@ describe('updateRecordMedia', () => {
     await waitFor(() => expect(lastResult).not.toBeNull());
 
     expect(lastResult?.ok).toBe(true);
-    expect(callOrder).toEqual(['patchRow', `remove:${EXISTING_PATH}`]);
+    expect(callOrder).toEqual(['begin:1:0', 'patchRow']);
     await waitFor(() => expect(screen.getByTestId('attachments')).toHaveTextContent(''));
   });
 
-  it('succeeds even if cleanup of the removed object fails, and says nothing false', async () => {
-    removeRecordMedia.mockRejectedValue(new Error('storage unavailable'));
+  it('reports logical removal success after durable cleanup is committed', async () => {
     await setup({ removePaths: [EXISTING_PATH] });
 
     await act(async () => {
@@ -666,17 +1104,31 @@ describe('updateRecordMedia', () => {
     });
     await waitFor(() => expect(lastResult).not.toBeNull());
 
-    // The row no longer references the object, so the user's intent WAS carried
-    // out. Unreferenced bytes are logged, not surfaced as a failure.
+    // The client promises logical removal only. Physical deletion belongs to the
+    // leased worker and is not represented by an authenticated Storage call.
     expect(lastResult?.ok).toBe(true);
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
   });
 
   it('reports a partial upload failure without losing the successful ones', async () => {
-    uploadRecordMedia.mockImplementation(async (file: File) =>
+    uploadRecordMedia.mockImplementation(async (
+      file: File,
+      coupleId: string,
+      recordId: string,
+      _displayName: string | undefined,
+      objectId: string,
+    ) =>
       file.name === 'bad.png'
         ? { error: '파일을 올리지 못했어요.' }
-        : { attachment: { type: 'photo', name: file.name, path: `couple-1/rec-1/${file.name}` } },
+        : {
+            attachment: {
+              type: 'photo',
+              name: file.name,
+              path: `${coupleId}/${recordId}/${objectId}.png`,
+            },
+          },
     );
     await setup({ addFiles: [pngFile('good.png'), pngFile('bad.png')] });
 
@@ -687,9 +1139,203 @@ describe('updateRecordMedia', () => {
 
     expect(lastResult?.ok).toBe(true);
     expect(lastResult?.failedFiles).toEqual(['bad.png']);
+    expect(lastResult?.retryableFailedFileIndexes).toEqual([1]);
+    const begins = beginRecordMediaMutation.mock.calls.map(([request]) => request as {
+      baseContentRevision: number;
+      existingPaths: string[];
+      newMediaIds: string[];
+    });
+    expect(begins).toHaveLength(2);
+    expect(begins[0]).toMatchObject({ baseContentRevision: 1 });
+    expect(begins[0].newMediaIds).toHaveLength(1);
+    expect(begins[1]).toMatchObject({ baseContentRevision: 2 });
+    expect(begins[1].newMediaIds).toHaveLength(1);
+    expect(begins[1].existingPaths).toEqual([
+      EXISTING_PATH,
+      expect.stringMatching(/^couple-1\/rec-1\/[0-9a-f-]+\.png$/),
+    ]);
     await waitFor(() =>
-      expect(screen.getByTestId('attachments')).toHaveTextContent('couple-1/rec-1/good.png'),
+      expect(screen.getByTestId('attachments')).toHaveTextContent(begins[1].existingPaths[1]),
     );
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an earlier one-file commit when a later begin is definitively refused', async () => {
+    beginRecordMediaMutation
+      .mockImplementationOnce(async (request: { baseContentRevision: number }) => ({
+        ok: true,
+        state: 'pending',
+        targetContentRevision: request.baseContentRevision + 1,
+      }))
+      .mockResolvedValueOnce({ ok: false, reason: 'forbidden' });
+    await setup({ addFiles: [pngFile('committed.png'), pngFile('unfinished.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({
+      ok: true,
+      failedFiles: ['unfinished.png'],
+      reason: 'forbidden',
+    });
+    expect(lastResult).not.toHaveProperty('retryableFailedFileIndexes');
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(2);
+    expect(uploadRecordMedia.mock.calls.map(([file]) => (file as File).name))
+      .toEqual(['committed.png']);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    const [committedId] = (beginRecordMediaMutation.mock.calls[0]?.[0] as {
+      newMediaIds: string[];
+    }).newMediaIds;
+    const [unfinishedId] = (beginRecordMediaMutation.mock.calls[1]?.[0] as {
+      newMediaIds: string[];
+    }).newMediaIds;
+    expect(screen.getByTestId('attachments')).toHaveTextContent(committedId);
+    expect(screen.getByTestId('attachments')).not.toHaveTextContent(unfinishedId);
+  });
+
+  it('continues the next one-file revision after a committed response-loss operation', async () => {
+    saveRecordToDB.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
+    uploadRecordMedia.mockImplementation(async (
+      file: File,
+      coupleId: string,
+      recordId: string,
+      _displayName: string | undefined,
+      objectId: string,
+    ) => file.name === 'bad.png'
+      ? { error: '파일을 올리지 못했어요.', reason: 'server' }
+      : {
+          attachment: {
+            type: 'photo',
+            name: file.name,
+            path: `${coupleId}/${recordId}/${objectId}.png`,
+          },
+        });
+    await setup({ addFiles: [pngFile('good.png'), pngFile('bad.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: ['bad.png'] });
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { baseContentRevision: number }).baseContentRevision
+    ))).toEqual([1, 2]);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('continues the exact operation when begin response is lost but status is pending', async () => {
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: 2,
+    });
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia).toHaveBeenCalledTimes(1);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    const beginRequest = beginRecordMediaMutation.mock.calls[0]?.[0] as {
+      operationId: string;
+      newMediaIds: string[];
+    };
+    const statusRequest = getRecordMediaMutationStatus.mock.calls[0]?.[0] as {
+      operationId: string;
+    };
+    expect(statusRequest.operationId).toBe(beginRequest.operationId);
+    expect(uploadRecordMedia.mock.calls[0]?.[4]).toBe(beginRequest.newMediaIds[0]);
+    expect((saveRecordToDB.mock.calls[0]?.[3] as { mediaOperationId: string }).mediaOperationId)
+      .toBe(beginRequest.operationId);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+  });
+
+  it('commits the exact stable object when Storage succeeded but its upload response was lost', async () => {
+    uploadRecordMedia.mockImplementationOnce(async (
+      file: File,
+      coupleId: string,
+      recordId: string,
+      _displayName: string | undefined,
+      objectId: string,
+    ) => ({
+      error: '서버에 요청이 닿지 않았어요. 잠시 후 다시 시도해 주세요.',
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: file.name,
+        path: `${coupleId}/${recordId}/${objectId}.png`,
+      },
+    }));
+    await setup({ addFiles: [pngFile('new.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(callOrder).toEqual(['begin:1:1', 'upload:new.png', 'patchRow']);
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia).toHaveBeenCalledTimes(1);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
+    const request = beginRecordMediaMutation.mock.calls[0]?.[0] as {
+      operationId: string;
+      newMediaIds: string[];
+    };
+    const saved = saveRecordToDB.mock.calls[0]?.[0] as DailyRecord;
+    expect(saved.attachments?.at(-1)?.path).toContain(request.newMediaIds[0]);
+    expect((saveRecordToDB.mock.calls[0]?.[3] as { mediaOperationId: string }).mediaOperationId)
+      .toBe(request.operationId);
+  });
+
+  it('abandons only after the record CAS proves an ambiguous upload did not commit', async () => {
+    uploadRecordMedia.mockImplementationOnce(async (
+      file: File,
+      coupleId: string,
+      recordId: string,
+      _displayName: string | undefined,
+      objectId: string,
+    ) => ({
+      error: '서버 응답을 확인하지 못했어요.',
+      reason: 'unreachable',
+      uncertainAttachment: {
+        type: 'photo',
+        name: file.name,
+        path: `${coupleId}/${recordId}/${objectId}.png`,
+      },
+    }));
+    saveRecordToDB.mockResolvedValueOnce({ ok: false, reason: 'server' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'pending' });
+    await setup({ addFiles: [pngFile('missing.png')] });
+
+    await act(async () => { screen.getByText('edit-media').click(); });
+    await waitFor(() => expect(lastResult).not.toBeNull());
+
+    expect(lastResult).toMatchObject({
+      ok: false,
+      failedFiles: ['missing.png'],
+      reason: 'server',
+    });
+    expect(lastResult).not.toHaveProperty('retryableFailedFileIndexes');
+    expect(callOrder).toEqual([
+      'begin:1:1',
+      'upload:missing.png',
+      'patchRow',
+      'status',
+      'abandon',
+    ]);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
   });
 
   it('all-or-nothing mode rolls back every new upload and leaves the row untouched', async () => {
@@ -711,11 +1357,15 @@ describe('updateRecordMedia', () => {
     expect(lastResult).toEqual({
       ok: true,
       failedFiles: ['good.png', 'bad.png'],
+      retryableFailedFileIndexes: [0, 1],
+      error: '파일을 올리지 못했어요.',
+      reason: 'unknown',
     });
     expect(callOrder).toEqual([
+      'begin:1:2',
       'upload:good.png',
       'upload:bad.png',
-      'remove:couple-1/rec-1/good.png',
+      'abandon',
     ]);
     expect(saveRecordToDB).not.toHaveBeenCalled();
     expect(screen.getByTestId('attachments')).toHaveTextContent(EXISTING_PATH);

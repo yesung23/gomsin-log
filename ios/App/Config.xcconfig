@@ -5,3 +5,7 @@
 // Developers can copy LocalSigning.xcconfig.example to LocalSigning.xcconfig
 // and fill in their Apple Developer Team ID.
 #include? "LocalSigning.xcconfig"
+
+// The tracked native purchase gate is fail-closed. A review or sandbox build
+// may override it before signing; the signed Info.plist carries that decision.
+GOMSINLOG_APPLE_IAP_NATIVE_SALE_ENABLED = NO

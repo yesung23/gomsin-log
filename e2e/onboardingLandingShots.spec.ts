@@ -14,7 +14,7 @@ for (const width of [320, 390]) {
     const page = await context.newPage();
     await page.addInitScript(() => localStorage.clear());
     await page.goto('/');
-    await expect(page.getByText('답장이 늦어도, 서로의 하루는 놓치지 않도록.')).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText('답장이 늦어도, 서로의 하루를 이어 둘만의 기억으로 남겨요.')).toBeVisible({ timeout: 15_000 });
     const googleButton = page.getByRole('button', { name: 'Google로 계속하기' });
     await expect(googleButton).toBeVisible();
     const googleBox = await googleButton.boundingBox();

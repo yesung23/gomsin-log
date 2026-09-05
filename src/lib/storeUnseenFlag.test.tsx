@@ -80,10 +80,10 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 /** The observable: the one client path that lowers the flag and moves the boundary. */
-const clearOwnUnseen = vi.fn(async () => {});
+const clearOwnUnseen = vi.fn(async (_userId: string) => {});
 const revokeOwnPushTokens = vi.fn(async () => ({ ok: true }));
 vi.mock('@/lib/pushTokens', () => ({
-  clearOwnUnseen: () => clearOwnUnseen(),
+  clearOwnUnseen: (userId: string) => clearOwnUnseen(userId),
   registerPushToken: vi.fn(async () => ({ ok: true })),
   revokeOwnPushTokens: () => revokeOwnPushTokens(),
 }));
@@ -256,6 +256,7 @@ describe('lowering the partner\'s invitation', () => {
     const unmount = await connect();
 
     await waitFor(() => expect(clearOwnUnseen).toHaveBeenCalled());
+    expect(clearOwnUnseen).toHaveBeenCalledWith('user-1');
     await waitFor(() => expect(revokeOwnPushTokens).toHaveBeenCalled());
     expect(screen.getByTestId('syncStatus').textContent).toBe('live');
 

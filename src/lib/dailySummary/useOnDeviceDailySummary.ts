@@ -1,16 +1,21 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
 import {
   buildAllOnDeviceBatches,
-  type DailySummaryLine,
+  MAX_DAILY_SUMMARY_EXCERPT_CHARS,
+  MAX_DAILY_SUMMARY_MODEL_RECORDS,
+  type OnDeviceSummaryFailure,
+  type DailySummaryRefinementReason,
+  type DailySummaryRefinementStatus,
 } from '@/lib/dailySummary/contract';
 import { selectDailySummaryCorpus } from '@/lib/dailySummary/corpus';
 import { deterministicSummaryLines } from '@/lib/dailySummary/rules';
 import {
   cancelOnDeviceSummary,
-  isOnDeviceDailySummaryEnabled,
+  onDeviceSummaryGate,
   ON_DEVICE_SUMMARY_TIMEOUT_MS,
+  preflightOnDeviceSummary,
   refineOnDeviceSummary,
 } from '@/lib/dailySummary/nativeOnDeviceSummary';
 import { verifyAndBindRefinedLines } from '@/lib/dailySummary/verify';
@@ -24,10 +29,16 @@ import { verifyAndBindRefinedLines } from '@/lib/dailySummary/verify';
  */
 
 const NO_REFINEMENT: ReadonlyMap<string, string> = new Map();
-
-export type OnDeviceSummaryStatus = 'idle' | 'running' | 'applied' | 'fallback';
+const RETRYABLE_FAILURES = new Set<OnDeviceSummaryFailure>([
+  'model_not_ready',
+  'timeout',
+  'cancelled',
+  'native_error',
+]);
 
 export interface UseOnDeviceDailySummaryInput {
+  /** 새 Partner Briefing이 같은 surface를 소유할 때 legacy 추론을 시작하지 않는다. */
+  enabled?: boolean;
   mode: StoryMode;
   /** 이 스토리가 담은 기록. 이미 권한 판정을 통과한 목록이다. */
   records: readonly DailyRecord[];
@@ -42,13 +53,16 @@ export interface UseOnDeviceDailySummaryInput {
 
 export interface UseOnDeviceDailySummaryResult {
   refined: ReadonlyMap<string, string>;
-  status: OnDeviceSummaryStatus;
+  status: DailySummaryRefinementStatus;
+  reason?: DailySummaryRefinementReason;
+  canRequest: boolean;
 }
 
 export function useOnDeviceDailySummary(
   input: UseOnDeviceDailySummaryInput,
 ): UseOnDeviceDailySummaryResult {
   const {
+    enabled = true,
     mode,
     records,
     viewerUserId,
@@ -58,22 +72,44 @@ export function useOnDeviceDailySummary(
     coupleStatus,
     requestVersion = 0,
   } = input;
+  const [preflight, setPreflight] = useState<{
+    payloadKey: string;
+    status: 'idle' | 'checking' | 'ready' | 'unavailable';
+    reason?: OnDeviceSummaryFailure;
+  }>({ payloadKey: '[]', status: 'idle' });
   const [result, setResult] = useState<{
     payloadKey: string;
     requestVersion: number;
     values: ReadonlyMap<string, string>;
-    status: OnDeviceSummaryStatus;
+    status: DailySummaryRefinementStatus;
+    reason?: OnDeviceSummaryFailure;
   }>({ payloadKey: '[]', requestVersion: 0, values: NO_REFINEMENT, status: 'idle' });
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
+  const [cancelledRequestVersion, setCancelledRequestVersion] = useState<number | null>(null);
+  const generationEpochRef = useRef(0);
 
-  /*
-    내용에서 유도한 키.
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState !== 'hidden';
+      setDocumentVisible(visible);
+      if (!visible) {
+        generationEpochRef.current += 1;
+        setCancelledRequestVersion(requestVersion);
+        cancelOnDeviceSummary();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [requestVersion]);
 
-    `[recordId, text]` 쌍만 담는다. `time`·`date`는 모델에 가지 않으므로 키에도 넣지 않는다.
-    스토어의 무관한 갱신으로 records 배열 신원만 바뀌어도 같은 요약을 다시 만들지 않는다.
-  */
-  const payloadKey = useMemo(() => {
-    if (mode !== 'today') return '[]';
-    const corpus = selectDailySummaryCorpus({
+  const corpus = useMemo(() => {
+    if (!enabled || mode !== 'today') {
+      return { ok: false, rejection: 'not_partner_today' } as const;
+    }
+    return selectDailySummaryCorpus({
       records,
       viewerUserId,
       partnerUserId,
@@ -81,87 +117,279 @@ export function useOnDeviceDailySummary(
       coupleConnected,
       coupleStatus,
     });
-    if (!corpus.ok) return '[]';
-    return JSON.stringify(
-      deterministicSummaryLines(corpus.records).map((line) => [line.recordId, line.text]),
-    );
-  }, [mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
+  }, [enabled, mode, records, viewerUserId, partnerUserId, todayStr, coupleConnected, coupleStatus]);
+
+  const summaryLines = useMemo(
+    () => corpus.ok ? deterministicSummaryLines(corpus.records) : [],
+    [corpus],
+  );
+
+  /*
+    내용에서 유도한 키.
+
+    모델 입력과 로컬 재결합에 필요한 값만 담는다. `time`·`date`는 모델에 가지 않으므로
+    키에도 넣지 않는다.
+    스토어의 무관한 갱신으로 records 배열 신원만 바뀌어도 같은 요약을 다시 만들지 않는다.
+  */
+  const payloadKey = useMemo(() => {
+    return JSON.stringify(summaryLines.map((line) => [
+      line.recordId,
+      line.text,
+      line.sourceText,
+      line.fullSourceText,
+      line.sourceWasTruncated,
+    ]));
+  }, [summaryLines]);
+
+  // A click authorizes this exact source, not every later edit delivered by
+  // realtime. Keep intent in state rather than a discardable memo/ref cache.
+  const [requestBinding, setRequestBinding] = useState<{
+    requestVersion: number;
+    payloadKey: string | null;
+  }>({ requestVersion: 0, payloadKey: null });
+  useEffect(() => {
+    if (requestBinding.requestVersion !== requestVersion) {
+      setRequestBinding({ requestVersion, payloadKey });
+    } else if (requestBinding.payloadKey !== null && requestBinding.payloadKey !== payloadKey) {
+      // A → B → A must not resurrect A's old click after any source change.
+      setRequestBinding({ requestVersion, payloadKey: null });
+    }
+  }, [requestVersion, payloadKey, requestBinding]);
+  const requestMatchesSource = requestBinding.requestVersion === requestVersion
+    && requestBinding.payloadKey === payloadKey;
+
+  const nativeGate = onDeviceSummaryGate();
+
+  /*
+    중요도 선별이 아니라 UTF-16 길이 하나만 보는 기계적 필터다.
+
+    attachment-only/짧은 본문은 즉시 그려진 기준선에 그대로 남고 네이티브 경계에는 가지
+    않는다. 긴 문장 후보는 시간순 그대로 5개씩 나누며, 20개를 넘으면 일부만 고르지 않고
+    모델 호출 전체를 생략한다.
+
+    원문 중 단 하나라도 120단위 경계에서 잘린 경우(grapheme cluster로 인해 잘린
+    경우 포함), 일부 레코드만 선별하여 다듬지 않고 그날 전체를 결정론적 요약으로 유지한다.
+  */
+  const hasTruncatedSource = summaryLines.some((line) => line.sourceWasTruncated);
+  const candidateLines = useMemo(
+    () => (hasTruncatedSource
+      ? []
+      : summaryLines.filter((line) => (
+          line.sourceText !== null
+          && line.sourceText.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
+        ))),
+    // payloadKey가 같으면 전체 원문까지 같으므로 진행 중인 요청의 배열 신원도 유지한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hasTruncatedSource, payloadKey],
+  );
+  const candidateBatches = useMemo(
+    () => buildAllOnDeviceBatches(candidateLines),
+    [candidateLines],
+  );
+  const tooManyCandidates = summaryLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS;
+  const candidatePayloadReady = !hasTruncatedSource
+    && candidateLines.length > 0
+    && !tooManyCandidates
+    && documentVisible
+    && candidateBatches !== null
+    && candidateBatches.length > 0;
+
+  /*
+    CTA 이전의 콘텐츠 없는 preflight.
+
+    payloadKey는 로컬 stale-result 구분에만 쓰며 native에는 전달하지 않는다. 네이티브가 보는
+    것은 고정 로케일뿐이다. 후보가 없거나 출시 상한을 넘으면 이 확인조차 하지 않는다.
+  */
+  useEffect(() => {
+    let active = true;
+
+    if (!corpus.ok || !candidatePayloadReady) {
+      setPreflight({ payloadKey, status: 'idle' });
+      return () => { active = false; };
+    }
+    if (nativeGate !== 'ready') {
+      setPreflight({ payloadKey, status: 'unavailable', reason: nativeGate });
+      return () => { active = false; };
+    }
+
+    setPreflight({ payloadKey, status: 'checking' });
+    void preflightOnDeviceSummary().then((outcome) => {
+      if (!active) return;
+      setPreflight(outcome.ok
+        ? { payloadKey, status: 'ready' }
+        : { payloadKey, status: 'unavailable', reason: outcome.reason });
+    });
+
+    return () => { active = false; };
+  }, [candidatePayloadReady, corpus.ok, nativeGate, payloadKey]);
 
   useEffect(() => {
-    const pairs = JSON.parse(payloadKey) as [string, string][];
-    if (pairs.length === 0 || requestVersion <= 0) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'idle' });
-      return;
-    }
-    if (!isOnDeviceDailySummaryEnabled()) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
-      return;
-    }
-
-    const lines: DailySummaryLine[] = pairs.map(([recordId, text]) => ({
-      recordId,
-      text,
-      // 표시용 필드는 이 경로에서 쓰이지 않는다. 덮어쓰기 지도는 `recordId`만으로 만들어진다.
-      time: '',
-      date: '',
-    }));
-
-    const batches = buildAllOnDeviceBatches(lines);
-    if (!batches) {
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
+    const preflightReady = preflight.payloadKey === payloadKey && preflight.status === 'ready';
+    if (
+      requestVersion <= 0
+      || !requestMatchesSource
+      || cancelledRequestVersion === requestVersion
+      || !corpus.ok
+      || !candidatePayloadReady
+      || nativeGate !== 'ready'
+      || !preflightReady
+    ) {
+      setResult((previous) => {
+        if (
+          previous.payloadKey === payloadKey
+          && previous.requestVersion === requestVersion
+          && previous.values === NO_REFINEMENT
+          && previous.status === 'idle'
+          && previous.reason === undefined
+        ) return previous;
+        return {
+          payloadKey,
+          requestVersion,
+          values: NO_REFINEMENT,
+          status: 'idle',
+          reason: undefined,
+        };
+      });
       return;
     }
 
     let active = true;
-    setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'running' });
+    const generationEpoch = generationEpochRef.current;
+    setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'running', reason: undefined });
 
-    const fallback = () => {
+    const fallback = (reason: OnDeviceSummaryFailure) => {
       if (!active) return;
-      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback' });
+      setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'fallback', reason });
     };
 
     void (async () => {
-      const merged = new Map<string, string>();
-      const deadline = Date.now() + ON_DEVICE_SUMMARY_TIMEOUT_MS;
-      for (const batch of batches) {
-        if (!active) return;
-        const remainingMs = deadline - Date.now();
-        if (remainingMs <= 0) {
-          fallback();
-          return;
-        }
-        const outcome = await refineOnDeviceSummary(batch.items, { timeoutMs: remainingMs });
-        if (!active) return;
+      if (!candidateBatches) {
+        fallback('rejected');
+        return;
+      }
+
+      // 검증된 batch도 하루 전체가 성공하기 전에는 화면에 공개하지 않는다.
+      const staged = new Map<string, string>();
+      for (const batch of candidateBatches) {
+        if (!active || generationEpoch !== generationEpochRef.current) return;
+        const outcome = await refineOnDeviceSummary(
+          batch.items,
+          { timeoutMs: ON_DEVICE_SUMMARY_TIMEOUT_MS },
+        );
+        if (!active || generationEpoch !== generationEpochRef.current) return;
         if (!outcome.ok) {
-          fallback();
+          fallback(outcome.reason);
           return;
         }
         const bound = verifyAndBindRefinedLines(outcome.items, batch.lines, batch.items);
-        if (!bound.ok) {
-          fallback();
+        if (!bound.ok || bound.refined.size !== batch.lines.length) {
+          fallback('rejected');
           return;
         }
-        for (const [recordId, refinedText] of bound.refined.entries()) {
-          merged.set(recordId, refinedText);
+        for (const [recordId, refinedText] of bound.refined) {
+          staged.set(recordId, refinedText);
         }
       }
-      if (!active) return;
-      if (merged.size === lines.length) {
-        setResult({ payloadKey, requestVersion, values: merged, status: 'applied' });
-      } else {
-        fallback();
+      if (!active || generationEpoch !== generationEpochRef.current) return;
+      if (staged.size !== candidateLines.length) {
+        fallback('rejected');
+        return;
       }
+      setResult({
+        payloadKey,
+        requestVersion,
+        values: staged,
+        status: 'applied',
+        reason: undefined,
+      });
     })();
 
     return () => {
       active = false;
       cancelOnDeviceSummary();
     };
-  }, [payloadKey, requestVersion]);
+  }, [
+    candidateBatches,
+    candidateLines,
+    candidatePayloadReady,
+    cancelledRequestVersion,
+    corpus.ok,
+    nativeGate,
+    payloadKey,
+    preflight.payloadKey,
+    preflight.status,
+    requestVersion,
+    requestMatchesSource,
+  ]);
 
   // payload나 요청 번호가 바뀐 렌더에서는 이전 모델 결과를 즉시 숨긴다.
-  if (result.payloadKey !== payloadKey || result.requestVersion !== requestVersion) {
-    return { refined: NO_REFINEMENT, status: requestVersion > 0 ? 'running' : 'idle' };
+  if (!corpus.ok) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: corpus.rejection,
+      canRequest: false,
+    };
   }
-  return { refined: result.values, status: result.status };
+  if (candidateLines.length === 0 || !candidatePayloadReady) {
+    if (tooManyCandidates) {
+      return {
+        refined: NO_REFINEMENT,
+        status: 'unavailable',
+        reason: 'too_many_candidates',
+        canRequest: false,
+      };
+    }
+    return {
+      refined: NO_REFINEMENT,
+      status: 'idle',
+      canRequest: false,
+    };
+  }
+  if (nativeGate !== 'ready') {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: nativeGate,
+      canRequest: false,
+    };
+  }
+  if (preflight.payloadKey !== payloadKey || preflight.status === 'checking' || preflight.status === 'idle') {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'idle',
+      canRequest: false,
+    };
+  }
+  if (preflight.status === 'unavailable') {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'unavailable',
+      reason: preflight.reason,
+      canRequest: false,
+    };
+  }
+  if (!requestMatchesSource) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'idle',
+      canRequest: requestVersion === 0 || requestBinding.requestVersion === requestVersion,
+    };
+  }
+  if (result.payloadKey !== payloadKey || result.requestVersion !== requestVersion) {
+    return {
+      refined: NO_REFINEMENT,
+      status: requestVersion > 0 ? 'running' : 'idle',
+      canRequest: requestVersion === 0,
+    };
+  }
+  return {
+    refined: result.values,
+    status: result.status,
+    reason: result.reason,
+    canRequest: result.status === 'idle'
+      || (result.status === 'fallback'
+        && result.reason !== undefined
+        && RETRYABLE_FAILURES.has(result.reason)),
+  };
 }

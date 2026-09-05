@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
  * ## What it replaces
  *
  * The same job was being done in four different shapes: a bare red caption
- * (`TripsPage`, `TripDetailPage`, `CycleSharingSettings`), a tinted pill
+ * (`TripsPage`, `TripDetailPage`, cycle settings), a tinted pill
  * (`SchedulePage`), a bordered block (`OnboardingPage`), and a centred grey panel
  * (`CycleTrackerSection`, `CycleSupportSection`). Nineteen `role="alert"` sites, no
  * two agreeing on what a failure looks like -- so the app looked least consistent

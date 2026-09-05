@@ -71,6 +71,56 @@ beforeEach(() => {
 });
 
 describe('day-page diary', () => {
+  it('opens the exact record from its time even when two records share that time', async () => {
+    currentState = stateWith([
+      record({ id: 'first/id', date: '2026-08-02', time: '08:00', log: '첫 순간' }),
+      record({ id: 'second&id', date: '2026-08-02', time: '08:00', log: '둘째 순간' }),
+    ]);
+    const user = userEvent.setup();
+    renderDiary();
+    await user.click(screen.getByRole('button', { name: '2026년 8월 지면 열기' }));
+
+    for (const source of currentState.records) {
+      const row = screen.getByText(source.log).closest('li')!;
+      expect(within(row).getByRole('link', { name: '8월 2일 08:00 기록 열기' }))
+        .toHaveAttribute('href', `/record?record=${encodeURIComponent(source.id)}`);
+    }
+    expect(localStorage.getItem('gomsin.diary.page.user-me.2026-08-02')).toBeNull();
+  });
+
+  it('keeps the landing screen self-explanatory and gives an empty diary one clear action', async () => {
+    currentState = stateWith([]);
+    const user = userEvent.setup();
+
+    renderDiary();
+
+    expect(screen.queryByText(/한 달을 열고 날짜를 골라/)).not.toBeInTheDocument();
+    expect(screen.getByText('아직 엮을 것이 없어요.')).toBeInTheDocument();
+    expect(screen.queryByText(/오늘 있었던 일을 하나 남기면/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: '첫 기록 남기기' }));
+    expect(navigate).toHaveBeenCalledWith('/compose');
+  });
+
+  it('shows one recent readable moment before opening a month', () => {
+    renderDiary();
+
+    const august = screen.getByRole('button', { name: '2026년 8월 지면 열기' });
+    expect(within(august).getByText('8월 14일')).toBeInTheDocument();
+    expect(within(august).getByText('8월 둘째 기록')).toBeInTheDocument();
+  });
+
+  it('explains when the latest month cannot be opened on this device', () => {
+    currentState = stateWith([
+      record({ date: '2026-08-02', log: '', contentUnavailable: 'key_unavailable' }),
+    ]);
+
+    renderDiary();
+
+    const august = screen.getByRole('button', { name: '2026년 8월 지면 열기' });
+    expect(within(august).getByText('이 기기에서 아직 열 수 없는 기록이에요')).toBeInTheDocument();
+  });
+
   it('keeps month cards but opens a single date page instead of duplicating the whole month', async () => {
     const user = userEvent.setup();
     renderDiary();
@@ -153,29 +203,31 @@ describe('day-page diary', () => {
 });
 
 describe('companion garden entry', () => {
-  it('offers the garden as an optional diary reward and opens the garden route', async () => {
+  it('keeps shop then garden as the only named header actions and removes body cards', async () => {
     const user = userEvent.setup();
     renderDiary();
 
-    const entry = screen.getByRole('button', { name: '우리 정원 보기' });
-    expect(entry).toBeInTheDocument();
-    await user.click(entry);
+    const header = screen.getByRole('banner');
+    const actions = within(header).getAllByRole('button');
+    expect(actions).toHaveLength(2);
+    expect(actions.map((button) => button.getAttribute('aria-label'))).toEqual([
+      '상점 열기',
+      '우리 정원 열기',
+    ]);
+    expect(screen.queryByText('내 종이로 엮기')).not.toBeInTheDocument();
+    expect(screen.queryByText('종이 고르기')).not.toBeInTheDocument();
+    expect(screen.queryByText('우리 정원', { selector: 'h2' })).not.toBeInTheDocument();
+    expect(screen.queryByText('정원 보기')).not.toBeInTheDocument();
+
+    await user.click(actions[0]);
+    expect(navigate).toHaveBeenCalledWith('/shop');
+    navigate.mockClear();
+    await user.click(actions[1]);
     expect(navigate).toHaveBeenCalledWith('/diary/garden');
   });
 });
 
-describe('paper library entry', () => {
-  it('uses paper wording rather than an unvalidated store/catalog promise', async () => {
-    const user = userEvent.setup();
-    renderDiary();
-    expect(screen.queryByText(/다꾸 & 기억 상점|기억책/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '종이 보관함' }));
-    expect(navigate).toHaveBeenCalledWith('/shop');
-    navigate.mockClear();
-    await user.click(screen.getByRole('button', { name: '종이 고르기' }));
-    expect(navigate).toHaveBeenCalledWith('/shop');
-  });
-
+describe('legacy month decoration', () => {
   it('keeps the free sticker set available only in the explicit legacy decorating mode', async () => {
     const user = userEvent.setup();
     renderDiary();

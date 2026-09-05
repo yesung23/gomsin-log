@@ -1,5 +1,5 @@
 import { createContext } from 'react';
-import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role } from '@/types';
+import type { AppState, UserProfile, DailyRecord, AuthUser, CoupleEvent, Role, AppLocale } from '@/types';
 import type { CoupleHighlightDraft, HighlightMutationResult } from '@/lib/highlights';
 import type { AccountDeletionOutcome, DeletionStatus } from '@/lib/accountDeletion';
 import type { ServerErrorKind } from '@/lib/serverErrors';
@@ -12,11 +12,12 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
  * `live` needs no explanation to the user. `delayed` and `unavailable` both do,
  * because in one case the data is real but frozen and in the other it is hidden.
  *
- * This is ONE OF THREE ORTHOGONAL AVAILABILITY AXES and must not be conflated
+ * This is ONE OF FOUR ORTHOGONAL AVAILABILITY AXES and must not be conflated
  * with the others, because reusing either of them for deletion status is exactly
  * how a failed check becomes indistinguishable from an authoritative negative:
  *
  *  - `SharedSyncStatus`  - how fresh the shared couple workspace on screen is.
+ *  - `TalkAboutSyncStatus` - whether the bookmark slice has an authoritative answer.
  *  - `authSyncUnavailable` - whether initial account hydration succeeded.
  *  - `DeletionStatus`    - whether this account is being deleted.
  *
@@ -27,6 +28,16 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
  * precedence, where the recovery gate takes priority over the sync-outage gate.
  */
 export type SharedSyncStatus = 'live' | 'delayed' | 'unavailable';
+
+/**
+ * Whether the tiny conversation-bookmark slice has an authoritative answer.
+ *
+ * This is intentionally narrower than `SharedSyncStatus`: records can remain
+ * current and readable while this one coordination query fails. Treating that
+ * failure as an empty array would falsely claim that the couple has no saved
+ * topics. Like the transport status, it is runtime-only and never persisted.
+ */
+export type TalkAboutSyncStatus = 'ready' | 'unavailable';
 
 /**
  * Why a record mutation did not happen.
@@ -71,6 +82,36 @@ export type RecordMutationResult =
   | { ok: true }
   | { ok: false; reason: RecordMutationReason; error: string };
 
+export interface RecordMediaMutationResult {
+  ok: boolean;
+  failedFiles: string[];
+  /** Exact `addFiles` positions whose upload definitely failed before a row commit. */
+  retryableFailedFileIndexes?: number[];
+  error?: string;
+  reason?: RecordMutationReason;
+}
+
+export interface RecordCreateWithMediaResult extends RecordMediaMutationResult {
+  queued?: boolean;
+  /** Present once the record row exists, including a durable queued intent. */
+  recordId?: string;
+}
+
+/**
+ * A conversation-mark write and its immediate authoritative reconciliation.
+ *
+ * `syncPending` means the server accepted the mutation but the follow-up read
+ * could not yet prove the screen is current. It must never be presented as a
+ * plain failure (which invites a duplicate retry) or a fully reflected success.
+ */
+export interface TalkAboutMutationResult {
+  ok: boolean;
+  error?: string;
+  syncPending?: boolean;
+  /** False when another client already settled the exact topic. */
+  changed?: boolean;
+}
+
 export interface StoreContextType {
   state: AppState;
   isReady: boolean;
@@ -87,6 +128,8 @@ export interface StoreContextType {
   authSyncStage: AuthSyncStage | null;
   /** Sanitized PostgREST/PostgreSQL code; never a raw server message. */
   sharedSyncStatus: SharedSyncStatus;
+  /** A failed bookmark read is unavailable, never an authoritative empty list. */
+  talkAboutSyncStatus: TalkAboutSyncStatus;
   /**
    * Server-authoritative couple lifecycle.
    *
@@ -111,7 +154,8 @@ export interface StoreContextType {
    */
   recoverExpiredSession: () => Promise<boolean>;
   /**
-   * Non-null while this account's data has been removed but its login has not.
+   * Non-null while a deletion attempt blocks this account. Pending and failed
+   * attempts retain local recovery data; only local_cleanup may remove it.
    * `warnings` is in-memory only and is never persisted.
    */
   accountDeletionRecovery: { warnings: string[] } | null;
@@ -142,15 +186,7 @@ export interface StoreContextType {
       /** A post keeps its selected order by committing either every photo or none. */
       allOrNothingMedia?: boolean;
     },
-  ) => Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    queued?: boolean;
-    reason?: RecordMutationReason;
-    /** Present once the record row exists, including a durable queued intent. */
-    recordId?: string;
-  }>;
+  ) => Promise<RecordCreateWithMediaResult>;
   /**
    * Store a record for later without attempting the write.
    *
@@ -191,13 +227,7 @@ export interface StoreContextType {
       /** Keep the existing row unchanged unless every added file succeeds. */
       allOrNothing?: boolean;
     },
-  ) => Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    /** Preserves retryable transport causes for offline post replay. */
-    reason?: RecordMutationReason;
-  }>;
+  ) => Promise<RecordMediaMutationResult>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   updateEvent: (
     id: string,
@@ -216,9 +246,9 @@ export interface StoreContextType {
    * act on the caller's own flag; `resolveTalkAbout` clears the topic for
    * both partners once the conversation has actually happened.
    */
-  markTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
-  unmarkTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
-  resolveTalkAbout: (recordId: string) => Promise<{ ok: boolean; error?: string }>;
+  markTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
+  unmarkTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
+  resolveTalkAbout: (recordId: string) => Promise<TalkAboutMutationResult>;
   setAuthenticatedUser: (user: AuthUser | null) => void;
   /**
    * `role` selects which of the two per-role layouts is written. It defaults to
@@ -227,6 +257,7 @@ export interface StoreContextType {
   setWidgetLayout: (layout: string[], role?: Role) => void;
   setHasSeenInstallPrompt: (seen: boolean) => void;
   setTheme: (theme: 'light' | 'dark') => void;
+  setLocale: (locale: AppLocale) => void;
 }
 
 export const StoreContext = createContext<StoreContextType | null>(null);

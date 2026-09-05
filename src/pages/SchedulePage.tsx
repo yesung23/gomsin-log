@@ -34,13 +34,15 @@ import {
   upcomingEvents,
   validateEventDraft,
 } from '@/lib/calendar';
-import { useEscapeKey } from '@/lib/hooks';
 import { nextAnniversaryMilestone } from '@/lib/milestones';
 import { daysBetweenLocal, localToday, toLocalDateString } from '@/lib/utils';
 import { useStore } from '@/lib/useStore';
 import { createTask, deleteTask, fetchTasks, updateTask, validateTaskTitle } from '@/lib/tasks';
 import { supabase } from '@/lib/supabase';
+import { useDialogFocus } from '@/lib/useDialogFocus';
 import type { CoupleEvent, CoupleTask, EventType } from '@/types';
+import { AppBar, AppBarAction } from '@/components/ui/AppBar';
+import { resolveRelationshipContext } from '@/lib/relationshipContext';
 
 const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent' | 'info' | 'success' | 'warning' }> = {
   anniversary: { label: '기념일', tone: 'accent' },
@@ -52,11 +54,19 @@ const EVENT_BADGES: Record<EventType, { label: string; tone: 'neutral' | 'accent
 };
 
 type LoadState = 'loading' | 'ready' | 'error' | 'forbidden';
+type TaskLoadState = 'idle' | 'loading' | 'ready' | 'error' | 'forbidden';
+
+const TASK_REALTIME_DEBOUNCE_MS = 250;
+const TASK_RECOVERY_BASE_DELAY_MS = 2_000;
+const TASK_RECOVERY_MAX_DELAY_MS = 30_000;
 
 export function SchedulePage() {
   const { state, addEvent, updateEvent, deleteEvent, reloadEvents, sharedSyncStatus } = useStore();
   const { profile, events, authenticatedUser } = state;
   const today = toLocalDateString(localToday());
+  const relationshipContext = resolveRelationshipContext(profile.couple.relationshipContext);
+  const isMilitaryRelationship = relationshipContext === 'military';
+  const defaultEventType: EventType = isMilitaryRelationship ? 'visit' : 'date';
   const activeCouple = Boolean(
     authenticatedUser?.id &&
       profile.couple.coupleId &&
@@ -69,7 +79,7 @@ export function SchedulePage() {
       profile.couple.status !== 'disconnected',
   );
   const scheduleAccessKey = authenticatedUser?.id
-    ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}`
+    ? `${authenticatedUser.id}:${profile.couple.coupleId || ''}:${profile.couple.connected ? 'connected' : 'disconnected'}:${profile.couple.status}:${relationshipContext || 'invalid'}`
     : '';
   const accessKeyRef = useRef(scheduleAccessKey);
   const accessGenerationRef = useRef(0);
@@ -94,9 +104,12 @@ export function SchedulePage() {
   const [currMonth, setCurrMonth] = useState(localToday().getMonth());
   const [currYear, setCurrYear] = useState(localToday().getFullYear());
   const [showEventModal, setShowEventModal] = useState(false);
+  const eventModalPanelRef = useRef<HTMLDivElement>(null);
+  const eventTitleRef = useRef<HTMLInputElement>(null);
+  const eventModalTriggerRef = useRef<HTMLElement | null>(null);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
-  const [eventType, setEventType] = useState<EventType>('visit');
+  const [eventType, setEventType] = useState<EventType>(defaultEventType);
   /*
     여러 날을 한 번에 고르기 (2026-08-22).
 
@@ -157,24 +170,32 @@ export function SchedulePage() {
   const isOffline = !useOnlineStatus();
   const [deletingEventId, setDeletingEventId] = useState<string | null>(null);
   const [tasks, setTasks] = useState<CoupleTask[]>([]);
+  const [taskLoadState, setTaskLoadState] = useState<TaskLoadState>(activeCouple ? 'loading' : 'idle');
   const [taskTitle, setTaskTitle] = useState('');
   const [taskTime, setTaskTime] = useState('');
   const [taskForMe, setTaskForMe] = useState(false);
   const [isSavingTask, setIsSavingTask] = useState(false);
   const [pendingTaskIds, setPendingTaskIds] = useState<Set<string>>(new Set());
+  const taskRequestSequenceRef = useRef(0);
+  /** Advances only when a task snapshot actually commits, not when a read starts. */
+  const taskStateSequenceRef = useRef(0);
   const reloadEventsRef = useRef(reloadEvents);
   reloadEventsRef.current = reloadEvents;
 
-  useEscapeKey(
-    () => setShowEventModal(false),
-    showEventModal && !isSaving && deletingEventId === null,
-  );
+  useDialogFocus({
+    active: showEventModal,
+    panelRef: eventModalPanelRef,
+    initialFocusRef: eventTitleRef,
+    restoreFocusRef: eventModalTriggerRef,
+    onClose: () => setShowEventModal(false),
+    closeDisabled: isSaving || deletingEventId !== null,
+  });
 
   useLayoutEffect(() => {
     setShowEventModal(false);
     setEditingEventId(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(today);
     setEventEndDate('');
     setIsPrivate(false);
@@ -182,7 +203,24 @@ export function SchedulePage() {
     setFormError(null);
     setIsSaving(false);
     setDeletingEventId(null);
-  }, [scheduleAccessKey, today]);
+  }, [defaultEventType, scheduleAccessKey, today]);
+
+  /*
+   * Tasks are component-local rather than part of the shared store. Clear them
+   * before paint whenever the account or couple boundary changes, otherwise one
+   * frame can show the previous couple's private planning data.
+   */
+  useLayoutEffect(() => {
+    taskRequestSequenceRef.current += 1;
+    taskStateSequenceRef.current += 1;
+    setTasks([]);
+    setPendingTaskIds(new Set());
+    setTaskTitle('');
+    setTaskTime('');
+    setTaskForMe(false);
+    setIsSavingTask(false);
+    setTaskLoadState(activeCouple ? 'loading' : 'idle');
+  }, [activeCouple, scheduleAccessKey]);
 
   useEffect(() => {
     if (!authenticatedUser?.id) return;
@@ -196,28 +234,143 @@ export function SchedulePage() {
     return () => { cancelled = true; };
   }, [authenticatedUser?.id, scheduleAccessKey]);
 
-  const refreshTasks = useCallback(async () => {
+  const refreshTasks = useCallback(async (
+    { announce = false }: { announce?: boolean } = {},
+  ): Promise<Exclude<TaskLoadState, 'loading'>> => {
     const coupleId = profile.couple.coupleId;
     if (!authenticatedUser?.id || !coupleId || !activeCouple) {
+      taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
       setTasks([]);
-      return;
+      setTaskLoadState('idle');
+      return 'idle';
     }
     const access = captureAccess();
-    const result = await fetchTasks(coupleId);
-    if (!isCurrentAccess(access)) return;
-    if (result.ok) setTasks(result.tasks);
+    const requestSequence = ++taskRequestSequenceRef.current;
+    if (announce) setTaskLoadState('loading');
+    try {
+      const result = await fetchTasks(coupleId);
+      if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return 'idle';
+      if (result.ok) {
+        taskStateSequenceRef.current += 1;
+        setTasks(result.tasks);
+        setTaskLoadState('ready');
+        return 'ready';
+      }
+      if (result.reason === 'forbidden') {
+        taskStateSequenceRef.current += 1;
+        setTasks([]);
+      }
+      setTaskLoadState(result.reason);
+      return result.reason;
+    } catch (error) {
+      if (!isCurrentAccess(access) || requestSequence !== taskRequestSequenceRef.current) return 'idle';
+      const reason = classifyServerError(error).kind === 'forbidden' ? 'forbidden' : 'error';
+      if (reason === 'forbidden') {
+        taskStateSequenceRef.current += 1;
+        setTasks([]);
+      }
+      setTaskLoadState(reason);
+      return reason;
+    }
   }, [activeCouple, authenticatedUser?.id, captureAccess, isCurrentAccess, profile.couple.coupleId]);
 
   useEffect(() => {
-    void refreshTasks();
+    void refreshTasks({ announce: true });
     const client = supabase;
     const coupleId = profile.couple.coupleId;
     if (!client || !activeCouple || !coupleId) return;
-    const channel = client.channel(`couple-tasks:${coupleId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => void refreshTasks())
+    const access = captureAccess();
+    let disposed = false;
+    let subscribed = false;
+    let channelEventsAllowed = true;
+    let debounceTimer: number | undefined;
+    let recoveryTimer: number | undefined;
+    let recoveryAttempt = 0;
+
+    const isCurrentSubscription = () => !disposed && isCurrentAccess(access);
+    const clearDebounce = () => {
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+    };
+    const clearRecovery = () => {
+      if (recoveryTimer !== undefined) window.clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
+    };
+    const refreshSoon = () => {
+      if (!isCurrentSubscription()) return;
+      if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => {
+        debounceTimer = undefined;
+        void refreshTasks();
+      }, TASK_REALTIME_DEBOUNCE_MS);
+    };
+    const scheduleRecovery = () => {
+      if (!isCurrentSubscription() || subscribed || recoveryTimer !== undefined) return;
+      const delay = Math.min(
+        TASK_RECOVERY_MAX_DELAY_MS,
+        TASK_RECOVERY_BASE_DELAY_MS * 2 ** recoveryAttempt,
+      );
+      recoveryAttempt += 1;
+      recoveryTimer = window.setTimeout(() => {
+        recoveryTimer = undefined;
+        void refreshTasks().finally(() => {
+          if (isCurrentSubscription() && !subscribed) scheduleRecovery();
+        });
+      }, delay);
+    };
+    const handleInvalidation = (payload: { new?: unknown }) => {
+      if (!channelEventsAllowed) return;
+      const next = payload.new;
+      if (!next || typeof next !== 'object' || (next as { slice?: unknown }).slice !== 'tasks') return;
+      refreshSoon();
+    };
+    // Keep the pre-072 source subscription in an isolated compatibility
+    // channel. When 072 removes couple_tasks from the publication, a failure in
+    // this channel cannot disable the authoritative invalidation channel.
+    const legacyTasksChannel = client.channel(`couple-tasks-compat:${coupleId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'couple_tasks', filter: `couple_id=eq.${coupleId}` }, () => {
+        if (channelEventsAllowed) refreshSoon();
+      })
       .subscribe();
-    return () => { void client.removeChannel(channel); };
-  }, [activeCouple, profile.couple.coupleId, refreshTasks]);
+    const channel = client.channel(`couple-tasks:${coupleId}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` }, handleInvalidation)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'collaboration_invalidations', filter: `couple_id=eq.${coupleId}` }, handleInvalidation)
+      .subscribe((status) => {
+        if (!isCurrentSubscription()) return;
+        if (status === 'SUBSCRIBED') {
+          subscribed = true;
+          channelEventsAllowed = true;
+          clearRecovery();
+          recoveryAttempt = 0;
+          void refreshTasks();
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          subscribed = false;
+          channelEventsAllowed = false;
+          scheduleRecovery();
+        }
+      });
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') refreshSoon();
+    };
+    const handleOnline = () => refreshSoon();
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      disposed = true;
+      subscribed = false;
+      channelEventsAllowed = false;
+      clearDebounce();
+      clearRecovery();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('online', handleOnline);
+      void client.removeChannel(legacyTasksChannel);
+      void client.removeChannel(channel);
+    };
+  }, [activeCouple, captureAccess, isCurrentAccess, profile.couple.coupleId, refreshTasks]);
 
   const previousSyncStatusRef = useRef(sharedSyncStatus);
   const loadStateRef = useRef(loadState);
@@ -335,9 +488,10 @@ export function SchedulePage() {
   const openCreateFromPick = () => {
     const runs = groupIntoRuns(pickedDays);
     if (runs.length === 0) return;
+    eventModalTriggerRef.current = document.querySelector<HTMLElement>(`[data-cal-date="${runs[0].start}"]`);
     setEditingEventId(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(runs[0].start);
     setEventEndDate(runs[0].end ?? '');
     setPendingRuns(runs.length > 1 ? runs : null);
@@ -350,10 +504,13 @@ export function SchedulePage() {
 
   const openCreateModal = () => {
     if (!hasCoupleSpace) return;
+    eventModalTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.querySelector<HTMLElement>(`[data-cal-date="${selectedDate}"]`);
     setEditingEventId(null);
     setPendingRuns(null);
     setTitle('');
-    setEventType('visit');
+    setEventType(defaultEventType);
     setEventStartDate(selectedDate);
     setEventEndDate('');
     setIsPrivate(!activeCouple);
@@ -364,6 +521,9 @@ export function SchedulePage() {
 
   const openEditModal = (event: CoupleEvent) => {
     if (event.createdBy !== authenticatedUser?.id) return;
+    eventModalTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : document.querySelector<HTMLElement>(`[data-cal-date="${event.startDate}"]`);
     setPendingRuns(null);
     setEditingEventId(event.id);
     setTitle(event.title);
@@ -527,13 +687,21 @@ export function SchedulePage() {
   };
 
   const handleCreateTask = async () => {
-    if (isSavingTask || isOffline || !authenticatedUser?.id || !profile.couple.coupleId || !activeCouple) return;
+    if (
+      isSavingTask
+      || isOffline
+      || taskLoadState !== 'ready'
+      || !authenticatedUser?.id
+      || !profile.couple.coupleId
+      || !activeCouple
+    ) return;
     const error = validateTaskTitle(taskTitle);
     if (error) {
       toast.error(error);
       return;
     }
     const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
     setIsSavingTask(true);
     try {
       const saved = await createTask({
@@ -550,7 +718,30 @@ export function SchedulePage() {
         toast.error('할 일을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
         return;
       }
-      setTasks((current) => [...current, saved]);
+      if (taskRequestSequenceRef.current !== mutationSequence) {
+        // An invalidation/foreground read observed database state while this
+        // response was in flight. Re-read after the mutation response instead
+        // of appending the same row twice or trusting an older snapshot.
+        const reconciliation = await refreshTasks();
+        if (!isCurrentAccess(access)) return;
+        if (reconciliation === 'error') {
+          taskRequestSequenceRef.current += 1;
+          taskStateSequenceRef.current += 1;
+          setTasks((current) => current.some((entry) => entry.id === saved.id)
+            ? current
+            : [...current, saved]);
+          toast.error('저장은 됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+        }
+        setTaskTitle('');
+        setTaskTime('');
+        if (reconciliation === 'ready') toast.success('우리 할 일에 추가했습니다.');
+        return;
+      }
+      taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
+      setTasks((current) => current.some((entry) => entry.id === saved.id)
+        ? current
+        : [...current, saved]);
       setTaskTitle('');
       setTaskTime('');
       toast.success('우리 할 일에 추가했습니다.');
@@ -560,32 +751,88 @@ export function SchedulePage() {
   };
 
   const handleToggleTask = async (task: CoupleTask) => {
-    if (pendingTaskIds.has(task.id) || isOffline) return;
+    if (pendingTaskIds.has(task.id) || isOffline || taskLoadState !== 'ready' || !activeCouple) return;
+    const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
+    const mutationStateSequence = taskStateSequenceRef.current;
     setPendingTaskIds((current) => new Set(current).add(task.id));
-    const saved = await updateTask(task, { completed: !task.completed });
-    setPendingTaskIds((current) => {
-      const next = new Set(current);
-      next.delete(task.id);
-      return next;
-    });
-    if (!saved) {
-      toast.error('할 일 상태를 저장하지 못했어요.');
-      return;
+    try {
+      const saved = await updateTask(task, { completed: !task.completed });
+      if (!isCurrentAccess(access)) return;
+      if (!saved) {
+        toast.error('할 일 상태를 저장하지 못했어요.');
+        return;
+      }
+      if (taskRequestSequenceRef.current !== mutationSequence) {
+        // A newer read may include a later edit from either device. The delayed
+        // mutation response has no server revision, so only a post-response
+        // authoritative read can decide the final row without clobbering it.
+        const reconciliation = await refreshTasks();
+        if (!isCurrentAccess(access)) return;
+        if (reconciliation === 'error') {
+          if (taskStateSequenceRef.current === mutationStateSequence) {
+            taskRequestSequenceRef.current += 1;
+            taskStateSequenceRef.current += 1;
+            setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
+          }
+          toast.error('변경은 저장됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+        }
+        return;
+      }
+      taskRequestSequenceRef.current += 1;
+      taskStateSequenceRef.current += 1;
+      setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
+    } finally {
+      if (isCurrentAccess(access)) {
+        setPendingTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        });
+      }
     }
-    setTasks((current) => current.map((entry) => entry.id === saved.id ? saved : entry));
   };
 
   const handleDeleteTask = async (task: CoupleTask) => {
-    if (pendingTaskIds.has(task.id) || task.createdBy !== authenticatedUser?.id || isOffline) return;
+    if (
+      pendingTaskIds.has(task.id)
+      || task.createdBy !== authenticatedUser?.id
+      || isOffline
+      || taskLoadState !== 'ready'
+      || !activeCouple
+    ) return;
+    const access = captureAccess();
+    const mutationSequence = taskRequestSequenceRef.current;
     setPendingTaskIds((current) => new Set(current).add(task.id));
-    const deleted = await deleteTask(task);
-    setPendingTaskIds((current) => {
-      const next = new Set(current);
-      next.delete(task.id);
-      return next;
-    });
-    if (deleted) setTasks((current) => current.filter((entry) => entry.id !== task.id));
-    else toast.error('할 일을 삭제하지 못했어요.');
+    try {
+      const deleted = await deleteTask(task);
+      if (!isCurrentAccess(access)) return;
+      if (deleted) {
+        if (taskRequestSequenceRef.current !== mutationSequence) {
+          const reconciliation = await refreshTasks();
+          if (!isCurrentAccess(access)) return;
+          if (reconciliation === 'error') {
+            taskRequestSequenceRef.current += 1;
+            taskStateSequenceRef.current += 1;
+            setTasks((current) => current.filter((entry) => entry.id !== task.id));
+            toast.error('삭제는 됐지만 최신 상태를 확인하지 못했어요. 다시 불러와 주세요.');
+          }
+          return;
+        }
+        taskRequestSequenceRef.current += 1;
+        taskStateSequenceRef.current += 1;
+        setTasks((current) => current.filter((entry) => entry.id !== task.id));
+      }
+      else toast.error('할 일을 삭제하지 못했어요.');
+    } finally {
+      if (isCurrentAccess(access)) {
+        setPendingTaskIds((current) => {
+          const next = new Set(current);
+          next.delete(task.id);
+          return next;
+        });
+      }
+    }
   };
 
   const selectedEvents = eventsOnDate(events, selectedDate).sort((a, b) =>
@@ -603,24 +850,30 @@ export function SchedulePage() {
 
   return (
     <MobileShell>
+      <AppBar
+        title="우리의 계획"
+        actions={!picking ? (
+          <AppBarAction
+            aria-label="일정 추가"
+            onClick={() => {
+              if (!hasCoupleSpace) return;
+              setPicking(true);
+              setPickedDays([]);
+            }}
+            disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
+            className="disabled:opacity-40"
+          >
+            <Plus size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+          </AppBarAction>
+        ) : undefined}
+      />
       {/*
         일정이 공책 위로 옮겨졌다 (2026-08-22, §5).
 
         달력 문법은 이 앱에서 여기만 소유한다 -- 요일을 맞추고 미래를 담는다. 표면만
         바뀌었고 셀 계산·이벤트·실시간 구독은 그대로다.
       */}
-      <div className="notebook min-h-full pb-28 px-4 pt-5 space-y-5">
-        {/*
-          제목줄을 걷어냈다 (2026-08-23).
-
-          `우리의 계획` 이라는 앱바와 그 아래 `2026년 8월` 이 따로 있었다. 프리뷰는 달
-          이름이 곧 헤더이고 그 줄 오른쪽에 `‹ › +` 가 있다 -- 인스타의 화면들이 그렇듯
-          제목이 곧 지금 보고 있는 것이다. 화면 이름을 한 번 더 적는 줄은 종이를 먹는다.
-
-          `+` 는 채운 알약이 아니라 펜 획이다. 종이 위에서 채운 알약은 그 화면에서 유일하게
-          앱처럼 보이는 물건이 된다.
-        */}
-
+      <div className="min-h-full space-y-6 px-4 pb-28 pt-3">
         <PlanSectionNav active="schedule" />
 
         {!authenticatedUser ? (
@@ -654,7 +907,7 @@ export function SchedulePage() {
             {!activeCouple && (
               <Card>
                 <div className="flex items-start gap-3">
-                  <Users size={18} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <Users size={18} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                   <div className="min-w-0">
                     <p className="text-label font-semibold text-foreground break-keep">
                       {profile.couple.status === 'pending' ? '파트너 연결을 기다리고 있어요' : '연결된 우리 공간이 없어요'}
@@ -671,16 +924,16 @@ export function SchedulePage() {
 
             {/* Anniversary D-Day - compact row, not a large card */}
             {anniversaryDate && daysTogether !== null && (
-              <div className="flex items-center justify-between px-1 py-2">
-                <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-1 py-1">
+                <div className="flex min-w-0 flex-wrap items-baseline gap-2">
                   <Heart size={14} className="fill-coral text-coral" aria-hidden="true" />
                   <span className="text-label font-semibold text-foreground">함께한 지</span>
-                  <span className="text-display text-foreground tabular-nums">
+                  <span className="text-title text-foreground tabular-nums">
                     {daysTogether > 0 ? `+${daysTogether}일` : dDayLabel(anniversaryDate, today)}
                   </span>
                 </div>
                 {nextMilestone && (
-                  <span className="text-caption text-muted-foreground">
+                  <span className="shrink-0 text-caption text-muted-foreground">
                     {nextMilestone.label} D-{nextMilestone.daysRemaining}
                   </span>
                 )}
@@ -688,9 +941,9 @@ export function SchedulePage() {
             )}
 
             {/* Calendar grid */}
-            <section aria-label="달력">
+            <section aria-labelledby="schedule-calendar-heading">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-heading" style={{ color: 'var(--ink)' }}>{currYear}년 {currMonth + 1}월</h2>
+                <h2 id="schedule-calendar-heading" className="text-heading" style={{ color: 'var(--ink)' }}>{currYear}년 {currMonth + 1}월</h2>
                 <div className="flex items-center gap-1">
                   {picking ? (
                     <button
@@ -708,7 +961,7 @@ export function SchedulePage() {
                     aria-label="이전 달"
                     className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronLeft size={18} className="pen-icon" color="var(--ink)" />
+                    <ChevronLeft size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -716,30 +969,15 @@ export function SchedulePage() {
                     aria-label="다음 달"
                     className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control"
                   >
-                    <ChevronRight size={18} className="pen-icon" color="var(--ink)" />
+                    <ChevronRight size={18} className="pen-icon" color="var(--ink)" aria-hidden="true" />
                   </button>
-                  {!picking ? (
-                    <button
-                      type="button"
-                      aria-label="일정 추가"
-                      onClick={() => {
-                        if (!hasCoupleSpace) return;
-                        setPicking(true);
-                        setPickedDays([]);
-                      }}
-                      disabled={!hasCoupleSpace || loadState !== 'ready' || isOffline}
-                      className="press-response relative min-w-11 min-h-11 flex items-center justify-center rounded-control disabled:opacity-40"
-                    >
-                      <Plus size={22} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-                    </button>
-                  ) : null}
                 </div>
               </div>
-              <div className="grid grid-cols-7 gap-0.5 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
+              <div className="-mx-3 grid grid-cols-7 gap-0 pb-1 text-center text-caption" style={{ color: 'var(--ink-soft)' }}>
                 <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
               </div>
               <div
-                className="grid grid-cols-7 gap-0.5 text-center"
+                className="-mx-3 grid grid-cols-7 gap-0 text-center"
                 onPointerDown={onGridDown}
                 onPointerMove={onGridMove}
                 onPointerUp={onGridUp}
@@ -788,6 +1026,7 @@ export function SchedulePage() {
                       aria-label={picking
                         ? `${date}${inPick ? ', 선택됨' : ''}`
                         : `${date}, 일정 ${dayEvents.length}개, 남은 할 일 ${dayTasks.length}개`}
+                      aria-current={isToday ? 'date' : undefined}
                       aria-pressed={isSelected}
                       /*
                         달력 칸도 손으로 그린 것이다 (2026-08-23).
@@ -841,7 +1080,7 @@ export function SchedulePage() {
               */}
               {picking ? (
                 <div className="mt-3 flex items-center gap-3">
-                  <p className="text-label flex-1" style={{ color: 'var(--ink)' }}>{pickedLabel}</p>
+                  <p className="min-w-0 flex-1 text-label break-keep [overflow-wrap:anywhere]" style={{ color: 'var(--ink)' }}>{pickedLabel}</p>
                   <Button
                     variant="primary"
                     size="sm"
@@ -851,31 +1090,64 @@ export function SchedulePage() {
                     <span>다음</span>
                   </Button>
                 </div>
-              ) : (
-                <p className="mt-2 text-caption" style={{ color: 'var(--ink-soft)' }}>
-                  일정 추가를 누르고 날짜를 끌면 여러 날이 한 번에 잡혀요. 떨어진 날은 하나씩 눌러 더할 수 있어요
-                </p>
-              )}
+              ) : null}
             </section>
 
             {/* Selected date events and tasks */}
-            <section>
+            <section aria-labelledby="selected-date-heading">
               <SectionHeader
+                titleId="selected-date-heading"
                 title={`${selectedDate.slice(5)} 일정`}
                 action={
                   <button
                     type="button"
                     onClick={openCreateModal}
                     disabled={!hasCoupleSpace || isOffline}
-                    className="press-response text-caption font-semibold disabled:opacity-40 min-h-11 flex items-center" style={{ color: 'var(--ink)' }}
+                    className="press-response flex min-h-11 items-center text-caption font-semibold break-keep disabled:opacity-40" style={{ color: 'var(--ink)' }}
                   >
                     이 날짜에 추가
                   </button>
                 }
               />
 
+              {activeCouple && taskLoadState === 'loading' ? (
+                <div
+                  role="status"
+                  className="mb-3 flex min-h-11 items-center gap-2 rounded-control border border-border px-3 py-2 text-label text-muted-foreground"
+                >
+                  <RefreshCw size={16} className="shrink-0 animate-spin" aria-hidden="true" />
+                  할 일을 불러오는 중이에요
+                </div>
+              ) : null}
+
+              {activeCouple && (taskLoadState === 'error' || taskLoadState === 'forbidden') ? (
+                <EmptyState
+                  className="mb-3 rounded-control border border-border px-4"
+                  icon={taskLoadState === 'forbidden'
+                    ? <ShieldAlert size={18} className="text-warning" />
+                    : <RefreshCw size={18} className="text-muted-foreground" />}
+                  title={taskLoadState === 'forbidden'
+                    ? '할 일을 볼 권한이 없어요'
+                    : '할 일을 불러오지 못했어요'}
+                  description={taskLoadState === 'forbidden'
+                    ? '연결 상태나 계정 권한을 확인한 뒤 다시 시도해 주세요.'
+                    : tasks.length > 0
+                      ? '이미 확인한 할 일은 그대로 두었어요. 연결을 확인한 뒤 다시 시도해 주세요.'
+                      : '일정은 불러왔지만 할 일 목록은 확인하지 못했어요.'}
+                  action={(
+                    <Button
+                      size="sm"
+                      variant="primary"
+                      onClick={() => void refreshTasks({ announce: true })}
+                    >
+                      할 일 다시 시도
+                    </Button>
+                  )}
+                />
+              ) : null}
+
               {/* Quick task creation */}
-              {activeCouple && (
+              {activeCouple && taskLoadState === 'ready' && (
                 /*
                   두 줄로 나눴다 (2026-08-23).
 
@@ -895,7 +1167,7 @@ export function SchedulePage() {
                     onKeyDown={(event) => { if (event.key === 'Enter') void handleCreateTask(); }}
                     placeholder="우리 할 일 빠르게 추가"
                     aria-label="할 일 제목"
-                    className="ink-chip w-full bg-transparent px-3 py-2 text-body outline-none min-h-11"
+                    className="ink-chip min-h-11 w-full bg-transparent px-3 py-2 text-body"
                   />
                   <div className="flex items-center gap-2">
                     <input
@@ -929,7 +1201,7 @@ export function SchedulePage() {
                   </div>
                 </div>
               )}
-              {activeCouple && (
+              {activeCouple && taskLoadState === 'ready' && (
                 /*
                  * The native checkbox paints at 13x13 and cannot be resized reliably
                  * across browsers, so the tap target is the LABEL: `min-h-11` makes the
@@ -955,7 +1227,7 @@ export function SchedulePage() {
 
               {/* Tasks list */}
               {selectedTasks.length > 0 && (
-                <RowGroup className="mb-3">
+                <RowGroup aria-label="선택한 날짜의 할 일" className="mb-3">
                   {selectedTasks.map((task) => {
                     const pending = pendingTaskIds.has(task.id);
                     return (
@@ -965,11 +1237,11 @@ export function SchedulePage() {
                           <button
                             type="button"
                             onClick={() => void handleToggleTask(task)}
-                            disabled={pending || isOffline}
+                            disabled={pending || isOffline || taskLoadState !== 'ready' || !activeCouple}
                             aria-label={`${task.title} ${task.completed ? '미완료로 변경' : '완료로 변경'}`}
                             className="press-response disabled:opacity-40 min-w-11 min-h-11 flex items-center justify-center -m-2" style={{ color: 'var(--ink)' }}
                           >
-                            {task.completed ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+                            {task.completed ? <CheckCircle2 size={18} aria-hidden="true" /> : <Circle size={18} aria-hidden="true" />}
                           </button>
                         }
                         trailing={
@@ -977,17 +1249,17 @@ export function SchedulePage() {
                             <button
                               type="button"
                               onClick={() => void handleDeleteTask(task)}
-                              disabled={pending || isOffline}
+                              disabled={pending || isOffline || taskLoadState !== 'ready' || !activeCouple}
                               aria-label={`${task.title} 할 일 삭제`}
                               className="press-response min-w-11 min-h-11 flex items-center justify-center -m-2 text-muted-foreground hover:text-destructive disabled:opacity-40"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={14} aria-hidden="true" />
                             </button>
                           ) : undefined
                         }
                         density="tight"
                       >
-                        <p className={`text-label font-semibold break-keep ${task.completed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{task.title}</p>
+                        <p className={`text-label font-semibold break-keep [overflow-wrap:anywhere] ${task.completed ? 'line-through text-muted-foreground' : 'text-foreground'}`}>{task.title}</p>
                         <p className="text-caption text-muted-foreground tabular-nums">{task.dueTime || '시간 미정'} · {task.assigneeId === authenticatedUser?.id ? '내 담당' : '함께'}</p>
                       </ListRow>
                     );
@@ -997,7 +1269,7 @@ export function SchedulePage() {
 
               {/* Events for selected date */}
               {selectedEvents.length > 0 && (
-                <RowGroup>
+                <RowGroup aria-label="선택한 날짜의 일정">
                   {selectedEvents.map((event) => {
                     const badge = EVENT_BADGES[event.eventType];
                     const isAuthor = event.createdBy === authenticatedUser?.id;
@@ -1019,7 +1291,7 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 수정`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
-                                <Pencil size={14} />
+                                <Pencil size={14} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -1028,21 +1300,21 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 삭제`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={14} aria-hidden="true" />
                               </button>
                             </div>
                           ) : undefined
                         }
                       >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-label font-semibold text-foreground break-keep">{event.title}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="min-w-0 text-label font-semibold text-foreground break-keep [overflow-wrap:anywhere]">{event.title}</span>
                           <Badge tone={badge.tone}>{badge.label}</Badge>
                         </div>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
                           {event.isPrivate ? (
-                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Lock size={10} />나만 보기</span>
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Lock size={10} aria-hidden="true" />나만 보기</span>
                           ) : (
-                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Users size={10} />둘이 보기</span>
+                            <span className="flex items-center gap-1 text-caption text-muted-foreground"><Users size={10} aria-hidden="true" />둘이 보기</span>
                           )}
                           {event.talkAbout && <span className="text-caption font-medium text-coral-strong">꼭 얘기</span>}
                         </div>
@@ -1052,19 +1324,23 @@ export function SchedulePage() {
                 </RowGroup>
               )}
 
-              {selectedEvents.length === 0 && selectedTasks.length === 0 && (
+              {selectedEvents.length === 0
+                && selectedTasks.length === 0
+                && (!activeCouple || taskLoadState === 'ready') && (
                 <EmptyState
                   icon={<ListTodo size={18} className="text-muted-foreground" />}
-                  title="선택한 날짜에 일정과 할 일이 없어요."
+                  title={activeCouple
+                    ? '선택한 날짜에 일정과 할 일이 없어요.'
+                    : '선택한 날짜에 일정이 없어요.'}
                 />
               )}
             </section>
 
             {/* Upcoming events */}
-            <section>
-              <SectionHeader title="다가오는 일정" />
+            <section aria-labelledby="upcoming-events-heading">
+              <SectionHeader titleId="upcoming-events-heading" title="다가오는 일정" />
               {upcoming.length > 0 ? (
-                <RowGroup>
+                <RowGroup aria-label="다가오는 일정 목록">
                   {upcoming.map((event) => {
                     const badge = EVENT_BADGES[event.eventType];
                     const isAuthor = event.createdBy === authenticatedUser?.id;
@@ -1073,7 +1349,7 @@ export function SchedulePage() {
                       <ListRow
                         key={event.id}
                         leading={
-                          <span className="text-caption text-muted-foreground tabular-nums w-11 text-right">
+                          <span className="w-11 shrink-0 text-right text-caption text-muted-foreground tabular-nums">
                             {isOngoing ? '진행 중' : dDayLabel(event.startDate, today)}
                           </span>
                         }
@@ -1087,7 +1363,7 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 수정`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground disabled:opacity-40"
                               >
-                                <Pencil size={14} />
+                                <Pencil size={14} aria-hidden="true" />
                               </button>
                               <button
                                 type="button"
@@ -1096,17 +1372,17 @@ export function SchedulePage() {
                                 aria-label={`${event.title} 일정 삭제`}
                                 className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-destructive disabled:opacity-40"
                               >
-                                <Trash2 size={14} />
+                                <Trash2 size={14} aria-hidden="true" />
                               </button>
                             </div>
                           ) : undefined
                         }
                       >
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-label font-semibold text-foreground break-keep">{event.title}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="min-w-0 text-label font-semibold text-foreground break-keep [overflow-wrap:anywhere]">{event.title}</span>
                           <Badge tone={badge.tone}>{badge.label}</Badge>
                         </div>
-                        <p className="text-caption text-muted-foreground mt-0.5">
+                        <p className="mt-0.5 text-caption text-muted-foreground [overflow-wrap:anywhere]">
                           {event.startDate}{event.endDate ? ` ~ ${event.endDate}` : ''}
                           {event.isPrivate && ' · 나만 보기'}
                           {event.talkAbout && ' · 꼭 얘기'}
@@ -1129,7 +1405,7 @@ export function SchedulePage() {
         {/* Event create/edit modal — z-[60] above the tab bar */}
         {showEventModal && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-            <div role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="bg-card rounded-surface p-4 max-w-sm w-full space-y-4 border border-border">
+            <div ref={eventModalPanelRef} role="dialog" aria-modal="true" aria-labelledby="event-modal-title" className="max-h-[calc(100dvh-2rem)] w-full max-w-sm space-y-4 overflow-y-auto rounded-surface border border-border bg-card p-4">
               <div className="flex items-center justify-between">
                 <h3 id="event-modal-title" className="text-heading text-foreground">{editingEventId ? '일정 수정' : '새 일정 추가'}</h3>
                 <button type="button" onClick={() => setShowEventModal(false)} disabled={isSaving} aria-label="닫기" className="press-response min-w-11 min-h-11 flex items-center justify-center text-muted-foreground disabled:opacity-40"><X size={18} /></button>
@@ -1137,15 +1413,21 @@ export function SchedulePage() {
               <div className="space-y-3">
                 <div>
                   <label htmlFor="event-title" className="block text-caption text-muted-foreground font-medium mb-1">일정 제목 *</label>
-                  <input id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="예: 첫 휴가 / 주말 데이트" className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
+                  <input ref={eventTitleRef} id="event-title" type="text" value={title} onChange={(event) => setTitle(event.target.value)} placeholder={isMilitaryRelationship ? '예: 첫 휴가 / 주말 데이트' : '예: 주말 데이트 / 함께할 일정'} className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11" />
                 </div>
                 <div>
                   <label htmlFor="event-type" className="block text-caption text-muted-foreground font-medium mb-1">일정 유형</label>
                   <select id="event-type" value={eventType} onChange={(event) => setEventType(event.target.value as EventType)} className="w-full px-3 py-2 rounded-control border border-border bg-background text-foreground text-body focus:outline-none focus:ring-2 focus:ring-coral/40 min-h-11">
-                    {(Object.entries(EVENT_BADGES) as [EventType, { label: string }][]).map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
+                    {(Object.entries(EVENT_BADGES) as [EventType, { label: string }][])
+                      .filter(([value]) => (
+                        isMilitaryRelationship
+                        || value !== 'visit'
+                        || (editingEventId !== null && eventType === 'visit')
+                      ))
+                      .map(([value, badge]) => <option key={value} value={value}>{badge.label}</option>)}
                   </select>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 gap-2 min-[360px]:grid-cols-2">
                   <div>
                     <label htmlFor="event-start" className="block text-caption text-muted-foreground font-medium mb-1">시작일 *</label>
                     <input id="event-start" type="date" value={eventStartDate} onChange={(event) => setEventStartDate(event.target.value)} className="w-full px-2 py-2 rounded-control border border-border bg-background text-foreground text-body min-h-11" />

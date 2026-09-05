@@ -17,7 +17,7 @@ vi.mock('@/lib/platform', () => ({ isNativePlatform: () => native }));
 
 const registerPushToken = vi.fn(async () => ({ ok: true }));
 vi.mock('@/lib/pushTokens', () => ({
-  registerPushToken: (...args: unknown[]) => registerPushToken(...(args as [never, never])),
+  registerPushToken: (...args: unknown[]) => registerPushToken(...(args as [never, never, never])),
 }));
 
 const checkPermissions = vi.fn();
@@ -63,7 +63,7 @@ describe('product kill switch', () => {
   it('stays fail-closed and never touches native push when disabled', async () => {
     vi.stubEnv('VITE_PUSH_NOTIFICATIONS_ENABLED', 'false');
     expect(pushSupported()).toBe(false);
-    await expect(setUpPushNotifications()).resolves.toEqual({ registered: false, reason: 'unsupported' });
+    await expect(setUpPushNotifications('user-a')).resolves.toEqual({ registered: false, reason: 'unsupported' });
     await expect(listenForPushTaps(vi.fn())).resolves.toBeUndefined();
     expect(checkPermissions).not.toHaveBeenCalled();
     expect(requestPermissions).not.toHaveBeenCalled();
@@ -84,7 +84,7 @@ describe('web is left entirely alone', () => {
     // different delivery guarantee and a different iOS story, and validating the
     // loop against both at once would tell us nothing about either.
     native = false;
-    const result = await setUpPushNotifications();
+    const result = await setUpPushNotifications('user-a');
 
     expect(result).toEqual({ registered: false, reason: 'unsupported' });
     expect(checkPermissions).not.toHaveBeenCalled();
@@ -94,19 +94,23 @@ describe('web is left entirely alone', () => {
 
 describe('asking, once', () => {
   it('registers the token the OS hands back', async () => {
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('token-from-os');
 
     await expect(pending).resolves.toEqual({ registered: true });
-    expect(registerPushToken).toHaveBeenCalledWith(expect.stringMatching(/^(ios|android)$/), 'token-from-os');
+    expect(registerPushToken).toHaveBeenCalledWith(
+      expect.stringMatching(/^(ios|android)$/),
+      'token-from-os',
+      'user-a',
+    );
   });
 
   it('does not re-prompt when permission was already decided', async () => {
     // iOS gives an app exactly one chance to ask. Asking again when the answer is
     // already recorded spends nothing and gains nothing.
     checkPermissions.mockResolvedValue({ receive: 'granted' });
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('t');
     await pending;
@@ -116,7 +120,7 @@ describe('asking, once', () => {
 
   it('prompts when the OS has not been asked yet', async () => {
     checkPermissions.mockResolvedValue({ receive: 'prompt' });
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('t');
     await pending;
@@ -128,7 +132,7 @@ describe('asking, once', () => {
     checkPermissions.mockResolvedValue({ receive: 'prompt' });
     requestPermissions.mockResolvedValue({ receive: 'denied' });
 
-    await expect(setUpPushNotifications()).resolves.toEqual({
+    await expect(setUpPushNotifications('user-a')).resolves.toEqual({
       registered: false,
       reason: 'denied',
     });
@@ -141,7 +145,7 @@ describe('asking, once', () => {
     // on a notification token is the wrong thing to make someone wait for; the
     // next launch tries again.
     vi.useFakeTimers();
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     await vi.advanceTimersByTimeAsync(10_000);
 
@@ -151,7 +155,7 @@ describe('asking, once', () => {
 
   it('reports a rejected server registration as a failure, not a success', async () => {
     registerPushToken.mockResolvedValue({ ok: false });
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('t');
 
@@ -253,8 +257,8 @@ describe('the setup is actually reachable from the product', () => {
       reinstall.
     */
     const effect = store.slice(
-      store.indexOf('setUpPushNotifications()') - 400,
-      store.indexOf('setUpPushNotifications()') + 100,
+      store.indexOf('setUpPushNotifications(') - 400,
+      store.indexOf('setUpPushNotifications(') + 160,
     );
     expect(effect).toContain("coupleLifecycle !== 'connected'");
   });
@@ -271,7 +275,7 @@ describe('the setup is actually reachable from the product', () => {
  */
 describe('nothing is left running', () => {
   it('removes both registration listeners once a token arrives', async () => {
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('t');
     await pending;
@@ -284,7 +288,7 @@ describe('nothing is left running', () => {
 
   it('removes them on the give-up path too', async () => {
     vi.useFakeTimers();
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     await vi.advanceTimersByTimeAsync(10_000);
     await pending;
@@ -300,7 +304,7 @@ describe('nothing is left running', () => {
       retry, so the timer is cleared rather than out-raced.
     */
     vi.useFakeTimers();
-    const pending = setUpPushNotifications();
+    const pending = setUpPushNotifications('user-a');
     await vi.waitFor(() => expect(listeners.has('registration')).toBe(true));
     emitToken('t');
     await expect(pending).resolves.toEqual({ registered: true });

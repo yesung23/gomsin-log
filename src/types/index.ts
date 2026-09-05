@@ -1,8 +1,11 @@
 import type { ServerErrorKind } from '@/lib/serverErrors';
+import type { AppLocale } from '@/lib/appLocale';
 
-export type { ServerErrorKind };
+export type { ServerErrorKind, AppLocale };
 
 export type Role = 'gomsin' | 'soldier';
+export type RelationshipContext = 'military' | 'general';
+export type GenderIdentity = 'woman' | 'man';
 
 export type Branch = 
   | 'army'            // 육군 (18개월)
@@ -26,6 +29,27 @@ export type CoupleStatus = 'pending' | 'active' | 'disconnected';
 
 export type ReactionType = 'good' | 'event' | 'hard' | 'thought_of_you';
 
+export interface PhotoRenditionDescriptor {
+  mediaObjectId: string;
+  widthPx: number;
+  heightPx: number;
+  byteSize: number;
+  sha256: string;
+  mimeType: 'image/jpeg';
+  /** Derived locally from the authorized record namespace; never accepted from RPC data. */
+  path?: string;
+  /** Ephemeral signed URL. Never persisted. */
+  url?: string;
+  urlUnavailable?: ServerErrorKind;
+}
+
+export interface PhotoRenditionMetadata {
+  /** Immutable operation that originally registered this master/thumbnail pair. */
+  sourceRevision: string;
+  screenMaster: PhotoRenditionDescriptor;
+  thumbnail: PhotoRenditionDescriptor & { path: string };
+}
+
 export interface Attachment {
   type: 'photo' | 'video' | 'voice';
   name: string;
@@ -40,8 +64,18 @@ export interface Attachment {
    * explanation. Set to the classified cause when signing was ATTEMPTED and
    * failed, so a surface can say so instead of pretending the media is fine.
    * Never persisted -- writes project attachments down to type/name/path.
-   */
+  */
   urlUnavailable?: ServerErrorKind;
+  /**
+   * The authoritative photo-pair metadata read could not authorize this master.
+   *
+   * This is deliberately separate from a Storage signing failure: every reason
+   * here blocks both master and thumbnail re-signing until a fresh authoritative
+   * record fetch returns valid pair metadata. It is transient and never persisted.
+   */
+  photoMetadataUnavailable?: ServerErrorKind;
+  /** Authorized, transient display enrichment. Writes continue to project type/name/path only. */
+  photoRendition?: PhotoRenditionMetadata;
 }
 
 export type EmotionGroup =
@@ -147,6 +181,12 @@ export interface DailyRecord {
    * greater than 1.
    */
   contentRevision?: number;
+  /** Opaque media-ledger contract stamped atomically with contentRevision. */
+  mediaContractVersion?: 0 | 1;
+  /** Content revision whose opaque media manifest most recently committed. */
+  mediaManifestRevision?: number;
+  /** Idempotence token for response-loss reconciliation; never a Storage path. */
+  lastMediaOperationId?: string;
   /**
    * Why this record's content could not be shown.
    *
@@ -259,10 +299,9 @@ export interface CycleSettings {
 /**
  * What a person may log about their own body.
  *
- * PERSONAL ONLY. None of this is ever partner-visible: the partner-facing payload
- * is `CyclePartnerProjection`, which has no field that could carry a symptom, and
- * the only other thing a partner sees is a `CycleSupportSignal` the owner chose to
- * send.
+ * PERSONAL ONLY. None of this or its predictions are automatically partner-visible.
+ * The only current partner-facing path is a short-lived `CycleSupportSignal` the
+ * owner deliberately chooses; it is not derived from these fields.
  *
  * `nausea` and `breast_tenderness` were added 2026-08-20. Two of the most commonly
  * reported, and until now the two most likely to end up written into `note` --
@@ -339,13 +378,12 @@ export interface CycleSharingPreferences {
 }
 
 /**
- * The ONLY cycle information a partner ever receives.
+ * Legacy compatibility shape for installed clients.
  *
- * Produced by the `get_partner_cycle_projection()` RPC, which reads the owner's
- * raw tables under SECURITY DEFINER and returns nothing but these booleans and
- * date ranges. The shape is the enforcement: there is no field here that could
- * carry a symptom, flow, pain level, mood, note, row id, or actual period date,
- * so a future change cannot leak one by accident.
+ * Automatic cycle/health projection is disabled. Migration 071 preserves the
+ * eight-column RPC shape but returns only false/null values, and the current
+ * client never calls it. Keep this type only while older installed builds need
+ * schema compatibility; `CycleSupportSignal` is the sole current partner path.
  */
 export interface CyclePartnerProjection {
   isCurrentPeriodShared: boolean;
@@ -459,6 +497,8 @@ export type ProfileDateType = (typeof PROFILE_DATE_TYPES)[number];
 
 export interface CoupleInfo {
   coupleId?: string;
+  /** Product mode chosen when this immutable relationship generation was created. */
+  relationshipContext?: RelationshipContext;
   /** Active membership에서 직접 확인한 현재 상대 계정 ID. 온디바이스 privacy gate에 사용한다. */
   partnerUserId?: string;
   partnerName: string;
@@ -488,6 +528,8 @@ export interface UserProfile {
   id?: string;               // Auth UID
   myName: string;
   role: Role;
+  /** Optional owner-only self-description. Never used for authorization or feature access. */
+  genderIdentity?: GenderIdentity;
   avatarPath?: string;
   username?: string;
   profileCaption?: string;
@@ -528,12 +570,41 @@ export interface AppState {
   soldierWidgetLayout: string[];
   hasSeenInstallPrompt: boolean;
   theme: 'light' | 'dark';
+  locale?: AppLocale;
 }
+
+export type AuthProvider = 'apple' | 'google' | 'email' | 'unknown';
 
 export interface AuthUser {
   id: string;
   email?: string;
-  provider: 'apple' | 'google' | 'email';
+  /** Primary provider reported by Supabase; not proof of the most recent login method. */
+  provider: AuthProvider;
+  /** Present only when Supabase actually loaded the linked identity records. */
+  identityProviders?: string[];
+}
+
+export type AuthSignInResult = { error?: string; cancelled?: true };
+
+/** One mapping for session hydration and explicit repository reads. Never infer
+ * a provider from email, or treat absent identities as a loaded empty list. */
+export function toAuthUser(user: {
+  id: string;
+  email?: string;
+  app_metadata?: { provider?: unknown };
+  identities?: Array<{ provider?: unknown } | null> | null;
+}): AuthUser {
+  const value = user.app_metadata?.provider;
+  const provider = value === 'apple' || value === 'google' || value === 'email' ? value : 'unknown';
+  const identityProviders = Array.isArray(user.identities)
+    ? user.identities.flatMap((identity) => typeof identity?.provider === 'string' ? [identity.provider] : [])
+    : undefined;
+  return {
+    id: user.id,
+    email: user.email,
+    provider,
+    ...(identityProviders ? { identityProviders } : {}),
+  };
 }
 
 /**
@@ -541,8 +612,8 @@ export interface AuthUser {
  */
 export interface IAuthRepository {
   getCurrentUser(): Promise<AuthUser | null>;
-  signInWithGoogle(): Promise<{ error?: string }>;
-  signInWithApple(): Promise<{ error?: string }>;
+  signInWithGoogle(): Promise<AuthSignInResult>;
+  signInWithApple(): Promise<AuthSignInResult>;
   signInWithEmail(email: string): Promise<{ error?: string }>;
   signOut(): Promise<void>;
   isConfigured(): boolean;

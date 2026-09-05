@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookHeart, Images, NotebookPen, CalendarDays, FileText, Sprout } from 'lucide-react';
+import { BookHeart, Images, NotebookPen, CalendarDays, ShoppingBag, Sprout } from 'lucide-react';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
+import { Button } from '@/components/ui/Button';
 import { visibleRecordsForViewer } from '@/lib/privacy';
 import { useStore } from '@/lib/useStore';
 import { buildDiaryMonths, type DiaryMonth } from './diaryMonths';
@@ -70,62 +71,26 @@ function DiaryPageBody() {
       <AppBar
         title="일기장"
         actions={(
-          <AppBarAction
-            aria-label="종이 보관함"
-            onClick={() => navigate('/shop')}
-          >
-            <FileText size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
-          </AppBarAction>
+          <>
+            <AppBarAction
+              aria-label="상점 열기"
+              onClick={() => navigate('/shop')}
+            >
+              <ShoppingBag size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+            </AppBarAction>
+            <AppBarAction
+              aria-label="우리 정원 열기"
+              onClick={() => navigate('/diary/garden')}
+            >
+              <Sprout size={20} className="pen-icon" color="var(--ink)" aria-hidden="true" />
+            </AppBarAction>
+          </>
         )}
       />
 
       <div className="px-4 py-4 space-y-4">
-        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <FileText size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
-              <h2 className="text-label font-bold text-card-foreground">내 종이로 엮기</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/shop')}
-              aria-label="종이 고르기"
-              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
-            >
-              종이 고르기
-            </button>
-          </div>
-          <p className="text-caption text-muted-foreground leading-relaxed">
-            남겨 둔 기록이 날짜별 페이지가 돼요. 종이와 순서만 골라도 한 장의 일기처럼 읽을 수 있어요.
-          </p>
-        </div>
-
-        <div className="rounded-surface border border-border bg-card p-4 space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <Sprout size={18} className="pen-icon shrink-0 text-coral" aria-hidden="true" />
-              <h2 className="text-label font-bold text-card-foreground">우리 정원</h2>
-            </div>
-            <button
-              type="button"
-              onClick={() => navigate('/diary/garden')}
-              aria-label="우리 정원 보기"
-              className="press-response min-h-11 shrink-0 px-3 rounded-control text-caption font-semibold bg-secondary text-secondary-foreground"
-            >
-              정원 보기
-            </button>
-          </div>
-          <p className="text-caption text-muted-foreground leading-relaxed">
-            함께한 시간에 따라 자라는 두 친구를 만나고, 이 기기에서 가볍게 꾸밀 수 있어요.
-          </p>
-        </div>
-
-        <p className="text-body text-muted-foreground">
-          한 달을 열고 날짜를 골라 보세요. 원본은 건드리지 않고, 이 페이지에서 무엇을 보여줄지만 정할 수 있어요.
-        </p>
-
         {months.length === 0 ? (
-          <EmptyYet />
+          <EmptyYet onCompose={() => navigate('/compose')} />
         ) : (
           months.map((month) => (
             <MonthCard key={month.key} month={month} onOpen={() => setOpenKey(month.key)} />
@@ -142,16 +107,15 @@ function DiaryPageBody() {
  * 며칠 남았는지 세어 주지 않는다. 세는 순간 그것은 카운트다운이 되고, §16이 연속 기록을
  * 금지하는 것과 같은 이유로 남기지 않은 날이 결핍이 된다.
  */
-function EmptyYet() {
+function EmptyYet({ onCompose }: { onCompose: () => void }) {
   return (
     <div className="rounded-surface border border-border bg-card p-6 text-center">
       <BookHeart size={28} className="mx-auto text-muted-foreground" aria-hidden="true" />
       <p className="mt-3 text-body text-card-foreground">아직 엮을 것이 없어요.</p>
-      <p className="mt-1.5 text-label text-muted-foreground leading-relaxed">
-        오늘 있었던 일을 하나 남기면
-        <br />
-        이번 달 지면이 여기 생겨요.
-      </p>
+      <Button variant="primary" size="md" onClick={onCompose} className="mt-4">
+        <NotebookPen size={16} aria-hidden="true" />
+        첫 기록 남기기
+      </Button>
     </div>
   );
 }
@@ -163,6 +127,16 @@ function EmptyYet() {
  * "쌓인 시간"이므로 얼마나 쌓였는지가 곧 설명이다. 앱이 만든 홍보 문구보다 정확하다.
  */
 function MonthCard({ month, onOpen }: { month: DiaryMonth; onOpen: () => void }) {
+  const latest = month.records[month.records.length - 1];
+  const [, latestMonth, latestDay] = latest?.date.split('-') ?? [];
+  const latestDateLabel = latestMonth && latestDay
+    ? `${Number(latestMonth)}월 ${Number(latestDay)}일`
+    : '';
+  const firstLine = latest?.contentUnavailable
+    ? '이 기기에서 아직 열 수 없는 기록이에요'
+    : latest?.log.split('\n').map((line) => line.trim()).find(Boolean)
+      ?? ((latest?.attachments?.length ?? 0) > 0 ? '사진으로 남긴 기록' : '짧게 남긴 기록');
+
   return (
     <button
       type="button"
@@ -186,6 +160,17 @@ function MonthCard({ month, onOpen }: { month: DiaryMonth; onOpen: () => void })
           {month.dayCount}일
         </span>
       </div>
+
+      {latest ? (
+        <div className="mt-3 border-t border-border pt-3">
+          {latestDateLabel ? (
+            <p className="text-caption text-muted-foreground">{latestDateLabel}</p>
+          ) : null}
+          <p className="hand-text mt-1 line-clamp-2 break-keep text-body text-card-foreground">
+            {firstLine}
+          </p>
+        </div>
+      ) : null}
     </button>
   );
 }

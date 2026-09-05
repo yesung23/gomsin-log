@@ -17,6 +17,15 @@ vi.mock('@supabase/supabase-js', () => ({
   SupabaseClient: class {},
 }));
 
+vi.mock('@/lib/accountDeletion', () => ({
+  runServerMutationBehindDeletionBarrier: async (
+    operation: (context: { userId: string; assertCurrent: () => void }) => Promise<unknown>,
+  ) => ({
+    kind: 'executed',
+    value: await operation({ userId: 'user-a', assertCurrent: () => {} }),
+  }),
+}));
+
 vi.stubEnv('VITE_SUPABASE_URL', 'https://example.supabase.co');
 vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'test-key');
 

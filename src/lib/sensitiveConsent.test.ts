@@ -1,10 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   CYCLE_CONSENT_VERSION,
+  clearPendingCycleConsentRevocation,
   grantCycleSensitiveConsent,
   hasCycleSensitiveConsent,
+  hasPendingCycleConsentRevocation,
+  markCycleConsentRevocationPending,
   revokeCycleSensitiveConsent,
+  syncCycleConsentWithDB,
 } from '@/lib/sensitiveConsent';
+
+vi.mock('@/lib/supabase', () => ({
+  isSupabaseConfigured: false,
+  supabase: null,
+}));
 
 describe('cycle sensitive-information consent', () => {
   beforeEach(() => window.localStorage.clear());
@@ -37,6 +46,31 @@ describe('cycle sensitive-information consent', () => {
     expect(hasCycleSensitiveConsent('user-b')).toBe(true);
   });
 
+  it('keeps an unfinished server revocation scoped to the initiating account', () => {
+    expect(markCycleConsentRevocationPending('user-a')).toBe(true);
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(true);
+    expect(hasPendingCycleConsentRevocation('user-b')).toBe(false);
+
+    clearPendingCycleConsentRevocation('user-a');
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(false);
+  });
+
+  it('keeps the running app locked when the durable revoke marker cannot be written', () => {
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.localStorage) as Storage,
+      'setItem',
+    ).mockImplementationOnce(() => {
+      throw new DOMException('quota');
+    });
+
+    expect(markCycleConsentRevocationPending('user-a')).toBe(false);
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(true);
+
+    setItem.mockRestore();
+    clearPendingCycleConsentRevocation('user-a');
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(false);
+  });
+
   it('reports failure instead of pretending consent was saved', () => {
     const setItem = vi.spyOn(Object.getPrototypeOf(window.localStorage) as Storage, 'setItem').mockImplementationOnce(() => {
       throw new DOMException('quota');
@@ -44,5 +78,15 @@ describe('cycle sensitive-information consent', () => {
     expect(grantCycleSensitiveConsent('user-a')).toBe(false);
     expect(hasCycleSensitiveConsent('user-a')).toBe(false);
     setItem.mockRestore();
+  });
+
+  it('never treats a local cache entry as authority when the server is unavailable', async () => {
+    grantCycleSensitiveConsent('user-a');
+
+    await expect(syncCycleConsentWithDB('user-a')).resolves.toEqual({
+      ok: false,
+      reason: 'server',
+    });
+    expect(hasCycleSensitiveConsent('user-a')).toBe(true);
   });
 });

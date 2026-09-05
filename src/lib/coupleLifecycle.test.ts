@@ -44,12 +44,29 @@ describe('parseRemoteCoupleState', () => {
     });
     expect(parsed).toEqual({
       coupleId: 'couple-1',
+      relationshipContext: 'military',
       role: 'soldier',
       memberStatus: 'active',
       partnerPresent: true,
       invitationActive: false,
       invitationExpiresAt: null,
     });
+  });
+
+  it('parses the immutable general relationship context', () => {
+    const parsed = parseRemoteCoupleState({
+      couple_id: 'couple-general',
+      relationship_context: 'general',
+    });
+
+    expect(parsed?.relationshipContext).toBe('general');
+  });
+
+  it('rejects a malformed relationship context instead of guessing a mode', () => {
+    expect(parseRemoteCoupleState({
+      couple_id: 'couple-1',
+      relationship_context: 'woman',
+    })).toBeNull();
   });
 
   it('parses the no-membership payload', () => {
@@ -138,6 +155,15 @@ describe('deriveCoupleLifecycle', () => {
 });
 
 describe('mergeCoupleState', () => {
+  it('adopts the server-authoritative relationship context', () => {
+    const merged = mergeCoupleState(
+      local({ relationshipContext: 'military' }),
+      remote({ relationshipContext: 'general' }),
+    );
+
+    expect(merged.relationshipContext).toBe('general');
+  });
+
   it('returns local state UNCHANGED for an unknown answer', () => {
     const current = local({ connected: true, status: 'active', partnerName: '몽룡' });
     expect(mergeCoupleState(current, undefined)).toBe(current);

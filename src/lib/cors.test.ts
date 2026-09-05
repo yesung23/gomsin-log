@@ -23,6 +23,7 @@ function makeRequest(method: string, origin: string | null, authorization?: stri
 /** Minimal admin double: records the sequence and fails nothing by default. */
 function makeAdmin(overrides: Record<string, unknown> = {}) {
   const calls: string[] = [];
+  let activeAttemptId: unknown = null;
   const admin = {
     calls,
     auth: {
@@ -53,14 +54,41 @@ function makeAdmin(overrides: Record<string, unknown> = {}) {
         },
       }),
     }),
-    rpc: vi.fn(async (name: string) => {
+    rpc: vi.fn(async (name: string, args?: Record<string, unknown>) => {
       calls.push(`rpc:${name}`);
+      if (name === 'begin_account_deletion_v2') {
+        activeAttemptId = args?.p_attempt_id;
+      }
       return {
-        data: name === 'e2ee_prepare_account_deletion'
-          ? { partner_remains: false }
-          : name === 'prepare_account_deletion'
-            ? { ok: true }
-            : name === 'cleanup_account_solo_couples' ? 0 : null,
+        data: name === 'record_media_cleanup_contract_version'
+          ? 4
+          : name === 'begin_account_deletion_v2'
+          ? { ok: true, attempt_id: args?.p_attempt_id, phase: 'media_cleanup' }
+          : name === 'inspect_account_deletion_fence_v2'
+            ? {
+              ok: true,
+              pending: true,
+              attempt_id: activeAttemptId,
+              phase: 'media_cleanup',
+            }
+          : name === 'e2ee_prepare_account_deletion_v2'
+            ? { ok: true, phase: 'e2ee_prepared', preparation: { partner_remains: false } }
+            : name === 'prepare_account_deletion_v2'
+              ? { ok: true, phase: 'relational_prepared', preparation: { ok: true } }
+              : name === 'close_account_relationship_generations_v2'
+                ? { ok: true, phase: 'relationships_closed', closed_count: 1 }
+                : name === 'cleanup_account_solo_couples_v2'
+                  ? { ok: true, phase: 'solo_cleanup_complete', deleted_count: 0 }
+                  : name === 'iap_prepare_account_deletion_v2'
+                    ? {
+                      prepared: true,
+                      entitlements_revoked: 0,
+                      reservations_released: 0,
+                      transactions_retained: 0,
+                      notifications_retained: 0,
+                      credit_entries_retained: 0,
+                    }
+                    : null,
         error: null,
       };
     }),
@@ -90,6 +118,7 @@ function makeDeps(admin: unknown, env: Record<string, string | undefined> = {}) 
       ...env,
     })[key],
     createAdmin: () => admin,
+    prepareAppleCredentialDeletion: async () => ({ status: 'not_required' as const }),
   };
 }
 
@@ -295,19 +324,28 @@ describe('C2 - the delete-account function applies the table end to end', () => 
       makeDeps(admin),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, warnings: [] });
+    expect(await response.json()).toEqual({
+      success: true,
+      warnings: [],
+      appleCredentialRevocation: { status: 'not_required' },
+    });
     // CORS does not reorder or remove any deletion step. The exact list,
     // including the pending-flag write and sole-couple cleanup, is pinned by
     // `deleteAccountFunction.test.ts`.
     expect(admin.calls.filter((call) => call !== 'auth.admin.updateUserById')).toEqual([
       'auth.getUser',
+      'rpc:record_media_cleanup_contract_version',
       'from:daily_records.select',
-      'rpc:begin_account_deletion',
+      'rpc:begin_account_deletion_v2',
+      'auth.getUser',
+      'rpc:inspect_account_deletion_fence_v2',
       // E2EE key-material cleanup runs before the relational preparation, so a
       // refusal there stops the deletion before anything is destroyed.
-      'rpc:e2ee_prepare_account_deletion',
-      'rpc:prepare_account_deletion',
-      'rpc:cleanup_account_solo_couples',
+      'rpc:e2ee_prepare_account_deletion_v2',
+      'rpc:prepare_account_deletion_v2',
+      'rpc:close_account_relationship_generations_v2',
+      'rpc:cleanup_account_solo_couples_v2',
+      'rpc:iap_prepare_account_deletion_v2',
       'auth.admin.deleteUser',
     ]);
   });

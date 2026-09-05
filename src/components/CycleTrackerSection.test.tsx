@@ -5,7 +5,39 @@ import type {
   CyclePeriodsFetchResult,
   CycleSettingsFetchResult,
 } from '@/lib/cycle';
-import { grantCycleSensitiveConsent, revokeCycleSensitiveConsent } from '@/lib/sensitiveConsent';
+import {
+  clearPendingCycleConsentRevocation,
+  grantCycleSensitiveConsent,
+  hasCycleSensitiveConsent,
+  hasPendingCycleConsentRevocation,
+  markCycleConsentRevocationPending,
+  revokeCycleSensitiveConsent,
+} from '@/lib/sensitiveConsent';
+
+type NativeStateListener = (state: { isActive: boolean }) => void;
+const nativeLifecycle = vi.hoisted(() => {
+  const state: { isNative: boolean; listener: NativeStateListener | null } = {
+    isNative: false,
+    listener: null,
+  };
+  const remove = vi.fn(async () => undefined);
+  return {
+    state,
+    remove,
+    addListener: vi.fn(async (_eventName: string, listener: NativeStateListener) => {
+      state.listener = listener;
+      return { remove };
+    }),
+  };
+});
+
+vi.mock('@/lib/platform', () => ({
+  isNativePlatform: () => nativeLifecycle.state.isNative,
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: { addListener: nativeLifecycle.addListener },
+}));
 
 /**
  * Consent gating, identity isolation and error-copy honesty for the V3 tracker.
@@ -28,7 +60,10 @@ const savePeriod = vi.fn();
 const updatePeriod = vi.fn();
 const saveDailyLog = vi.fn();
 const saveSettings = vi.fn();
+const saveSharingPreferences = vi.fn();
 const syncConsent = vi.fn();
+const grantConsent = vi.fn();
+const revokeConsent = vi.fn();
 
 vi.mock('@/lib/cycle', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/cycle')>();
@@ -60,6 +95,7 @@ vi.mock('@/lib/cycle', async (importOriginal) => {
     updateCyclePeriodInDB: (...args: unknown[]) => updatePeriod(...args),
     saveCycleDailyLogToDB: (...args: unknown[]) => saveDailyLog(...args),
     saveCycleSettingsToDB: (...args: unknown[]) => saveSettings(...args),
+    saveCycleSharingPreferencesToDB: (...args: unknown[]) => saveSharingPreferences(...args),
   };
 });
 
@@ -68,13 +104,20 @@ vi.mock('@/lib/sensitiveConsent', async (importOriginal) => {
   return {
     ...actual,
     syncCycleConsentWithDB: (...args: unknown[]) => syncConsent(...args),
+    grantCycleConsentInDB: (...args: unknown[]) => grantConsent(...args),
+    revokeCycleConsentInDB: (...args: unknown[]) => revokeConsent(...args),
   };
 });
 
 const { CycleTrackerSection } = await import('@/components/CycleTrackerSection');
 
 beforeEach(() => {
+  nativeLifecycle.state.isNative = false;
+  nativeLifecycle.state.listener = null;
+  nativeLifecycle.addListener.mockClear();
+  nativeLifecycle.remove.mockClear();
   window.localStorage.clear();
+  clearPendingCycleConsentRevocation('user-a');
   periodLoads.length = 0;
   dailyLogLoads.length = 0;
   settingLoads.length = 0;
@@ -82,11 +125,50 @@ beforeEach(() => {
   updatePeriod.mockReset();
   saveDailyLog.mockReset();
   saveSettings.mockReset();
+  saveSharingPreferences.mockReset();
   syncConsent.mockReset();
-  syncConsent.mockResolvedValue({ ok: true, granted: true });
+  grantConsent.mockReset();
+  revokeConsent.mockReset();
+  syncConsent.mockResolvedValue({ ok: true, granted: true, revision: 7 });
+  grantConsent.mockResolvedValue({ ok: true, applied: true, granted: true, revision: 8 });
+  revokeConsent.mockResolvedValue({ ok: true, applied: true, granted: false, revision: 8 });
+  saveSharingPreferences.mockResolvedValue({
+    ok: true,
+    preferences: {
+      userId: 'user-a',
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    },
+  });
   grantCycleSensitiveConsent('user-a');
   grantCycleSensitiveConsent('user-b');
 });
+
+async function renderGrantedCycle() {
+  const view = render(<CycleTrackerSection userId="user-a" />);
+  await waitFor(() => expect(periodLoads).toHaveLength(1));
+  await act(async () => {
+    periodLoads[0].resolve({
+      ok: true,
+      periods: [{ id: 'period-aug', userId: 'user-a', startDate: '2026-08-01', endDate: '2026-08-05' }],
+    });
+    dailyLogLoads[0].resolve({ ok: true, logs: [] });
+    settingLoads[0].resolve({
+      ok: true,
+      settings: { userId: 'user-a', averageCycleLength: 28, averagePeriodLength: 5 },
+    });
+  });
+  await screen.findByTestId('cycle-hero');
+  return view;
+}
+
+async function confirmConsentRevoke() {
+  fireEvent.click(screen.getByRole('button', { name: '내 몸의 리듬 설정' }));
+  fireEvent.click(await screen.findByRole('button', { name: /민감정보 동의/ }));
+  fireEvent.click(await screen.findByRole('button', { name: '민감정보 동의 철회' }));
+  fireEvent.click(await screen.findByRole('button', { name: '철회' }));
+}
 
 /**
  * What the consent card leads with.
@@ -99,7 +181,7 @@ beforeEach(() => {
 describe('the consent card offers before it discloses', () => {
   async function renderUnconsented(userId: string) {
     revokeCycleSensitiveConsent(userId);
-    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    syncConsent.mockResolvedValue({ ok: true, granted: false, revision: 0 });
     const view = render(<CycleTrackerSection userId={userId} />);
     await screen.findByText('내 몸의 리듬 시작하기');
     return view;
@@ -147,7 +229,7 @@ describe('the consent card offers before it discloses', () => {
 describe('CycleTrackerSection sensitive-information gate', () => {
   it('does not retrieve cycle data before separate explicit consent', async () => {
     revokeCycleSensitiveConsent('user-c');
-    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    syncConsent.mockResolvedValue({ ok: true, granted: false, revision: 1 });
     render(<CycleTrackerSection userId="user-c" />);
 
     expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
@@ -160,8 +242,9 @@ describe('CycleTrackerSection sensitive-information gate', () => {
   });
 
   it('keeps the feature locked when the server consent check itself fails', async () => {
-    // An unreachable authority must not be read as "yes".
-    revokeCycleSensitiveConsent('user-d');
+    // An unreachable authority must not be read as "yes", even when an old
+    // local cache entry says this account consented on a previous visit.
+    grantCycleSensitiveConsent('user-d');
     syncConsent.mockResolvedValue({ ok: false, reason: 'offline' });
     render(<CycleTrackerSection userId="user-d" />);
 
@@ -173,11 +256,333 @@ describe('CycleTrackerSection sensitive-information gate', () => {
   it('does not unlock on a stale local cache when the server says revoked', async () => {
     // Cache says yes, server says no. The server wins.
     grantCycleSensitiveConsent('user-e');
-    syncConsent.mockResolvedValue({ ok: true, granted: false });
+    syncConsent.mockResolvedValue({ ok: true, granted: false, revision: 2 });
     render(<CycleTrackerSection userId="user-e" />);
 
     expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
     expect(periodLoads).toHaveLength(0);
+  });
+
+  it('requires this device consent as well as a current server consent', async () => {
+    revokeCycleSensitiveConsent('user-device-proof');
+    syncConsent.mockResolvedValue({ ok: true, granted: true, revision: 3 });
+    render(<CycleTrackerSection userId="user-device-proof" />);
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('이 기기');
+    expect(periodLoads).toHaveLength(0);
+    expect(dailyLogLoads).toHaveLength(0);
+    expect(settingLoads).toHaveLength(0);
+  });
+
+  it('does not unlock when the server grant succeeds but device consent cannot persist', async () => {
+    revokeCycleSensitiveConsent('user-storage-failure');
+    syncConsent.mockResolvedValueOnce({ ok: true, granted: false, revision: 7 });
+    render(<CycleTrackerSection userId="user-storage-failure" />);
+    await screen.findByText('내 몸의 리듬 시작하기');
+
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.localStorage) as Storage,
+      'setItem',
+    ).mockImplementation(() => {
+      throw new DOMException('storage unavailable');
+    });
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '동의하고 시작하기' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('기기');
+    expect(screen.getByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(0);
+    setItem.mockRestore();
+  });
+
+  it('clears stale sharing choices before a fresh consent can unlock health data', async () => {
+    revokeCycleSensitiveConsent('user-a');
+    syncConsent.mockResolvedValueOnce({ ok: true, granted: false, revision: 7 });
+    render(<CycleTrackerSection userId="user-a" />);
+
+    await screen.findByText('내 몸의 리듬 시작하기');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '동의하고 시작하기' }));
+
+    await waitFor(() => expect(saveSharingPreferences).toHaveBeenCalledWith({
+      shareCurrentPeriod: false,
+      sharePredictionWindow: false,
+      shareFertilityWindow: false,
+    }, 'user-a'));
+    await waitFor(() => expect(grantConsent).toHaveBeenCalledWith('user-a', 7));
+    expect(saveSharingPreferences.mock.invocationCallOrder[0])
+      .toBeLessThan(grantConsent.mock.invocationCallOrder[0]);
+    expect(hasCycleSensitiveConsent('user-a')).toBe(true);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+  });
+
+  it('does not let a stale cross-device grant reopen a newer server revoke', async () => {
+    revokeCycleSensitiveConsent('user-a');
+    syncConsent.mockResolvedValueOnce({ ok: true, granted: false, revision: 7 });
+    grantConsent.mockResolvedValueOnce({
+      ok: true,
+      applied: false,
+      granted: false,
+      revision: 8,
+    });
+    render(<CycleTrackerSection userId="user-a" />);
+
+    await screen.findByText('내 몸의 리듬 시작하기');
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: '동의하고 시작하기' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('다른 기기');
+    expect(screen.getByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(hasCycleSensitiveConsent('user-a')).toBe(false);
+    expect(periodLoads).toHaveLength(0);
+  });
+
+  it('revalidates on foreground and clears already rendered health data after remote revocation', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+
+    await act(async () => {
+      periodLoads[0].resolve({
+        ok: true,
+        periods: [{ id: 'visible-period', userId: 'user-a', startDate: '2026-08-13' }],
+      });
+      dailyLogLoads[0].resolve({
+        ok: true,
+        logs: [{
+          id: 'visible-log',
+          userId: 'user-a',
+          logDate: '2026-08-14',
+          symptoms: [],
+          note: '기기 밖에서 철회하면 즉시 숨겨질 내용',
+        }],
+      });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+    expect(await screen.findByText(/생리 2일째/)).toBeInTheDocument();
+
+    syncConsent.mockResolvedValue({ ok: true, granted: false, revision: 8 });
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.queryByText(/생리 2일째/)).not.toBeInTheDocument();
+    expect(screen.queryByText('기기 밖에서 철회하면 즉시 숨겨질 내용')).not.toBeInTheDocument();
+    expect(periodLoads).toHaveLength(1);
+    expect(syncConsent).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the native app-state signal to revalidate consent on iOS foreground', async () => {
+    nativeLifecycle.state.isNative = true;
+    const view = render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await waitFor(() => expect(nativeLifecycle.state.listener).not.toBeNull());
+
+    await act(async () => {
+      periodLoads[0].resolve({ ok: true, periods: [] });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+
+    syncConsent.mockResolvedValue({ ok: true, granted: false, revision: 8 });
+    await act(async () => {
+      nativeLifecycle.state.listener?.({ isActive: true });
+      await Promise.resolve();
+    });
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(1);
+    expect(syncConsent).toHaveBeenCalledTimes(2);
+
+    view.unmount();
+    await waitFor(() => expect(nativeLifecycle.remove).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores foreground and reconnect signals while an explicit revoke is in flight', async () => {
+    const pendingRevoke = deferred<{
+      ok: true;
+      applied: true;
+      granted: false;
+      revision: 8;
+    }>();
+    revokeConsent.mockReturnValueOnce(pendingRevoke.promise);
+    await renderGrantedCycle();
+
+    await confirmConsentRevoke();
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalledTimes(1));
+
+    // Revocation intent locks the surface synchronously, before the server round trip.
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    expect(hasCycleSensitiveConsent('user-a')).toBe(false);
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('online'));
+
+    await act(async () => pendingRevoke.resolve({
+      ok: true,
+      applied: true,
+      granted: false,
+      revision: 8,
+    }));
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    expect(syncConsent).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays locked after a refused revoke and offers only an explicit revoke retry', async () => {
+    revokeConsent
+      .mockResolvedValueOnce({ ok: false, reason: 'forbidden' })
+      .mockResolvedValueOnce({ ok: true, applied: true, granted: false, revision: 8 });
+    await renderGrantedCycle();
+
+    await confirmConsentRevoke();
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('권한이 없어요');
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '동의하고 시작하기' })).not.toBeInTheDocument();
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: '철회 다시 시도' }));
+    await waitFor(() => expect(revokeConsent).toHaveBeenCalledTimes(2));
+    expect(await screen.findByRole('button', { name: '동의하고 시작하기' })).toBeInTheDocument();
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(false);
+  });
+
+  it('keeps an unfinished revoke locked across a component restart', async () => {
+    markCycleConsentRevocationPending('user-a');
+    grantCycleSensitiveConsent('user-a');
+
+    const first = render(<CycleTrackerSection userId="user-a" />);
+    expect(await screen.findByRole('button', { name: '철회 다시 시도' })).toBeInTheDocument();
+    expect(hasCycleSensitiveConsent('user-a')).toBe(false);
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(true);
+    expect(syncConsent).not.toHaveBeenCalled();
+    expect(periodLoads).toHaveLength(0);
+
+    first.unmount();
+    render(<CycleTrackerSection userId="user-a" />);
+    expect(await screen.findByRole('button', { name: '철회 다시 시도' })).toBeInTheDocument();
+    expect(syncConsent).not.toHaveBeenCalled();
+    expect(periodLoads).toHaveLength(0);
+  });
+
+  it('stays locked after restart even when the pending marker could not be written', async () => {
+    revokeConsent.mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    const first = await renderGrantedCycle();
+    const setItem = vi.spyOn(
+      Object.getPrototypeOf(window.localStorage) as Storage,
+      'setItem',
+    ).mockImplementation(() => {
+      throw new DOMException('quota');
+    });
+
+    await confirmConsentRevoke();
+    expect(await screen.findByRole('alert')).toHaveTextContent('인터넷 연결');
+    expect(hasPendingCycleConsentRevocation('user-a')).toBe(true);
+    expect(hasCycleSensitiveConsent('user-a')).toBe(false);
+
+    first.unmount();
+    setItem.mockRestore();
+    syncConsent.mockResolvedValue({ ok: true, granted: true, revision: 8 });
+    render(<CycleTrackerSection userId="user-a" />);
+
+    expect(await screen.findByRole('button', { name: '철회 다시 시도' })).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('이전에 요청한 동의 철회');
+    expect(screen.queryByTestId('cycle-hero')).not.toBeInTheDocument();
+    expect(periodLoads).toHaveLength(1);
+  });
+
+  it('rechecks server consent before a transient load retry touches health tables again', async () => {
+    render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await act(async () => {
+      periodLoads[0].resolve({ ok: false, reason: 'error' });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+
+    const retryConsent = deferred<{ ok: true; granted: true; revision: 8 }>();
+    syncConsent.mockReturnValueOnce(retryConsent.promise);
+    fireEvent.click(await screen.findByRole('button', { name: '다시 시도' }));
+
+    await waitFor(() => expect(syncConsent).toHaveBeenCalledTimes(2));
+    expect(periodLoads).toHaveLength(1);
+
+    await act(async () => retryConsent.resolve({ ok: true, granted: true, revision: 8 }));
+    await waitFor(() => expect(periodLoads).toHaveLength(2));
+  });
+
+  it('does not let a queued quick symptom write cross a new authority check', async () => {
+    const recheck = deferred<{ ok: true; granted: false; revision: 8 }>();
+    await renderGrantedCycle();
+    syncConsent.mockReturnValueOnce(recheck.promise);
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    });
+
+    await act(async () => {
+      screen.getByRole('button', { name: /두통/ }).click();
+      document.dispatchEvent(new Event('visibilitychange'));
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(syncConsent).toHaveBeenCalledTimes(2));
+    expect(saveDailyLog).not.toHaveBeenCalled();
+    await act(async () => recheck.resolve({ ok: true, granted: false, revision: 8 }));
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+  });
+
+  it('ignores an old account consent response after the account changes', async () => {
+    const accountAConsent = deferred<{ ok: true; granted: true; revision: 7 }>();
+    syncConsent
+      .mockReturnValueOnce(accountAConsent.promise)
+      .mockResolvedValueOnce({ ok: true, granted: false, revision: 8 });
+
+    const view = render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(syncConsent).toHaveBeenCalledWith('user-a'));
+    view.rerender(<CycleTrackerSection userId="user-b" />);
+
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    await act(async () => accountAConsent.resolve({ ok: true, granted: true, revision: 7 }));
+
+    expect(screen.getByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+    expect(periodLoads).toHaveLength(0);
+  });
+
+  it('does not apply A pending-revoke state through a stale native callback after switching to B', async () => {
+    nativeLifecycle.state.isNative = true;
+    const view = render(<CycleTrackerSection userId="user-a" />);
+    await waitFor(() => expect(periodLoads).toHaveLength(1));
+    await waitFor(() => expect(nativeLifecycle.state.listener).not.toBeNull());
+    const staleAccountAListener = nativeLifecycle.state.listener!;
+
+    await act(async () => {
+      periodLoads[0].resolve({ ok: true, periods: [] });
+      dailyLogLoads[0].resolve({ ok: true, logs: [] });
+      settingLoads[0].resolve({ ok: true, settings: null });
+    });
+
+    markCycleConsentRevocationPending('user-a');
+    syncConsent.mockResolvedValueOnce({ ok: true, granted: false, revision: 8 });
+    view.rerender(<CycleTrackerSection userId="user-b" />);
+    expect(await screen.findByText('내 몸의 리듬 시작하기')).toBeInTheDocument();
+
+    await act(async () => {
+      staleAccountAListener({ isActive: true });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByRole('button', { name: '철회 다시 시도' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '동의하고 시작하기' })).toBeInTheDocument();
   });
 });
 
@@ -270,8 +675,8 @@ describe('CycleTrackerSection write integrity', () => {
     fireEvent.click(screen.getByRole('button', { name: /오늘 생리 시작했어요/ }));
 
     await waitFor(() => expect(savePeriod).toHaveBeenCalled());
-    // The hero stays in its prediction state: no local period was invented.
-    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('prediction');
+    // The hero stays in its insufficient-data state: no local period was invented.
+    expect(screen.getByTestId('cycle-hero-state')).toHaveTextContent('insufficient_data');
   });
 
   it('reports a rejected settings save with its real cause and keeps the stored average', async () => {

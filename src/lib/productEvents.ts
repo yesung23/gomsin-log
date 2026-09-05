@@ -1,4 +1,8 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+import {
+  runServerMutationBehindDeletionBarrier,
+  type AccountDeletionLockLease,
+} from '@/lib/accountDeletion';
 
 /**
  * The measurement pipe, shaped by PRODUCT_V3 §19's allowlist.
@@ -92,6 +96,12 @@ export interface ProductEvent {
   errorCode?: string;
 }
 
+export interface ProductEventEmissionOptions {
+  expectedUserId: string;
+  now?: Date;
+  deletionLease?: AccountDeletionLockLease;
+}
+
 /**
  * Kinds that would be a §19 violation if they ever existed.
  *
@@ -128,18 +138,25 @@ function todayBucket(now: Date): string {
  */
 export async function recordProductEvent(
   event: ProductEvent,
-  now: Date = new Date(),
+  options: ProductEventEmissionOptions,
 ): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) return;
+  if (!options.expectedUserId || !isSupabaseConfigured || !supabase) return;
+  const client = supabase;
 
   try {
-    await supabase.from('product_events').insert({
-      kind: event.kind,
-      subject_id: event.subjectId ?? null,
-      screen: event.screen ?? null,
-      duration_ms: event.durationMs ?? null,
-      error_code: event.errorCode ?? null,
-      occurred_on: todayBucket(now),
+    await runServerMutationBehindDeletionBarrier(async () => {
+      await client.from('product_events').insert({
+        kind: event.kind,
+        subject_id: event.subjectId ?? null,
+        screen: event.screen ?? null,
+        duration_ms: event.durationMs ?? null,
+        error_code: event.errorCode ?? null,
+        occurred_on: todayBucket(options.now ?? new Date()),
+      });
+    }, {
+      expectedUserId: options.expectedUserId,
+      existingLease: options.deletionLease,
+      policy: 'best_effort',
     });
   } catch {
     // Deliberately swallowed. See above.

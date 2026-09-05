@@ -53,6 +53,34 @@ jobs:
       - name: Install the locked dependency graph
         run: npm ci
 
+      - name: Install the PostgreSQL 17 harness runtime
+        # PostgreSQL integration tests require 17. Install that exact server
+        # package rather than assuming the Ubuntu 24.04 runner's PostgreSQL 16.
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ca-certificates curl
+          sudo install -d -m 0755 /usr/share/postgresql-common/pgdg
+          sudo curl --fail --show-error --silent --location \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          . /etc/os-release
+          sudo tee /etc/apt/sources.list.d/pgdg.sources > /dev/null <<EOF
+          Types: deb
+          URIs: https://apt.postgresql.org/pub/repos/apt
+          Suites: ${VERSION_CODENAME}-pgdg
+          Architectures: $(dpkg --print-architecture)
+          Components: main
+          Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          EOF
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y postgresql-17 postgresql-client-17
+          bindir='/usr/lib/postgresql/17/bin'
+          if [ ! -x "$bindir/postgres" ] || ! "$bindir/postgres" --version | grep -E '^postgres \(PostgreSQL\) 17([.]|$)'; then
+            echo "PostgreSQL 17 server binaries are not installed on this runner." >&2
+            exit 1
+          fi
+          echo "$bindir" >> "$GITHUB_PATH"
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -545,13 +573,25 @@ jobs:
           # Simulator builds with CODE_SIGNING_ALLOWED=NO do not embed
           # entitlements, so the source file is what gets asserted here. On-device
           # enforcement of NSFileProtectionComplete stays a DEVICE GATE.
-          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.default-data-protection' ios/App/App/App.entitlements)" = 'NSFileProtectionComplete'
-          for forbidden in keychain-access-groups com.apple.developer.applesignin com.apple.developer.associated-domains aps-environment; do
-            if /usr/libexec/PlistBuddy -c "Print :${forbidden}" ios/App/App/App.entitlements > /dev/null 2>&1; then
-              echo "Unexpected entitlement: ${forbidden}" >&2
-              exit 1
-            fi
-          done
+          # The native Apple bridge requires the one approved Sign in with Apple
+          # mode. Compare the complete plist so an extra capability cannot hide
+          # behind merely removing Apple from the old forbidden-name list.
+          python3 - <<'PY'
+          import plistlib
+          import sys
+
+          path = 'ios/App/App/App.entitlements'
+          with open(path, 'rb') as source:
+              actual = plistlib.load(source)
+          expected = {
+              'com.apple.developer.applesignin': ['Default'],
+              'com.apple.developer.default-data-protection': 'NSFileProtectionComplete',
+          }
+          if actual != expected:
+              print('Entitlements differ from the approved exact key/value contract.', file=sys.stderr)
+              print('Actual entitlement keys: ' + ', '.join(sorted(actual)), file=sys.stderr)
+              raise SystemExit(1)
+          PY
 
           app="$(find "${RUNNER_TEMP}/DerivedData/Build/Products" -maxdepth 3 -name 'App.app' -type d | head -1)"
           # Xcode may ad-hoc sign a simulator bundle; what must not exist is a
@@ -566,6 +606,8 @@ jobs:
   secret-scan:
     name: Secret and signing-material scan
     runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: '8.24.3'
     steps:
       - name: Check out complete history without write credentials
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -577,6 +619,23 @@ jobs:
         uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
         env:
           GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Scan the complete introduced commit range for secrets
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          # The pinned action installs gitleaks and exports its directory via
+          # core.addPath. Its PR API selection and first-parent scan are narrower
+          # than this complete Git range, which also includes side branches.
+          gitleaks_bin="$(command -v gitleaks)"
+          test -x "$gitleaks_bin"
+          test "$("$gitleaks_bin" version)" = "$GITLEAKS_VERSION"
+          if [ -z "${BASE_SHA}" ] || ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            BASE_SHA="$(git rev-parse HEAD^)"
+          fi
+          "$gitleaks_bin" git --config=.gitleaks.toml --redact --no-banner --log-opts="${BASE_SHA}..HEAD"
 
       - name: Scan every newly introduced commit for signing material
         shell: bash
@@ -613,16 +672,10 @@ jobs:
           done < <(git rev-list "${BASE_SHA}..HEAD")
           test "${fail}" -eq 0
 
-          # And no file may carry a private-key blob or an actual signing password
-          # assignment. The tests and this workflow mention the property NAMES on
-          # purpose, so only an assignment form counts.
-          if git grep -nIE \
-            -e '-----BEGIN [A-Z ]*PRIVATE KEY-----' \
-            -e 'store(Password|File)[[:space:]]*[=:]' \
-            -e 'keyPassword[[:space:]]*[=:]' \
-            -e 'MIIE[A-Za-z0-9+/]{40,}' \
-            HEAD -- ':!package-lock.json' ':!.github/workflows/*'; then
-            echo 'A private key or a signing password appears in the tree.' >&2
-            exit 1
-          fi
+          # No file may carry a private-key blob or an actual signing-password
+          # assignment. Four exact non-secret test/validator sentinel lines are
+          # reviewed; the scanner still rejects another match in those files and
+          # redacts matched contents from CI output.
+          python3 scripts/security/scan_signing_material_test.py
+          python3 scripts/security/scan_signing_material.py HEAD
           echo 'No keystore, certificate, provisioning profile, store key or signing password in any commit on this branch.'

@@ -1,12 +1,31 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#1B2340"/>
-  <circle cx="256" cy="256" r="210" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="12"/>
-  <path d="M256 395 C256 395 125 308 125 210 C125 152 168 115 220 115 C248 115 272 130 286 150 C300 130 324 115 352 115 C404 115 447 152 447 210 C447 308 316 395 316 395 Z" fill="#E87A6E"/>
-  <path d="M256 375 C256 375 142 296 142 208 C142 160 178 130 220 130 C245 130 266 144 278 163 C290 144 311 130 336 130 C378 130 414 160 414 208 C414 296 300 375 300 375 Z" fill="url(#grad)"/>
-  <defs>
-    <linearGradient id="grad" x1="142" y1="130" x2="414" y2="375" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#F28B82"/>
-      <stop offset="100%" stop-color="#D95F52"/>
-    </linearGradient>
-  </defs>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">곰신로그 뿔단추 하트</title>
+  <desc id="desc">국방색과 진한 핑크색 두 면의 온전한 하트를 세 개의 더플 코트형 뿔단추가 이어 주는 심볼</desc>
+  <rect data-brand-background="true" width="1024" height="1024" rx="224" fill="#FCFBF7"/>
+
+  <g data-brand-mark="true">
+    <path data-brand-half="military" d="M512 300C452 220 350 205 274 250C185 302 155 405 188 507C227 626 336 728 512 848V300Z" fill="#66704A"/>
+    <path data-brand-half="rose" d="M512 300C572 220 674 205 750 250C839 302 869 405 836 507C797 626 688 728 512 848V300Z" fill="#D94F7A"/>
+
+    <!-- The cord stays quiet; the asymmetric horn toggle is the recognizable closure. -->
+    <g fill="none" stroke="#FFF8EA" stroke-width="18" stroke-linecap="round">
+      <path d="M366 370C414 365 463 377 507 374C560 370 610 377 658 370"/>
+      <path d="M366 510C414 505 463 517 507 514C560 510 610 517 658 510"/>
+      <path d="M366 650C414 645 463 657 507 654C560 650 610 657 658 650"/>
+    </g>
+
+    <!-- Long, gently curved horn toggles: blunt at the cord hole, pointed at the free end. -->
+    <g fill="#3B2924">
+      <path d="M430 378C444 366 457 360 472 360H574C586 360 594 368 594 378C594 388 586 396 574 396H472C457 396 444 390 430 378Z" transform="rotate(-50 512 378)"/>
+      <path d="M430 518C444 506 457 500 472 500H574C586 500 594 508 594 518C594 528 586 536 574 536H472C457 536 444 530 430 518Z" transform="rotate(-50 512 518)"/>
+      <path d="M430 658C444 646 457 640 472 640H574C586 640 594 648 594 658C594 668 586 676 574 676H472C457 676 444 670 430 658Z" transform="rotate(-50 512 658)"/>
+    </g>
+
+    <!-- A small cord contact point makes the fastener read as hardware, not decoration. -->
+    <g fill="#E9D3B0">
+      <ellipse cx="506" cy="383" rx="8" ry="6" transform="rotate(-50 506 383)"/>
+      <ellipse cx="506" cy="523" rx="8" ry="6" transform="rotate(-50 506 523)"/>
+      <ellipse cx="506" cy="663" rx="8" ry="6" transform="rotate(-50 506 663)"/>
+    </g>
+  </g>
 </svg>

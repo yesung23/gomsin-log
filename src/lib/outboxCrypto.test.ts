@@ -26,8 +26,14 @@ function memoryPersistence(): OutboxPersistence & { rows: Map<string, QueuedReco
   return {
     rows,
     all: async () => [...rows.values()],
+    add: async (entry) => {
+      if (rows.has(entry.id)) throw new DOMException('duplicate', 'ConstraintError');
+      rows.set(entry.id, entry);
+    },
     put: async (entry) => { rows.set(entry.id, entry); },
+    putMany: async (entries) => { for (const entry of entries) rows.set(entry.id, entry); },
     remove: async (id) => { rows.delete(id); },
+    removeMany: async (ids) => { for (const id of ids) rows.delete(id); },
   };
 }
 

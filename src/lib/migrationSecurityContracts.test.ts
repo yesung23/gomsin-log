@@ -57,7 +57,14 @@ for (const file of files) {
  * Same discipline as `gatePathCoverage.test.ts`: an unhardened function is only
  * acceptable with a written reason, so the list cannot grow silently.
  */
-const SEARCH_PATH_EXEMPTIONS: Record<string, string> = {};
+const SEARCH_PATH_EXEMPTIONS: Record<string, string> = {
+  'public.has_current_cycle_write_consent()':
+    'This leaf authority helper uses only fully-qualified application relations, so pg_catalog plus pg_temp is the narrower approved path.',
+  'public.grant_cycle_sensitive_consent(uuid, bigint, text)':
+    'This consent authority RPC fully qualifies every relation and helper, so pg_catalog plus pg_temp prevents caller-controlled name resolution.',
+  'public.revoke_cycle_sensitive_consent(uuid)':
+    'This consent authority RPC fully qualifies every relation and uses only built-in functions, so pg_catalog plus pg_temp is deliberately narrower.',
+};
 
 /** Every RPC the client or the Edge Function actually invokes. */
 const CLIENT_RPCS = [
@@ -109,6 +116,57 @@ describe('every SECURITY DEFINER function ends up with a pinned search_path', ()
 });
 
 describe('effective EXECUTE privileges after every migration has been applied', () => {
+  it('keeps the cycle write-consent lock helper authenticated-only and hardened', () => {
+    const signature = 'public.has_current_cycle_write_consent()';
+    const entry = latestDefinition.get(signature);
+    expect(entry, `${signature}: missing atomic cycle-write authority`).toBeDefined();
+    expect(entry!.file).toBe('070_cycle_consent_atomic_write_gate.sql');
+    expect(entry!.definition.security).toBe('DEFINER');
+    expect(entry!.definition.volatility).toBe('VOLATILE');
+    expect(entry!.definition.searchPath).toEqual(['pg_catalog', 'pg_temp']);
+
+    const privileges = executePrivileges(allSql, signature);
+    expect(privileges.statementsApplied).toBeGreaterThan(0);
+    expect(canExecute(privileges, 'authenticated')).toBe(true);
+    expect(canExecute(privileges, 'anon')).toBe(false);
+    expect(privileges.publicHolds).toBe(false);
+  });
+
+  for (const signature of [
+    'public.grant_cycle_sensitive_consent(uuid, bigint, text)',
+    'public.revoke_cycle_sensitive_consent(uuid)',
+  ]) {
+    it(`${signature} is the authenticated-only consent mutation boundary`, () => {
+      const entry = latestDefinition.get(signature);
+      expect(entry, `${signature}: missing consent RPC`).toBeDefined();
+      expect(entry!.file).toBe(
+        signature.startsWith('public.grant_')
+          ? '076_account_deletion_write_fence.sql'
+          : '070_cycle_consent_atomic_write_gate.sql',
+      );
+      expect(entry!.definition.security).toBe('DEFINER');
+      expect(entry!.definition.volatility).toBe('VOLATILE');
+      expect(entry!.definition.searchPath).toEqual(['pg_catalog', 'pg_temp']);
+
+      const privileges = executePrivileges(allSql, signature);
+      expect(canExecute(privileges, 'authenticated')).toBe(true);
+      expect(canExecute(privileges, 'anon')).toBe(false);
+      expect(privileges.publicHolds).toBe(false);
+    });
+  }
+
+  it('serializes a cycle-consent grant against account-deletion startup', () => {
+    const entry = latestDefinition.get(
+      'public.grant_cycle_sensitive_consent(uuid, bigint, text)',
+    );
+    expect(entry).toBeDefined();
+    const body = entry!.definition.body;
+    const lock = body.indexOf('LOCK TABLE public.account_deletion_requests IN SHARE MODE');
+    const pendingCheck = body.indexOf('public.is_my_account_deletion_pending()');
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(pendingCheck).toBeGreaterThan(lock);
+  });
+
   it('create_invitation is authenticated-only and uses public relations', () => {
     const entry = latestDefinition.get('public.create_invitation(uuid, text)');
     expect(entry).toBeDefined();
@@ -292,6 +350,7 @@ describe('the RPC return shape matches the hand-written client parser', () => {
       partnerPresent: true,
       invitationActive: true,
       invitationExpiresAt: '2026-09-01T00:00:00.000Z',
+      relationshipContext: 'military',
     });
   });
 

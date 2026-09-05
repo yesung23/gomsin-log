@@ -6,18 +6,65 @@
  */
 import { clearAllCoupleProtectionRequirements } from './coupleProtectionBarrier';
 
-let teardown: (() => void) | null = null;
-let coupleAuthorityUnlink: ((coupleId: string) => Promise<void>) | null = null;
+type RuntimeTeardownSlot = {
+  token: symbol;
+  callback: () => void;
+};
 
-export function registerE2eeRuntimeTeardown(callback: (() => void) | null): void {
-  teardown = callback;
+export type E2eeRuntimeTeardownRegistration = {
+  /** Clear only the capability installed by this exact registration. */
+  clear(): void;
+};
+
+export type E2eeRuntimeProviderRegistration = {
+  /** Release one mounted Provider; the last Provider clears the shared runtime. */
+  unregister(): void;
+};
+
+let teardown: RuntimeTeardownSlot | null = null;
+let coupleAuthorityUnlink: ((coupleId: string) => Promise<void>) | null = null;
+const mountedProviders = new Set<symbol>();
+
+export function registerE2eeRuntimeTeardown(
+  callback: (() => void) | null,
+): E2eeRuntimeTeardownRegistration {
+  const token = Symbol('e2ee-runtime-teardown');
+  teardown = callback ? { token, callback } : null;
+  let active = true;
+  return {
+    clear: () => {
+      if (!active) return;
+      active = false;
+      if (teardown?.token !== token) return;
+      clearE2eeRuntimeCapabilities();
+    },
+  };
 }
 
 /** Replace record/outbox capabilities without discarding session authority state. */
 export function clearE2eeRuntimeCapabilities(): void {
   const current = teardown;
   teardown = null;
-  current?.();
+  current?.callback();
+}
+
+/**
+ * Keep the process-wide runtime alive while at least one StoreProvider remains
+ * mounted. This matters during shell replacement and tests with two Providers:
+ * an old tree must not clear capabilities installed for the surviving tree.
+ */
+export function registerE2eeRuntimeProvider(): E2eeRuntimeProviderRegistration {
+  const token = Symbol('e2ee-runtime-provider');
+  mountedProviders.add(token);
+  let active = true;
+  return {
+    unregister: () => {
+      if (!active) return;
+      active = false;
+      mountedProviders.delete(token);
+      if (mountedProviders.size === 0) clearE2eeRuntime();
+    },
+  };
 }
 
 /**

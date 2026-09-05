@@ -70,13 +70,6 @@ const DECORATIVE_CORAL_FILLS: Array<{ file: string; anchor: string; occurrences:
       + 'now has to hold.',
   },
   {
-    file: 'src/pages/ServicePage.tsx',
-    anchor: 'h-full bg-coral rounded-full',
-    occurrences: 1,
-    reason: 'Service progress bar fill. The percentage is printed OUTSIDE the bar, '
-      + 'so no text is ever laid over this surface.',
-  },
-  {
     file: 'src/features/us/MonthGrid.tsx',
     anchor: 'rounded-full bg-coral',
     occurrences: 1,

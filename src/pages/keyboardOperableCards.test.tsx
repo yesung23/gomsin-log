@@ -144,8 +144,8 @@ describe('nothing in the app is operable by pointer only', () => {
   });
 
   it('the backdrop exemption is only as wide as its justification', () => {
-    // The exemption above is claimed by exactly one element. If a second appears
-    // it should be read, not waved through, so the count is pinned here.
+    // Every exempt backdrop is named explicitly. If another appears it should be
+    // read, not waved through, so this list stays deliberately narrow.
     const backdrops: string[] = [];
     for (const file of sourceFiles(SRC)) {
       const source = readFileSync(file, 'utf8');
@@ -156,8 +156,13 @@ describe('nothing in the app is operable by pointer only', () => {
         }
       }
     }
-    expect(backdrops).toEqual(['components/widgets/AddWidgetBottomSheet.tsx']);
+    expect(backdrops).toEqual([
+      'components/ProfilePaperMenu.tsx',
+      'components/widgets/AddWidgetBottomSheet.tsx',
+    ]);
     // And the keyboard equivalent it relies on is real, not assumed.
+    expect(readFileSync(resolve(SRC, 'components/ProfilePaperMenu.tsx'), 'utf8'))
+      .toContain('useEscapeKey(onClose, isOpen)');
     expect(readFileSync(resolve(SRC, 'components/widgets/AddWidgetBottomSheet.tsx'), 'utf8'))
       .toContain('useEscapeKey(onClose, isOpen)');
   });

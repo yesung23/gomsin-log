@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useInRouterContext, useNavigate } from 'react-router-dom';
 import { ChevronLeft, Copy, Check } from 'lucide-react';
 import { CoupleAvatar } from '@/components/CoupleAvatar';
+import { BrandMark } from '@/components/BrandMark';
+import { PenFace } from '@/components/paper/InkCircle';
 import { Button } from '@/components/ui/Button';
-import { serverCallBlockedByPendingDeletion } from '@/lib/accountDeletion';
+import {
+  runServerMutationBehindDeletionBarrier,
+} from '@/lib/accountDeletion';
 import { clearAuthErrorFromUrl, readAuthErrorFromUrl } from '@/lib/authErrorFromUrl';
 import { useStore } from '@/lib/useStore';
 import {
@@ -17,10 +21,30 @@ import {
   supabase,
 } from '@/lib/supabase';
 import { invitationExpiryLabel } from '@/lib/coupleLifecycle';
+import { LEGAL_DOC_TITLES, type LegalDocKey } from '@/lib/legalDocs';
+import { LegalDocumentSheet } from '@/pages/LegalPage';
 import { classifyServerError } from '@/lib/serverErrors';
+import {
+  consumeAppleNameCandidate,
+  isNativeAppleLoginAvailable,
+  subscribeAppleNameCandidate,
+} from '@/lib/appleAuth';
+import { isGeneralCoupleOnboardingEnabled } from '@/lib/generalCoupleGate';
+import {
+  parseGenderIdentity,
+  resolveRelationshipContext,
+  usesMilitaryFeatures,
+} from '@/lib/relationshipContext';
 
 import { toast } from 'sonner';
-import type { Role, Branch, MilitaryStatus, DischargeDateSource } from '@/types';
+import type {
+  Role,
+  Branch,
+  MilitaryStatus,
+  DischargeDateSource,
+  GenderIdentity,
+  RelationshipContext,
+} from '@/types';
 import { addMonths } from '@/lib/utils';
 
 function isAbortError(error: unknown): boolean {
@@ -30,6 +54,41 @@ function isAbortError(error: unknown): boolean {
 
 function buildInviteShareText(code: string): string {
   return `[곰신로그] 초대 코드: ${code}\n'초대 코드가 있어요'에 코드를 입력해 주세요.`;
+}
+
+function ConsentCheckboxControl({
+  id,
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  id?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <span className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        aria-label={ariaLabel}
+        className="peer absolute inset-0 z-10 h-11 w-11 cursor-pointer opacity-0"
+      />
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none flex h-5 w-5 items-center justify-center rounded-[4px] border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-coral-strong peer-focus-visible:ring-offset-2 ${
+          checked
+            ? 'border-coral-strong bg-coral-strong text-white'
+            : 'border-border bg-background text-transparent'
+        }`}
+      >
+        <Check size={14} strokeWidth={3} />
+      </span>
+    </span>
+  );
 }
 
 function OnboardingWithRouter() {
@@ -106,11 +165,6 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     return stored === 0 && hasIdentity ? FIRST_WIZARD_STEP : stored;
   }); // 0: Landing, 1: Role, 2: Nickname, 3: Space, 4: Anniversary, 5: Military, 6: Contact, 7: Complete
 
-  // Detect iOS environment for conditional Apple Login UI
-  const isIOS = useMemo(() => {
-    if (typeof window === 'undefined') return false;
-    return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-  }, []);
   // Fail-closed default: all providers remain disabled until GoTrue explicitly
   // confirms availability. If the availability check fails (null) or is pending,
   // no provider buttons are offered to prevent dead buttons and failed logins.
@@ -122,6 +176,9 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   });
   const [authProvidersResolved, setAuthProvidersResolved] = useState(false);
   const [authAvailabilityReloadIndex, setAuthAvailabilityReloadIndex] = useState(0);
+  const appleLoginAvailable = authProvidersResolved
+    && isNativeAppleLoginAvailable()
+    && authProviders.apple;
 
   useEffect(() => {
     if (step !== 0) {
@@ -153,10 +210,56 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   // Form State
   const [ageConfirmed, setAgeConfirmed] = useState(false);
   const [legalAccepted, setLegalAccepted] = useState(false);
+
+  /**
+   * Which legal document is open over the sign-in screen, if any.
+   *
+   * Deliberately NOT a route: navigating to `/legal/:doc` and back would unmount this
+   * wizard and reset both consent checkboxes, so a user who did the responsible thing
+   * and read the terms would come back to an empty form.
+   */
+  const [openLegalDoc, setOpenLegalDoc] = useState<LegalDocKey | null>(null);
+  const legalTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeLegalDoc = useCallback(() => {
+    setOpenLegalDoc(null);
+    // Put focus back on the link that opened the document rather than at the top of
+    // the page, so a keyboard or screen-reader user resumes where they left off.
+    const trigger = legalTriggerRef.current;
+    legalTriggerRef.current = null;
+    trigger?.focus();
+  }, []);
   const [isStartingSocialLogin, setIsStartingSocialLogin] = useState(false);
   const socialLoginInFlightRef = useRef(false);
   const [role, setRole] = useState<Role>('gomsin');
-  const [nickname, setNickname] = useState('');
+  const [relationshipContext, setRelationshipContext] = useState<RelationshipContext>(() =>
+    resolveRelationshipContext(state.profile.couple.relationshipContext) ?? 'military');
+  const [genderIdentity, setGenderIdentity] = useState<GenderIdentity | undefined>(() =>
+    parseGenderIdentity(state.profile.genderIdentity));
+  const generalCoupleOnboardingEnabled = isGeneralCoupleOnboardingEnabled();
+  const [nickname, setNickname] = useState(() => state.profile.myName || '');
+  const consumedAppleNameForUserRef = useRef<string | null>(null);
+  const nicknameEditedForUserRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const userId = state.authenticatedUser?.id;
+    if (!userId) return;
+    const applyCandidate = () => {
+      if (consumedAppleNameForUserRef.current === userId) return;
+      const candidate = consumeAppleNameCandidate(userId);
+      if (!candidate) return;
+      consumedAppleNameForUserRef.current = userId;
+      if (nicknameEditedForUserRef.current === userId) return;
+      // Consuming happens even when the field already has text. This makes the
+      // one-time Apple value incapable of replacing a user choice after a clear,
+      // rerender, or later Apple response that contains no name.
+      setNickname((current) => current.length === 0 ? candidate : current);
+    };
+    applyCandidate();
+    return subscribeAppleNameCandidate((candidateUserId) => {
+      if (candidateUserId === userId) applyCandidate();
+    });
+  }, [state.authenticatedUser?.id]);
   const [spaceMode, setSpaceMode] = useState<'create' | 'join'>('create');
   const [createdCoupleId, setCreatedCoupleId] = useState('');
   const [createdInviteCode, setCreatedInviteCode] = useState('');
@@ -265,7 +368,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     a learned pattern). A 곰신 who was never asked would fall back to the
     schema default, which was written for a soldier's day.
   */
-  const totalSteps = role === 'gomsin' ? 5 : 6;
+  const totalSteps = usesMilitaryFeatures(relationshipContext) && role === 'soldier' ? 6 : 5;
 
   // Handle Google OAuth Login
   const handleGoogleLogin = async () => {
@@ -282,7 +385,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     }
   };
 
-  // Handle Apple OAuth Login
+  // Handle native Sign in with Apple
   const handleAppleLogin = async () => {
     if (!requireLegalGate()) return;
     if (socialLoginInFlightRef.current) return;
@@ -355,6 +458,24 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
     }
 
     const existing = lifecycleResult.state;
+    const authoritativeRelationshipContext = resolveRelationshipContext(
+      existing.relationshipContext,
+    );
+    const isValidRole = existing.role === 'gomsin' || existing.role === 'soldier';
+    if (!authoritativeRelationshipContext || !isValidRole) {
+      toast.error('이미 만들어진 커플 공간의 정보를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return { ok: false, mintedCode: false };
+    }
+
+    // A relationship generation is server-owned and immutable. Onboarding may
+    // have restarted with a stale local choice, so adopt the authoritative mode
+    // before deciding which remaining steps apply.
+    setRelationshipContext(authoritativeRelationshipContext);
+    setRole(existing.role as Role);
+    if (usesMilitaryFeatures(authoritativeRelationshipContext)) {
+      setGenderIdentity(undefined);
+    }
+
     if (existing.partnerPresent) {
       // Already connected: there is nothing to invite anyone to.
       setCreatedCoupleId(existing.coupleId!);
@@ -470,7 +591,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       if (spaceMode === 'create' && !createdInviteCode && !createdCoupleId) {
         setIsGeneratingCode(true);
         try {
-          const res = await createCoupleInvitation(role);
+          const res = await createCoupleInvitation(role, relationshipContext);
           if (!isCurrentIdentity(identity)) return;
           if (res.error || !res.coupleId || !res.code) {
             // `User already in an active couple` is not a dead end: the couple
@@ -513,7 +634,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           }
           setIsVerifyingCode(true);
           try {
-            const res = await consumeCoupleInvitation(cleanCode);
+            const res = await consumeCoupleInvitation(cleanCode, relationshipContext);
             if (!isCurrentIdentity(identity)) return;
             if (res.error || !res.coupleId) {
               // The server can report that the SESSION, not the code, is the
@@ -546,10 +667,15 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
           const serverState = lifecycleResult.state;
           const isValidRole = serverState.role === 'gomsin' || serverState.role === 'soldier';
+          const authoritativeRelationshipContext = resolveRelationshipContext(
+            serverState.relationshipContext,
+          );
           if (
             serverState.coupleId !== targetCoupleId
             || serverState.memberStatus !== 'active'
             || !isValidRole
+            || !authoritativeRelationshipContext
+            || authoritativeRelationshipContext !== relationshipContext
             || !serverState.partnerPresent
           ) {
             toast.error('커플 공간 정보가 올바르지 않습니다. 다시 시도해 주세요.');
@@ -558,6 +684,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
           const authoritativeRole = serverState.role as Role;
           setRole(authoritativeRole);
+          setRelationshipContext(authoritativeRelationshipContext);
 
           if (supabase) {
             try {
@@ -571,7 +698,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             } catch {}
           }
           toast.success('커플 공간 연결 성공!');
-          if (authoritativeRole === 'soldier') {
+          if (usesMilitaryFeatures(authoritativeRelationshipContext) && authoritativeRole === 'soldier') {
             setStep(5);
           } else {
             setStep(6);
@@ -594,7 +721,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
     // 곰신 skips 복무 정보 (step 5) only. Step 6 asks when they want to hear
     // from the app, which is a question for both roles.
-    if (role === 'gomsin' && step === 4) {
+    if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 4) {
       setStep(6);
       return;
     }
@@ -606,11 +733,8 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
   };
 
   const handleBack = () => {
-    if (role === 'gomsin' && step === 6) {
-      setStep(4);
-      if (spaceMode === 'join') {
-        setStep(3);
-      }
+    if ((!usesMilitaryFeatures(relationshipContext) || role === 'gomsin') && step === 6) {
+      setStep(spaceMode === 'join' ? 3 : 4);
       return;
     }
     if (role === 'soldier' && step === 6) {
@@ -738,29 +862,38 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       // straight back through onboarding.
       if (supabase && state.authenticatedUser) {
         const userId = state.authenticatedUser.id;
-        // Pre-flight: a pending deletion aborts every write below before the
-        // first one is issued, so onboarding cannot recreate a `profiles` row
-        // for an account whose data the server has already removed.
-        if (await serverCallBlockedByPendingDeletion()) return;
-        if (!isCurrentIdentity(identity)) return;
+        const barrierResult = await runServerMutationBehindDeletionBarrier(async ({ lease, assertCurrent }) => {
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
 
-        // Re-validate authority state before any server/local mutation
-        const authorityResult = await fetchMyCoupleState();
-        if (!isCurrentIdentity(identity)) return;
+          // Re-validate authority state before any server/local mutation
+          const authorityResult = await fetchMyCoupleState();
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
         if (!authorityResult || !authorityResult.ok || !authorityResult.state) {
           toast.error('커플 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
-          return;
+            return false;
         }
 
         const authState = authorityResult.state;
         const isValidRole = authState.role === 'gomsin' || authState.role === 'soldier';
+        const authoritativeRelationshipContext = resolveRelationshipContext(
+          authState.relationshipContext,
+        );
         const isTargetCouple = !!createdCoupleId && authState.coupleId === createdCoupleId;
         const isActiveMember = authState.memberStatus === 'active';
         const isPartnerValid = spaceMode === 'create' ? true : authState.partnerPresent;
 
-        if (!isTargetCouple || !isActiveMember || !isValidRole || !isPartnerValid) {
+        if (
+          !isTargetCouple
+          || !isActiveMember
+          || !isValidRole
+          || !authoritativeRelationshipContext
+          || authoritativeRelationshipContext !== relationshipContext
+          || !isPartnerValid
+        ) {
           toast.error('커플 정보가 올바르지 않습니다. 다시 확인해 주세요.');
-          return;
+            return false;
         }
 
         const authoritativeRole: Role = authState.role as Role;
@@ -786,33 +919,39 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           enabled: contactEnabled,
         };
 
-        const { error: profileError } = await supabase.from('profiles').upsert({
+          assertCurrent();
+          const { error: profileError } = await supabase!.from('profiles').upsert({
           id: userId,
           display_name: finalNickname,
           role: authoritativeRole,
-          military_info: military,
+          ...(usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? { military_info: military }
+            : { gender_identity: genderIdentity ?? null }),
           onboarding_completed_at: nowIso,
           updated_at: nowIso,
-        });
-        if (!isCurrentIdentity(identity)) return;
+          });
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
 
         if (profileError) {
           console.error('[Onboarding] Profile save failed.');
           // Classified from the real error: an RLS or session failure must not be
           // reported as a connectivity problem.
           toast.error(`프로필을 저장하지 못했어요. ${classifyServerError(profileError).message}`);
-          return;
+            return false;
         }
 
         if (contactEnabled) {
-          const { error: contactError } = await supabase.from('contact_preferences').upsert({
+            assertCurrent();
+            const { error: contactError } = await supabase!.from('contact_preferences').upsert({
             user_id: userId,
             weekday_start: weekdayStart,
             weekday_end: weekdayEnd,
             weekend_start: weekendStart,
             weekend_end: weekendEnd,
-          });
-          if (!isCurrentIdentity(identity)) return;
+            });
+            assertCurrent();
+            if (!isCurrentIdentity(identity)) return false;
           if (contactError) {
             // Non-blocking: contact hours are editable later from settings.
             console.error('[Onboarding] Contact preferences save failed.');
@@ -820,8 +959,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
         }
 
         if (spaceMode === 'create' && createdCoupleId && anniversaryDate) {
-          const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate);
-          if (!isCurrentIdentity(identity)) return;
+            assertCurrent();
+            const anniversarySaved = await saveCoupleAnniversary(createdCoupleId, anniversaryDate, lease);
+            assertCurrent();
+            if (!isCurrentIdentity(identity)) return false;
           if (!anniversarySaved) {
             console.error('[Onboarding] Anniversary save failed.');
             // The anniversary lives on the SHARED `couples` row, so a failure here
@@ -833,13 +974,18 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           }
         }
 
-        await updateProfile({
+          assertCurrent();
+          await updateProfile({
           myName: finalNickname,
           role: authoritativeRole,
+          ...(usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? { genderIdentity: undefined }
+            : { genderIdentity }),
           onboardingCompletedAt: nowIso,
           couple: {
             ...state.profile.couple,
             coupleId: createdCoupleId || undefined,
+            relationshipContext: authoritativeRelationshipContext,
             // No invented partner name: it is filled in for real once the partner joins.
             partnerName: joinedPartnerName || '',
             anniversaryDate: spaceMode === 'create' ? anniversaryDate : undefined,
@@ -848,18 +994,26 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
             connected: authoritativePartnerPresent,
             status: authoritativePartnerPresent ? 'active' : 'pending',
           },
-          military,
+          military: usesMilitaryFeatures(authoritativeRelationshipContext)
+            ? military
+            : state.profile.military,
           contact,
-        }, { persist: false });
+          }, { persist: false });
 
-        if (!isCurrentIdentity(identity)) return;
+          assertCurrent();
+          if (!isCurrentIdentity(identity)) return false;
+          return { authoritativeRelationshipContext, authoritativeRole };
+        }, { expectedUserId: userId });
+
+        if (barrierResult.kind !== 'executed' || !barrierResult.value) return;
+        const { authoritativeRelationshipContext, authoritativeRole } = barrierResult.value;
         if (anniversaryNotSaved) {
           toast.warning(
             '기념일을 두 사람의 공간에 저장하지 못했어요. 설정에서 다시 입력해 주세요.',
           );
         }
         setSetupComplete(true);
-        if (authoritativeRole === 'gomsin' && navigate) {
+        if ((!usesMilitaryFeatures(authoritativeRelationshipContext) || authoritativeRole === 'gomsin') && navigate) {
           navigate('/compose');
         }
       }
@@ -883,7 +1037,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
       */}
       <div
         data-astryx-theme="gomsin"
-        className="relative w-full max-w-[430px] min-h-screen min-h-[100dvh] bg-background shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
+        className="paper-texture-layer relative w-full max-w-[430px] min-h-screen min-h-[100dvh] shadow-[0_0_60px_-30px_rgba(27,35,64,0.18)] flex flex-col pt-[env(safe-area-inset-top,0px)]"
       >
         
         {/*
@@ -956,45 +1110,28 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 themselves in is the asymmetry: one person can reply now and the
                 other cannot, so the day gets lost between them. That is the line
                 that belongs at the top.
-              */}
+                */}
               <div className="text-center space-y-3">
                 <div className="flex justify-center mb-3">
-                  <CoupleAvatar size={84} />
+                  <BrandMark width={84} height={84} className="h-[84px] w-[84px]" />
                 </div>
                 <h1 className="text-display tracking-tight text-foreground">곰신로그</h1>
-                <div className="space-y-1">
-                  <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
-                    함께하지 못한 하루를 서로 이어주고, 둘만의 기억으로 남겨요.
-                  </p>
-                  <p className="text-muted-foreground text-body font-medium leading-relaxed break-keep">
-                    답장이 늦어도, 서로의 하루는 놓치지 않도록.
-                  </p>
-                </div>
+                <p className="text-foreground text-body font-semibold leading-relaxed break-keep">
+                  답장이 늦어도, 서로의 하루를 이어 둘만의 기억으로 남겨요.
+                </p>
 
                 {/*
                   What signing in actually commits you to.
 
                   A first-run visitor could not tell from this screen that the app
                   needs a PARTNER -- they signed in, met a role picker, and only
-                  discovered at step 3 that the thing is unusable alone. Three lines
-                  is enough to set that expectation before the decision, and it is a
-                  real sequence, so it is numbered.
+                  discovered at step 3 that the thing is unusable alone. One quiet
+                  sentence sets that expectation without turning sign-in into a
+                  tutorial.
                 */}
-                <ol className="pt-2 mx-auto w-fit text-left space-y-1.5">
-                  {['역할과 닉네임을 고르고', '상대를 초대하면', '둘만의 공간이 열려요'].map(
-                    (line, index) => (
-                      <li key={line} className="flex items-center gap-2 text-caption text-muted-foreground">
-                        <span
-                          aria-hidden="true"
-                          className="w-5 h-5 shrink-0 rounded-full bg-muted text-foreground font-bold flex items-center justify-center tabular-nums"
-                        >
-                          {index + 1}
-                        </span>
-                        {line}
-                      </li>
-                    ),
-                  )}
-                </ol>
+                <p className="pt-1 text-caption text-muted-foreground">
+                  가입 후 상대를 초대해 함께 사용해요.
+                </p>
               </div>
 
               <div className="space-y-3">
@@ -1033,20 +1170,68 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   claims it will do something it will not.
                 */}
                 <div className="rounded-control border border-border bg-muted/40 p-3 space-y-2">
-                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
-                    <input type="checkbox" checked={ageConfirmed} onChange={(event) => setAgeConfirmed(event.target.checked)} className="mt-1 accent-coral" />
+                  <label className="flex min-h-11 items-center gap-2 text-caption text-foreground leading-relaxed">
+                    <ConsentCheckboxControl
+                      checked={ageConfirmed}
+                      onChange={setAgeConfirmed}
+                    />
                     <span><strong>[필수]</strong> 만 14세 이상입니다.</span>
                   </label>
-                  <label className="flex items-start gap-2 text-caption text-foreground leading-relaxed min-h-11">
-                    <input type="checkbox" checked={legalAccepted} onChange={(event) => setLegalAccepted(event.target.checked)} className="mt-1 accent-coral" />
-                    <span>
-                      <strong>[필수]</strong>{' '}
-                      <a href="/legal/terms" target="_blank" rel="noreferrer" className="underline underline-offset-2">서비스 이용약관</a>
-                      {' 및 '}
-                      <a href="/legal/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-2">개인정보 처리방침</a>
-                      을 확인하고 동의합니다.
+                  {/*
+                    The document buttons are SIBLINGS of the label, never inside it.
+
+                    They are buttons rather than `target="_blank"` links because the app
+                    is served from `capacitor://localhost` on iOS and `https://localhost`
+                    on Android: opening either document in the system browser handed
+                    Safari an origin it cannot reach, so the user met a connection failure
+                    instead of the terms they are being asked to agree to, and had left
+                    onboarding to get there. These open in-app over the wizard.
+
+                    A button inside a `<label>` is only safe by the spec's rule that a
+                    label does nothing for events targeted at interactive descendants --
+                    one behaviour, in one clause, standing between "read the terms" and
+                    "silently agree to the terms". It does not need to be relied on. The
+                    label is now three text-only `htmlFor` segments around the buttons:
+                    tapping the sentence still ticks the box, tapping a document name
+                    cannot, and no rule has to hold for that to be true.
+
+                    The checkbox carries `aria-label` because its name has to be the whole
+                    sentence; three separate label fragments would otherwise announce as
+                    "[필수] 및 을 확인하고 동의합니다."
+                  */}
+                  <div className="flex min-h-11 items-start gap-2 text-caption text-foreground leading-relaxed">
+                    <ConsentCheckboxControl
+                      id="legal-consent-checkbox"
+                      checked={legalAccepted}
+                      onChange={setLegalAccepted}
+                      ariaLabel={`[필수] ${LEGAL_DOC_TITLES.terms} 및 ${LEGAL_DOC_TITLES.privacy}을 확인하고 동의합니다.`}
+                    />
+                    <span className="flex min-w-0 flex-1 flex-wrap items-center">
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center"><strong>[필수]</strong>{' '}</label>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          legalTriggerRef.current = event.currentTarget;
+                          setOpenLegalDoc('terms');
+                        }}
+                        className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-1 underline underline-offset-2"
+                      >
+                        {LEGAL_DOC_TITLES.terms}
+                      </button>
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center">{' 및 '}</label>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          legalTriggerRef.current = event.currentTarget;
+                          setOpenLegalDoc('privacy');
+                        }}
+                        className="press-response inline-flex min-h-11 min-w-11 items-center justify-center rounded-control px-1 underline underline-offset-2"
+                      >
+                        {LEGAL_DOC_TITLES.privacy}
+                      </button>
+                      <label htmlFor="legal-consent-checkbox" className="inline-flex min-h-11 items-center">을 확인하고 동의합니다.</label>
                     </span>
-                  </label>
+                  </div>
                 </div>
 
                 {/*
@@ -1060,13 +1245,23 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   action, rather than only to people who can see it greyed out.
                 */}
                 {!legalGatePassed && (
-                  <p id="legal-gate-reason" className="text-caption text-muted-foreground text-center break-keep">
+                  <p id="legal-gate-reason" className="sr-only">
                     위 두 항목에 동의하면 로그인할 수 있어요.
                   </p>
                 )}
 
+                {!authProvidersResolved && (
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    className="min-h-11 text-caption text-muted-foreground text-center flex items-center justify-center"
+                  >
+                    로그인 방법을 확인하고 있어요.
+                  </p>
+                )}
+
                 {/* Primary Auth CTAs */}
-                {authProvidersResolved && isIOS && authProviders.apple && (
+                {appleLoginAvailable && (
                   <button
                     onClick={handleAppleLogin}
                     disabled={isStartingSocialLogin}
@@ -1076,6 +1271,18 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                   >
                     <span>{isStartingSocialLogin ? '로그인 연결 중...' : 'Apple로 계속하기'}</span>
                   </button>
+                )}
+
+                {appleLoginAvailable && authProvidersResolved && authProviders.google && (
+                  <div
+                    role="separator"
+                    aria-label="기타 로그인"
+                    className="flex items-center gap-3 py-0.5"
+                  >
+                    <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                    <span className="text-caption font-medium text-muted-foreground">기타 로그인</span>
+                    <span aria-hidden="true" className="h-px flex-1 bg-border" />
+                  </div>
                 )}
 
                 {authProvidersResolved && authProviders.google && (
@@ -1093,7 +1300,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 {/* `email` is deliberately absent: a provider the screen does not
                     offer must not count as a way in, or a project configured for
                     email alone would show no button and no explanation either. */}
-                {authProvidersResolved && !authProviders.google && !(isIOS && authProviders.apple) && (
+                {authProvidersResolved && !authProviders.google && !appleLoginAvailable && (
                   <div className="space-y-3 text-center">
                     <p role="alert" className="text-caption text-destructive text-center font-semibold">
                       현재 사용할 수 있는 로그인 방법을 확인하지 못했어요. 잠시 후 다시 열어 주세요.
@@ -1118,39 +1325,118 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
               <div className="space-y-6">
                 <div>
                   <h2 className="text-title">곰신로그를 어떻게 사용할까요?</h2>
-                  <p className="text-body text-muted-foreground mt-1">역할에 따라 맞춤 기능이 제공돼요.</p>
                 </div>
 
-                <div className="space-y-3">
+                <div className="space-y-3" role="group" aria-label="사용 방식">
                   <button
-                    onClick={() => setRole('gomsin')}
-                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
-                      role === 'gomsin'
+                    type="button"
+                    aria-pressed={relationshipContext === 'military' && role === 'gomsin'}
+                    onClick={() => {
+                      setRelationshipContext('military');
+                      setGenderIdentity(undefined);
+                      setRole('gomsin');
+                    }}
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
+                      relationshipContext === 'military' && role === 'gomsin'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-display">🌸</span>
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                      <PenFace size={42} tone="b" />
+                    </span>
                     <div className="flex-1">
                       <div className="text-heading text-foreground">나는 곰신이에요</div>
-                      <div className="text-caption text-muted-foreground mt-1">하루의 순간을 편하게 남길게요</div>
+                      <div className="text-caption text-muted-foreground mt-1">내 하루를 남겨요</div>
                     </div>
                   </button>
 
                   <button
-                    onClick={() => setRole('soldier')}
-                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-start gap-4 min-h-[80px] ${
-                      role === 'soldier'
+                    type="button"
+                    aria-pressed={relationshipContext === 'military' && role === 'soldier'}
+                    onClick={() => {
+                      setRelationshipContext('military');
+                      setGenderIdentity(undefined);
+                      setRole('soldier');
+                    }}
+                    className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
+                      relationshipContext === 'military' && role === 'soldier'
                         ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
                         : 'border-border bg-card'
                     }`}
                   >
-                    <span className="text-display">🪖</span>
+                    <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                      <PenFace size={42} tone="a" />
+                    </span>
                     <div className="flex-1">
                       <div className="text-heading text-foreground">나는 군화예요</div>
-                      <div className="text-caption text-muted-foreground mt-1">연인의 오늘을 놓치지 않고 볼게요</div>
+                      <div className="text-caption text-muted-foreground mt-1">상대의 오늘을 이어 봐요</div>
                     </div>
                   </button>
+
+                  {generalCoupleOnboardingEnabled && (
+                    <>
+                      <button
+                        type="button"
+                        aria-pressed={relationshipContext === 'general'}
+                        onClick={() => {
+                          setRelationshipContext('general');
+                          // The existing two-value role remains an internal
+                          // membership slot. It is never presented as identity in
+                          // general-couple mode.
+                          setRole('gomsin');
+                        }}
+                        className={`press-response-row w-full p-5 rounded-surface border text-left flex items-center gap-4 min-h-[80px] ${
+                          relationshipContext === 'general'
+                            ? 'border-coral bg-coral/10 ring-2 ring-coral/40'
+                            : 'border-border bg-card'
+                        }`}
+                      >
+                        <span className="flex h-12 w-12 shrink-0 items-center justify-center" aria-hidden="true">
+                          <CoupleAvatar size={42} />
+                        </span>
+                        <div className="flex-1">
+                          <div className="text-heading text-foreground">저는 곰신 커플이 아니에요</div>
+                          <div className="text-caption text-muted-foreground mt-1">군 관련 화면 없이 함께 기록해요</div>
+                        </div>
+                      </button>
+
+                      {relationshipContext === 'general' && (
+                        <div role="group" aria-label="성별" className="grid grid-cols-2 gap-2 rounded-surface border border-border bg-muted/30 p-3">
+                          {([
+                            ['woman', '여성이에요'],
+                            ['man', '남성이에요'],
+                          ] as const).map(([value, label]) => (
+                            <button
+                              key={value}
+                              type="button"
+                              aria-pressed={genderIdentity === value}
+                              onClick={() => setGenderIdentity(value)}
+                              className={`press-response-row min-h-11 rounded-control border px-3 text-label font-semibold ${
+                                genderIdentity === value
+                                  ? 'border-coral bg-coral/10 text-foreground'
+                                  : 'border-border bg-card text-muted-foreground'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            aria-pressed={genderIdentity === undefined}
+                            onClick={() => setGenderIdentity(undefined)}
+                            className={`press-response-row col-span-2 min-h-11 rounded-control border px-3 text-label font-semibold ${
+                              genderIdentity === undefined
+                                ? 'border-coral bg-coral/10 text-foreground'
+                                : 'border-border bg-card text-muted-foreground'
+                            }`}
+                          >
+                            답하지 않을래요
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
 
@@ -1186,7 +1472,10 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     id="onboarding-nickname"
                     type="text"
                     value={nickname}
-                    onChange={(e) => setNickname(e.target.value)}
+                    onChange={(e) => {
+                      nicknameEditedForUserRef.current = state.authenticatedUser?.id ?? null;
+                      setNickname(e.target.value);
+                    }}
                     /*
                       This step has exactly one field and nothing else to decide, so
                       arriving with it unfocused costs a tap and a keyboard-open
@@ -1214,7 +1503,9 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                         ? 'onboarding-nickname-error'
                         : undefined
                     }
-                    placeholder={role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
+                    placeholder={relationshipContext === 'general'
+                      ? '예) 하루'
+                      : role === 'gomsin' ? '예) 춘향' : '예) 몽룡'}
                     maxLength={12}
                     className="w-full h-13 px-4 rounded-control bg-card border border-border text-body outline-none focus:ring-2 focus:ring-coral/40"
                   />
@@ -1455,7 +1746,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           )}
 
           {/* STEP 5: Military Info (Soldier ONLY) */}
-          {step === 5 && role === 'soldier' && (
+          {step === 5 && usesMilitaryFeatures(relationshipContext) && role === 'soldier' && (
             <div className="flex-1 flex flex-col justify-between py-2">
               <div className="space-y-6">
                 <div>
@@ -1569,12 +1860,12 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                     each person's notification inside their own window.
                   */}
                   <h2 className="text-title">
-                    {role === 'soldier'
+                    {usesMilitaryFeatures(relationshipContext) && role === 'soldier'
                       ? '주로 언제 오늘의 로그를 확인할 수 있나요?'
                       : '언제 알려드리면 좋을까요?'}
                   </h2>
                   <p className="text-body text-muted-foreground mt-1">
-                    {role === 'soldier'
+                    {usesMilitaryFeatures(relationshipContext) && role === 'soldier'
                       ? '이 시간에만 알림을 보내드려요. 상대의 로그 표시에도 함께 쓰여요.'
                       : '이 시간 밖에서는 알리지 않아요. 하루에 한 번을 넘지 않고, 내용은 담기지 않아요.'}
                   </p>
@@ -1649,17 +1940,12 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
           {step === 7 && (
             <div className="flex-1 flex flex-col justify-between py-8 text-center">
               <div className="pt-12 space-y-4">
-                <div className="w-20 h-20 bg-coral/15 rounded-full flex items-center justify-center mx-auto text-display">
-                  {role === 'gomsin' ? '🌸' : '🪖'}
+                <div className="flex justify-center">
+                  <CoupleAvatar size={72} />
                 </div>
                 <h2 className="text-title text-foreground">
                   우리 둘만의 곰신로그가 준비됐어요.
                 </h2>
-                <p className="text-body text-muted-foreground">
-                  {role === 'gomsin'
-                    ? '오늘부터 편하게 하루의 순간을 남겨보세요.'
-                    : '곰신이 남긴 오늘 하루를 놓치지 않고 따라잡아볼까요?'}
-                </p>
               </div>
 
               <Button variant="primary" size="lg" full
@@ -1667,7 +1953,7 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
                 disabled={isFinishing}>
                 {isFinishing
                   ? '저장 중...'
-                  : role === 'gomsin'
+                  : !usesMilitaryFeatures(relationshipContext) || role === 'gomsin'
                     ? '오늘의 첫 순간 남기기'
                     : '오늘의 로그 기다리기'}
               </Button>
@@ -1676,6 +1962,14 @@ function OnboardingContent({ navigate }: OnboardingContentProps) {
 
         </main>
       </div>
+
+      {/*
+        Rendered outside the wizard frame so it covers the whole viewport, and mounted
+        only while open so the long document is not in the tree during sign-in.
+      */}
+      {openLegalDoc !== null && (
+        <LegalDocumentSheet doc={openLegalDoc} onClose={closeLegalDoc} />
+      )}
     </div>
   );
 }

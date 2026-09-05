@@ -24,8 +24,9 @@ function openDatabase(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(STORE_NAME)) {
-        // Keyed by the entry id, which is also the eventual `daily_records` row id,
-        // so re-putting an entry updates it instead of duplicating it.
+        // Keyed by the entry id, which is also the eventual `daily_records` row id.
+        // New intents use `add` (duplicate ids reject); `put` is reserved for
+        // updates to an entry already selected by the queue workflow.
         database.createObjectStore(STORE_NAME, { keyPath: 'id' });
       }
     };
@@ -66,6 +67,35 @@ function transact<T>(
   }));
 }
 
+/** Issue a batch synchronously so IndexedDB commits all requests or none. */
+function transactBatch(
+  run: (store: IDBObjectStore) => void,
+): Promise<void> {
+  return openDatabase().then((database) => new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORE_NAME, 'readwrite');
+    let runError: unknown = null;
+    transaction.oncomplete = () => {
+      database.close();
+      resolve();
+    };
+    transaction.onabort = () => {
+      database.close();
+      reject(runError || transaction.error || new Error('IndexedDB batch transaction aborted.'));
+    };
+    try {
+      run(transaction.objectStore(STORE_NAME));
+    } catch (error) {
+      runError = error;
+      try {
+        transaction.abort();
+      } catch {
+        database.close();
+        reject(error);
+      }
+    }
+  }));
+}
+
 export function isOutboxStorageAvailable(): boolean {
   return typeof indexedDB !== 'undefined';
 }
@@ -80,7 +110,14 @@ export function createIndexedDbOutbox(): OutboxPersistence | null {
   if (!isOutboxStorageAvailable()) return null;
   return {
     all: () => transact<QueuedRecord[]>('readonly', (store) => store.getAll()),
+    add: (entry) => transact('readwrite', (store) => store.add(entry)).then(() => undefined),
     put: (entry) => transact('readwrite', (store) => store.put(entry)).then(() => undefined),
+    putMany: (entries) => transactBatch((store) => {
+      for (const entry of entries) store.put(entry);
+    }),
     remove: (id) => transact('readwrite', (store) => store.delete(id)).then(() => undefined),
+    removeMany: (ids) => transactBatch((store) => {
+      for (const id of ids) store.delete(id);
+    }),
   };
 }

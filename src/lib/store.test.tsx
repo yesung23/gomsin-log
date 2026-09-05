@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import type { AppState } from '@/types';
+import { useEffect } from 'react';
+import type { AppState, DailyRecord } from '@/types';
+import type { RecordPhotoMutationRequest } from '@/lib/records';
+import type { PreparedRecordPhotoRenditions } from '@/lib/recordPhotoRenditions';
+import { getOrCreateRecordMediaMutationOwnerToken, listRecordMediaMutationJournalEntries } from '@/lib/recordMediaMutationJournal';
 import type { OutboxPersistence, QueuedRecord } from '@/lib/outbox';
 import {
   clearCoupleProtectionRequirement,
@@ -18,6 +22,81 @@ vi.mock('@/app/e2ee/featureFlag', () => ({
 }));
 
 type AuthCallback = (event: string, session: { user: { id: string; email?: string; app_metadata?: Record<string, unknown> } } | null) => void;
+
+function installTestWebLocks(): void {
+  type PendingLock = {
+    mode: LockMode;
+    callback: (lock: Lock | null) => PromiseLike<unknown> | unknown;
+    resolve: (value: unknown) => void;
+    reject: (reason?: unknown) => void;
+  };
+  type LockState = {
+    activeShared: number;
+    activeExclusive: boolean;
+    queue: PendingLock[];
+  };
+  const states = new Map<string, LockState>();
+
+  const pump = (name: string, state: LockState): void => {
+    if (state.activeExclusive || state.queue.length === 0) return;
+    if (state.queue[0]?.mode === 'exclusive' && state.activeShared > 0) return;
+
+    const grant = (entry: PendingLock) => {
+      if (entry.mode === 'exclusive') state.activeExclusive = true;
+      else state.activeShared += 1;
+      void Promise.resolve()
+        .then(() => entry.callback({ name, mode: entry.mode } as Lock))
+        .then(entry.resolve, entry.reject)
+        .finally(() => {
+          if (entry.mode === 'exclusive') state.activeExclusive = false;
+          else state.activeShared -= 1;
+          if (!state.activeExclusive && state.activeShared === 0 && state.queue.length === 0) {
+            states.delete(name);
+          }
+          pump(name, state);
+        });
+    };
+
+    if (state.queue[0]?.mode === 'exclusive') {
+      grant(state.queue.shift()!);
+      return;
+    }
+    while (state.queue[0]?.mode === 'shared' && !state.activeExclusive) {
+      grant(state.queue.shift()!);
+    }
+  };
+
+  const request = vi.fn(async <T,>(
+    name: string,
+    options: LockOptions,
+    callback: (lock: Lock | null) => PromiseLike<T> | T,
+  ): Promise<T> => {
+    const mode = options.mode ?? 'exclusive';
+    const state = states.get(name) ?? {
+      activeShared: 0,
+      activeExclusive: false,
+      queue: [],
+    };
+    states.set(name, state);
+    const canGrantImmediately = state.queue.length === 0
+      && !state.activeExclusive
+      && (mode === 'shared' || state.activeShared === 0);
+    if (options.ifAvailable && !canGrantImmediately) return callback(null);
+    return new Promise<T>((resolve, reject) => {
+      state.queue.push({
+        mode,
+        callback: callback as PendingLock['callback'],
+        resolve: resolve as (value: unknown) => void,
+        reject,
+      });
+      pump(name, state);
+    });
+  });
+  Object.defineProperty(navigator, 'locks', {
+    configurable: true,
+    value: { request },
+  });
+}
 
 const authCallbacks: AuthCallback[] = [];
 const unsubscribe = vi.fn();
@@ -48,7 +127,11 @@ const mockSupabase = {
     return chainable;
   }),
   removeChannel: vi.fn(),
-  rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
+  rpc: vi.fn(async (name: string) => (
+    name === 'is_my_account_deletion_pending'
+      ? { data: false, error: null }
+      : { data: null, error: null }
+  )),
   from: () => ({
     update: (payload: Record<string, unknown>) => {
       mockSupabase.lastProfileUpdatePayload = payload;
@@ -77,8 +160,16 @@ const fetchMyCoupleState = vi.fn().mockResolvedValue({ ok: false, reason: 'serve
 const outboxEntries = new Map<string, QueuedRecord>();
 const outboxPersistence: OutboxPersistence = {
   all: vi.fn(async () => Array.from(outboxEntries.values())),
+  add: vi.fn(async (entry) => {
+    if (outboxEntries.has(entry.id)) throw new DOMException('duplicate', 'ConstraintError');
+    outboxEntries.set(entry.id, entry);
+  }),
   put: vi.fn(async (entry) => { outboxEntries.set(entry.id, entry); }),
+  putMany: vi.fn(async (entries) => {
+    for (const entry of entries) outboxEntries.set(entry.id, entry);
+  }),
   remove: vi.fn(async (id) => { outboxEntries.delete(id); }),
+  removeMany: vi.fn(async (ids) => { for (const id of ids) outboxEntries.delete(id); }),
 };
 
 vi.mock('@/lib/outboxStorage', () => ({
@@ -98,16 +189,18 @@ vi.mock('@/lib/supabase', () => ({
 
 const fetchFullStateFromDB = vi.fn();
 const FULL_STATE_UNAVAILABLE = Symbol('full-state-unavailable');
+const defaultFetchFullStateResult = async (userId: string) => {
+  const result = await fetchFullStateFromDB(userId);
+  return result === FULL_STATE_UNAVAILABLE
+    ? { ok: false as const, reason: 'unknown' as const }
+    : { ok: true as const, state: result };
+};
+const fetchFullStateResultFromDB = vi.fn(defaultFetchFullStateResult);
 vi.mock('@/lib/sync', () => ({
   fetchFullStateFromDB: (userId: string) => fetchFullStateFromDB(userId),
   // The store reads the reason-carrying variant. Deriving it from the same mock
   // keeps every existing scenario byte-identical while exercising the new shape.
-  fetchFullStateResultFromDB: async (userId: string) => {
-    const result = await fetchFullStateFromDB(userId);
-    return result === FULL_STATE_UNAVAILABLE
-      ? { ok: false, reason: 'unknown' }
-      : { ok: true, state: result };
-  },
+  fetchFullStateResultFromDB: (userId: string) => fetchFullStateResultFromDB(userId),
   FULL_STATE_UNAVAILABLE,
 }));
 
@@ -128,26 +221,69 @@ const saveRecordToDB = vi.fn(async (...args: unknown[]) => {
   }
   return { ok: true as const };
 });
-const uploadRecordMedia = vi.fn(async (file: File) => {
+const uploadRecordMedia = vi.fn(async (
+  file: File,
+  coupleId?: string,
+  recordId?: string,
+  _displayName?: string,
+  objectId?: string,
+) => {
   callOrder.push(`upload:${file.name}`);
-  return { attachment: { type: 'photo' as const, name: file.name, path: `c/r/${file.name}` } };
+  return {
+    attachment: {
+      type: 'photo' as const,
+      name: file.name,
+      path: objectId
+        ? `${coupleId}/${recordId}/${objectId}.png`
+        : `c/r/${file.name}`,
+    },
+  };
 });
-const removeRecordMedia = vi.fn(async () => {
-  callOrder.push('removeMedia');
-});
+const beginRecordMediaMutation = vi.fn(async (
+  request: { baseContentRevision: number },
+) => ({
+  ok: true as const,
+  state: 'pending' as const,
+  targetContentRevision: request.baseContentRevision + 1,
+}));
+const getRecordMediaMutationStatus = vi.fn(async () => ({
+  ok: true as const,
+  state: 'pending' as const,
+}));
+const abandonRecordMediaMutation = vi.fn(async () => ({
+  ok: true as const,
+  state: 'abandoned' as const,
+}));
+const getRecordPhotoRenditionCapability = vi.fn();
+const beginRecordPhotoMutation = vi.fn();
+const uploadRecordPhotoRendition = vi.fn();
+const prepareRecordPhotoRenditions = vi.fn();
+
+vi.mock('@/lib/recordPhotoRenditions', () => ({
+  prepareRecordPhotoRenditions: (...args: unknown[]) => prepareRecordPhotoRenditions(...args),
+}));
 
 const fetchRecordsFromDB = vi.fn(async () => []);
 
 const fetchRecordsResultFromDB = vi.fn(async () => ({ ok: true, records: [] }));
+const deleteRecordFromDB = vi.fn(async () => ({ ok: true as const }));
 const activateCoupleProtectionForAuthenticatedSession = vi.fn(async () => 'not_paired' as const);
 
 vi.mock('@/lib/records', () => ({
   saveRecordToDB: (...args: unknown[]) => saveRecordToDB(...(args as [])),
-  deleteRecordFromDB: vi.fn().mockResolvedValue({ ok: true }),
+  deleteRecordFromDB: (...args: unknown[]) => deleteRecordFromDB(...(args as [])),
   fetchRecordsFromDB: (...args: unknown[]) => fetchRecordsFromDB(...(args as [])),
   fetchRecordsResultFromDB: (...args: unknown[]) => fetchRecordsResultFromDB(...(args as [])),
-  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(...(args as [File])),
-  removeRecordMedia: (...args: unknown[]) => removeRecordMedia(...(args as [])),
+  uploadRecordMedia: (...args: unknown[]) => uploadRecordMedia(
+    ...(args as [File, string?, string?, string?, string?]),
+  ),
+  beginRecordMediaMutation: (...args: unknown[]) => beginRecordMediaMutation(...(args as [])),
+  // These existing store scenarios exercise the legacy single-master backend.
+  getRecordPhotoRenditionCapability: () => getRecordPhotoRenditionCapability(),
+  beginRecordPhotoMutation: (...args: unknown[]) => beginRecordPhotoMutation(...args),
+  uploadRecordPhotoRendition: (...args: unknown[]) => uploadRecordPhotoRendition(...args),
+  getRecordMediaMutationStatus: (...args: unknown[]) => getRecordMediaMutationStatus(...(args as [])),
+  abandonRecordMediaMutation: (...args: unknown[]) => abandonRecordMediaMutation(...(args as [])),
   resolveAttachmentUrls: async (attachments: unknown[]) => attachments,
   classifyMediaFile: (file: { type: string }) =>
     file.type.startsWith('image/')
@@ -157,6 +293,9 @@ vi.mock('@/lib/records', () => ({
     if (typeof path !== 'string') return false;
     return path.startsWith(`${coupleId}/${recordId}/`);
   },
+  isValidMediaObjectId: (value: string) => (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  ),
 }));
 
 vi.mock('@/app/e2ee/runtimeSession', () => ({
@@ -186,14 +325,22 @@ vi.mock('@/lib/trips', () => ({
 
 const fetchTalkAboutMarksResultFromDB = vi.fn()
   .mockResolvedValue({ ok: true, marks: [] });
+const markTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
+const unmarkTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
+const resolveTalkAboutInDB = vi.fn().mockResolvedValue({ ok: true });
+const recordProductEvent = vi.fn().mockResolvedValue(undefined);
 
 // Talk-about marks load alongside the other shared slices. A failed read keeps
 // the old list; the normal default here is an authoritative empty result.
 vi.mock('@/lib/talkAbout', () => ({
   fetchTalkAboutMarksResultFromDB: (...args: unknown[]) => fetchTalkAboutMarksResultFromDB(...args),
-  markTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
-  unmarkTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
-  resolveTalkAboutInDB: vi.fn().mockResolvedValue({ ok: true }),
+  markTalkAboutInDB: (...args: unknown[]) => markTalkAboutInDB(...args),
+  unmarkTalkAboutInDB: (...args: unknown[]) => unmarkTalkAboutInDB(...args),
+  resolveTalkAboutInDB: (...args: unknown[]) => resolveTalkAboutInDB(...args),
+}));
+
+vi.mock('@/lib/productEvents', () => ({
+  recordProductEvent: (...args: unknown[]) => recordProductEvent(...args),
 }));
 
 const { StoreProvider } = await import('@/lib/store');
@@ -206,25 +353,44 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: {
   ok: boolean;
   failedFiles: string[];
+  retryableFailedFileIndexes?: number[];
   error?: string;
   reason?: string;
   recordId?: string;
 } | null = null;
 let lastFlushResult: { delivered: number; requeued: number; blocked: number } | null = null;
+let lastTalkAboutResult: { ok: boolean; error?: string; syncPending?: boolean } | null = null;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
 
 function Probe({
   files = [] as File[],
   allOrNothingMedia = false,
-}: { files?: File[]; allOrNothingMedia?: boolean }) {
+  onCommit,
+}: {
+  files?: File[];
+  allOrNothingMedia?: boolean;
+  onCommit?: (state: AppState) => void;
+}) {
   const {
     state,
     isReady,
     authSyncUnavailable,
     sharedSyncStatus,
+    talkAboutSyncStatus,
+    coupleLifecycle,
     signOut,
     disconnect,
     updateProfile,
     addRecordWithMedia,
+    updateRecord,
+    deleteRecord,
     queueRecordForLater,
     flushOutbox,
     refreshCoupleLifecycle,
@@ -232,28 +398,49 @@ function Probe({
     outboxBlocked,
     addEvent,
     reloadEvents,
+    markTalkAbout,
+    unmarkTalkAbout,
+    resolveTalkAbout,
+    setLocale,
   } = useStore();
+  useEffect(() => {
+    onCommit?.(state);
+  }, [onCommit, state]);
   return (
     <div>
       <span data-testid="ready">{isReady ? 'ready' : 'loading'}</span>
       <span data-testid="authSync">{authSyncUnavailable ? 'unavailable' : 'available'}</span>
       <span data-testid="syncStatus">{sharedSyncStatus}</span>
+      <span data-testid="talkSyncStatus">{talkAboutSyncStatus}</span>
+      <span data-testid="coupleLifecycle">{coupleLifecycle}</span>
       <span data-testid="setup">{String(state.setupComplete)}</span>
+      <span data-testid="locale">{state.locale ?? 'none'}</span>
       <span data-testid="user">{state.authenticatedUser?.id ?? 'none'}</span>
       <span data-testid="name">{state.profile.myName}</span>
       <span data-testid="username">{state.profile.username ?? 'none'}</span>
+      <span data-testid="gender">{state.profile.genderIdentity ?? 'none'}</span>
       <span data-testid="couple">{state.profile.couple.coupleId ?? 'none'}</span>
       <span data-testid="partner">{state.profile.couple.partnerName || 'none'}</span>
+      <span data-testid="partnerId">{state.profile.couple.partnerUserId ?? 'none'}</span>
       <span data-testid="partnerMilitary">{state.profile.couple.partnerMilitary ? 'present' : 'none'}</span>
       <span data-testid="anniversary">{state.profile.couple.anniversaryDate ?? 'none'}</span>
       <span data-testid="records">{state.records.map((r) => r.id).join(',')}</span>
       <span data-testid="events">{state.events.map((event) => event.id).join(',')}</span>
       <span data-testid="trips">{state.trips.map((trip) => trip.id).join(',')}</span>
+      <span data-testid="highlights">{(state.coupleHighlights ?? []).map((highlight) => highlight.id).join(',')}</span>
       <span data-testid="talkAboutMarks">{(state.talkAboutMarks ?? []).map((mark) => mark.id).join(',')}</span>
+      <span data-testid="highlightedRecord">{state.highlightedRecordId ?? 'none'}</span>
       <span data-testid="attachments">
         {state.records
           .flatMap((r) => r.attachments || [])
           .map((a) => a.name)
+          .join(',')}
+      </span>
+      <span data-testid="thumbnailUrls">
+        {state.records
+          .flatMap((r) => r.attachments || [])
+          .map((a) => a.photoRendition?.thumbnail.url ?? '')
+          .filter(Boolean)
           .join(',')}
       </span>
       <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
@@ -280,6 +467,14 @@ function Probe({
         post
       </button>
       <button onClick={() => {
+        const first = state.records[0];
+        if (first) void updateRecord(first.id, { log: '수정된 최신 기록' });
+      }}>update-first-record</button>
+      <button onClick={() => {
+        const first = state.records[0];
+        if (first) void deleteRecord(first.id);
+      }}>delete-first-record</button>
+      <button onClick={() => {
         void queueRecordForLater({
           date: '2026-08-16',
           time: '12:00',
@@ -295,11 +490,15 @@ function Probe({
       <button onClick={() => void signOut()}>signout</button>
       <button onClick={() => void disconnect()}>disconnect</button>
       <button onClick={() => void updateProfile({ myName: 'updated-name' })}>update-profile</button>
+      <button onClick={() => setLocale('en')}>set-locale-en</button>
+      <button onClick={() => setLocale('ko')}>set-locale-ko</button>
       <button onClick={() => void updateProfile({
         username: ' Foo_Bar ',
         profileCaption: '오늘도 함께',
         profileDateType: 'meeting',
       })}>update-profile-identity</button>
+      <button onClick={() => void updateProfile({ genderIdentity: 'woman' })}>set-gender</button>
+      <button onClick={() => void updateProfile({ genderIdentity: undefined })}>clear-gender</button>
       <button onClick={() => void updateProfile({
         couple: { ...state.profile.couple, anniversaryDate: undefined },
       })}>clear-anniversary</button>
@@ -318,6 +517,37 @@ function Probe({
         }
       }}>add-event</button>
       <button onClick={() => void reloadEvents()}>reload-events</button>
+      <button onClick={() => {
+        void markTalkAbout('record-talk').then((result) => { lastTalkAboutResult = result; });
+      }}>mark-talk</button>
+      <button onClick={() => {
+        void unmarkTalkAbout('record-talk').then((result) => { lastTalkAboutResult = result; });
+      }}>unmark-talk</button>
+      <button onClick={() => {
+        void resolveTalkAbout('record-talk').then((result) => { lastTalkAboutResult = result; });
+      }}>resolve-talk</button>
+    </div>
+  );
+}
+
+function OnboardingStepProbe({
+  onRender,
+}: {
+  onRender: (setter: (step: number) => void) => void;
+}) {
+  const { state, isReady, setOnboardingStep } = useStore();
+  onRender(setOnboardingStep);
+
+  return (
+    <div>
+      <span data-testid="onboarding-ready">{isReady ? 'ready' : 'loading'}</span>
+      <span data-testid="onboarding-step">{state.onboardingStep}</span>
+      <button onClick={() => setOnboardingStep(state.onboardingStep)}>
+        write-same-onboarding-step
+      </button>
+      <button onClick={() => setOnboardingStep(state.onboardingStep + 1)}>
+        advance-onboarding-step
+      </button>
     </div>
   );
 }
@@ -341,6 +571,7 @@ function serverState(overrides: Partial<AppState>): Partial<AppState> {
 
 describe('StoreProvider auth lifecycle', () => {
   beforeEach(() => {
+    installTestWebLocks();
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
@@ -351,14 +582,33 @@ describe('StoreProvider auth lifecycle', () => {
     setOutboxLocalCacheKey(null);
     lastFlushResult = null;
     fetchFullStateFromDB.mockReset();
+    fetchFullStateResultFromDB.mockReset().mockImplementation(defaultFetchFullStateResult);
     mockSupabase.profileUpdateError = null;
     mockSupabase.lastProfileUpdatePayload = null;
     mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
+    deleteRecordFromDB.mockReset().mockResolvedValue({ ok: true });
+    beginRecordMediaMutation.mockReset().mockImplementation(async (
+      request: { baseContentRevision: number },
+    ) => ({
+      ok: true,
+      state: 'pending',
+      targetContentRevision: request.baseContentRevision + 1,
+    }));
+    getRecordMediaMutationStatus.mockReset().mockResolvedValue({ ok: true, state: 'pending' });
+    abandonRecordMediaMutation.mockReset().mockResolvedValue({ ok: true, state: 'abandoned' });
+    getRecordPhotoRenditionCapability.mockReset().mockResolvedValue({ ok: true, supported: false });
+    beginRecordPhotoMutation.mockReset();
+    uploadRecordPhotoRendition.mockReset();
+    prepareRecordPhotoRenditions.mockReset();
     mockSupabase.channel.mockClear();
     mockSupabase.removeChannel.mockClear();
-    mockSupabase.rpc.mockReset().mockResolvedValue({ data: null, error: null });
+    mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
+      name === 'is_my_account_deletion_pending'
+        ? { data: false, error: null }
+        : { data: null, error: null }
+    ));
     // The shared setup's `vi.restoreAllMocks()` strips implementations, and the
     // store now asks the server whether a deletion is pending before it syncs.
     // The default answer is an authoritative "not pending".
@@ -374,6 +624,11 @@ describe('StoreProvider auth lifecycle', () => {
     fetchEventsResultFromDB.mockReset().mockResolvedValue({ ok: true, events: [] });
     fetchTripsResultFromDBMock.mockReset().mockResolvedValue({ ok: true, trips: [] });
     fetchTalkAboutMarksResultFromDB.mockReset().mockResolvedValue({ ok: true, marks: [] });
+    markTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    unmarkTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    resolveTalkAboutInDB.mockReset().mockResolvedValue({ ok: true });
+    recordProductEvent.mockReset().mockResolvedValue(undefined);
+    lastTalkAboutResult = null;
     saveEventToDB.mockReset().mockResolvedValue(null);
     updateEventInDB.mockReset().mockResolvedValue(null);
     deleteEventFromDB.mockReset().mockResolvedValue(true);
@@ -381,9 +636,41 @@ describe('StoreProvider auth lifecycle', () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
   });
 
+  it('keeps the onboarding step writer stable and treats the same step as a no-op', async () => {
+    const setters: Array<(step: number) => void> = [];
+    let renderCount = 0;
+
+    render(
+      <StoreProvider>
+        <OnboardingStepProbe onRender={(setter) => {
+          renderCount += 1;
+          setters.push(setter);
+        }} />
+      </StoreProvider>,
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const settledRenderCount = renderCount;
+    const settledSetter = setters.at(-1);
+    screen.getByRole('button', { name: 'write-same-onboarding-step' }).click();
+    await act(async () => { await Promise.resolve(); });
+
+    expect(renderCount).toBe(settledRenderCount);
+    expect(setters.at(-1)).toBe(settledSetter);
+
+    screen.getByRole('button', { name: 'advance-onboarding-step' }).click();
+    await waitFor(() => expect(screen.getByTestId('onboarding-step')).toHaveTextContent('1'));
+    expect(setters.at(-1)).toBe(settledSetter);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     setOutboxLocalCacheKey(null);
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('clears module-level E2EE capabilities when the provider unmounts', async () => {
@@ -504,10 +791,11 @@ describe('StoreProvider auth lifecycle', () => {
         isPrivate: false,
       },
     }))));
-    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 1 }));
+    await waitFor(() => expect(lastFlushResult).toEqual({ delivered: 0, requeued: 0, blocked: 0 }));
 
     expect(saveRecordToDB).not.toHaveBeenCalled();
-    expect(Array.from(outboxEntries.values())[0].blocked?.reason).toBe('couple_changed');
+    expect(Array.from(outboxEntries.values())[0]).toMatchObject({ attempts: 0 });
+    expect(Array.from(outboxEntries.values())[0].blocked).toBeUndefined();
   });
 
   it('enters the app when Supabase restores the persisted initial session', async () => {
@@ -591,6 +879,778 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('records')).toHaveTextContent('');
     expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
     expect(screen.getByTestId('name')).toHaveTextContent('');
+  });
+
+  it('reports a committed talk-about write separately when reconciliation is delayed', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      error: new Error('refresh failed'),
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
+    expect(markTalkAboutInDB).toHaveBeenCalledWith(
+      'record-talk',
+      'couple-1',
+      'user-a',
+      expect.objectContaining({ userId: 'user-a' }),
+    );
+  });
+
+  it('returns a fully reconciled talk-about success only after the authoritative list refreshes', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      marks: [{
+        id: 'mark-new', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
+  });
+
+  it('does not restore talk-about metadata after the workspace is quarantined mid-refresh', async () => {
+    let finishRefresh!: (value: { ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }) => void;
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB.mockImplementationOnce(() => new Promise((resolve) => {
+      finishRefresh = resolve;
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(fetchTalkAboutMarksResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => subscribeCallback?.('CHANNEL_ERROR'));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+
+    await act(async () => finishRefresh({
+      ok: true,
+      marks: [{
+        id: 'mark-stale', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    }));
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual({ ok: true, syncPending: true }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+  });
+
+  it('does not let an older talk-about refresh overwrite the newest response', async () => {
+    const first = deferred<{ ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }>();
+    const second = deferred<{ ok: true; marks: Array<{
+      id: string; recordId: string; coupleId: string; actorUserId: string;
+      createdAt: string; isCompleted: boolean;
+    }> }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchTalkAboutMarksResultFromDB
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+
+    screen.getByText('mark-talk').click();
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(fetchTalkAboutMarksResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => second.resolve({
+      ok: true,
+      marks: [{
+        id: 'mark-newest', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T02:00:00.000Z', isCompleted: false,
+      }],
+    }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest');
+
+    await act(async () => first.resolve({
+      ok: true,
+      marks: [{
+        id: 'mark-older', recordId: 'record-talk', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+      }],
+    }));
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest');
+    expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-older');
+  });
+
+  it('separates a talk-about slice outage from an authoritative empty list', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      error: new Error('talk slice unavailable'),
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'talk_about' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({ ok: true, marks: [] });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'talk_about' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('ready');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('');
+  });
+
+  it('fails closed when a profile refresh cannot load its talk-about slice', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      reason: 'unknown',
+      stage: 'talk-about',
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('unavailable');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+
+    markTalkAboutInDB.mockClear();
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(lastTalkAboutResult).toEqual(expect.objectContaining({ ok: false })));
+    expect(markTalkAboutInDB).not.toHaveBeenCalled();
+  });
+
+  it('applies profile and talk-about data from the same successful profile refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', partnerUserId: 'partner-1', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [{
+          id: 'mark-new', recordId: 'record-new', coupleId: 'couple-1',
+          actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+        }],
+        profile: {
+          myName: '새 이름', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-1', partnerName: '몽룡', partnerUserId: 'partner-1', coupleCode: '',
+            connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('name')).toHaveTextContent('새 이름');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-new');
+    expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-old');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('ready');
+  });
+
+  it.each([
+    {
+      label: 'pending',
+      nextCouple: {
+        coupleId: 'couple-1', partnerName: '', coupleCode: '',
+        connected: false, status: 'pending' as const,
+      },
+      expectedLifecycle: 'pending',
+    },
+    {
+      label: 'disconnected',
+      nextCouple: {
+        partnerName: '', coupleCode: '', connected: false, status: 'disconnected' as const,
+      },
+      expectedLifecycle: 'disconnected',
+    },
+  ])('publishes a successful $label profile refresh without any stale couple slice', async ({
+    nextCouple,
+    expectedLifecycle,
+  }) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const committedFrames: Array<{
+      partnerId?: string;
+      recordIds: string[];
+      eventIds: string[];
+      tripIds: string[];
+      highlightIds: string[];
+      talkAboutIds: string[];
+      highlightedRecordId?: string;
+    }> = [];
+    const captureFrame = (next: AppState) => {
+      if (next.authenticatedUser?.id !== 'user-a') return;
+      committedFrames.push({
+        partnerId: next.profile.couple.partnerUserId,
+        recordIds: next.records.map((record) => record.id),
+        eventIds: next.events.map((event) => event.id),
+        tripIds: next.trips.map((trip) => trip.id),
+        highlightIds: (next.coupleHighlights ?? []).map((highlight) => highlight.id),
+        talkAboutIds: next.talkAboutMarks.map((mark) => mark.id),
+        highlightedRecordId: next.highlightedRecordId,
+      });
+    };
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{
+        id: 'record-former-partner', userId: 'partner-b', date: '2026-09-03', time: '09:00',
+        authorRole: 'soldier', log: 'stale', isPrivate: false, createdAt: '2026-09-03T00:00:00Z',
+      }] as never,
+      events: [{ id: 'event-former-partner', createdBy: 'partner-b', isPrivate: false }] as never,
+      trips: [{ id: 'trip-former-partner' }] as never,
+      coupleHighlights: [{ id: 'highlight-former-partner' }] as never,
+      talkAboutMarks: [{
+        id: 'mark-former-partner', recordId: 'record-former-partner', coupleId: 'couple-1',
+        actorUserId: 'partner-b', createdAt: '2026-09-03T00:00:00Z', isCompleted: false,
+      }],
+      highlightedRecordId: 'record-former-partner',
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: 'Partner B', partnerUserId: 'partner-b',
+          partnerMilitary: {
+            branch: 'army', militaryStatus: 'serving', dischargeDateSource: 'manual',
+          },
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe onCommit={captureFrame} /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('highlightedRecord')).toHaveTextContent('record-former-partner'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    committedFrames.length = 0;
+    if (expectedLifecycle === 'pending') {
+      fetchMyCoupleState.mockResolvedValueOnce({
+        ok: true,
+        state: {
+          coupleId: 'couple-1',
+          role: 'gomsin',
+          memberStatus: 'active',
+          partnerPresent: false,
+          invitationActive: true,
+          invitationExpiresAt: '2026-09-04T00:00:00Z',
+        },
+      });
+    }
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      state: serverState({
+        records: [],
+        events: [],
+        trips: [],
+        coupleHighlights: [],
+        talkAboutMarks: [],
+        profile: {
+          myName: '춘향', role: 'gomsin', couple: nextCouple,
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('none'));
+    expect(screen.getByTestId('records')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('events')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('trips')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('highlights')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('talkAboutMarks')).toBeEmptyDOMElement();
+    expect(screen.getByTestId('highlightedRecord')).toHaveTextContent('none');
+    expect(screen.getByTestId('partner')).toHaveTextContent('none');
+    expect(screen.getByTestId('partnerMilitary')).toHaveTextContent('none');
+    expect(screen.getByTestId('coupleLifecycle')).toHaveTextContent(expectedLifecycle);
+    expect(committedFrames.every((frame) => frame.partnerId !== undefined || (
+      !frame.recordIds.includes('record-former-partner')
+      && !frame.eventIds.includes('event-former-partner')
+      && !frame.tripIds.includes('trip-former-partner')
+      && !frame.highlightIds.includes('highlight-former-partner')
+      && !frame.talkAboutIds.includes('mark-former-partner')
+      && frame.highlightedRecordId !== 'record-former-partner'
+    ))).toBe(true);
+  });
+
+  it('preserves the last-known-good workspace when partner membership refresh is unavailable', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-known-good' }] as never,
+      events: [{ id: 'event-known-good' }] as never,
+      trips: [{ id: 'trip-known-good' }] as never,
+      coupleHighlights: [{ id: 'highlight-known-good' }] as never,
+      talkAboutMarks: [{
+        id: 'mark-known-good', recordId: 'record-known-good', coupleId: 'couple-1',
+        actorUserId: 'partner-b', createdAt: '2026-09-03T00:00:00Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: 'Partner B', partnerUserId: 'partner-b',
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      reason: 'offline',
+      stage: 'partner-membership',
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b');
+    expect(screen.getByTestId('records')).toHaveTextContent('record-known-good');
+    expect(screen.getByTestId('events')).toHaveTextContent('event-known-good');
+    expect(screen.getByTestId('trips')).toHaveTextContent('trip-known-good');
+    expect(screen.getByTestId('highlights')).toHaveTextContent('highlight-known-good');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-known-good');
+  });
+
+  it('keeps the last verified profile until an identity-bearing profile refresh completes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const refresh = deferred<{ ok: true; state: Partial<AppState> }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-old', recordId: 'record-old', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '현재 이름', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '현재 상대', partnerUserId: 'partner-1',
+          coupleCode: '', connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockImplementationOnce(() => refresh.promise);
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchFullStateResultFromDB).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByTestId('name')).toHaveTextContent('현재 이름');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+
+    await act(async () => refresh.resolve({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [{
+          id: 'mark-unverified', recordId: 'record-unverified', coupleId: 'couple-1',
+          actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+        }],
+        profile: {
+          myName: '불완전한 새 이름', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-1', partnerName: '신원 없는 상대', coupleCode: '',
+            connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    }));
+
+    expect(screen.getByTestId('name')).toHaveTextContent('현재 이름');
+    expect(screen.getByTestId('partner')).toHaveTextContent('현재 상대');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-1');
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-old');
+    expect(screen.getByTestId('talkSyncStatus')).toHaveTextContent('unavailable');
+  });
+
+  it('drops a delayed account A profile refresh after account B becomes active', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const delayedAccountA = deferred<{ ok: true; state: Partial<AppState> }>();
+    let accountAReads = 0;
+    fetchFullStateResultFromDB.mockImplementation((requestedUserId: string) => {
+      if (requestedUserId === 'user-a') {
+        accountAReads += 1;
+        if (accountAReads > 1) return delayedAccountA.promise;
+        return Promise.resolve({
+          ok: true as const,
+          state: serverState({
+            talkAboutMarks: [],
+            profile: {
+              myName: 'Account A', role: 'gomsin',
+              couple: {
+                coupleId: 'couple-a', partnerName: 'A partner', partnerUserId: 'partner-a',
+                coupleCode: '', connected: true, status: 'active',
+              },
+              military: {} as never, contact: {} as never,
+            } as never,
+          }),
+        });
+      }
+      return Promise.resolve({
+        ok: true as const,
+        state: serverState({
+          talkAboutMarks: [],
+          profile: {
+            myName: 'Account B', role: 'gomsin',
+            couple: {
+              coupleId: 'couple-b', partnerName: 'B partner', partnerUserId: 'partner-b',
+              coupleCode: '', connected: true, status: 'active',
+            },
+            military: {} as never, contact: {} as never,
+          } as never,
+        }),
+      });
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-a'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-a')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(accountAReads).toBe(2));
+
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
+    await waitFor(() => expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b'));
+
+    await act(async () => delayedAccountA.resolve({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [],
+        profile: {
+          myName: 'Stale Account A', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-a', partnerName: 'Stale A partner', partnerUserId: 'partner-a',
+            coupleCode: '', connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    }));
+
+    expect(screen.getByTestId('user')).toHaveTextContent('user-b');
+    expect(screen.getByTestId('name')).toHaveTextContent('Account B');
+    expect(screen.getByTestId('couple')).toHaveTextContent('couple-b');
+    expect(screen.getByTestId('partnerId')).toHaveTextContent('partner-b');
+  });
+
+  it('does not let an older profile full-read overwrite a newer talk-only response', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const oldProfileRead = deferred<{
+      ok: true;
+      state: Partial<AppState>;
+    }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      talkAboutMarks: [{
+        id: 'mark-initial', recordId: 'record-initial', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T00:00:00.000Z', isCompleted: false,
+      }],
+      profile: {
+        myName: '현재 이름', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-initial'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+
+    fetchFullStateResultFromDB.mockImplementationOnce(() => oldProfileRead.promise);
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'profile' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchFullStateResultFromDB).toHaveBeenCalledTimes(2));
+
+    fetchTalkAboutMarksResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      marks: [{
+        id: 'mark-newest', recordId: 'record-newest', coupleId: 'couple-1',
+        actorUserId: 'user-a', createdAt: '2026-09-03T02:00:00.000Z', isCompleted: false,
+      }],
+    });
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'talk_about' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest'));
+
+    await act(async () => oldProfileRead.resolve({
+      ok: true,
+      state: serverState({
+        talkAboutMarks: [{
+          id: 'mark-stale', recordId: 'record-stale', coupleId: 'couple-1',
+          actorUserId: 'user-a', createdAt: '2026-09-03T01:00:00.000Z', isCompleted: false,
+        }],
+        profile: {
+          myName: '뒤늦은 이름', role: 'gomsin',
+          couple: {
+            coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+            connected: true, status: 'active',
+          },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }),
+    }));
+
+    expect(screen.getByTestId('talkAboutMarks')).toHaveTextContent('mark-newest');
+    expect(screen.getByTestId('talkAboutMarks')).not.toHaveTextContent('mark-stale');
+    expect(screen.getByTestId('name')).toHaveTextContent('현재 이름');
+  });
+
+  it.each([
+    { label: 'mark', button: 'mark-talk', write: markTalkAboutInDB },
+    { label: 'unmark', button: 'unmark-talk', write: unmarkTalkAboutInDB },
+    { label: 'resolve', button: 'resolve-talk', write: resolveTalkAboutInDB },
+  ])('drops all post-write side effects when the account changes before $label resolves', async ({ button, write }) => {
+    const pendingWrite = deferred<{ ok: true }>();
+    fetchFullStateFromDB.mockImplementation(async (userId: string) => serverState({
+      profile: {
+        myName: userId === 'user-a' ? 'A' : 'B', role: 'gomsin',
+        couple: userId === 'user-a'
+          ? {
+              coupleId: 'couple-a', partnerName: 'A partner', coupleCode: '',
+              connected: true, status: 'active',
+            }
+          : {
+              partnerName: '', coupleCode: '', connected: false, status: 'pending',
+            },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    write.mockImplementationOnce(() => pendingWrite.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-a'));
+    recordProductEvent.mockClear();
+
+    screen.getByText(button).click();
+    await waitFor(() => expect(write).toHaveBeenCalledOnce());
+    await act(async () => emitAuth('SIGNED_IN', 'user-b'));
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-b'));
+    await act(async () => pendingWrite.resolve({ ok: true }));
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual(expect.objectContaining({ ok: false })));
+    expect(recordProductEvent).not.toHaveBeenCalled();
+    expect(fetchTalkAboutMarksResultFromDB).not.toHaveBeenCalled();
+  });
+
+  it('drops post-write side effects when the same account disconnects before a mark resolves', async () => {
+    const pendingWrite = deferred<{ ok: true }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: {
+          coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '',
+          connected: true, status: 'active',
+        },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    markTalkAboutInDB.mockImplementationOnce(() => pendingWrite.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('couple-1'));
+    recordProductEvent.mockClear();
+
+    screen.getByText('mark-talk').click();
+    await waitFor(() => expect(markTalkAboutInDB).toHaveBeenCalledOnce());
+    screen.getByText('disconnect').click();
+    await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
+    await act(async () => pendingWrite.resolve({ ok: true }));
+
+    await waitFor(() => expect(lastTalkAboutResult).toEqual(expect.objectContaining({ ok: false })));
+    expect(recordProductEvent).not.toHaveBeenCalled();
+    expect(fetchTalkAboutMarksResultFromDB).not.toHaveBeenCalled();
   });
 
   it('fails closed immediately while a different account is hydrating', async () => {
@@ -746,6 +1806,34 @@ describe('StoreProvider auth lifecycle', () => {
     await act(async () => { screen.getByText('signout').click(); });
 
     await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('none'));
+  });
+
+  it('purges local data immediately and finishes sign-out when push revocation never settles', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { authRepository } = await import('@/lib/supabase');
+    vi.mocked(authRepository.signOut).mockClear();
+    mockSupabase.rpc.mockImplementation((name: string) => (
+      name === 'revoke_my_push_tokens'
+        ? new Promise(() => {})
+        : Promise.resolve({ data: null, error: null })
+    ));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => { emitAuth('SIGNED_IN', 'user-a'); });
+    await waitFor(() => expect(screen.getByTestId('user')).toHaveTextContent('user-a'));
+
+    await act(async () => {
+      screen.getByText('signout').click();
+      await Promise.resolve();
+    });
+
+    // Local records and identity do not wait on a network hygiene call.
+    expect(screen.getByTestId('user')).toHaveTextContent('none');
+    expect(authRepository.signOut).not.toHaveBeenCalled();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3_000); });
+    expect(authRepository.signOut).toHaveBeenCalledOnce();
   });
 
   it('clears the couple id and shared state, then tears down realtime after disconnect', async () => {
@@ -915,6 +2003,601 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(screen.getByTestId('events')).toHaveTextContent(''));
   });
 
+  it('uses insert/update invalidations for records while retaining the direct-read compatibility channel', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false, log: 'before' }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCalls = channel.on.mock.calls.filter(
+      (call) => call[1]?.table === 'collaboration_invalidations',
+    );
+    expect(invalidationCalls.map((call) => call[1]?.event)).toEqual(['INSERT', 'UPDATE']);
+    expect(channel.on.mock.calls.some((call) => call[1]?.table === 'daily_records')).toBe(false);
+    const compatibilityChannel = createdChannels.find(
+      (entry) => entry.name === 'couple-records-compat:couple-1',
+    )!;
+    expect(compatibilityChannel.on.mock.calls.some(
+      (call) => call[1]?.table === 'daily_records' && call[1]?.event === '*',
+    )).toBe(true);
+    expect(compatibilityChannel.subscribe).toHaveBeenCalledWith();
+
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{
+        id: 'record-after',
+        userId: 'user-a',
+        isPrivate: false,
+        log: 'authoritative',
+        attachments: [{
+          type: 'photo',
+          name: 'photo.jpg',
+          path: 'couple-1/record-after/master.jpg',
+          url: 'https://media.test/master.jpg',
+          photoRendition: {
+            sourceRevision: 'source-revision',
+            screenMaster: {},
+            thumbnail: { url: 'https://media.test/thumbnail.jpg' },
+          },
+        }],
+      }],
+    });
+    await act(async () => {
+      invalidationCalls[0]?.[2]?.({
+        new: { slice: 'records', log_text: 'payload must not become state' },
+      });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    expect(screen.getByTestId('records')).toHaveTextContent('record-after');
+    expect(screen.getByTestId('logs')).toHaveTextContent('authoritative');
+    expect(screen.getByTestId('logs')).not.toHaveTextContent('payload must not become state');
+    expect(screen.getByTestId('thumbnailUrls')).toHaveTextContent('https://media.test/thumbnail.jpg');
+  });
+
+  it('reconciles every shared slice after SUBSCRIBED before considering the channel live', async () => {
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ id: 'record-after', userId: 'user-a', isPrivate: false }],
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-after'));
+    expect(mockSupabase.rpc).toHaveBeenCalledWith('get_my_active_couple_id');
+  });
+
+  it('quarantines prior records when the latest refresh resolves ok:false', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      records: [],
+      error: new Error('complete records read failed'),
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(''));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable');
+  });
+
+  it('prevents an older records refresh from overwriting a newer same-access refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const older = deferred<{ ok: true; records: never[] }>();
+    const newer = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(newer.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => newer.resolve({
+      ok: true,
+      records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+    await act(async () => older.resolve({
+      ok: true,
+      records: [{ id: 'record-older', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-older');
+  });
+
+  it('ignores an older records rejection after a newer same-access refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let rejectOlder!: (reason?: unknown) => void;
+    const older = new Promise<{ ok: true; records: never[] }>((_resolve, reject) => {
+      rejectOlder = reject;
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+
+    await act(async () => rejectOlder(new Error('stale request failed')));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('ignores an older resolved ok:false refresh after a newer same-access refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const older = deferred<{ ok: false; records: []; error: Error }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+
+    await act(async () => older.resolve({
+      ok: false,
+      records: [],
+      error: new Error('stale complete records read failed'),
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('shares the records sequence between SUBSCRIBED reconciliation and a dedicated refresh', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const olderReconciliation = deferred<{ ok: true; records: never[] }>();
+    const newerDedicated = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation.promise)
+      .mockReturnValueOnce(newerDedicated.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(2));
+
+    await act(async () => newerDedicated.resolve({
+      ok: true,
+      records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+    await act(async () => olderReconciliation.resolve({
+      ok: true,
+      records: [{ id: 'record-reconciliation-older', userId: 'user-a', isPrivate: false }] as never,
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-reconciliation-older');
+  });
+
+  it('ignores an older reconciliation records rejection after a dedicated refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let rejectReconciliation!: (reason?: unknown) => void;
+    const olderReconciliation = new Promise<{ ok: true; records: never[] }>((_resolve, reject) => {
+      rejectReconciliation = reject;
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+
+    await act(async () => rejectReconciliation(new Error('stale reconciliation records failed')));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('ignores stale SUBSCRIBED ok:false reconciliation after a dedicated refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const olderReconciliation = deferred<{ ok: false; records: []; error: Error }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+
+    await act(async () => olderReconciliation.resolve({
+      ok: false,
+      records: [],
+      error: new Error('stale SUBSCRIBED complete records read failed'),
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('does not let an in-flight records read erase a newly created record', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+    saveRecordToDB.mockResolvedValueOnce({ ok: true, contentRevision: 1 });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    const channel = await waitFor(() => {
+      const found = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록'));
+    await act(async () => staleRead.resolve({ ok: true, records: [] }));
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('does not append a record twice when its invalidation refetch wins the create-response race', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const createResponse = deferred<{ ok: true; contentRevision: number }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [],
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    saveRecordToDB.mockReturnValueOnce(createResponse.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    const channel = await waitFor(() => {
+      const found = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(saveRecordToDB).toHaveBeenCalledTimes(1));
+    const inserted = saveRecordToDB.mock.calls[0]?.[0] as {
+      id: string; userId: string; isPrivate: boolean; log: string;
+    };
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: true,
+      records: [{ ...inserted, contentRevision: 1 }] as never,
+    });
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(inserted.id));
+
+    await act(async () => createResponse.resolve({ ok: true, contentRevision: 1 }));
+    await waitFor(() => expect(lastMediaResult?.ok).toBe(true));
+    expect(screen.getByTestId('records').textContent?.split(',')).toEqual([inserted.id]);
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+  });
+
+  it('does not let an in-flight records read undo a successful record update', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const original = {
+      id: 'record-1', userId: 'user-a', date: '2026-08-01', time: '12:00',
+      authorRole: 'gomsin', log: '수정 전 기록', isPrivate: false, createdAt: '2026-08-01T03:00:00Z',
+      contentRevision: 1,
+    };
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [original] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+    saveRecordToDB.mockResolvedValueOnce({ ok: true, contentRevision: 2 });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('수정 전 기록'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('update-first-record').click());
+    await waitFor(() => expect(screen.getByTestId('logs')).toHaveTextContent('수정된 최신 기록'));
+    await act(async () => staleRead.resolve({ ok: true, records: [original] as never }));
+    expect(screen.getByTestId('logs')).toHaveTextContent('수정된 최신 기록');
+    expect(screen.getByTestId('logs')).not.toHaveTextContent('수정 전 기록');
+  });
+
+  it('does not let an in-flight records read resurrect a successfully deleted record', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const original = {
+      id: 'record-1', userId: 'user-a', date: '2026-08-01', time: '12:00',
+      authorRole: 'gomsin', log: '삭제할 기록', isPrivate: false, createdAt: '2026-08-01T03:00:00Z',
+      contentRevision: 1,
+    };
+    const staleRead = deferred<{ ok: true; records: never[] }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [original] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockReturnValueOnce(staleRead.promise);
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-1'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+
+    await act(async () => screen.getByText('delete-first-record').click());
+    await waitFor(() => expect(screen.getByTestId('records')).not.toHaveTextContent('record-1'));
+    await act(async () => staleRead.resolve({ ok: true, records: [original] as never }));
+    expect(screen.getByTestId('records')).not.toHaveTextContent('record-1');
+  });
+
+  it('removes a shared record only after the RLS-visible authoritative refresh returns no row', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-shared', userId: 'partner-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-shared'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'UPDATE',
+    );
+    fetchRecordsResultFromDB.mockResolvedValueOnce({ ok: true, records: [] });
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(''));
+  });
+
   it('does not append an event saved for account A after switching to account B', async () => {
     let resolveSave!: (value: unknown) => void;
     saveEventToDB.mockReturnValue(new Promise((resolve) => { resolveSave = resolve; }));
@@ -1000,18 +2683,21 @@ describe('StoreProvider auth lifecycle', () => {
     render(<StoreProvider><Probe /></StoreProvider>);
     await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
     await act(async () => emitAuth('SIGNED_IN', 'user-a'));
-    await waitFor(() => expect(mockSupabase.rpc).toHaveBeenCalledTimes(1));
+    const partnerPollCount = () => mockSupabase.rpc.mock.calls.filter(
+      ([name]) => name === 'get_partner_profile',
+    ).length;
+    await waitFor(() => expect(partnerPollCount()).toBe(1));
     expect(mockSupabase.channel).not.toHaveBeenCalled();
 
     await act(async () => {
       screen.getByText('disconnect').click();
     });
     await waitFor(() => expect(screen.getByTestId('couple')).toHaveTextContent('none'));
-    const callsAfterDisconnect = mockSupabase.rpc.mock.calls.length;
+    const callsAfterDisconnect = partnerPollCount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(120_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterDisconnect);
+    expect(partnerPollCount()).toBe(callsAfterDisconnect);
   });
 
   it('replaces the active couple channel when the authenticated account changes', async () => {
@@ -1042,6 +2728,169 @@ describe('StoreProvider auth lifecycle', () => {
     await act(async () => emitAuth('SIGNED_IN', 'user-b'));
     await waitFor(() => expect(mockSupabase.channel).toHaveBeenCalledWith('couple-sync:couple-b'));
     expect(mockSupabase.removeChannel).toHaveBeenCalledWith(firstChannel);
+  });
+
+  describe('paired photo creation', () => {
+    let prepared: PreparedRecordPhotoRenditions;
+    const journalEntries = () => listRecordMediaMutationJournalEntries(
+      'user-a', getOrCreateRecordMediaMutationOwnerToken()!,
+    );
+
+    beforeEach(() => {
+      callOrder.length = 0;
+      lastMediaResult = null;
+      sessionStorage.clear();
+      uploadRecordMedia.mockClear();
+      saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+        callOrder.push('saveRecord');
+        const intent = args[3] as { expectedRevision?: number };
+        return { ok: true, contentRevision: (intent?.expectedRevision ?? 0) + 1 };
+      });
+      getRecordPhotoRenditionCapability.mockImplementation(async () => {
+        callOrder.push('capability');
+        expect(journalEntries()).toEqual([]);
+        return { ok: true, supported: true };
+      });
+      prepared = {
+        screenMaster: {
+          file: new File(['master'], 'photo.jpg', { type: 'image/jpeg' }),
+          widthPx: 2048, heightPx: 1536, byteSize: 6, sha256: 'a'.repeat(64),
+        },
+        thumbnail: {
+          file: new File(['thumb'], 'photo.jpg', { type: 'image/jpeg' }),
+          widthPx: 640, heightPx: 480, byteSize: 5, sha256: 'b'.repeat(64),
+        },
+      };
+      prepareRecordPhotoRenditions.mockImplementation(async () => {
+        callOrder.push('prepare');
+        expect(journalEntries()).toEqual([]);
+        return prepared;
+      });
+      beginRecordPhotoMutation.mockImplementation(async (request: RecordPhotoMutationRequest) => {
+        callOrder.push('beginPhoto');
+        const entries = journalEntries();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+          operationId: request.operationId, userId: request.userId,
+          coupleId: request.coupleId, recordId: request.recordId,
+        });
+        expect(Object.keys(entries[0]).sort()).toEqual([
+          'coupleId', 'createdAtMs', 'operationId', 'ownerToken', 'recordId', 'userId', 'version',
+        ]);
+        return { ok: true, state: 'pending', targetContentRevision: request.baseContentRevision + 1 };
+      });
+      uploadRecordPhotoRendition.mockImplementation(async (
+        _rendition: unknown, kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => {
+        callOrder.push(kind);
+        return { attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } };
+      });
+      fetchFullStateFromDB.mockResolvedValue(serverState({
+        profile: {
+          myName: '춘향', role: 'gomsin',
+          couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+          military: {} as never, contact: {} as never,
+        } as never,
+      }));
+    });
+
+    async function createPhotos(files: File[], allOrNothingMedia = true) {
+      render(<StoreProvider><Probe files={files} allOrNothingMedia={allOrNothingMedia} /></StoreProvider>);
+      await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+      await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+      await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+      await act(async () => screen.getByText('post').click());
+      await waitFor(() => expect(lastMediaResult).not.toBeNull());
+    }
+
+    it('creates the row, reserves opaque paired IDs, uploads both exact prepared files and publishes only the master by CAS', async () => {
+      const original = new File(['original'], 'private-original.png', { type: 'image/png' });
+      await createPhotos([original]);
+
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: [] });
+      expect(callOrder).toEqual(['saveRecord', 'capability', 'prepare', 'beginPhoto', 'screen_master', 'thumbnail', 'saveRecord']);
+      expect(prepareRecordPhotoRenditions).toHaveBeenCalledWith(original, expect.any(Function));
+      const request = beginRecordPhotoMutation.mock.calls[0][0] as RecordPhotoMutationRequest;
+      const pair = request.newPhotos[0];
+      expect(request).toMatchObject({ userId: 'user-a', coupleId: 'couple-1', baseContentRevision: 1, existingPaths: [] });
+      expect(pair.screenMaster).toMatchObject({ widthPx: 2048, heightPx: 1536, byteSize: 6, sha256: 'a'.repeat(64) });
+      expect(pair.thumbnail).toMatchObject({ widthPx: 640, heightPx: 480, byteSize: 5, sha256: 'b'.repeat(64) });
+      expect(pair.thumbnail.mediaObjectId).not.toBe(pair.screenMaster.mediaObjectId);
+      expect(uploadRecordPhotoRendition.mock.calls.map((call) => [call[1], call[4]])).toEqual([
+        ['screen_master', pair.screenMaster.mediaObjectId], ['thumbnail', pair.thumbnail.mediaObjectId],
+      ]);
+      expect(uploadRecordPhotoRendition.mock.calls[0][0]).toBe(prepared.screenMaster);
+      expect(uploadRecordPhotoRendition.mock.calls[1][0]).toBe(prepared.thumbnail);
+      const saved = saveRecordToDB.mock.calls.map((call) => call[0] as DailyRecord);
+      expect(saved).toHaveLength(2);
+      expect(saved[0]).toMatchObject({ isPrivate: true });
+      expect(saved[0].attachments).toBeUndefined();
+      expect(saved[1]).toMatchObject({ isPrivate: false, isProfilePost: true, log: '오늘의 기록' });
+      expect(saved[1].attachments).toEqual([{
+        type: 'photo', name: 'photo.jpg', path: `couple-1/${request.recordId}/${pair.screenMaster.mediaObjectId}.jpg`,
+      }]);
+      expect(saveRecordToDB.mock.calls[1][3]).toEqual({ kind: 'update', expectedRevision: 1, mediaOperationId: request.operationId });
+      expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+      expect(journalEntries()).toEqual([]);
+    });
+
+    it('keeps the staged row private and abandons the pair when the thumbnail is denied', async () => {
+      uploadRecordPhotoRendition.mockImplementationOnce(async (
+        _rendition: unknown, _kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => ({ attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } }))
+        .mockResolvedValueOnce({ error: 'denied', reason: 'forbidden' });
+      await createPhotos([new File(['x'], 'new.png', { type: 'image/png' })]);
+
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'forbidden' });
+      expect(uploadRecordPhotoRendition).toHaveBeenCalledTimes(2);
+      expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+      expect(abandonRecordMediaMutation).toHaveBeenCalledWith(expect.objectContaining({
+        operationId: beginRecordPhotoMutation.mock.calls[0][0].operationId,
+      }));
+      expect(screen.getByTestId('privacy')).toHaveTextContent('private');
+      expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+      expect(screen.getByTestId('attachments')).toBeEmptyDOMElement();
+      expect(journalEntries()).toEqual([]);
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+    });
+
+    it('does not begin or fall back when capability fails after the initial row save', async () => {
+      getRecordPhotoRenditionCapability.mockResolvedValueOnce({ ok: false, reason: 'server' });
+      await createPhotos([new File(['x'], 'new.png', { type: 'image/png' })]);
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['new.png'], reason: 'server' });
+      expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+      expect(prepareRecordPhotoRenditions).not.toHaveBeenCalled();
+      expect(beginRecordPhotoMutation).not.toHaveBeenCalled();
+      expect(beginRecordMediaMutation).not.toHaveBeenCalled();
+      expect(uploadRecordMedia).not.toHaveBeenCalled();
+      expect(uploadRecordPhotoRendition).not.toHaveBeenCalled();
+      expect(journalEntries()).toEqual([]);
+    });
+
+    it('keeps the first complete pair when a later file fails in ordinary partial-success creation', async () => {
+      uploadRecordPhotoRendition.mockImplementation(async (
+        _rendition: unknown, _kind: string, coupleId: string, recordId: string, objectId: string,
+      ) => uploadRecordPhotoRendition.mock.calls.length === 4
+        ? { error: 'denied', reason: 'forbidden' }
+        : { attachment: { type: 'photo', name: 'photo.jpg', path: `${coupleId}/${recordId}/${objectId}.jpg` } });
+      await createPhotos([
+        new File(['1'], 'first.png', { type: 'image/png' }),
+        new File(['2'], 'second.png', { type: 'image/png' }),
+      ], false);
+      expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['second.png'], reason: 'forbidden' });
+      expect(beginRecordPhotoMutation.mock.calls.map(([request]) => request.baseContentRevision)).toEqual([1, 2]);
+      expect(uploadRecordPhotoRendition).toHaveBeenCalledTimes(4);
+      expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+      const first = beginRecordPhotoMutation.mock.calls[0][0] as RecordPhotoMutationRequest;
+      const firstPath = `couple-1/${first.recordId}/${first.newPhotos[0].screenMaster.mediaObjectId}.jpg`;
+      expect(beginRecordPhotoMutation.mock.calls[1][0].existingPaths).toEqual([firstPath]);
+      expect((saveRecordToDB.mock.calls[1][0] as DailyRecord).attachments).toEqual([
+        { type: 'photo', name: 'photo.jpg', path: firstPath },
+      ]);
+      expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+      expect(journalEntries()).toEqual([]);
+    });
   });
 
   it('saves the record row before uploading media (storage RLS requires it)', async () => {
@@ -1088,8 +2937,15 @@ describe('StoreProvider auth lifecycle', () => {
     expect(callOrder).toContain('upload:first.png');
     expect(callOrder).toContain('upload:second.png');
     expect(callOrder.indexOf('saveRecord')).toBeLessThan(callOrder.indexOf('upload:first.png'));
-    // A second save patches the row with the attachment metadata.
-    expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(2);
+    // Normal partial-success mode commits one bounded media revision per file.
+    expect(callOrder.filter((c) => c === 'saveRecord')).toHaveLength(3);
+    expect(beginRecordMediaMutation.mock.calls.slice(-2).map(([request]) => ({
+      base: (request as { baseContentRevision: number }).baseContentRevision,
+      uploads: (request as { newMediaIds: string[] }).newMediaIds.length,
+    }))).toEqual([
+      { base: 1, uploads: 1 },
+      { base: 2, uploads: 1 },
+    ]);
     expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
   });
 
@@ -1131,12 +2987,55 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('privacy')).toHaveTextContent('public');
   });
 
-  it('keeps uploaded media when the attachment patch response is lost and read-back confirms commit', async () => {
+  it('returns truthful partial success when media begin fails after the staged profile row exists', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockResolvedValue({ ok: true, contentRevision: 1 });
+    beginRecordMediaMutation.mockResolvedValueOnce({ ok: false, reason: 'server' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({ ok: true, state: 'unavailable' });
+    uploadRecordMedia.mockClear();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[new File(['a'], 'post.png', { type: 'image/png' })]} allOrNothingMedia />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({
+      ok: true,
+      failedFiles: ['post.png'],
+      reason: 'server',
+      recordId: expect.any(String),
+    });
+    expect(saveRecordToDB).toHaveBeenCalledTimes(1);
+    expect(uploadRecordMedia).not.toHaveBeenCalled();
+    expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
+    expect(screen.getByTestId('privacy')).toHaveTextContent('private');
+  });
+
+  it('keeps uploaded media when the attachment patch response is lost and operation status confirms commit', async () => {
     callOrder.length = 0;
-    removeRecordMedia.mockClear();
     saveRecordToDB.mockReset()
       .mockResolvedValueOnce({ ok: true, contentRevision: 1 })
       .mockResolvedValueOnce({ ok: false, reason: 'offline' });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
     fetchFullStateFromDB.mockResolvedValue(
       serverState({
         profile: {
@@ -1148,13 +3047,6 @@ describe('StoreProvider auth lifecycle', () => {
         } as never,
       }),
     );
-    fetchRecordsResultFromDB.mockImplementation(async () => {
-      const intended = saveRecordToDB.mock.calls[1]?.[0] as DailyRecord | undefined;
-      return {
-        ok: true,
-        records: intended ? [{ ...intended, userId: 'user-a', contentRevision: 2 }] : [],
-      };
-    });
 
     render(
       <StoreProvider>
@@ -1169,7 +3061,8 @@ describe('StoreProvider auth lifecycle', () => {
 
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual([]);
-    expect(removeRecordMedia).not.toHaveBeenCalled();
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
     expect(screen.getByTestId('attachments')).toHaveTextContent('post.png');
   });
 
@@ -1385,7 +3278,186 @@ describe('StoreProvider auth lifecycle', () => {
     // Text survived, the failure is surfaced to the caller instead of silently swallowed.
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual(['broken.png']);
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([0]);
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
+  });
+
+  it('preserves successful normal-composer files without reviving an abandoned failed id', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+      callOrder.push('saveRecord');
+      const intent = args[3] as { kind: 'create' | 'update'; expectedRevision?: number };
+      return {
+        ok: true as const,
+        contentRevision: intent.kind === 'create' ? 1 : (intent.expectedRevision ?? 1) + 1,
+      };
+    });
+    uploadRecordMedia.mockReset().mockImplementation(async (
+      file: File,
+      coupleId?: string,
+      recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => {
+      callOrder.push(`upload:${file.name}`);
+      return file.name === 'broken.png'
+        ? { error: '파일을 올리지 못했어요.', reason: 'server' as const }
+        : {
+            attachment: {
+              type: 'photo' as const,
+              name: file.name,
+              path: `${coupleId}/${recordId}/${objectId}.png`,
+            },
+          };
+    });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'good.png', { type: 'image/png' }),
+          new File(['b'], 'broken.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['broken.png'] });
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([1]);
+    expect(screen.getByTestId('attachments')).toHaveTextContent('good.png');
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { baseContentRevision: number }).baseContentRevision
+    ))).toEqual([1, 2]);
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { newMediaIds: string[] }).newMediaIds.length
+    ))).toEqual([1, 1]);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports only the unfinished normal-composer files after a later begin is refused', async () => {
+    lastMediaResult = null;
+    saveRecordToDB.mockReset().mockImplementation(async (...args: unknown[]) => {
+      const intent = args[3] as { kind: 'create' | 'update'; expectedRevision?: number };
+      return {
+        ok: true as const,
+        contentRevision: intent.kind === 'create' ? 1 : (intent.expectedRevision ?? 1) + 1,
+      };
+    });
+    beginRecordMediaMutation
+      .mockImplementationOnce(async (request: { baseContentRevision: number }) => ({
+        ok: true as const,
+        state: 'pending' as const,
+        targetContentRevision: request.baseContentRevision + 1,
+      }))
+      .mockResolvedValueOnce({ ok: false, reason: 'forbidden' });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'committed.png', { type: 'image/png' }),
+          new File(['b'], 'unfinished.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({
+      ok: true,
+      failedFiles: ['unfinished.png'],
+      reason: 'forbidden',
+    });
+    expect(lastMediaResult).not.toHaveProperty('retryableFailedFileIndexes');
+    expect(uploadRecordMedia.mock.calls.map(([file]) => (file as File).name))
+      .toEqual(['committed.png']);
+    expect(saveRecordToDB).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId('attachments')).toHaveTextContent('committed.png');
+    expect(screen.getByTestId('attachments')).not.toHaveTextContent('unfinished.png');
+  });
+
+  it('continues normal-composer sequencing after response-loss status confirms a file commit', async () => {
+    callOrder.length = 0;
+    lastMediaResult = null;
+    saveRecordToDB.mockReset()
+      .mockResolvedValueOnce({ ok: true, contentRevision: 1 })
+      .mockResolvedValueOnce({ ok: false, reason: 'offline' })
+      .mockResolvedValueOnce({ ok: true, contentRevision: 3 });
+    getRecordMediaMutationStatus.mockResolvedValueOnce({
+      ok: true,
+      state: 'committed',
+      targetContentRevision: 2,
+    });
+    uploadRecordMedia.mockReset().mockImplementation(async (
+      file: File,
+      coupleId?: string,
+      recordId?: string,
+      _displayName?: string,
+      objectId?: string,
+    ) => ({
+      attachment: {
+        type: 'photo' as const,
+        name: file.name,
+        path: `${coupleId}/${recordId}/${objectId}.png`,
+      },
+    }));
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      profile: {
+        myName: '춘향',
+        role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never,
+        contact: {} as never,
+      } as never,
+    }));
+
+    render(
+      <StoreProvider>
+        <Probe files={[
+          new File(['a'], 'first.png', { type: 'image/png' }),
+          new File(['b'], 'second.png', { type: 'image/png' }),
+        ]} />
+      </StoreProvider>,
+    );
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => screen.getByText('post').click());
+    await waitFor(() => expect(lastMediaResult).not.toBeNull());
+
+    expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: [] });
+    expect(screen.getByTestId('attachments')).toHaveTextContent('first.png');
+    expect(screen.getByTestId('attachments')).toHaveTextContent('second.png');
+    expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
+      (request as { baseContentRevision: number }).baseContentRevision
+    ))).toEqual([1, 2]);
+    expect(getRecordMediaMutationStatus).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).not.toHaveBeenCalled();
   });
 
   it('post mode rolls back successful media when any file fails and returns the same row id', async () => {
@@ -1437,10 +3509,10 @@ describe('StoreProvider auth lifecycle', () => {
 
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual(['good.png', 'broken.png']);
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([0, 1]);
     expect(lastMediaResult?.recordId).toBeTruthy();
-    expect(removeRecordMedia).toHaveBeenCalledWith([
-      expect.stringContaining('/good.png'),
-    ]);
+    expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
+    expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('logs')).toHaveTextContent('오늘의 기록');
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
     expect((saveRecordToDB.mock.calls[0]?.[0] as DailyRecord).isPrivate).toBe(true);
@@ -1645,7 +3717,11 @@ describe('StoreProvider auth lifecycle', () => {
     const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
 
     // Set up mocks for the HTTP recovery path BEFORE triggering the error
-    mockSupabase.rpc.mockReset().mockResolvedValue({ data: 'couple-1', error: null });
+    mockSupabase.rpc.mockReset().mockImplementation(async (name: string) => (
+      name === 'is_my_account_deletion_pending'
+        ? { data: false, error: null }
+        : { data: 'couple-1', error: null }
+    ));
     fetchRecordsResultFromDB.mockResolvedValue({
       ok: true,
       records: [{ id: 'rec-recovered', date: '2026-07-31', time: '12:00', userId: 'user-a', log: 'recovered', isPrivate: false, createdAt: 'x' }],
@@ -1665,51 +3741,54 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(screen.getByTestId('syncStatus')).toHaveTextContent('delayed'));
     expect(screen.getByTestId('records')).toHaveTextContent('rec-recovered');
 
-    const callsAfterFirstRecovery = mockSupabase.rpc.mock.calls.length;
+    const recoveryReadCount = () => mockSupabase.rpc.mock.calls.filter(
+      ([name]) => name === 'get_my_active_couple_id',
+    ).length;
+    const callsAfterFirstRecovery = recoveryReadCount();
     await act(async () => {
       // The next poll must back off to 4 seconds. The old implementation reset
       // after every successful HTTP read and hit all shared endpoints every 2s.
       await vi.advanceTimersByTimeAsync(2_500);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 1);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(7_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 1);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 1);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 2);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(15_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 2);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 2);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 3);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(29_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 3);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 3);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 4);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 4);
 
     // The cap remains 30 seconds for subsequent recovery polls.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
-    expect(mockSupabase.rpc).toHaveBeenCalledTimes(callsAfterFirstRecovery + 5);
+    expect(recoveryReadCount()).toBe(callsAfterFirstRecovery + 5);
   });
 
   it('does not blank the timeline on foreground return', async () => {
@@ -1770,14 +3849,20 @@ describe('profile persistence acknowledgement', () => {
   });
 
   beforeEach(() => {
+    installTestWebLocks();
     authCallbacks.length = 0;
     createdChannels.length = 0;
     localStorage.clear();
     fetchFullStateFromDB.mockReset().mockResolvedValue(profileState());
+    fetchFullStateResultFromDB.mockReset().mockImplementation(defaultFetchFullStateResult);
     fetchRecordsResultFromDB.mockReset().mockResolvedValue({ ok: true, records: [] });
     mockSupabase.profileUpdateError = null;
     mockSupabase.profileUpdateMatched = true;
     saveCoupleAnniversary.mockReset().mockResolvedValue(true);
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
   });
 
   it('keeps the confirmed local profile when the server update fails', async () => {
@@ -1820,7 +3905,11 @@ describe('profile persistence acknowledgement', () => {
       screen.getByText('clear-anniversary').click();
     });
 
-    await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith('couple-1', null));
+    await waitFor(() => expect(saveCoupleAnniversary).toHaveBeenCalledWith(
+      'couple-1',
+      null,
+      expect.objectContaining({ userId: 'user-a', mode: 'shared' }),
+    ));
     await waitFor(() => expect(screen.getByTestId('anniversary')).toHaveTextContent('none'));
   });
 
@@ -1838,6 +3927,76 @@ describe('profile persistence acknowledgement', () => {
       username: 'foo_bar',
       profile_caption: '오늘도 함께',
       profile_date_type: 'meeting',
+    });
+  });
+
+  it('persists an optional gender and erases it with SQL NULL before updating local state', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('none'));
+
+    await act(async () => {
+      screen.getByText('set-gender').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('woman'));
+    expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({ gender_identity: 'woman' });
+
+    await act(async () => {
+      screen.getByText('clear-gender').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('gender')).toHaveTextContent('none'));
+    expect(mockSupabase.lastProfileUpdatePayload).toMatchObject({ gender_identity: null });
+  });
+
+  it('hydrates with stored valid locale and sets html lang', async () => {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ locale: 'en' }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+    expect(document.documentElement.lang).toBe('en');
+  });
+
+  it('uses browser English preference on first run when no stored locale exists', async () => {
+    const origLanguages = navigator.languages;
+    Object.defineProperty(navigator, 'languages', { value: ['en-US', 'en'], configurable: true });
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('en');
+    expect(document.documentElement.lang).toBe('en');
+    Object.defineProperty(navigator, 'languages', { value: origLanguages, configurable: true });
+  });
+
+  it('rejects invalid stored locale and falls back to default', async () => {
+    const origLanguages = navigator.languages;
+    Object.defineProperty(navigator, 'languages', { value: ['fr-FR'], configurable: true });
+    localStorage.setItem(STORE_KEY, JSON.stringify({ locale: 'unsupported-xyz' }));
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('INITIAL_SESSION', null));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    expect(screen.getByTestId('locale')).toHaveTextContent('ko');
+    expect(document.documentElement.lang).toBe('ko');
+    Object.defineProperty(navigator, 'languages', { value: origLanguages, configurable: true });
+  });
+
+  it('setLocale updates state, html lang, and persists via device preferences save flow', async () => {
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('ready')).toHaveTextContent('ready'));
+    await act(async () => {
+      screen.getByText('set-locale-en').click();
+    });
+    await waitFor(() => expect(screen.getByTestId('locale')).toHaveTextContent('en'));
+    expect(document.documentElement.lang).toBe('en');
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(STORE_KEY) || '{}');
+      expect(stored.locale).toBe('en');
     });
   });
 });

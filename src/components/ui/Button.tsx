@@ -16,9 +16,9 @@ import { cn } from '@/lib/utils';
  *     measured-readable pink pair. DESIGN_V2 §3.2 allows ONE primary per screen.
  *     `--coral-strong` is the darker sibling for coral INK on a card; a fill light
  *     enough to look pink measures 2.00:1 as text, which is why they are separate.
- *   - `lg` paints the 48px primary CTA, `md` the 40-44px ordinary control, and
- *     `sm` a 36px compact control whose hit area is still 44px -- so a tap target
- *     cannot be lost by choosing a size (WCAG 2.5.5, and 표면·컨트롤 규칙).
+ *   - `lg` paints the 48px primary CTA; `md` and `sm` both keep a physical 44px
+ *     control. Compactness comes from padding and type, never from a hit area
+ *     painted behind another surface (WCAG 2.5.5, and 표면·컨트롤 규칙).
  *   - the label is text. An icon-only button must pass `aria-label`, which is why
  *     `children` is required and `aria-label` is surfaced in the type.
  *   - no palette literal appears here; src/lib/themeTokens.test.ts guards it.
@@ -46,24 +46,20 @@ const VARIANT: Record<Variant, string> = {
 };
 
 /**
- * Visual height, and separately the hit target.
+ * Visual hierarchy without shrinking the physical hit target.
  *
  * DESIGN_V2 (2026-08-08) 표면·컨트롤 규칙: primary CTA paints at 48px, an ordinary
  * control at 40-44px, and EVERY control keeps a 44px hit target. Those two
  * numbers used to be the same number, which is why the old `md` at 44px and `lg`
  * at 52px made a screen of four buttons look like a remote control.
  *
- * `sm` is how the two are separated. It paints 36px and grows its own hit area to
- * 44px with a `::before` overlay, so a compact chip-height control is still legal
- * under WCAG 2.5.5. The overlay is inset horizontally by zero and vertically by
- * -4px, i.e. 36 + 4 + 4 = 44, and it is `-z-10` so it never covers the label.
+ * `sm` used to paint 36px and rely on a negative-z-index pseudo-element for the
+ * remaining 8px. Real-browser hit testing showed surrounding paper surfaces can
+ * sit above that pseudo-element, leaving only a 36-42px target. Both compact
+ * sizes therefore occupy 44px; `sm` remains quieter through narrower padding.
  */
 const SIZE: Record<Size, string> = {
-  sm: [
-    'min-h-9 px-3 text-label',
-    'relative isolate',
-    "before:absolute before:content-[''] before:inset-x-0 before:-inset-y-1 before:-z-10",
-  ].join(' '),
+  sm: 'min-h-11 px-3 text-label',
   md: 'min-h-11 px-4 text-label',
   lg: 'min-h-12 px-5 text-emphasis',
 };

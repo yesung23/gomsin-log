@@ -1,4 +1,5 @@
 import Foundation
+import CoreFoundation
 import Capacitor
 
 /// The Capacitor bridge for `OnDeviceSummary`.
@@ -11,10 +12,11 @@ import Capacitor
 /// ## Input validation is a contract check, not defensive noise
 ///
 /// The web side promises exactly three things about `items`: two fields per
-/// entry, indices that are `0..n-1` in ascending order, and text within the
-/// 40-character bound. All three are re-checked here. If the bridge accepted a
-/// looser payload, a future caller could send a longer line or an arbitrary
-/// index and the only evidence would be in the model's output.
+/// entry, indices that are `0..n-1` in ascending order, and source text within
+/// the 120-UTF-16-unit bound. All three are re-checked here. Generated excerpts
+/// have a separate 40-unit bound. If the bridge accepted a looser payload, a
+/// future caller could send a longer source or an arbitrary index and the only
+/// evidence would be in the model's output.
 ///
 /// ## Logging
 ///
@@ -106,7 +108,9 @@ public class GomsinlogOnDeviceSummaryPlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - Boundary helpers
 
-    /// The three promises the web side makes about `items`, re-checked.
+    /// The three promises the web side makes about `items`, re-checked. Source
+    /// text is bounded at 120 UTF-16 units; the generated excerpt has its own
+    /// 40-unit bound in the Foundation Models path.
     ///
     /// Rejects the call and returns `nil` on any violation, naming WHICH promise
     /// broke in a message that contains no user text.
@@ -126,19 +130,22 @@ public class GomsinlogOnDeviceSummaryPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("items entry must be an object", "E_BAD_REQUEST")
                 return nil
             }
-            // Capacitor hands JSON numbers over as `Int` or `NSNumber` depending
-            // on the value; accept both rather than depending on which.
-            let index = (entry["index"] as? Int) ?? (entry["index"] as? NSNumber)?.intValue
-            guard let index, let text = entry["text"] as? String else {
+            guard Set(entry.keys) == Set(["index", "text"]) else {
+                call.reject("items entry must contain only index and text", "E_BAD_REQUEST")
+                return nil
+            }
+            // JSON numbers arrive as NSNumber. Compare the exact numeric value
+            // instead of using `intValue`, which would silently turn 0.5 into 0.
+            // CFBoolean is also an NSNumber subclass, so reject it explicitly.
+            guard let indexNumber = entry["index"] as? NSNumber,
+                  CFGetTypeID(indexNumber) != CFBooleanGetTypeID(),
+                  indexNumber.doubleValue == Double(parsed.count),
+                  let text = entry["text"] as? String else {
                 call.reject("items entry must carry index and text", "E_BAD_REQUEST")
                 return nil
             }
-            // Ordinal and ascending, so the model cannot be handed a gap to fill.
-            guard index == parsed.count else {
-                call.reject("items index must be ordinal and ascending", "E_BAD_REQUEST")
-                return nil
-            }
-            guard !text.isEmpty, text.utf16.count <= OnDeviceSummary.maxLineCharacters else {
+            let index = parsed.count
+            guard !text.isEmpty, text.utf16.count <= OnDeviceSummary.maxSourceCharacters else {
                 call.reject("items text is outside the length contract", "E_BAD_REQUEST")
                 return nil
             }

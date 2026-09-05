@@ -22,12 +22,12 @@ name: master validation
 # The gates are the same ones proven for the integration branch, in the same
 # order, so a green run here means what the other workflows' green runs mean.
 #
-# Everything is read-only:
+# Repository and production access remain read-only:
 #   - `permissions: contents: read` at workflow scope, inherited by every job.
 #   - No secret is referenced. The Supabase values are public placeholders, shaped
 #     like a URL and an anon key; neither points at a real project.
 #   - No deploy, merge, migration, Supabase configuration, signing or store step.
-#   - No artifact upload, so this workflow publishes nothing whatsoever.
+#   - Failed browser tests retain only synthetic test results as an artifact for one day.
 #   - `persist-credentials: false` on every checkout.
 #   - Third-party actions are pinned by full commit SHA.
 
@@ -242,10 +242,17 @@ jobs:
           # placeholders above and intercepts every Supabase call per browser
           # context. No real project is contacted and no credential is needed.
           #
-          # Failures are diagnosed from this job's own log on purpose: uploading a
-          # report artifact is deliberately NOT done here, so this workflow
-          # publishes nothing at all.
+          # Failed browser results are retained for one day by the next step.
           npm run test:e2e
+
+      - name: Retain failed browser test evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-failure-test-results
+          path: e2e/.artifacts/test-results
+          retention-days: 1
+          include-hidden-files: false
 
   deno-edge:
     name: Deno Edge Function validation

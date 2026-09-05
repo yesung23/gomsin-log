@@ -274,7 +274,7 @@ function DiaryRecord({ record, coupleId, layout }: {
         : '이 기기의 열쇠로는 읽을 수 없어요'}
     </p>
   ) : body ? (
-    <p className="hand-text whitespace-pre-wrap break-keep text-body" style={{ color: 'var(--ink)' }}>
+    <p className="hand-text record-copy whitespace-pre-wrap break-keep [overflow-wrap:anywhere]" style={{ color: 'var(--ink)' }}>
       {body}
     </p>
   ) : null;

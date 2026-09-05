@@ -82,6 +82,11 @@
  */
 @import "../fonts/hand/hand.css";
 
+/* The face scales its glyphs by 120%: browser measurement at a 17px em found
+ * Korean ink height of 12.78px versus Pretendard's 15.23px. Keep this optical
+ * correction in the face, so named sizes, line spacing and the sans fallback
+ * stay unchanged. scripts/fonts/build_hand_font.py preserves it on rebuild. */
+
 /* 노트에 그린 인스타그램의 표면. 옛 토큰을 지우지 않고 더해지는 층이다. */
 @import "./paper.css";
 

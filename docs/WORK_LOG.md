@@ -9,6 +9,337 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-06 — Apple caller lifecycle M1 확인·좁은 교정 배정
+
+- PLAN POSITION: predesign Apple final DELTA HOLD. Product/Engineering/Current State와 기존 master-first 지시 유지; business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: `7d8805d` + Apple WIP. Boyle SolMax readonly C0/H0/M1/L0; Meitner SolMax sole4file worker. Parent source 수정 없음.
+- VERIFIED: 부모 SQL430 duplicate/459 no-token finalizer 읽기 확인. 호출 당시 lifecycle 증거가 없어 새 terminal 이후 옛 완료가 성공으로 해석될 수 있음. 이전 provider/ACL finding CLOSED.
+- REVIEW IMPACT: Apple DELTA required, 기존 green test가 누락 경합을 증명하지 않음. 사진 commit 보존.
+- NEXT: 두 실제 PG 재현 RED→caller fence 수정→focused GREEN→동결 독립 리뷰. 그전 Apple commit/master/remote 진행하지 않음.
+- PRODUCTION: NOT APPLIED. 자동배포 일시중단 사용자 선택 대기, Book untouched.
+- 상세: [Apple caller lifecycle HOLD](../control-tower/reports/codex/2026-09-06_apple-caller-lifecycle-hold_codex.md).
+- 교정 반환: Meitner4파일 동결·종료. 부모4hash 일치, 실제 PG180PASS 및 Edge39PASS/0FAIL 재실행. Boyle 동일 M1 DELTA 재검토 시작, 판정 pending. 전체UI 재실행 없음; parent source 수정/commit/push/Production 없음.
+- 최종 판정: Boyle **M1 CLOSED / Spec·Quality PASS / C/H/M/L0**, 종료. named stage/stat/check 후 DB2파일 `c2785690c61f1b137aaa5c15dade5c5bf5cdfae7`, server13파일 `abd5909bdd9508a4e46f8ecc4d47a510957b2f47` 로컬 커밋. 검토된 source bytes 변경 없음(패키징), 상세 report 최상단이 최신. master/push/Production/새Home 미적용, 자동배포 안전 선택 대기.
+
+## 2026-09-06 — 동결 소스 사진 브라우저 8PASS·최종 통합 검증
+
+- PLAN POSITION: predesign master 전 통합; 기존 photo 독립 review PASS, 이번 browser gate PASS.
+- DIRECTION CHECK: 기존 V5/Engineering/Current State와 master-first 승인 유지; 사업 변경 없음, conflict NO.
+- OWNERSHIP: parent source/test 수정 없음; Apple writer 반환, Sol Max Boyle read-only DELTA; Astra Nietzsche browser.
+- BASE/HEAD: `676eda2d3ad1b4ddbeaa901cd90ea92d766cd5f9` + frozen WIP, stage/commit/push 없음.
+- VERIFICATION: 부모 raw JSON 직접 확인: 기존 mediaGallery 8PASS/0FAIL/0SKIP/0flaky, trace OFF, 30.835초. 최초 trace ON timeout 증거 보존. 전체 ESLint exit0, diff-check PASS. 전체 Vitest 진행 중으로 PASS 주장 없음.
+- REVIEW IMPACT: 사진 소스 변경 없음; Apple 4파일 hash 보고서와 일치, DELTA pending.
+- BLOCKERS/REMAINING: Apple review·전체 회귀·master 배포 영향 해결. 새 Home 및 remote/device 검증 미완료.
+- PRODUCTION: 이번 checkpoint NOT APPLIED. 다음 owner parent; 통합 게이트 충족 전 push하지 않음.
+- 상세/복구: [동결 통합 검증](../control-tower/reports/codex/2026-09-06_frozen-integration-verification_codex.md).
+- 최종 갱신: 부모 전체 Vitest **363파일/6181PASS/2SKIP/0FAIL**, 320.19초; 실제 local PG160assertions PASS. 사진15파일 staged검사 후 `7d8805db87bc060c455e576ff13057f8c28b0384` 커밋. Apple cors test 제외, Apple4hash 동일. source byte 변경 없는 packaging이며 Apple 독립 reviewer에게 HEAD 변경 전달. master/push/Production 없음.
+- 추가 부모 검증: Edge36PASS/0FAIL. 첫 잘못된 테스트 파일 경로 import 실패는 report에 기록하고 실제 파일로 교정. Vercel Automatic/no checks 재확인; 자동배포 일시중단을 통한 코드/공개 분리 제안, 설정은 아직 미변경. Apple reviewer live 대기.
+
+## 2026-09-06 — Photo round2 동결·Apple lifecycle 분리·배포 전제 재확인
+
+- PLAN POSITION: predesign master checkpoint, HEAD676eda2+WIP; source/test는 하위 모델만 수정.
+- DIRECTION CHECK: V5§1/11·Engineering§0·Current State·최신 원장 및 master-first 승인 확인; 사업 변경 없음, conflict NO.
+- OWNERSHIP: Aristotle photo 반환/종료; Linnaeus TerraMax 독립 검토 PASS 후 종료. Kierkegaard Apple4paths writer + Nietzsche AstraMax 현재-build 브라우저 verifier. 최신 사용자는 모델 고정을 해제했으며 진행 작업은 보존한다.
+- VERIFICATION: photo worker519PASS/TS/lint, 부모 실제 diff/호출 경로 확인, 독립 Spec/Quality C/H/M/L0. 최신 전체 회귀는 아직 미완료. 기존 전체6149PASS/2FAIL/2SKIP을 성공으로 덮지 않음.
+- REVIEW IMPACT: photo DELTA PASS/hash고정, Apple pending. Vercel Git 연결/Automatic build/no deployment checks, Supabase 함수 부재, 기존 백업 폴더 존재를 읽기 전용 재확인.
+- STOPPED AT: master/push/새Home/Book/원격DB/배포 없음. 다음은 리뷰 반환·Apple 보완·독립검토·정확한 통합, 배포는 별도 서버/복구 gate.
+- 상세와 미검증/복구 경계: [현재 gate](../control-tower/reports/codex/2026-09-06_predesign-live-gates_codex.md).
+
+## 2026-09-05 — 사용자 승인 공개 운영 정보 Vercel 설정
+
+- 사용자 제공 운영자명 한예성 / 문의 gomsinlog@gmail.com을 Vercel gomsin-log Production Config 두 항목에 저장.
+- VERIFIED: 두 항목 목록 및 저장 성공 toast. Remote settings APPLIED; 배포/master/Supabase NOT APPLIED. 실제 서비스 표시·이메일 수신 미검증.
+- source/test 코드 수정 없음. 기존 비밀값·플래그·시스템변수 설정 변경 없음.
+- 상세 및 rollback: [공개 운영 정보 설정](../control-tower/reports/codex/2026-09-05_public-operator-vercel-settings_codex.md).
+
+## 2026-09-05 — Predesign 전체 회귀 2FAIL와 독립 검토 후 수정 범위 확정
+
+- PLAN POSITION: master 전 통합 gate, HEAD676eda2+WIP. 사용자 순서/권한/기능 보존 유지; business NOT APPLICABLE.
+- OWNERSHIP: Aristotle Sol Max photo14+검증test2 writer, Gibbs Sol Max Apple readonly Architect; parent 구현코드 수정 없음.
+- VERIFICATION: 운영빌드 gate79PASS; 전체 Vitest6149PASS/2FAIL/2SKIP, 실패2건은 실제 응답·RPC 경로 확인 후 수정 배정. 상세는 아래 리포트.
+- REVIEW IMPACT: Apple M2/L1, 사진 authority provenance 등 미해결. tests PASS만으로 승인하지 않음.
+- NEXT: 기존 review finding 교정→scoped independent review→통합. Home/Book/master/Production NOT APPLIED.
+- 상세: [검토 및 실제 전체 테스트 결과](../control-tower/reports/codex/2026-09-05_predesign-round3-status_codex.md).
+
+## 2026-09-05 — Predesign 검증 담당 복구와 배포 영향 확인
+
+- PLAN POSITION: predesign master gate; HEAD676eda2+기존 WIP 보존.
+- DIRECTION CHECK: 사용자 master 우선 순서 유지, 사업 변경 없음. 기존 두 handle not_found 확인 후 미완료 범위만 재배정.
+- OWNERSHIP: Russell Sol High photo14 writer; Gibbs Sol Max Apple readonly DELTA. parent 통합 담당.
+- VERIFICATION: GitHub 현재 master의 과거 Vercel Production 성공 확인; 현재 자동배포 설정/새 코드 backend 호환성은 UNVERIFIED. 이번 새 테스트 없음.
+- REVIEW IMPACT: 사진 수정 후 독립 검토 필요; Apple 구현 보고서는 독립 승인 아님.
+- PRODUCTION NOT APPLIED. 다음: 두 gate 반환→통합 검증→master→notebook Home.
+- 상세: [복구 및 배포 증거](../control-tower/reports/codex/2026-09-05_predesign-gate-recovery_codex.md).
+
+## 2026-09-05 — 사용자 요청: 기존 작업 master 통합 우선, 새 디자인 중지
+
+- PLAN POSITION: predesign integration priority; notebook approval retained but source changes0, paused.
+- DIRECTION CHECK: 최신 사용자 순서승인/기존RC 안전gate/현재원장 확인; business변경없음, conflict NO.
+- OWNERSHIP: HEAD676eda2, remote/localorigin masterbd4a9f3 확인;0behind244ahead, pendingWIP별도. Indexempty.
+- CHANGED/REVIEWED: parent 순서변경만; Archimedes serverround2유일writer, Beauvoir photo14readonly independentreview 배정.
+- VERIFICATION: gitlive/두agentstop확인; 새테스트없음. REVIEW IMPACT: serverH1/photoreview미완료, 통합gate유지.
+- EXPLICITLY NOT CHANGED: 새Home/Book/remote. BLOCKERS: serverfix/reviews/exactintegration/auto-deploy compatibility.
+- NEXT: namedcommits 및 검증→READY TO MERGE→승인된master업데이트→새디자인. 알려진HIGH를 그대로merge하지 않음.
+- PRODUCTION NOT APPLIED; push/merge/stash/reset없음. 기존WIP모두보존.
+- 상세: [master 우선 실행경계](../control-tower/reports/codex/2026-09-05_predesign-master-priority_codex.md).
+
+## 2026-09-05 — Apple 재검토 신규 H1/M2/L2 HOLD
+
+- PLAN POSITION: RC Task1 server re-review 반환; previousH3구조해결, 새H1로 integration HOLD.
+- DIRECTION CHECK: 기존 V5인증/삭제·Engineering·현재원장·round1brief 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Hubble SolMax readonly→좁은 Architect 후속; photo Archimedes 유일writer 유지. HEAD676eda2+WIP.
+- REVIEWED: live revoke lease를 건너뛴 premature terminal, unknown provider, 누락 operator evidence, cancel deadline, metadata reason 손실.
+- VERIFICATION: reviewer PG race 재현/서버15paths hash고정; parent SQL288/301,helper601/393,operator378 실제소스 확인. 상세 명령/보고 근거 리포트.
+- REVIEW IMPACT: prior server safety 승인 없음; H3기존수정은 보존, 새경쟁회귀 필요. EXPLICITLY NOT CHANGED: runtime/DB/crypto/remote.
+- BLOCKERS/STOPPED AT: H1미해결; 사진작업 뒤 bounded 서버수정 배정. NEXT: 모든terminal invariant Architect 처방→writer→fresh DELTA.
+- DO NOT ADVANCE UNTIL: 미처리token 있는 terminal 불가 재현검증 및 independentH0. PRODUCTION NOT APPLIED, server merge없음.
+- 상세: [서버 재검토와 수정 경계](../control-tower/reports/codex/2026-09-05_apple-server-round2-hold_codex.md).
+
+## 2026-09-05 — 사진 SliceB generation/sync 판정 후 구현 배정
+
+- PLAN POSITION: RC Task2 display integration; readonly preparation 반환, implementation 진행.
+- DIRECTION CHECK: V5 photo/BUSINESS_MEMORY_ROADMAP 무료 일반사진/Engineering Task2/CURRENT_STATE/최신원장 확인; conflict NO.
+- OWNERSHIP: Archimedes SolHigh 유일writer, Hubble SolMax frozenApple 독립review; HEAD676eda2, index empty.
+- REVIEWED: parent090 RPC source_revision=pair operation_id 확인; record 최신revision/index 비교 금지, masterID 기반 transient metadata.
+- CHANGES: exact7source7test 구현 brief 배정, parent 앱코드 수정 없음. Preview는 small cells, fullscreen/master 보존.
+- VERIFICATION: 탐색과 실제RPC/hook 확인만; 이번 slice 테스트 미실행/완료 주장 없음. REVIEW IMPACT: 새photo patch에 독립review 필요.
+- EXPLICITLY NOT CHANGED: DB/crypto/auth/Book/가격/Production. BLOCKERS: 실제 구현·회귀·network evidence 및 remote/device gate.
+- STOPPED AT/NEXT: 구현배정 완료; 실제diff/test 반환 뒤 parent검증과 독립검토. 권한거절을 missingAPI로 취급 금지.
+- PRODUCTION: NOT APPLIED. Rollback future named client patch만, 기존 master/다른WIP 보존.
+- 상세: [사진 표시 배정과 경계](../control-tower/reports/codex/2026-09-05_photo-display-dispatch_codex.md).
+
+## 2026-09-05 — 전체 Vitest 6122PASS / 기존 CORS 실패 종료
+
+- PLAN POSITION: RC local regression; 이전 full suite1FAIL, 현재 실행363files PASS/6122PASS2SKIP.
+- DIRECTION CHECK: 기존 RC/V5/Engineering/직전원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent test execution, branch codex/rc-v5-final-fixes; 시작88d8f53+serverWIP, native commit676eda2로 종료.
+- VERIFICATION: root Vitest CLI run --reporter=dot, PTY26414 exit0,314.06s. Native 실행 중 변경은 별도 final focused75PASS2SKIP로 보완; clean exact-commit 전체 판정 아님.
+- EXPLICITLY NOT CHANGED: 테스트 실행으로 app/DB/crypto/remote 의미 변경 없음. REVIEW IMPACT: 로컬 회귀 증거 추가, 독립 server security review 대체 불가.
+- BLOCKERS/REMAINING: client/서버 독립 검토/사진/실기기/hosted/운영복원 및 전체 RC. STOPPED AT: 전체 Vitest 종료.
+- NEXT: reviewer 결과와 client 연결; 실제 로그인/온디바이스/Production 검증 없이 출시 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; push/mastermerge 없음. 테스트 실행 rollback 불필요.
+- 상세: [전체 실행 결과와 증거 한계](../control-tower/reports/codex/2026-09-05_full-vitest-regression_codex.md).
+
+## 2026-09-05 — native Apple 권한 parent DELTA 검증
+
+- PLAN POSITION: RC Task1 native capability local 준비 gate; signed/device gate 미완료.
+- DIRECTION CHECK: 기존 승인 native brief/V5/Engineering/현재 원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Archimedes 구현 반환, parent exact diff 검토·focused 재실행; HEAD88d8f53+WIP unchanged.
+- CHANGED: App.entitlements/project.pbxproj/nativeConfig.test.ts 세 파일; Default 권한/target capability/실제 plist 검사.
+- VERIFICATION: parent plutil 두 파일 PASS, focused Vitest75PASS2SKIP603ms; full suite PTY26414 진행 중, 아직 판정 없음.
+- EXPLICITLY NOT CHANGED: server/crypto/flags/team/profiles/remote. REVIEW IMPACT: 좁은 native DELTA만, server Hubble 독립 검토 진행.
+- BLOCKERS/REMAINING: signed profile/device/hosted/client 및 전체 RC. STOPPED AT: native local diff+test 확인.
+- INTEGRATION: named native3files만 cached scope/check 확인 후676eda2 커밋(Old88d8f53); postcommit3files41+/13−, index empty. Server WIP 제외, reviewer 통지. Push/mastermerge 없음.
+- NEXT: server review 반환 후 client 연결. 서명/기기 증거 전 실제 Apple 로그인 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; rollback 세 파일만 revert, 다른 WIP 보존.
+- 상세: [native DELTA 및 client 연결 근거](../control-tower/reports/codex/2026-09-05_client-boundary-and-backup-reply_codex.md).
+
+## 2026-09-05 — client Architect 경계 확정 / Book 백업 의존성 회신
+
+- PLAN POSITION: RC Task1 server fix 진행; client 설계 검토 종료, 구현/출시 gate 아님.
+- DIRECTION CHECK: 기존 승인 V5/Engineering DEVELOPMENT·BETA 구분/현재 원장 기준 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent 조정, Popper SolMax readonly 종료, Archimedes 유일 writer 유지; branch codex/rc-v5-final-fixes, HEAD88d8f53 unchanged.
+- REVIEWED: captured-session credential 등록, 계정 전환 fencing, 삭제 안내 보존; hosted 선배포 없이 reviewed mock 계약으로 local 구현 가능 판정.
+- VERIFICATION: Architect 의견 수신·판정 기록만; 새 테스트 없음. Book owner의 지정 백업 직접참조 없음 회신은 복원/삭제 허가 증거가 아님.
+- EXPLICITLY NOT CHANGED: runtime/tests/DB/crypto/Book/backup/remote. REVIEW IMPACT: 설계 입력만, server 독립 review 대체 불가.
+- BLOCKERS/REMAINING: server HIGH 수정 및 fresh review, client/native/실기기/hosted/복원 증거. STOPPED AT: client brief 입력 확정.
+- NEXT / DO NOT ADVANCE UNTIL: server 실제 wire 계약 검토 후 client 배정; 복원 증거 없이 consequential production DDL 진행 금지.
+- PRODUCTION: NOT APPLIED; rollback 문서 항목만, 기존 WIP 보존.
+- 상세: [client 경계 및 백업 회신](../control-tower/reports/codex/2026-09-05_client-boundary-and-backup-reply_codex.md).
+
+## 2026-09-05 — 작은 화면 프로필/일정 오류 real-browser 2PASS
+
+- PLAN POSITION: RC Task5 bounded existing-screen verification alongside Task1 server/Architect. Gate two views PASS, wholeRC incomplete.
+- DIRECTION CHECK: V5/EngineeringRC Task5/CURRENT_STATE/직전원장 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: parent verification only, branch codex/rc-v5-final-fixes/HEAD88d8f53; no new source/test implementation or commit.
+- REVIEWED: existing settingsDialogAccessibility + scheduleFailureState; profile focus/overflow, task500 vs empty-state distinction.
+- VERIFICATION: temp exact-commit snapshot standard build PASS; matching root Playwright CLI + installedChrome 2PASS9.5s. Earlier customoutDir build and mixednpx collection failed before tests, details preserved.
+- EXPLICITLY NOT CHANGED: app/test assertions, DB/crypto/product semantics, Book4173/user4174 processes. First buildhook targeted ignoredrootdist/_headers; no prehash byte-preservation claim.
+- REVIEW IMPACT: adds scoped Chromium evidence only; physicalVoiceOver/actualAI/hosted/fullRC UNVERIFIED. No prior security review replaced.
+- STOPPED AT/NEXT: two browser cases completed, server/currentclient Architect continue. Temp4175 stopped, artifacts retained; remaining UI/native/remote gates open.
+- PRODUCTION: NOT APPLIED; no source rollback required, no commit/push/mastermerge.
+- 상세: [실행·실패·복구·검증 범위](../control-tower/reports/codex/2026-09-05_small-screen-functional-gate_codex.md).
+
+## 2026-09-05 — identity/shared matcher 독립 PASS 및 test-only commit
+
+- PLAN POSITION: RC Task1 identity test gate; Previous review pending, This Gate local test DELTA CLOSED.
+- DIRECTION CHECK: 기존 승인 V5§11/Engineering§0/CURRENT_STATE/직전원장/수정brief 유지; Business NOT APPLICABLE, conflict NO.
+- OWNERSHIP: Anscombe SolMax READONLY 반환·종료, parent 실제diff+commit. Branch codex/rc-v5-final-fixes, Old/Base1c7503e→New88d8f53.
+- CHANGED: src/lib/storeAuthIdentity.test.tsx + src/test/setup.ts만 커밋; sameUID재검증/다른UID격리/공통matcher. runtime/DB/crypto/제품 의미 변경 없음.
+- VERIFICATION: independent Spec/QualityPASS C/H/M/L0,8testsPASS/test-inclusiveTS0/scopedlint. Parent actualassertions/review패키지 exactmatch/cached두파일/diffcheck/postcommitstat 확인.
+- REVIEW IMPACT: 검토된patch 그대로88d8f53에 고정; serverreview 승계 아님. 전체6108PASS1corsFAIL2skip은 기존worker결과로 여전히 fullPASS아님.
+- BLOCKERS/REMAINING: serverHIGH3수정/새review, nativeclient·서명·hosted·실기기·전체RC.
+- STOPPED AT/NEXT: 두test파일 gate종결, Archimedes server계속/Popper readonly clientArchitect. 부모 코드구현 없음.
+- DO NOT ADVANCE UNTIL: 각 server/native/실기기/Production gate 통과; 테스트로 실제 계정로그인 완료 주장 금지.
+- PRODUCTION: NOT APPLIED; push/mastermerge/profile/기기설치 없음. Rollback named두파일revert, 다른WIP보존.
+- 상세: [독립 검토·커밋 근거](../control-tower/reports/codex/2026-09-05_identity-test-gate-closed_codex.md).
+
+## 2026-09-05 — RC 차단 수정 배정 / identity regression 반환
+
+- PLAN POSITION: RC Task1; Previous server HOLD H3, This Gate coherent fix running / identity DELTA review.
+- DIRECTION CHECK: V5 제품루프/인증계약, Engineering§0, CURRENT_STATE§0, 최신 관련 Work Log와 원 Task1 brief 확인. Business NOT APPLICABLE; 전략 변경 없음, conflict NO.
+- OWNERSHIP: branch codex/rc-v5-final-fixes, Base/Old/Reviewed HEAD1c7503e+WIP; Archimedes SolHigh server writer, Anscombe SolMax test readonly; parent 계획/검증. PR/새HEAD 없음.
+- CHANGED/REVIEWED: shared matcher 수정 반환 및 CORS fixture gap; server token custody/binding 분리·sticky uncertainty·advanced deletion evidence 수정 brief 승인. 상세파일/이유는 리포트.
+- EXPLICITLY NOT CHANGED: parent runtime/crypto/DB 구현 없음; 기존 user-content E2EE/제품 의미 보존. remote NOT APPLIED.
+- VERIFICATION: worker90focusedPASS/전체6108PASS1FAIL2skip; parent setupdiff/CORScaller 확인. 실제 xcode/devicectl/signing identity/disk 조회 성공, 일부 nonexistent config rg2 별도 기록.
+- REVIEW IMPACT: server 수정 후 fresh security review, identity DELTA pending; 이전 green 결과 자동 승계 안 함.
+- BLOCKERS/STOPPED AT: HIGH3 미해결, hosted·native 서명/실로그인/모델·백업복원 미완료. iPhone 현재available/개발인증서2개 있으나 signed install 증거 아님.
+- NEXT ACTION: server fix executable regression+새 독립review, identity 결과 뒤 native/client slice. 원래 전체 RC 목표 유지.
+- DO NOT ADVANCE UNTIL: 인증·삭제 및 실기기/hosted gates 통과 전 provider/flags/master HOLD.
+- PRODUCTION: NOT APPLIED; commit/stage/push/merge/실기기 설치 없음.
+- 상세: [RC 수정 배정 및 preflight](../control-tower/reports/codex/2026-09-05_2105_rc-fix-dispatch_codex.md).
+
+## 2026-09-05 — Apple server 독립 HIGH3 / 수정 설계 시작
+
+- PLAN POSITION: RC Task1 server independent review HOLD(C0/H3/M3/L1), fix architecture 진행.
+- DIRECTION CHECK: 기존 V5 인증/삭제 계약과 worker scope, 직전원장 확인. Business NOT APPLICABLE; 제품 정책 변경 없음.
+- OWNERSHIP: Franklin SolMax read-only review 반환→좁은 Architect 후속. Aquinas test 유일writer 유지. HEAD1c7503e+13path WIP.
+- REVIEWED: refresh-token 세대 유실, uncertainty marker pruning, advanced 삭제재시도 phase 충돌; 영구키소실/redirectURI/metadata/bodytimeout 문제.
+- VERIFICATION: parent 해당실제코드 확인. reviewer29+5Deno/71Vitest/36PG·확장68PG PASS 보고와 별도 결함 재현. 테스트 녹색이 결함부재를 증명하지 않음.
+- REVIEW IMPACT: 기존server PASS 승계 불가. 독립수정재검토 필수. reviewer ignored tsbuildinfo갱신 계약편차 기록.
+- NEXT/DO NOT ADVANCE: 세대보존·비활성격리·exact삭제attempt 재시도·운영키복구 설계 후 단일worker 수정. 서버/클라이언트/hosted/실기기 미완료.
+- PRODUCTION: NOT APPLIED; provider/flags/master HOLD, commit/stage/push 없음.
+- 상세: [독립 보안 검토와 수정 경계](../control-tower/reports/codex/2026-09-05_apple-server-independent-hold_codex.md).
+
+## 2026-09-05 — identity 수정 반환 / 공통 matcher 후속 범위 승인
+
+- PLAN POSITION: RC Task1 identity test 수정 반환, test infrastructure 후속 진행. HEAD1c7503e+WIP.
+- DIRECTION CHECK: 승인된 계정 연속성·격리 계약, 직전 원장/worker report 확인. Business NOT APPLICABLE; runtime 정책 변경 없음.
+- OWNERSHIP: Aquinas SolHigh 동일 담당 재사용, parent diff/보고서 검토. Franklin 서버 독립검토 유지.
+- VERIFICATION: worker identity8/combined30·test-inclusiveTS·scopedlint PASS 보고. authExpiry9FAIL은 공통 matcher 등록 문제. parent 재현/독립 DELTA는 다음 단계.
+- CHANGED/NEXT: src/test/setup.ts의 명시적 expect matcher 등록 + identity test 중복등록 제거만 후속 승인. 대표 suite 후 전체Vitest 한 번. dependency/runtime 변경 금지.
+- REVIEW IMPACT/DO NOT ADVANCE: 공통setup 변경 검증과 identity 독립 DELTA 필요; 실계정/실기기 증거 아님.
+- PRODUCTION: NOT APPLIED; commit/stage/push 없음.
+- 상세: [검증 반환과 후속 경계](../control-tower/reports/codex/2026-09-05_native-readiness-and-identity-fix_codex.md).
+
+## 2026-09-05 — 운영 백업 보관기한 preflight
+
+- PLAN POSITION: RC 운영 적용 준비/read-only metadata 확인; Production HOLD 유지.
+- DIRECTION CHECK: rollback-runbook§7·CURRENT_STATE·직전원장 확인. 보관정책 변경 안 함; Business 전략 변경 NOT APPLICABLE.
+- OWNERSHIP: parent 읽기/기록만, HEAD1c7503e+WIP. 기존 worker/reviewer 범위 유지.
+- VERIFICATION: 문서의 두 exact 백업경로 존재·permissions700·파일수5/4 확인. 내용/키/복원 가능성 UNVERIFIED.
+- FINDING/REVIEW IMPACT: delete-by 경과, 생성후7일 대 검증후7일 문구 충돌. 삭제/기한 연장 임의 수행 금지. runtime review 영향 NONE.
+- NEXT/DO NOT ADVANCE: 복구 의존성·공유DB 담당 확인 후 안전한 처분 승인/복구 증거 확보. 로컬 구현 계속 가능.
+- PRODUCTION: NOT APPLIED; 삭제·권한변경·commit·push 없음.
+- 상세: [백업 보관기한 점검](../control-tower/reports/codex/2026-09-05_backup-retention-preflight_codex.md).
+
+## 2026-09-05 — Native 준비 검증 반환 / identity 테스트 수정 시작
+
+- PLAN POSITION: RC Task1 native readiness HOLD → test-only 수정 배정. 기준HEAD1c7503e+WIP.
+- DIRECTION CHECK: 승인된 인증/기기 검증 범위 유지, 직전 원장/native 계획 확인. Business NOT APPLICABLE; 새 제품·사업 변경 없음.
+- OWNERSHIP: Maxwell read-only 종료; Aquinas SolHigh identity test 유일writer; Franklin SolMax server 독립검토 진행.
+- VERIFICATION: parent native 로그 확인( unsigned BUILD SUCCEEDED, signed Team 필요 FAIL). Parent identity focused Vitest FAIL7/7: DOM matcher 오류. 앱 runtime 실패로 확대 해석하지 않음.
+- CHANGED/REVIEW IMPACT: parent 보고서/계획만; test 수정 후 새 DELTA 필요. 기존 테스트 PASS 보고를 현재 상태로 승계하지 않음.
+- BLOCKERS/REMAINING: 서명팀/Apple entitlement/Xcode27beta, caller/삭제안내, 실제 로그인/요약, hosted 및 전체 RC gates.
+- NEXT/DO NOT ADVANCE: 테스트 원인 확인·수정, server 독립결과, native 연결 순서. flags/설치 승인 단계 전 활성화 금지.
+- PRODUCTION: 추가 NOT APPLIED, commit/stage/push 없음.
+- 상세: [기기 검증 및 테스트 수정 배정](../control-tower/reports/codex/2026-09-05_native-readiness-and-identity-fix_codex.md).
+
+## 2026-09-05 — Apple server 반환 / 독립 검토 배정
+
+- PLAN POSITION: RC Task1 server 구현 반환 → 독립 검토 진행. 전체 RC HOLD.
+- DIRECTION CHECK: 기존 승인 Task1 범위·직전 원장·native 후속 계획 유지. Business NOT APPLICABLE; 전략 변경 없음.
+- OWNERSHIP: HEAD1c7503e + WIP. Herschel 종료, Franklin SolMax read-only server review; Maxwell native read-only 검증. Parent 구현 없음.
+- CHANGED/VERIFICATION: worker 보고서와 실제 endpoint 일부 확인. Deno34/Vitest71/PG36 PASS는 현재 worker 보고이며 parent 재현/독립 승인 아님. 선택 Xcode26.6 및 Apple capability ON은 parent 직접 확인.
+- REVIEW IMPACT: 새 인증/삭제/DB 변경은 별도 security review 필요. 이전 리뷰 자동 승계 안 함.
+- BLOCKERS/REMAINING: identity-test 수정, native/client 연결, 실계정·실기기·hosted gate 및 전체 RC 미완료.
+- NEXT/DO NOT ADVANCE: 독립 결과와 실패 수정 후 정확한 변경 범위를 검증. Xcode27 beta 앱 설치는 구현·검증 후 수행.
+- PRODUCTION: 추가 NOT APPLIED. commit/stage/push 없음.
+- 상세: [서버 구현 반환 및 검토 배정](../control-tower/reports/codex/2026-09-05_apple-server-review-dispatch_codex.md).
+
+## 2026-09-05 — identity-test 독립 FAIL / 보안 재조회 보존하도록 계획 교정
+
+- PLAN POSITION: RC Task1 test-only review. Previous Gate7localPASS;
+  This Gate **독립Spec/Quality FAIL, 수정 대기**. 서버worker와 별도이며 전체목표 유지.
+- DIRECTION CHECK: V5§11 UID/데이터 연속성, 현재Store1660–1825의 deletionstatus+hydrate,
+  tsconfig test제외, 기존brief/직전원장 확인. Business NOT APPLICABLE; 기준V5/2026-09-05.
+  Plan conflict: parent의 절대no-hydration 조건을 canonical연속성/보안 재검증 기준으로 교정.
+- OWNERSHIP: Lovelace SolMax READONLY review, parent 계획수정만. Herschel SolHigh server유일writer.
+  기준HEAD1c7503e 및 test-only delta, reviewer patchhash는 상세report. commit/stage/remote없음.
+- CHANGED/REVIEWED: Store identity test H1/M3/L1(실제event/spy/중간격리/type7/report표현).
+  parent는 test/runtime을 수정하지 않았고 다음writer brief와 원장만 갱신했다.
+- VERIFICATION: reviewer diff일치/고정hash/diffcheckPASS, 대상TS **FAIL7**;
+  parent Store보안재조회와 tsconfig제외 확인. physicaliPhone16Pro available(paired) 재확인;
+  nativeentitlement Applekey 실제미존재(주석만존재). native실행/모델성능은 UNVERIFIED.
+- REVIEW IMPACT: testWIP승인불가, 새DELTA필요. 실제runtime데이터손실이 증명된 것은 아님.
+- STOPPED AT/NEXT: reviewer후속은 정상sameUIDread가 runtime결함이 아님을 확인했고 종료했다.
+  E2EE설치/복구marker같은 보안작업은허용, 제품귀속mutation만 금지한다. queuedtestfix는
+  serverwriter반환후 하위모델 배정. parent코딩 금지 유지.
+- BLOCKERS/DO NOT ADVANCE: testfix/독립재검토·server/codecaller/signing/provider/device gates.
+  실행중agent를 timeout만으로 재시작하지 않는다. 현재새server완료증거 없음.
+- PRODUCTION: 추가 NOT APPLIED. 앞선Appleportal만APPLIED. 전체RC/master HOLD.
+- 상세: [테스트 검토 보류](../control-tower/reports/codex/2026-09-05_1949_identity-review-hold_codex.md).
+
+## 2026-09-05 — Parent 계획 전담 / 하위 모델 구현·독립 검토 배정
+
+- PLAN POSITION: RC Task1 server lifecycle + identity-test 검토, Task2B 표시 흐름 계획.
+  Previous Gate Apple portal 등록만 APPLIED; This Gate **작업 배정/구현 진행 중**, 완료판정 없음.
+- DIRECTION CHECK: 최신 `계획만 짜고 구현은 하위모델` 지시, V5§11, Engineering§0/6task,
+  CURRENT_STATE/직전원장, 사진 BUSINESS§9.5/무료기본사진 확인. V5/2026-09-05; conflict NO.
+- OWNERSHIP: parent 계획/원장/실제검증·최종통합만. Herschel SolHigh server 유일writer,
+  Lovelace SolMax identity test READONLY. 정확한 agent ID·허용파일은 paired report/SDD brief.
+  branch codex/rc-v5-final-fixes, 배정base/HEAD1c7503e. commit/stage/remote권한 위임없음.
+- CHANGED: parent 계획brief·review package·progress와 이 운영기록만. source/test 구현은
+  하위모델 소유, 기존 WIP 보존. 사진Task2B는 실제호출경로를 읽고 queued 계획만 작성.
+- VERIFICATION: isolated worktree와 live HEAD 확인, 기존 App ID 저장 재조회 증거 별도;
+  현재 하위모델 결과 없음. 대기 timeout은 완료/종료가 아니라 작업 진행 중 상태로 유지한다.
+  `git diff --check` PASS(배정/문서시점), 새로운 구현 테스트·독립 gate는 아직 미완료.
+- REVIEW IMPACT: 기존runtime검토로 새server source를 승인하지 않음. 작업반환 후 새DELTA 필요.
+- BLOCKERS/STOPPED AT: 서명/profile·server lifecycle·provider실사용·원격복구/RC는 남음.
+  지금은 구현자가 진행 중이며 환경차단/완료로 판정하지 않는다.
+- NEXT ACTION: test reviewer 결과 판단 → server writer 반환 → parent 실제diff/테스트확인 →
+  별도SolMax server독립검토 → client/native 호출 연결·사진Task2B. parent가 수정사항 직접코딩하지 않음.
+- DO NOT ADVANCE UNTIL: 미해결C/H0와 exact범위 테스트/독립검토, 외부gate 별도충족.
+- PRODUCTION: 이번배정으로 추가변경 **NOT APPLIED**; 앞서승인한 Apple portal만 APPLIED.
+- 상세: [하위모델 배정·완료 기준](../control-tower/reports/codex/2026-09-05_1938_delegated-implementation_codex.md).
+
+## 2026-09-05 — Apple App ID 로그인 capability 실제 활성화
+
+- PLAN POSITION: RC Task1/V5-B 외부 준비. Previous Gate Apple portal OFF 확인;
+  This Gate **app.gomsinlog capability만 APPLIED**, 앱 로그인/전체RC 완료 아님.
+- DIRECTION CHECK: 최신 저장 승인 `해줘`, V5§11, ENGINEERING§0/6task, CURRENT_STATE/
+  직전 Apple 원장 확인. Business NOT APPLICABLE(인증 무료/정책 불변). 기준V5/2026-09-05;
+  conflict NO: provider/CTA 활성화 gate는 유지한다.
+- OWNERSHIP: parent Codex 단일 browser operator, 하위 구현자 없음. Branch codex/rc-v5-final-fixes;
+  Base/Old/New HEAD1c7503e620b9958adf3dad0b30f037bfea6b46c0. 신규 commit/PR 없음.
+- CHANGED/WHY: Apple Developer의 기존 app.gomsinlog Sign In with Apple OFF→ON(primary).
+  실제 로그인 서명 준비에 필요한 등록이다. 로컬 CURRENT_STATE·원장·report만 현재 적용 사실 기록.
+- EXPLICITLY NOT CHANGED: runtime/기존test WIP/DB/migration/crypto/계정정책/Google/Book/keys.
+- VERIFICATION: live App ID와 기존 ON 항목 확인 → Save → profile 영향 Confirm → 목록 복귀 →
+  같은 App ID 재진입에서 Sign In with Apple ON, Save disabled, Complete Protection/IAP 유지 확인.
+  상세 native 로그인·서명·revoke·Supabase tests 미실행. 로컬 실행/회귀PASS로 대체하지 않음.
+- REVIEW IMPACT: DELTA(외부capability). 기존source 검토불변, Apple 활성화 전체승인 아님.
+- BLOCKERS: provisioning/entitlement 정합·server token revoke·provider·실기기/계정 lifecycle 확인.
+- STOPPED AT: 승인된 Apple portal 설정만 저장/재조회. REMAINING: 실제로그인 종단검증/RC.
+- NEXT ACTION: parent Task1 서버revoke·서명 준비와 Task2B를 각 기존gate대로 이어간다.
+- DO NOT ADVANCE UNTIL: 원격provider/키는 각각의 안전조건·필요한 action-time 승인을 충족한다.
+- PRODUCTION: **Apple portal capability APPLIED**; Supabase/key/flag/DDL/배포/master **NOT APPLIED**.
+  portal OFF 복귀는 profile 재무효화·설정초기화 가능성이 있어 자동실행하지 않는다.
+- 상세: [Apple capability 적용 보고서](../control-tower/reports/codex/2026-09-05_1929_apple-capability-enabled_codex.md).
+
+## 2026-09-05 — Apple verified-email 승인 반영 / 실제 설정 화면 안내
+
+- PLAN POSITION: RC Task1 Apple activation. Previous Gate1c7503e; This Gate 정책충돌 해소,
+  **source/provider 활성화 미완료**, 신규테스트 독립검토 대기.
+- DIRECTION CHECK: 최신 명시 승인+V5§11, ENGINEERING§0/RC6task, CURRENT_STATE/최신원장,
+  privacyTier0/rollback 확인. Business NOT APPLICABLE(무료인증 유지). 기준 V5/2026-09-05.
+  이전 자동연결금지와의 충돌은 이번 명시승인으로 대체; 다른 UID 데이터 병합 금지는 유지.
+- OWNERSHIP: parent 문서/실설정조회; Bohr SolMax Architect read-only, Jason FlashHigh test-only.
+  branch codex/rc-v5-final-fixes; Base/Old/Reviewed1c7503e, New미커밋. PR없음. agents종료.
+- CHANGED/WHY: V5/Engineering/SecurityTestPlan/제출초안/현재상태 승인조건 갱신,
+  Store identity test1파일 회귀 추가. 잘못된 클라이언트 이메일 병합 없이 기존 UID 경계 확인.
+- EXPLICITLY NOT CHANGED: runtime/auth/DB/migration/crypto/결제/Book/Production 의미.
+- VERIFICATION: parent 기존4files65PASS, typecheckPASS, Store7PASS, diff-check/localdocs14linksPASS;
+  worker 관련38PASS/lint0. mock≠hosted, 예상mutation≠실행한mutant. 상세 명령은 리포트.
+- REVIEW IMPACT: DELTA 필요(신규test-quality 미완료). 기존runtime불변; 전체RC재판정 없음.
+- BLOCKERS: 서버Apple refresh token 등록/보관/revoke 미구현, key/signing/provider 설정,
+  실계정 UID/relay/revoke 검증. 실물iPhone available(paired) 확인은 실행 성공 증거가 아님.
+- STOPPED AT: 사용자 화면 안내 요청. policy/test WIP 보존, 서버 writer 미배정.
+- REMAINING/NEXT ACTION: 화면 입력 안내 → 새test 실제 SIGNED_IN 검토 → 서버revoke bounded구현.
+- DO NOT ADVANCE UNTIL: 인증/삭제·서명·실사용 gate 전 Apple provider/CTA 활성화 금지.
+- PRODUCTION: **NOT APPLIED**; 키/설정/DDL/merge/push/deploy없음. 좁은localdelta rollback가능.
+- 상세: [Apple 승인 checkpoint](../control-tower/reports/codex/2026-09-05_1915_apple-identity-approval_codex.md).
+
 ## 2026-09-05 — Photo SliceA·복구 화면 종결 / 안정 HEAD 전체6092 PASS
 
 - PLAN POSITION: RC Task2 upload SliceA / Task5 복구 / Task6 로컬 검사. Previous Gate ba3f6bb;

@@ -6,8 +6,8 @@
 > - **목적**: Apple App Store (iOS) 정식 제출을 위한 정직하고 일관된 메타데이터 및 심사 대응 정보 정리
 > - **기준 상태**: Release Candidate exact HEAD가 확정되지 않음. 제출 직전 branch·HEAD·binary를
 >   다시 기록해야 하며 아래 과거 수치를 현재 사실로 승계하지 않습니다.
-> - **제출 HOLD**: managed Supabase의 same-email OAuth silent merge 차단 경로와 staging 2계정
->   실측, Sign in with Apple 삭제 token revoke가 아직 검증되지 않았습니다. Google 로그인을
+> - **제출 HOLD**: 승인된 verified-email 연속 로그인의 hosted UID 유지·relay 분리 실측과
+>   Sign in with Apple 삭제 token revoke가 아직 검증되지 않았습니다. Google 로그인을
 >   제공하는 현재 제품은 Guideline 4.8 검토 대상이므로 이 게이트 전에는 App Store 제출을
 >   진행하지 않습니다.
 > - **식별자 및 빌드 사양**:
@@ -187,11 +187,10 @@
 - 확인 후 본인 계정·프로필·본인 작성 기록과 첨부를 삭제하고 커플 연결을 해제합니다. 상대가 작성한 콘텐츠는 상대 계정에 남습니다. 부분 실패는 완료로 표시하지 않고 복구·재시도 화면을 제공합니다.
 
 6. Authentication and purchases
-- Apple 로그인은 managed Supabase에서 silent same-email merge가 일어나지 않는 공식 지원과
-  staging 두 계정 negative test를 먼저 통과해야 합니다. Production provider 상태는
-  UNVERIFIED이고 현재 CTA는 원격 provider 응답에 종속되며 독립 V5 build gate는 아직
-  구현되지 않았습니다. 계정 삭제 token revocation·실패 재시도 원장까지 검증하기 전에는
-  제출하지 않습니다.
+- Apple 로그인은 V5§11의 승인된 verified-email 연속 로그인 계약을 따릅니다. native/default-OFF
+  경로는 로컬에 준비됐으나 실제 hosted UID 유지·relay 분리·미확인 이메일 방어와 signing,
+  계정 삭제 token revocation·실패 복구를 검증하기 전에는 제출하지 않습니다. 현재 설정과
+  exact-commit 증거는 CURRENT_STATE§0에서 확인하고 심사 binary와 다시 대조합니다.
 - IAP가 포함된 빌드는 App Store Connect 상품과 Sandbox 심사 경로, 구매 복원 위치를 별도 메모에 추가합니다. 판매가 꺼진 빌드에는 구매 CTA가 없습니다.
 ```
 
@@ -248,7 +247,7 @@
 | **서비스 이용약관 URL** | 선택 유효 URL | `https://gomsin-log.vercel.app/legal/terms` | 코드 경로 존재 / 프로덕션 최신 배포 검증 대기 | UNVERIFIED |
 | **고객지원 URL (Support URL)** | 필수 유효 URL | `/support` 코드 경로 | Production 외부 접근·실제 문의 채널 미확인 | UNVERIFIED |
 | **심사용 데모 계정** | 로그인 필수 앱 요구사항 | 상호 사전 페어링 계정 2개 | **원격 DB 미생성 (자격증명 미커밋)** | BLOCKED |
-| **Apple 로그인 (Sign in with Apple)** | Google 등 제3자 로그인을 제공하는 현재 구성에서 Guideline 4.8 검토 대상 | 현재 CTA는 원격 provider 응답에 종속; 독립 V5 gate는 NOT BUILT | provider 상태·silent-merge 차단·staging 2계정·삭제 revoke 미검증 | BLOCKED / SUBMISSION HOLD |
+| **Apple 로그인 (Sign in with Apple)** | Google 등 제3자 로그인을 제공하는 현재 구성에서 Guideline 4.8 검토 대상 | native/default-OFF 경로 로컬 준비; 현재 증거는 CURRENT_STATE§0 | hosted UID 유지·relay 분리·signing·실기기·삭제 revoke 미검증 | BLOCKED / SUBMISSION HOLD |
 | **빌드 & SDK 요구사항** | Xcode 26+ / iOS 26 SDK | iOS 15.0 floor, iPhone 전용 | **로컬 빌드/아카이브 미실행** | BLOCKED |
 | **2026 연령 등급 설문** | 2026 Age Rating Questionnaire | 소셜 미디어/스크린타임/건강 설문 | **App Store Connect 미응답** | BLOCKED |
 
@@ -263,7 +262,7 @@
 | **메타데이터** | 심사 참고 메모 (Review Notes) | **DRAFT** | RC binary와 데모 계정/IAP 상태를 반영한 뒤 확정 |
 | **법적 문서** | 개인정보 처리방침 및 서비스 이용약관 | **PARTIAL** | 앱 내 `/legal/privacy`, `/legal/terms` 구현 완료. 최신 master 브랜치 Vercel 프로덕션 배포 확인 필요 |
 | **고객지원** | 고객지원 웹페이지 URL (Support URL) | **UNVERIFIED** | `/support` 구현은 확인됨; Production 비로그인 접근과 실제 문의 채널 검증 필요 |
-| **인증 연동** | Apple 로그인 (Sign in with Apple) | **BLOCKED / SUBMISSION HOLD** | managed Supabase silent-merge 차단 공식 지원, staging 2계정 negative test, provider·redirect·삭제 revoke 검증 필요 |
+| **인증 연동** | Apple 로그인 (Sign in with Apple) | **BLOCKED / SUBMISSION HOLD** | 승인된 verified-email 연결의 hosted UID 유지/negative test, provider·signing·실기기·삭제 revoke 검증 필요 |
 | **심사 계정** | 사전 페어링된 심사용 데모 계정 | **BLOCKED** | 원격 DB에 1:1 연결된 곰신/군화 계정 실제 생성 및 비밀번호 ASC 등록 필요 |
 | **디자인 에셋** | 6.9형 스크린샷 6장 (1290x2796, 무알파) | **BLOCKED** | 매니페스트 수립 완료. 가상 데이터 기반 실기기/시뮬레이터 실제 캡처 및 알파 채널 제거 필요 |
 | **바이너리** | iPhone 전용 빌드 및 iOS 15 floor | **PARTIAL** | `TARGETED_DEVICE_FAMILY = 1`, `IPHONEOS_DEPLOYMENT_TARGET = 15.0` 프로젝트 설정 반영 완료 |

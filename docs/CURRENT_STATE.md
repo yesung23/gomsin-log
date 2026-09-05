@@ -27,11 +27,70 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
+- **2026-09-06 추가 checkpoint:** 아래 과거 개별 검토 상태보다 이 항목이 최신이다.
+  photo SliceB 및 권한 보완 round2는 독립 Terra Max Spec/Quality PASS(C/H/M/L0),
+  현재 build 브라우저8PASS 후 사진15파일을 `7d8805db87bc060c455e576ff13057f8c28b0384`로 커밋했다.
+  Apple 관련 cors test는 별도 WIP로 보존했다. 부모 전체 Vitest는363파일/6181PASS/2SKIP/0FAIL,
+  전체 ESLint PASS다. 이후 변경은 Apple caller-lifecycle4파일로 한정됐다.
+  Apple 재검토에서 이전 호출의 완료가 새 lifecycle terminal로 해석될 수 있는 M1이 발견돼
+  호출 당시 lifecycle 전달 및 exact completing-lease proof를 보완했다. 수정자 동결 후 부모 실제
+  PG180assertions/Edge39tests PASS; Boyle Sol Max 재검토 **PASS, M1 CLOSED, C/H/M/L0**다.
+  검증된 DB2파일은 `c278569`, 서버/복구13파일은 `abd5909`로 나눠 커밋했다. 현재 HEAD는
+  `abd5909bdd9508a4e46f8ecc4d47a510957b2f47`이다. 소스 bytes 변경 없이 검토된 파일을 커밋했다.
+  이 결과를 Apple 실제 활성화나 전체 RC 완료로 해석하지 않는다. master와 새 notebook Home은 아직 변경하지 않았다.
+  Vercel Git 자동 배포 연결·필수 Supabase 사진/프로필 함수 부재를 재확인했으므로
+  코드 통합과 운영 배포를 구분한다. 공개 운영 정보2개는 설정에만 저장됐고 재배포하지 않았다.
+  자동배포 일시중단은 사용자 선택 대기이며 설정은 미변경이다.
+  [통합 증거](../control-tower/reports/codex/2026-09-06_frozen-integration-verification_codex.md),
+  [Apple 재검토](../control-tower/reports/codex/2026-09-06_apple-caller-lifecycle-hold_codex.md).
+- **이전 native checkpoint `676eda2`:** Apple native entitlement/target capability와
+  실제 plist 테스트 세 파일을 별도 커밋했다. parent focused75PASS2SKIP/plutil두파일PASS.
+  서명 profile·signed binary·실기기 로그인 증거는 아니다. 이전 identity test commit은88d8f53.
+- **최신 기기 재조회:** 전체 Vitest 종료 후 `xcrun devicectl list devices`에서 실물
+  iPhone16Pro는 다시 unavailable이다. 이전 available 관찰을 현재 상태로 사용하지 않는다.
+  `xcodebuild -version`은26.6/17F113, Data 볼륨 가용12GiB. Xcode27 beta와 기기 검증은
+  아직 미완료이며, 공간 확보를 이유로 사용자 파일/백업을 삭제하지 않았다.
+- **전체 Vitest 최신 실행:** root CLI,363files/6122PASS2SKIP,314.06s,exit0.
+  이전 CORS fixture1FAIL은 이 실행에서 해소됐다. 실행 중 native 변경은 별도 최종 focused
+  검증으로 보완했으므로 clean exact-commit 전체 gate로 표현하지 않는다. Deno/PG/실기기/
+  Production과 독립 보안 검토는 별도다.
+  [전체 테스트 증거](../control-tower/reports/codex/2026-09-05_full-vitest-regression_codex.md).
+- **Apple server 재검토 HOLD(C0/H1/M2/L2):** Hubble SolMax가 이전HIGH3 수정은 확인했으나,
+  겹친 탈퇴 요청에서 live revoke lease를 건너뛰고 revoked를 확정하는 새HIGH를 실제PG로 재현했다.
+  provider unknown 오판·운영증빙 reference 미저장·cancel deadline·metadata 손실도 남았다.
+  parent가 실제 분기를 대조했고 Hubble은 좁은 수정 Architect 후속 중이다. 기존 녹색 테스트는
+  전체 안전 승인으로 사용하지 않는다. [재검토 근거](../control-tower/reports/codex/2026-09-05_apple-server-round2-hold_codex.md).
+  사진 SliceB는 준비조사 종료 후 Archimedes 유일writer가 구현 중이다. 서버 fix는 그 반환 뒤
+  배정하며, 등록·삭제 안내 client도 미완료다. 서버/remote 통합 HOLD 유지.
+
+- **Apple identity 테스트 독립검토:** 기존 test-only WIP는 SolMax에서 승인되지 않았다.
+  실제 `SIGNED_IN` 대신 `USER_UPDATED`를 쓰고, write/setup·전환중couple/setup 격리 증거가
+  부족하며 대상파일 TypeScript 진단7개가 보고됐다. 기본 typecheck는 테스트파일을 제외한다.
+  parent는 기존 `SIGNED_IN`의 최신 탈퇴상태 확인/데이터 재조회를 우회하지 않는 수정계획으로
+  정정했다. Aquinas가 identity와 공통 matcher 수정을 반환했다(대표90PASS, 전체6108PASS/
+  CORS fixture1FAIL/2skip). Anscombe SolMax 독립 DELTA는 Spec/Quality PASS(C/H/M/L0),
+  identity8PASS/test-inclusiveTS0/scopedlint로 종결했다. parent는 검토diff 동일성을 확인해
+  두 테스트파일만 `88d8f53`으로 커밋했다. 실제 로그인/전체RC 승인은 아니다. 서버는
+  Franklin 독립검토 HIGH3/MEDIUM3/LOW1로 HOLD였으며 수정 반환 후 위 Hubble 재검토 단계다.
+  parent의 이전 focused DOM matcher7FAIL은 수정 전 기록이다.
+  [검토 결과와 수정 경계](../control-tower/reports/codex/2026-09-05_1949_identity-review-hold_codex.md).
+  [현재 수정 배정·실기기/서명 preflight](../control-tower/reports/codex/2026-09-05_2105_rc-fix-dispatch_codex.md).
+  [identity 테스트 gate 종결](../control-tower/reports/codex/2026-09-05_identity-test-gate-closed_codex.md).
+- **Apple Developer 설정 실제 적용(19:28KST):** 사용자에게 서명 profile 무효화/갱신 영향을
+  알리고 명시적인 `해줘` 승인을 받은 뒤, 기존 App ID `app.gomsinlog`의 Sign In with Apple을
+  primary App ID로 활성화했다. 저장·Confirm 후 목록에서 다시 열어 체크 ON/Save disabled를
+  확인했다. Data Protection의 Complete Protection과 기존 In-App Purchase는 유지됐다.
+  **Apple portal capability만 APPLIED**다. 키 생성·다운로드, notification endpoint,
+  Supabase provider, 앱 feature flag, provisioning 재생성·서명·실기기 로그인은 변경/실행하지 않았다.
+  [적용 범위·확인·남은 gate](../control-tower/reports/codex/2026-09-05_1929_apple-capability-enabled_codex.md).
 - **최신 live 원격 확인(17:20–17:40KST):** master `bd4a9f3`, RC branch 원격 미존재.
   과거 master CI/Production deployment는 해당SHA의 success이며 최신 RC 증거가 아니다.
   Supabase project healthy, Google ON/Apple OFF. 최신 app media/avatars/IAP 테이블·Edge 없음,
   14개 Book migration tracking만 존재하나 legacy app schema는 있으므로 전체001..090재적용 금지.
   backups:null/PITRfalse, Book 담당도 DB restore증거 미확보. 명확한 복구 gate 없이 DDL/merge 금지.
+  추가 metadata 점검에서 8/26·8/27 백업 폴더에 각각5/4파일이 남아 있었고 문서상 delete-by는
+  지났다. 내용/키는 읽지 않았고 삭제하지 않았다. 보관기한 문구 충돌과 복구 의존성 해결 전
+  운영 배포 HOLD. [백업 점검](../control-tower/reports/codex/2026-09-05_backup-retention-preflight_codex.md).
   anon 기록/건강 query거절과 UID없는authenticated 0행은 live확인; 전체권한승인은 아님.
   [세부 근거·실패/교정·공유 DB 경계](../control-tower/reports/codex/2026-09-05_1730_live-remote-baseline_codex.md).
 - **최신 복무 변경 `206ebb0` → `ac6ea50`:** 시간당1레벨·초당10EXP·왕고/말년칭호.
@@ -42,9 +101,17 @@
 - **Summary M1 `2a420b2` 종결:** 원문 절단 여부를 후보 길이 필터보다 먼저 검사한다.
   독립 Sol Max67tests + pending취소1probe PASS, C/H/M/L0. AI flag OFF 유지.
   18:09KST CoreDevice에서 실물 iPhone이 unavailable이므로 실제 모델 성능/발열은 미검증이다.
-- Apple 독립 활성화 검토 C0/H2/M2/L1: 동일verified-email 자동연결금지계약 vs hosted지원 충돌,
-  삭제tokenrevoke구현없음, signingcapability없음, webApple경로없음. Provider/flagOFF를 유지한다.
-  기존auth race의PASS와 실제Apple활성화준비를 구분한다. 사용자에게 이메일연결정책선택을 요청했다.
+- **Apple 계정 정책 후속 승인(2026-09-05):** 동일한 본인확인 이메일의 Apple·Google 로그인을
+  Supabase가 기존 UID에 연결하도록 사용자가 승인했다. V5§11/로드맵을 개정해 과거 정책 충돌을
+  해소했다. 앱의 별도 계정 병합이나 manual-linking 설정 변경은 없다.
+  이번 live Dashboard에서도 Google Enabled/Apple Disabled, Confirm email ON/manual linking OFF를
+  확인했다. 실제 양방향 로그인 UID 유지·relay 분리는 아직 UNVERIFIED다.
+  과거 독립 활성화 검토의 나머지 항목(삭제 token revoke, signed native build, web Apple 경로)은
+  미완료다. Apple portal capability는 위19:28 적용과 구분한다. 기존 auth race PASS와
+  실제 Apple 활성화 준비를 구분하며 Supabase provider/앱 flag OFF를 유지한다.
+  이번 Apple Developer Keys 목록은 등록 키가 없는 시작 안내였으며 키를 생성·다운로드하지 않았다.
+  이번 `xcrun devicectl list devices` 조회는 실물 iPhone16Pro **available(paired)**를 반환했다.
+  이전18:09 unavailable에서 상태가 달라졌지만 signed Apple 로그인·실제 AI 실행 증거는 아니다.
 
 - Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
   `codex/rc-v5-final-fixes`, service checkpoint `ac6ea50` (hourly `206ebb0`, summary `2a420b2`). 이 문서 이후에도
@@ -75,7 +142,7 @@
   생성·해시·paired예약·업로드·master-only저장과 계정전환취소/응답유실복구를 포함한다.
   worker259tests/lint/typecheck PASS, parent gate206+생성86+수정37=329PASS. **독립SolMax
   exact128736c C/H/M/L0 Spec/LocalQualityPASS**,465focused+7memoryprobes+2mutant예상RED.
-  표시 SliceB,
+  표시 SliceB는2026-09-06 위 checkpoint의 로컬 WIP 구현/독립검토 단계다.
   인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현이다.
   backend090 독립 Sol Max 리뷰는 exact `fb880ed`에서 **C/H/M/L 0, PASS**다.
   001..090187/기존회귀520/보안형태209를 독립 재실행했다. remote NOT APPLIED다.
@@ -90,7 +157,8 @@
 - 기록 미디어 삭제 086–088의 변경 `a8113b7`, `85be85b`는 `fb880ed`에서 누적 독립 Sol Max
   보안 리뷰 PASS다. 기존PG518, 083–088 tests62, Edge33을 독립 확인했다. Edge 첫 실행의
   권한 제한8FAIL은 선언된 권한 재실행33PASS와 구분한다. 새 client가 이 계약을 우회하면 안 된다.
-- 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
+- 이번 checkpoint의 Apple portal capability: 위19:28 **APPLIED**.
+  Supabase·Apple key/서명 profile·배포·master 변경: **NOT APPLIED**.
   원격 catalog는 위 live inventory 참조. 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
 - 온디바이스 `d01793a`는 관찰된 HIGH2 반례를 수정했고 독립 Sol Max에서 해당 반례 종결을 확인했다.
   전체 원문 보존/결과 무효화, 총20 상한, 완전한 마지막 문장 발췌, 원문 편집 뒤 새 수동 요청,

@@ -17,7 +17,7 @@
 | 순서 | Gate | 완료 조건 |
 |---|---|---|
 | **V5-A** | 생성형 write·건강정보 안전 경계 | OCR review-before-save, 온디바이스 요약 exact-true/default-off, 주기 owner-only V4와 자동 projection all-false, 로컬 회귀·actor test |
-| **V5-B** | Apple 로그인 | default-OFF native/web 경로와 이름 1회·logout/delete/revoke를 준비한다. managed Supabase에서 silent same-email merge를 막는 공식 지원과 staging 2계정 실측 전에는 provider·CTA·App Store 제출을 활성화하지 않는다 |
+| **V5-B** | Apple 로그인 | V5§11의 승인된 verified-email 연속 로그인, default-OFF native/web 경로와 이름 1회·logout/delete/revoke를 준비한다. hosted 동일 UID 유지·relay 분리·미확인 이메일 방어, revoke/삭제 복구, 서명·실기기 검증 전에는 provider·CTA·App Store 제출을 활성화하지 않는다 |
 | **V5-C** | 결제 기반 | 신규 판매 CTA와 항상 살아 있는 restore/refund listener 분리, StoreKit bridge, 서버 검증·멱등 transaction·entitlement·notification 원장, Sandbox/App Review 구성 |
 | **V5-D** | 정원 제품 | 기존 일일 뽑기/FOMO 제거, 권리 원장과 manifest, 접근 가능한 배치, 충돌·pair interaction 상태머신, 무료 첫 건물, 구매 에셋 entitlement·unlink fallback |
 | **V5-E** | 사진 lifecycle | 기기 생성 screen master/thumbnail, EXIF 제거, 멱등 업로드·orphan cleanup, Book Studio effective-PPI·print-master lifecycle |

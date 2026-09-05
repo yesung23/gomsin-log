@@ -427,32 +427,39 @@ AI는 원문 대신 무엇이 중요하다고 고르지 않는다. 먼저 권한
 - 가능하면 native Sign in with Apple credential을 Supabase session으로 교환하고, web/PWA는
   OAuth PKCE를 사용한다.
 - Apple이 이름을 처음 한 번만 줄 수 있으므로 최초 성공 시에만 사용자 확인을 거쳐 저장한다.
-- private relay email 때문에 이메일이 같다는 이유만으로 Google 계정과 자동 병합하지 않는다.
-  로그인된 사용자의 명시적 `로그인 방법 연결`과 재인증을 요구한다.
+- **2026-09-05 추가 명시 승인:** Apple·Google이 본인 확인한 동일 이메일의 로그인은
+  Supabase Auth의 자동 identity 연결을 통해 기존 곰신로그 계정으로 이어진다.
+  이는 아래 §11.1의 과거 자동 연결 금지 결정을 대체한다. 앱은 이메일 문자열만 비교해
+  계정을 찾거나 서로 다른 UID의 기록·커플·구매 권리를 병합/이전하지 않는다.
+- Apple private relay 등 이메일이 다르면 같은 사람이라고 추정하지 않는다. 이미 별도 UID로
+  만들어진 계정도 자동 합치지 않는다. 서로 다른 이메일의 명시적 로그인 방법 연결은 기존
+  로그인 세션·provider 재인증·충돌 검증이 필요한 별도 경로이며 이번 승인만으로 활성화하지 않는다.
 - 로그아웃·계정삭제·연결해제·도난기기·토큰 revoke 경로를 테스트한다.
 - 계정삭제 시 Sign in with Apple refresh/access token revoke 의무를 서버에서 수행하고 실패는
   재시도 가능한 삭제 작업 원장에 남긴다.
 
-### 11.1 현재 managed Supabase 제약과 활성화 HOLD
+### 11.1 검증된 이메일 연속 로그인과 남은 활성화 gate
 
-2026-09-03 공식 문서와 현재 코드 검토 기준, managed Supabase Auth는 검증된 동일 이메일의
-OAuth identity를 자동 연결할 수 있지만 이를 프로젝트 단위로 안전하게 끄는 일반 설정은
-문서화·실증되지 않았다. open-source GoTrue의 실험적 provider-linking domain 설정이 managed
-프로젝트에서 지원된다고 가정하지 않는다.
+2026-09-05 사용자가 동일한 검증 이메일의 Apple·Google 로그인을 기존 계정으로 연결하는
+추천안을 명시 승인했다. 따라서 2026-09-03의 managed Supabase 자동 연결 금지/해제 가능성
+확보 조건은 더 이상 blocker가 아니다. 서버의 검증된 identity 연결을 사용하며 별도
+Auth self-hosting, OAuth broker, 클라이언트 이메일 기반 병합은 도입하지 않는다.
 
-- Apple 로그인 코드는 `default OFF`로 준비할 수 있지만 Production provider와 사용자 CTA는
-  활성화하지 않는다.
-- 로그인 전 클라이언트 이메일 비교, `Before User Created` hook, redirect 후 확인 화면은 이미
-  일어난 서버측 자동 병합을 되돌릴 수 없으므로 안전 경계의 대체물이 아니다.
-- 명시적 연결은 기존 로그인 세션에서 재인증을 거쳐 시작하고, 취소·충돌·다른 계정·relay
-  email·기존 Apple identity를 각각 테스트한다.
-- 활성화 전에는 managed Supabase가 자동 병합을 끌 수 있는 공식 지원 경로를 제공하는지
-  재확인하고, staging의 서로 다른 두 계정으로 silent merge가 일어나지 않음을 실측한다.
-- 이 조건과 Apple token revoke를 포함한 계정 삭제 복구 테스트가 통과하기 전까지
-  **V5-B, Apple Production 활성화, App Store 제출은 HOLD**다.
-- 이 제약만 피하려고 Auth를 self-host하거나 자체 OAuth broker를 도입하지 않는다. 그런 변경은
-  auth.uid(), RLS, 세션 복구, E2EE device binding 전체를 다시 검증해야 하는 별도 아키텍처
-  결정이다.
+- Supabase의 `Allow manual linking`은 다른 이메일의 명시적 연결 API 설정이다. 이번 자동
+  연결 승인을 적용하려고 이를 켜거나 이메일 확인·nonce·PKCE 검사를 끄지 않는다.
+- 앱은 Supabase가 인증한 UID를 계정 경계로 유지한다. provider 변경만으로 온보딩을
+  다시 만들거나 기록 소유자·커플·E2EE 키·구매 귀속을 변경하지 않는다.
+- 활성화 전 테스트 계정으로 Apple→Google/Google→Apple 동일 verified-email의 UID 유지,
+  다른 이메일/relay의 임의 연결 금지, 다른 UID에 귀속된 Apple subject의 임의 이전 금지,
+  미확인 이메일의 takeover 방어를 실측한다.
+  로컬 mock 테스트는 실제 hosted Auth의 연결 동작을 증명하지 않는다.
+- Apple token revoke와 계정 삭제 복구, 실제 signing capability/provider 설정, signed native
+  로그인·취소·로그아웃·재로그인 검증은 별도 필수 gate다. 완료 전 Apple provider/CTA는
+  `default OFF`, **V5-B·Apple Production 활성화·App Store 제출은 HOLD**다.
+- 현재 구현·설정·실측 결과는 [`CURRENT_STATE.md`](CURRENT_STATE.md)가 소유한다.
+
+근거: [Supabase identity linking](https://supabase.com/docs/guides/auth/auth-identity-linking),
+[Apple 계정 삭제·token revoke](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
 
 ## 12. 서버·비용·운영 구조
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { useProfileAvatar } from '@/lib/useProfileAvatar';
 import {
   clearAvatar,
   prepareAvatarFile,
@@ -53,8 +54,17 @@ export function AvatarPicker({
   className?: string;
 }) {
   const owner = userId;
-  const [dataUrl, setDataUrl] = useState<string | null>(() => readAvatar(owner, slot));
+  const shared = useProfileAvatar(slot === 'me' ? owner : undefined);
+  const [localPhoto, setLocalPhoto] = useState(() => ({ owner, slot, dataUrl: readAvatar(owner, slot) }));
+  const localDataUrl = localPhoto.owner === owner && localPhoto.slot === slot ? localPhoto.dataUrl : readAvatar(owner, slot);
+  // Old, device-only choices are never uploaded implicitly. A tombstone from
+  // another device also suppresses a legacy local photo after remote removal.
+  const dataUrl = slot === 'me'
+    ? shared.allowed ? shared.dataUrl ?? (shared.version === null ? localDataUrl : null) : null
+    : localDataUrl;
   const [busy, setBusy] = useState(false);
+  const preparing = useRef(false);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
   /**
    * Whether the edit controls are showing.
    *
@@ -67,6 +77,8 @@ export function AvatarPicker({
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentOwner = useRef(owner);
+  useEffect(() => { currentOwner.current = owner; return () => { currentOwner.current = undefined; }; }, [owner]);
 
   /**
    * Auto-hide, because there is no `mouseleave` on a phone.
@@ -93,28 +105,57 @@ export function AvatarPicker({
   }, [revealed]);
 
   const handleFile = async (file: File | undefined) => {
-    if (!file) return;
+    if (!file || preparing.current || busy || shared.busy || !owner) return;
+    preparing.current = true;
+    const expectedOwner = owner;
     setBusy(true);
-    const prepared = await prepareAvatarFile(file);
-    setBusy(false);
-    if ('error' in prepared) {
-      toast.error(prepared.error);
-      return;
-    }
-    if (!writeAvatar(owner, slot, prepared.dataUrl)) {
-      // The realistic cause is a full quota, and the honest message says so rather
-      // than blaming the photo the user just picked.
-      toast.error('사진을 저장할 공간이 부족해요. 기기 저장 공간을 확인해 주세요.');
-      return;
-    }
-    setDataUrl(prepared.dataUrl);
-    setRevealed(false);
-    toast.success('사진을 바꿨어요. 이 기기에서만 보여요.');
+    try {
+      const prepared = await prepareAvatarFile(file);
+      if (currentOwner.current !== expectedOwner) return;
+      if ('error' in prepared) {
+        toast.error(prepared.error);
+        return;
+      }
+      if (slot === 'me') {
+        const result = await shared.save(prepared.dataUrl);
+        if (currentOwner.current !== expectedOwner) return;
+        if (!result.ok) {
+          toast.error(result.reason === 'conflict'
+            ? '다른 기기에서 사진이 바뀌었어요. 확인 후 다시 골라주세요.'
+            : '사진을 저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+          return;
+        }
+        clearAvatar(owner, slot);
+        setLocalPhoto({ owner, slot, dataUrl: null });
+        setRevealed(false);
+        toast.success('프로필 사진을 바꿨어요.');
+        return;
+      }
+      if (!writeAvatar(owner, slot, prepared.dataUrl)) {
+        toast.error('사진을 저장할 공간이 부족해요. 기기 저장 공간을 확인해 주세요.');
+        return;
+      }
+      setLocalPhoto({ owner, slot, dataUrl: prepared.dataUrl });
+      setRevealed(false);
+      toast.success('사진을 바꿨어요. 이 기기에서만 보여요.');
+    } catch {
+      if (currentOwner.current === expectedOwner) toast.error('사진을 처리하지 못했어요. 다시 골라주세요.');
+    } finally { preparing.current = false; setBusy(false); }
   };
 
-  const handleRemove = () => {
+  const handleRemove = async () => {
+    if (busy || shared.busy || !owner) return;
+    const expectedOwner = owner;
+    if (slot === 'me') {
+      const result = await shared.save(null);
+      if (currentOwner.current !== expectedOwner) return;
+      if (!result.ok) {
+        toast.error('사진을 지우지 못했어요. 다시 시도해 주세요.');
+        return;
+      }
+    }
     clearAvatar(owner, slot);
-    setDataUrl(null);
+    setLocalPhoto({ owner, slot, dataUrl: null });
     setRevealed(false);
     toast.success('기본 그림으로 돌아갔어요.');
   };
@@ -140,14 +181,16 @@ export function AvatarPicker({
       <button
         type="button"
         onClick={() => {
-          if (dataUrl) setRevealed((v) => !v);
+          if (dataUrl) setRevealed(true);
           else inputRef.current?.click();
         }}
         onFocus={() => {
           if (dataUrl) setRevealed(true);
         }}
-        disabled={busy || !owner}
+        disabled={busy || shared.busy || !owner}
+        aria-busy={busy || shared.busy}
         aria-label={dataUrl ? `${label} 바꾸기 또는 지우기` : `${label} 고르기`}
+        aria-description={slot === 'me' ? '새로 고른 사진은 나와 연결된 상대방의 스토리에 보여요.' : undefined}
         aria-expanded={dataUrl ? revealed : undefined}
         className={cn(
           'press-response-row relative block w-full h-full rounded-full overflow-hidden',
@@ -155,8 +198,8 @@ export function AvatarPicker({
           'active:scale-95 transition disabled:opacity-60',
         )}
       >
-        {dataUrl ? (
-          <img src={dataUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" />
+        {dataUrl && dataUrl !== failedUrl ? (
+          <img src={dataUrl} alt="" aria-hidden="true" className="w-full h-full object-cover" onError={() => setFailedUrl(dataUrl)} />
         ) : (
           <span className="flex w-full h-full items-center justify-center" aria-hidden="true">
             {children}
@@ -193,6 +236,7 @@ export function AvatarPicker({
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
+            disabled={busy || shared.busy}
             aria-label={`${label} 다시 고르기`}
             className={cn(
               'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2',
@@ -206,7 +250,8 @@ export function AvatarPicker({
 
           <button
             type="button"
-            onClick={handleRemove}
+            onClick={() => { void handleRemove(); }}
+            disabled={busy || shared.busy}
             aria-label={`${label} 지우고 기본 그림으로`}
             className={cn(
               'press-response absolute -top-1 -right-1 rounded-full bg-card border border-border',

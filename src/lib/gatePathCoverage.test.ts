@@ -92,6 +92,9 @@ function extractExemptTransportTokens(body: string): string[] {
  * Each exemption must have a documented reason.
  */
 const EXEMPTIONS: Record<string, Record<string, string>> = {
+  'profileAvatars.ts': {
+    readProfileAvatar: 'Read-only private avatar projection; RLS authenticates the exact owner/active partner',
+  },
   'trips.ts': {
     // Read-only functions
     fetchTripsResultFromDB: 'Read-only: fetches trips without mutation',
@@ -297,6 +300,7 @@ const STORE_GATED_ALLOWED_IMPORTERS = ['src/lib/store.tsx', 'src/lib/sync.ts'];
  * Gated mutation functions: these MUST contain the gate call.
  */
 const GATED_MUTATIONS: Record<string, string[]> = {
+  'profileAvatars.ts': ['saveProfileAvatar'],
   'trips.ts': [
     'saveTripToDB',
     'updateTripInDB',
@@ -440,7 +444,7 @@ function productionSourceFiles(dir: string): string[] {
 }
 
 describe('Gate path coverage: every mutation holds the operation-lifetime deletion barrier', () => {
-  const files = ['trips.ts', 'cycle.ts', 'supabase.ts', 'tasks.ts', 'sensitiveConsent.ts'] as const;
+  const files = ['trips.ts', 'cycle.ts', 'supabase.ts', 'tasks.ts', 'sensitiveConsent.ts', 'profileAvatars.ts'] as const;
   const sources: Record<string, string> = {};
 
   for (const file of files) {
@@ -829,6 +833,7 @@ describe('Whole-source server mutation inventory', () => {
     'src/lib/events.ts',
     'src/lib/highlights.ts',
     'src/lib/partnerUsername.ts',
+    'src/lib/profileAvatars.ts',
     'src/lib/pushTokens.ts',
     'src/lib/records.ts',
     'src/lib/relationshipSnapshot.ts',
@@ -869,6 +874,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/events.ts': 1,
       'src/lib/highlights.ts': 1,
       'src/lib/partnerUsername.ts': 1,
+      'src/lib/profileAvatars.ts': 1,
       'src/lib/pushTokens.ts': 3,
       'src/lib/records.ts': 4,
       'src/lib/relationshipSnapshot.ts': 1,

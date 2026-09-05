@@ -20,6 +20,7 @@ import { isRecordContentAvailable } from '@/lib/recordAvailability';
 import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 import { Bookmark, InkCircle, PenFace } from '@/components/paper';
 import { BrandMark } from '@/components/BrandMark';
+import { ProfileAvatar } from '@/components/ProfileAvatar';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
@@ -403,7 +404,7 @@ export function PaperHome() {
             onClick={() => navigate('/story/mine')}
             className="press-response flex w-[72px] flex-col items-center gap-1.5"
           >
-            <InkCircle size={66} ring="seen"><PenFace size={44} tone="b" /></InkCircle>
+            <InkCircle size={66} ring="seen"><ProfileAvatar userId={profile.id} size={54}><PenFace size={44} tone="b" /></ProfileAvatar></InkCircle>
             <span className="text-caption leading-none" style={{ color: 'var(--ink-soft)' }}>내 스토리</span>
           </button>
           <button
@@ -445,7 +446,7 @@ export function PaperHome() {
                 열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
                 말한다 -- 상대는 내가 봤는지 알 수 없다.
               */}
-              <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><PenFace size={44} /></InkCircle>
+              <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><ProfileAvatar userId={activePartnerUserId} size={54}><PenFace size={44} /></ProfileAvatar></InkCircle>
               <span
                 className="max-w-[72px] truncate text-caption leading-none"
                 style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}

@@ -1,31 +1,12 @@
 /**
- * A user-chosen photo for the two decorative avatars: the couple illustration on
- * 우리 and the role glyph on 마이.
+ * Avatar image preparation and legacy device-local storage.
+ * Fresh `me` choices now sync through profileAvatars.ts and migration 089, not
+ * these storage helpers. Legacy choices are never uploaded without a new choice.
+ * The `couple` illustration still does not sync. All local keys are cleared at
+ * sign-out/account deletion and are kept out of the main AppState cache.
  *
- * ## Why this is device-local and not uploaded
- *
- * The `couple-media` bucket cannot hold it. Its storage policies (migration 007)
- * require `coupleId/recordId/...`, and INSERT additionally checks that
- * `daily_records` holds a row whose id is the second path segment and whose owner
- * is the caller. An avatar has no record to belong to, so uploading one would mean
- * widening a policy that exists to stop cross-couple reads. Not worth it for a
- * decoration.
- *
- * ## Why it is kept OUT of the main store
- *
- * `saveState` persists a strict device-preference whitelist for an authenticated
- * user -- `widgetLayout`, `soldierWidgetLayout`, `hasSeenInstallPrompt`, `theme` --
- * and a test asserts that list exactly, because anything else would survive an
- * account purge. Adding image data there would break that guarantee, so avatars get
- * their own key that the purge clears explicitly.
- *
- * ## Consequences the caller has to accept
- *
- * - It does not sync. A photo set on a phone is not visible on a laptop, and the
- *   partner never sees it. The UI says so rather than implying otherwise.
- * - It is cleared by account deletion and by sign-out, through `clearAllAvatars`.
- * - It is stored as a data URL, downscaled hard on the way in, because
- *   `localStorage` is a few MB in total and shared with the rest of the app.
+ * Avatars never enter `couple-media`: that bucket requires an owned
+ * `daily_records` path. Sharing a profile photo must not weaken record RLS.
  */
 
 /** Keyed per user so an account switch cannot surface the other person's photo. */
@@ -42,8 +23,9 @@ export type AvatarSlot = 'couple' | 'me';
  * `QuotaExceededError` and take the save with it.
  */
 const MAX_EDGE_PX = 256;
+export const MAX_AVATAR_BYTES = 65_536;
 
-/** JPEG rather than PNG: a photograph, and quality 0.82 keeps it well under 60 kB. */
+/** JPEG rather than PNG; the actual byte limit is checked after encoding. */
 const OUTPUT_TYPE = 'image/jpeg';
 const OUTPUT_QUALITY = 0.82;
 
@@ -52,6 +34,8 @@ const ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 /** Refuse before decoding. A 40 MB original would stall the main thread first. */
 const MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+const MAX_DECODED_PIXELS = 64_000_000;
+const DECODE_TIMEOUT_MS = 15_000;
 
 function storageKey(userId: string, slot: AvatarSlot): string {
   return `${KEY_PREFIX}${slot}.${userId}`;
@@ -126,6 +110,10 @@ export async function prepareAvatarFile(file: File): Promise<{ dataUrl: string }
   const objectUrl = URL.createObjectURL(file);
   try {
     const image = await loadImage(objectUrl);
+    if (!Number.isSafeInteger(image.naturalWidth) || !Number.isSafeInteger(image.naturalHeight)
+      || image.naturalWidth * image.naturalHeight > MAX_DECODED_PIXELS) {
+      return { error: '사진 크기가 너무 커요. 작은 사진으로 골라주세요.' };
+    }
     const edge = Math.min(image.naturalWidth, image.naturalHeight);
     if (!edge) return { error: '사진을 읽을 수 없어요. 다른 사진을 골라주세요.' };
 
@@ -137,6 +125,8 @@ export async function prepareAvatarFile(file: File): Promise<{ dataUrl: string }
     if (!context) return { error: '사진을 변환할 수 없어요.' };
 
     // Centre crop: take the largest square from the middle of the original.
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, target, target);
     context.drawImage(
       image,
       (image.naturalWidth - edge) / 2,
@@ -149,8 +139,10 @@ export async function prepareAvatarFile(file: File): Promise<{ dataUrl: string }
       target,
     );
 
-    const dataUrl = canvas.toDataURL(OUTPUT_TYPE, OUTPUT_QUALITY);
-    if (!dataUrl.startsWith('data:image/')) {
+    let dataUrl = canvas.toDataURL(OUTPUT_TYPE, OUTPUT_QUALITY);
+    const maxDataUrlLength = 'data:image/jpeg;base64,'.length + Math.ceil(MAX_AVATAR_BYTES / 3) * 4;
+    if (dataUrl.length > maxDataUrlLength) dataUrl = canvas.toDataURL(OUTPUT_TYPE, 0.65);
+    if (!dataUrl.startsWith('data:image/jpeg;base64,') || dataUrl.length > maxDataUrlLength) {
       return { error: '사진을 변환할 수 없어요.' };
     }
     return { dataUrl };
@@ -164,8 +156,16 @@ export async function prepareAvatarFile(file: File): Promise<{ dataUrl: string }
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('decode failed'));
+    const finish = (ok: boolean) => {
+      clearTimeout(timer);
+      image.onload = null;
+      image.onerror = null;
+      if (ok) resolve(image);
+      else reject(new Error('decode failed'));
+    };
+    const timer = setTimeout(() => finish(false), DECODE_TIMEOUT_MS);
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
     image.src = src;
   });
 }

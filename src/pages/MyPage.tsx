@@ -65,7 +65,7 @@ export function MyPage() {
       <div className="notebook min-h-full px-4 pt-4 pb-28 space-y-5">
 
         <div className="flex items-center gap-3 py-2">
-          {/* Device-local profile photo with the shared hand-drawn face as fallback. */}
+          {/* One account photo, also shown in both partners' story rings. */}
           <AvatarPicker
             userId={state.authenticatedUser?.id || profile.id}
             slot="me"
@@ -92,6 +92,7 @@ export function MyPage() {
                 <span className="text-muted-foreground">{coupleStatusLabel}</span>
               )}
             </div>
+            <p className="mt-1 text-caption text-muted-foreground">프로필 사진은 서로에게 보여요</p>
           </div>
         </div>
 

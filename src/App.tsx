@@ -199,8 +199,8 @@ function AuthSyncUnavailable({
   const copy = authSyncFailureCopy(reason, stage);
 
   return (
-    <main className="min-h-[100dvh] bg-background flex items-center justify-center px-6">
-      <section role="alert" className="w-full max-w-sm rounded-surface border border-border bg-card p-6 text-center shadow-sm space-y-3">
+    <main className="paper-texture-layer min-h-[100dvh] flex items-center justify-center px-6 pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]">
+      <section role="alert" className="ink-box w-full max-w-sm p-6 text-center space-y-3">
         <h1 className="text-heading text-foreground">{copy.title}</h1>
         <p className="text-body text-muted-foreground">{copy.description}</p>
         {/*
@@ -231,7 +231,7 @@ function AuthSyncUnavailable({
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="press-response w-full min-h-[44px] rounded-xl bg-coral-fill px-4 py-3 text-label font-bold text-coral-fill-foreground"
+          className="press-response ink-fill w-full min-h-[44px] px-4 py-3 text-label font-bold"
         >
           {copy.actionLabel}
         </button>

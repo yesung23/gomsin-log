@@ -3,8 +3,6 @@ import { mkdir } from 'node:fs/promises';
 import { installMockBackend } from './fixtures/mockBackend';
 import { CREATOR, PARTNER, SHARED_LOG, TODAY } from './scenarios';
 
-const OUT = 'e2e/.artifacts/task-1-paper-surfaces';
-
 function markRow(recordId: string, actorUserId: string) {
   return {
     id: `mark-${recordId}`,
@@ -22,7 +20,8 @@ async function expectTouchTarget(target: Locator) {
   expect(box?.height).toBeGreaterThanOrEqual(44);
 }
 
-test('Story, Call Mode, and crash recovery share the paper-home surface', async ({ browser }) => {
+test('Story, Call Mode, and records recovery share the paper-home surface', async ({ browser }, testInfo) => {
+  const OUT = testInfo.outputPath('screenshots');
   await mkdir(OUT, { recursive: true });
 
   const context = await browser.newContext({
@@ -70,8 +69,8 @@ test('Story, Call Mode, and crash recovery share the paper-home surface', async 
 
   /*
     Deliberately malformed local PostgREST fixture: the real column is NOT NULL,
-    so this is a safe crash injection for the boundary presentation, not evidence
-    that Production can return this row.
+    so this tests fail-closed hydration, not a production row or a render crash.
+    ErrorBoundary.test.tsx separately injects a genuine render exception.
   */
   const malformedRecords = [{
     id: 'broken-record',
@@ -91,14 +90,43 @@ test('Story, Call Mode, and crash recovery share the paper-home surface', async 
 
   const alert = errorPage.getByRole('alert');
   await expect(alert).toBeVisible({ timeout: 20_000 });
-  await expect(alert).toHaveClass(/paper-texture-layer/);
-  await expect(alert.locator('.ink-box')).toBeVisible();
-  await expect(alert).toContainText('문제가 발생했어요');
-  await expect(alert).toContainText('앱을 다시 시작합니다');
-  await expectTouchTarget(alert.getByRole('button', { name: '새로고침' }));
+  await expect(errorPage.getByRole('main')).toHaveClass(/paper-texture-layer/);
+  await expect(alert).toHaveClass(/ink-box/);
+  await expect(alert).toContainText('기록을 불러오지 못했어요');
+  await expect(alert).toContainText('진단 코드: RECORDS-UNKNOWN');
+  await expect(alert).toContainText('확인이 끝날 때까지 둘의 기록은 표시하지 않아요.');
+  await expect(errorPage.getByText('경계 렌더 확인', { exact: true })).toHaveCount(0);
+  await expect(errorPage.getByText(SHARED_LOG, { exact: true })).toHaveCount(0);
+  const retry = alert.getByRole('button', { name: '다시 시도', exact: true });
+  const logout = alert.getByRole('button', { name: '로그아웃', exact: true });
+  await expectTouchTarget(retry);
+  await expectTouchTarget(logout);
+  await retry.focus();
+  await errorPage.keyboard.press('Tab');
+  await expect(logout).toBeFocused();
   await errorPage.screenshot({ path: `${OUT}/error-recovery-375.png`, fullPage: true });
   await errorPage.locator('html').evaluate((node) => node.setAttribute('data-theme', 'dark'));
   await expect(alert).toHaveCSS('color', 'rgb(244, 241, 234)');
   await errorPage.screenshot({ path: `${OUT}/error-recovery-dark-375.png`, fullPage: true });
+
+  // A real reload must retry hydration and recover when the server becomes valid.
+  let recoveredReads = 0;
+  await errorContext.route('**/rest/v1/daily_records*', route => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    recoveredReads += 1;
+    return route.fulfill({
+      headers: { 'Access-Control-Allow-Origin': '*', 'Content-Range': '0-0/0' },
+      json: [],
+    });
+  });
+  await retry.click();
+  await expect.poll(() => recoveredReads).toBeGreaterThan(0);
+  await expect(errorPage.getByText('기록을 불러오지 못했어요', { exact: true })).toHaveCount(0);
+  await expect(errorPage.getByText('경계 렌더 확인', { exact: true })).toHaveCount(0);
+  const homeLink = errorPage.getByRole('navigation', { name: '하단 내비게이션' })
+    .getByRole('link', { name: '홈', exact: true });
+  await expect(homeLink).toBeVisible();
+  await homeLink.click();
+  await expect(homeLink).toHaveAttribute('aria-current', 'page');
   await errorContext.close();
 });

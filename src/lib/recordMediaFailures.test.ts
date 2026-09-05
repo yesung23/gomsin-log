@@ -268,36 +268,44 @@ const attachmentRow = {
   path: `${COUPLE_ID}/${RECORD_ID}/a.png`,
 };
 
-function mockRecordRows() {
+function mockRecordPages(pages: Array<{ data: unknown[] | null; error: unknown }>) {
+  let pageIndex = 0;
   mockFrom.mockReset();
-  mockFrom.mockImplementation(() => ({
-    select: () => ({
-      eq: () => ({
-        order: () => ({
-          order: () => ({
-            limit: async () => ({
-              data: [
-                {
-                  id: RECORD_ID,
-                  record_date: '2026-03-01',
-                  record_time: '10:00',
-                  log_text: '오늘의 기록',
-                  reaction: null,
-                  attachments: [attachmentRow],
-                  is_private: false,
-                  emotion_flow: [],
-                  emotion_updated_at: null,
-                  created_at: '2026-03-01T10:00:00Z',
-                  user_id: 'user-1',
-                },
-              ],
-              error: null,
-            }),
-          }),
-        }),
-      }),
-    }),
-  }));
+  mockFrom.mockImplementation(() => {
+    const page = pages[pageIndex++] ?? { data: [], error: null };
+    const builder = {
+      select: () => builder,
+      eq: () => builder,
+      or: () => builder,
+      order: () => builder,
+      limit: async () => page,
+    };
+    return builder;
+  });
+}
+
+function mockRecordRows(attachments = [attachmentRow]) {
+  mockRecordPages([
+    {
+      data: [
+        {
+          id: RECORD_ID,
+          record_date: '2026-03-01',
+          record_time: '10:00',
+          log_text: '오늘의 기록',
+          reaction: null,
+          attachments,
+          is_private: false,
+          emotion_flow: [],
+          emotion_updated_at: null,
+          created_at: '2026-03-01T10:00:00.123456Z',
+          user_id: '44444444-4444-4444-8444-444444444444',
+        },
+      ],
+      error: null,
+    },
+    { data: [], error: null },
+  ]);
 }
 
 describe('M-4: a media-signing failure is surfaced instead of passing silently', () => {
@@ -334,6 +342,22 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
     expect(result.mediaUnavailable).toBe('server');
   });
 
+  it('keeps text records readable when the Storage client rejects instead of returning an error', async () => {
+    mockCreateSignedUrls.mockRejectedValueOnce(new TypeError('malformed Storage response'));
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].log).toBe('오늘의 기록');
+    expect(result.records[0].attachments![0]).toMatchObject({
+      ...attachmentRow,
+      urlUnavailable: 'unknown',
+    });
+    expect(result.records[0].attachments![0].url).toBeUndefined();
+    expect(result.mediaUnavailable).toBe('unknown');
+  });
+
   it('classifies an expired session on the signing call as such', async () => {
     mockCreateSignedUrls.mockResolvedValue({
       data: null,
@@ -351,8 +375,190 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
     if (!result.ok) throw new Error('expected ok');
     expect(result.records[0].attachments![0].url).toBeUndefined();
-    expect(result.records[0].attachments![0].urlUnavailable).toBe('forbidden');
-    expect(result.mediaUnavailable).toBe('forbidden');
+    expect(result.records[0].attachments![0].urlUnavailable).toBe('unknown');
+    expect(result.mediaUnavailable).toBe('unknown');
+  });
+
+  it.each([
+    [{ status: 403, message: 'forbidden' }, 'forbidden'],
+    [{ status: 500, message: 'server failed' }, 'server'],
+  ])('classifies a top-level Storage response error: %#', async (error, expected) => {
+    mockCreateSignedUrls.mockResolvedValue({ data: null, error });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments![0].urlUnavailable).toBe(expected);
+    expect(result.mediaUnavailable).toBe(expected);
+  });
+
+  it.each([0, 1, 2])(
+    'keeps first/middle/last per-entry authorization failures scoped to entry %i',
+    async (failedIndex) => {
+      const attachments = [
+        { type: 'photo' as const, name: 'first.png', path: `${COUPLE_ID}/${RECORD_ID}/first.png` },
+        { type: 'video' as const, name: 'middle.mp4', path: `${COUPLE_ID}/${RECORD_ID}/middle.mp4` },
+        { type: 'voice' as const, name: 'last.m4a', path: `${COUPLE_ID}/${RECORD_ID}/last.m4a` },
+      ];
+      mockRecordRows(attachments);
+      mockCreateSignedUrls.mockResolvedValue({
+        data: attachments.map((attachment, index) => index === failedIndex
+          ? { path: attachment.path, signedUrl: null, error: { status: 403, message: 'denied' } }
+          : {
+              path: attachment.path,
+              signedUrl: `https://signed.example/${index}`,
+              error: null,
+            }),
+        error: null,
+      });
+
+      const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+      if (!result.ok) throw new Error('expected records to remain readable');
+      expect(result.records[0].attachments?.map(({ type, name, path }) => ({
+        type,
+        name,
+        path,
+      }))).toEqual(attachments);
+      result.records[0].attachments?.forEach((attachment, index) => {
+        if (index === failedIndex) {
+          expect(attachment.url).toBeUndefined();
+          expect(attachment.urlUnavailable).toBe('forbidden');
+        } else {
+          expect(attachment.url).toBe(`https://signed.example/${index}`);
+          expect(attachment.urlUnavailable).toBeUndefined();
+        }
+      });
+    },
+  );
+
+  it('matches signed URLs by path when the response order changes', async () => {
+    const attachments = [
+      { type: 'photo' as const, name: 'a.png', path: `${COUPLE_ID}/${RECORD_ID}/a.png` },
+      { type: 'photo' as const, name: 'b.png', path: `${COUPLE_ID}/${RECORD_ID}/b.png` },
+      { type: 'photo' as const, name: 'c.png', path: `${COUPLE_ID}/${RECORD_ID}/c.png` },
+    ];
+    mockRecordRows(attachments);
+    mockCreateSignedUrls.mockResolvedValue({
+      data: [...attachments].reverse().map((attachment) => ({
+        path: attachment.path,
+        signedUrl: `https://signed.example/${attachment.name}`,
+        error: null,
+      })),
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments?.map((attachment) => attachment.url)).toEqual([
+      'https://signed.example/a.png',
+      'https://signed.example/b.png',
+      'https://signed.example/c.png',
+    ]);
+  });
+
+  it('preserves duplicate same-path attachment metadata and order', async () => {
+    const duplicatePath = `${COUPLE_ID}/${RECORD_ID}/shared.bin`;
+    const attachments = [
+      { type: 'photo' as const, name: '원본 사진', path: duplicatePath },
+      { type: 'video' as const, name: '같은 경로 영상 메타데이터', path: duplicatePath },
+    ];
+    mockRecordRows(attachments);
+    mockCreateSignedUrls.mockResolvedValue({
+      data: [{ path: duplicatePath, signedUrl: 'https://signed.example/shared', error: null }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments).toEqual([
+      { ...attachments[0], url: 'https://signed.example/shared', urlUnavailable: undefined },
+      { ...attachments[1], url: 'https://signed.example/shared', urlUnavailable: undefined },
+    ]);
+    expect(mockCreateSignedUrls).toHaveBeenCalledWith([duplicatePath], 60 * 60);
+  });
+
+  it('keeps mixed success, proven denial, and missing entries precise in one batch', async () => {
+    const attachments = [
+      { type: 'photo' as const, name: 'ok.png', path: `${COUPLE_ID}/${RECORD_ID}/ok.png` },
+      { type: 'photo' as const, name: 'denied.png', path: `${COUPLE_ID}/${RECORD_ID}/denied.png` },
+      { type: 'photo' as const, name: 'missing.png', path: `${COUPLE_ID}/${RECORD_ID}/missing.png` },
+    ];
+    mockRecordRows(attachments);
+    mockCreateSignedUrls.mockResolvedValue({
+      data: [
+        { path: attachments[0].path, signedUrl: 'https://signed.example/ok', error: null },
+        { path: attachments[1].path, signedUrl: null, error: { code: '42501' } },
+      ],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments).toEqual([
+      { ...attachments[0], url: 'https://signed.example/ok', urlUnavailable: undefined },
+      { ...attachments[1], url: undefined, urlUnavailable: 'forbidden' },
+      { ...attachments[2], url: undefined, urlUnavailable: 'unknown' },
+    ]);
+  });
+
+  it.each([
+    ['a string-only error', { path: attachmentRow.path, signedUrl: null, error: 'denied' }, 'unknown'],
+    ['a proven 403', { path: attachmentRow.path, signedUrl: null, error: { status: 403 } }, 'forbidden'],
+    ['a proven 42501', { path: attachmentRow.path, signedUrl: null, error: { code: '42501' } }, 'forbidden'],
+    ['an absent URL alone', { path: attachmentRow.path, signedUrl: null, error: null }, 'unknown'],
+    ['a URL/error contradiction', {
+      path: attachmentRow.path,
+      signedUrl: 'https://signed.example/contradiction',
+      error: { status: 403 },
+    }, 'unknown'],
+  ])('classifies %s without inventing authorization', async (_label, entry, expected) => {
+    mockCreateSignedUrls.mockResolvedValue({ data: [entry], error: null });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments![0]).toMatchObject({
+      ...attachmentRow,
+      urlUnavailable: expected,
+    });
+    expect(result.records[0].attachments![0].url).toBeUndefined();
+  });
+
+  it('treats a null response path as unknown', async () => {
+    mockCreateSignedUrls.mockResolvedValue({
+      data: [{ path: null, signedUrl: 'https://signed.example/unbound', error: null }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments![0].url).toBeUndefined();
+    expect(result.records[0].attachments![0].urlUnavailable).toBe('unknown');
+  });
+
+  it('ignores response entries for paths that were not requested', async () => {
+    mockCreateSignedUrls.mockResolvedValue({
+      data: [{
+        path: `${COUPLE_ID}/${RECORD_ID}/external.png`,
+        signedUrl: 'https://signed.example/external',
+        error: null,
+      }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('expected records to remain readable');
+    expect(result.records[0].attachments![0]).toMatchObject({
+      ...attachmentRow,
+      urlUnavailable: 'unknown',
+    });
+    expect(result.records[0].attachments![0].url).toBeUndefined();
   });
 
   it('PRESERVATION: a successful signing attaches the URL and flags nothing', async () => {
@@ -370,35 +576,7 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
   });
 
   it('PRESERVATION: records with no attachments are unaffected and never sign', async () => {
-    mockFrom.mockReset();
-    mockFrom.mockImplementation(() => ({
-      select: () => ({
-        eq: () => ({
-          order: () => ({
-            order: () => ({
-              limit: async () => ({
-                data: [
-                  {
-                    id: RECORD_ID,
-                    record_date: '2026-03-01',
-                    record_time: '10:00',
-                    log_text: '글만 있는 기록',
-                    reaction: null,
-                    attachments: [],
-                    is_private: false,
-                    emotion_flow: [],
-                    emotion_updated_at: null,
-                    created_at: '2026-03-01T10:00:00Z',
-                    user_id: 'user-1',
-                  },
-                ],
-                error: null,
-              }),
-            }),
-          }),
-        }),
-      }),
-    }));
+    mockRecordRows([]);
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error('expected ok');
@@ -407,18 +585,7 @@ describe('M-4: a media-signing failure is surfaced instead of passing silently',
   });
 
   it('PRESERVATION: a records QUERY failure is still a hard failure', async () => {
-    mockFrom.mockReset();
-    mockFrom.mockImplementation(() => ({
-      select: () => ({
-        eq: () => ({
-          order: () => ({
-            order: () => ({
-              limit: async () => ({ data: null, error: { code: '42501', message: 'rls' } }),
-            }),
-          }),
-        }),
-      }),
-    }));
+    mockRecordPages([{ data: null, error: { code: '42501', message: 'rls' } }]);
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
     expect(result.ok).toBe(false);
     expect(result.records).toEqual([]);

@@ -216,67 +216,137 @@ function mapAuthenticatedAttachment(
  * in `urlUnavailable`, which is what lets a surface explain itself. The record
  * itself is still returned: a signing failure must not escalate into data loss.
  */
-async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
-  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return attachments;
+type SignedUrlAvailability =
+  | { url: string; urlUnavailable?: undefined }
+  | { url?: undefined; urlUnavailable: ServerErrorKind };
+
+async function buildSignedUrlAvailability(
+  attachments: Attachment[],
+): Promise<Map<string, SignedUrlAvailability>> {
+  const availability = new Map<string, SignedUrlAvailability>();
+  if (!isSupabaseConfigured || !supabase || attachments.length === 0) return availability;
 
   const paths = Array.from(new Set(
     attachments.map((attachment) => attachment.path).filter((path): path is string => !!path),
   ));
-  if (paths.length === 0) return attachments;
+  if (paths.length === 0) return availability;
 
-  const byPath = new Map<string, string>();
-  const unavailableByPath = new Map<string, ServerErrorKind>();
   for (let offset = 0; offset < paths.length; offset += SIGNED_URL_BATCH_SIZE) {
     const batch = paths.slice(offset, offset + SIGNED_URL_BATCH_SIZE);
-    const { data, error } = await supabase.storage
-      .from(MEDIA_BUCKET)
-      .createSignedUrls(batch, SIGNED_URL_TTL_SECONDS);
-
-    if (error) {
+    let data: unknown;
+    let responseError: unknown;
+    try {
+      const response = await supabase.storage
+        .from(MEDIA_BUCKET)
+        .createSignedUrls(batch, SIGNED_URL_TTL_SECONDS);
+      data = response.data;
+      responseError = response.error;
+    } catch (error) {
       console.error('[gomsinlog] Failed to sign media URLs.');
       const reason = classifyServerError(error).kind;
-      batch.forEach((path) => unavailableByPath.set(path, reason));
+      batch.forEach((path) => availability.set(path, { urlUnavailable: reason }));
       continue;
     }
 
-    const returned = new Set<string>();
-    (data || []).forEach((entry) => {
-      if (!entry.path || !entry.signedUrl || !batch.includes(entry.path)) return;
-      returned.add(entry.path);
-      byPath.set(entry.path, entry.signedUrl);
-    });
-    batch.forEach((path) => {
-      if (!returned.has(path)) unavailableByPath.set(path, 'forbidden');
+    if (responseError) {
+      console.error('[gomsinlog] Failed to sign media URLs.');
+      const reason = classifyServerError(responseError).kind;
+      batch.forEach((path) => availability.set(path, { urlUnavailable: reason }));
+      continue;
+    }
+
+    batch.forEach((path) => availability.set(path, { urlUnavailable: 'unknown' }));
+    const seen = new Set<string>();
+    (Array.isArray(data) ? data : []).forEach((rawEntry) => {
+      if (!rawEntry || typeof rawEntry !== 'object' || Array.isArray(rawEntry)) return;
+      const entry = rawEntry as Record<string, unknown>;
+      const path = entry.path;
+      if (typeof path !== 'string' || !batch.includes(path)) return;
+      if (seen.has(path)) {
+        availability.set(path, { urlUnavailable: 'unknown' });
+        return;
+      }
+      seen.add(path);
+
+      const hasError = entry.error !== null && entry.error !== undefined;
+      const hasUrl = typeof entry.signedUrl === 'string' && entry.signedUrl.length > 0;
+      if (hasError && hasUrl) {
+        availability.set(path, { urlUnavailable: 'unknown' });
+      } else if (hasError) {
+        const reason = typeof entry.error === 'object' && entry.error !== null
+          ? classifyServerError(entry.error, { online: true }).kind
+          : 'unknown';
+        availability.set(path, { urlUnavailable: reason });
+      } else if (hasUrl) {
+        availability.set(path, { url: entry.signedUrl as string, urlUnavailable: undefined });
+      }
     });
   }
 
+  return availability;
+}
+
+function applySignedUrlAvailability(
+  attachment: Attachment,
+  availability: ReadonlyMap<string, SignedUrlAvailability>,
+): Attachment {
+  const resolved = attachment.path ? availability.get(attachment.path) : undefined;
+  return resolved ? { ...attachment, ...resolved } : attachment;
+}
+
+async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
+  const availability = await buildSignedUrlAvailability(attachments);
   return attachments.map((attachment) => {
-    if (attachment.path && byPath.has(attachment.path)) {
-      return { ...attachment, url: byPath.get(attachment.path), urlUnavailable: undefined };
-    }
-    if (attachment.path && unavailableByPath.has(attachment.path)) {
-      return {
-        ...attachment,
-        url: undefined,
-        urlUnavailable: unavailableByPath.get(attachment.path),
-      };
-    }
-    return attachment;
+    return applySignedUrlAvailability(attachment, availability);
   });
 }
 
-type RecordsPageCursor = { createdAt: string; id: string };
+type RecordsPageCursor = { createdAt: string; timestampKey: string; id: string };
+
+const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const UTC_RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?(Z|\+00:00)$/;
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function canonicalTimestampKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const match = UTC_RFC3339.exec(value);
+  if (!match) return null;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText, fraction = ''] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const daysInMonth = [31, isLeapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (
+    year < 1
+    || month < 1
+    || month > 12
+    || day < 1
+    || day > daysInMonth[month - 1]
+    || hour > 23
+    || minute > 59
+    || second > 59
+  ) return null;
+  return `${yearText}-${monthText}-${dayText}T${hourText}:${minuteText}:${secondText}.${fraction.padEnd(6, '0')}Z`;
+}
 
 function cursorForRecordRow(row: unknown): RecordsPageCursor | null {
   if (!row || typeof row !== 'object' || Array.isArray(row)) return null;
   const candidate = row as Record<string, unknown>;
-  if (typeof candidate.created_at !== 'string' || candidate.created_at.length === 0) return null;
-  if (typeof candidate.id !== 'string' || candidate.id.length === 0) return null;
-  return { createdAt: candidate.created_at, id: candidate.id };
+  const timestampKey = canonicalTimestampKey(candidate.created_at);
+  if (!timestampKey || typeof candidate.created_at !== 'string') return null;
+  if (typeof candidate.id !== 'string' || !CANONICAL_UUID.test(candidate.id)) return null;
+  return { createdAt: candidate.created_at, timestampKey, id: candidate.id };
 }
 
-function sameRecordsCursor(left: RecordsPageCursor | null, right: RecordsPageCursor): boolean {
-  return left?.createdAt === right.createdAt && left.id === right.id;
+function isStrictlyOlderCursor(next: RecordsPageCursor, previous: RecordsPageCursor): boolean {
+  const timestampOrder = next.timestampKey.localeCompare(previous.timestampKey);
+  return timestampOrder < 0 || (timestampOrder === 0 && next.id.localeCompare(previous.id) < 0);
 }
 
 /**
@@ -312,15 +382,18 @@ async function fetchAllRecordRows(coupleId: string): Promise<
       .limit(RECORDS_PAGE_SIZE);
 
     if (error) return { ok: false, error };
-    const page = Array.isArray(data) ? data : [];
-    for (const row of page) {
-      if (typeof row?.id === 'string' && !rowsById.has(row.id)) rowsById.set(row.id, row);
+    if (!Array.isArray(data)) {
+      return { ok: false, error: new Error('Records page returned invalid data') };
     }
-    if (page.length < RECORDS_PAGE_SIZE) break;
+    const page = data;
+    if (page.length === 0) break;
 
     const nextCursor = cursorForRecordRow(page.at(-1));
-    if (!nextCursor || sameRecordsCursor(cursor, nextCursor)) {
+    if (!nextCursor || (cursor && !isStrictlyOlderCursor(nextCursor, cursor))) {
       return { ok: false, error: new Error('Records pagination did not advance') };
+    }
+    for (const row of page) {
+      if (typeof row?.id === 'string' && !rowsById.has(row.id)) rowsById.set(row.id, row);
     }
     cursor = nextCursor;
   }
@@ -354,11 +427,7 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
   const allAttachments = records.flatMap((record) => record.attachments || []);
   if (allAttachments.length === 0) return { ok: true, records };
 
-  const signed = await signValidatedAttachments(allAttachments);
-  const signedByPath = new Map<string, Attachment>();
-  signed.forEach((attachment) => {
-    if (attachment.path) signedByPath.set(attachment.path, attachment);
-  });
+  const signedUrlAvailability = await buildSignedUrlAvailability(allAttachments);
 
   /**
    * The records themselves loaded, so this stays `ok: true` -- a media-signing
@@ -370,10 +439,7 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
   const withUrls = records.map((record) => ({
     ...record,
     attachments: record.attachments?.map((attachment) =>
-      attachment.path && signedByPath.has(attachment.path)
-        ? signedByPath.get(attachment.path)!
-        : attachment,
-    ),
+      applySignedUrlAvailability(attachment, signedUrlAvailability)),
   }));
 
   const mediaUnavailable = withUrls

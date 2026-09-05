@@ -317,27 +317,32 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
   afterEach(() => mockFrom.mockReset());
 
   it('maps explicit profile posts without changing the stored record time', async () => {
-    const limit = vi.fn().mockResolvedValue({
-      data: [{
-        id: 'record-1',
-        user_id: 'user-1',
-        record_date: '2026-08-28',
-        record_time: '09:07:33',
-        log_text: '아침 기록',
-        attachments: [],
-        is_private: false,
-        is_profile_post: true,
-        created_at: '2026-08-28T00:07:33.000Z',
-        content_revision: 1,
-        cipher_format: 0,
-      }],
-      error: null,
-    });
-    const secondOrder = vi.fn().mockReturnValue({ limit });
-    const firstOrder = vi.fn().mockReturnValue({ order: secondOrder });
-    const eq = vi.fn().mockReturnValue({ order: firstOrder });
-    const select = vi.fn().mockReturnValue({ eq });
-    mockFrom.mockReturnValue({ select });
+    let pageIndex = 0;
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      or: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(async () => pageIndex++ === 0
+        ? {
+            data: [{
+              id: '11111111-1111-4111-8111-111111111111',
+              user_id: '22222222-2222-4222-8222-222222222222',
+              record_date: '2026-08-28',
+              record_time: '09:07:33',
+              log_text: '아침 기록',
+              attachments: [],
+              is_private: false,
+              is_profile_post: true,
+              created_at: '2026-08-28T00:07:33.000000Z',
+              content_revision: 1,
+              cipher_format: 0,
+            }],
+            error: null,
+          }
+        : { data: [], error: null }),
+    };
+    mockFrom.mockReturnValue(builder);
 
     const [mapped] = await fetchRecordsFromDB('couple-1');
 

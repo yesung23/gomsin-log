@@ -103,6 +103,7 @@ describe('daily_records complete pagination', () => {
       { data: rows.slice(0, 500), error: null },
       { data: rows.slice(500, 1_000), error: null },
       { data: rows.slice(1_000), error: null },
+      { data: [], error: null },
     );
 
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
@@ -111,7 +112,7 @@ describe('daily_records complete pagination', () => {
     expect(result.records).toHaveLength(1_005);
     expect(new Set(result.records.map((record) => record.id)).size).toBe(1_005);
     expect(result.records.map((record) => record.id)).toEqual(rows.map((row) => row.id));
-    expect(mocks.pageRequests).toHaveLength(3);
+    expect(mocks.pageRequests).toHaveLength(4);
     expect(mocks.pageRequests.every((request) => request.limits.includes(500))).toBe(true);
     expect(mocks.pageRequests[0].orders).toEqual([
       { column: 'created_at', ascending: false },
@@ -121,11 +122,46 @@ describe('daily_records complete pagination', () => {
     expect(mocks.pageRequests[1].filters[0]).toContain(`id.lt.${rows[499].id}`);
   });
 
+  it.each([1, 2, 100])(
+    'keeps reading through a server max_rows cap of %i until an empty page',
+    async (serverCap) => {
+      const rows = descendingRows(serverCap * 2 + 1);
+      for (let offset = 0; offset < rows.length; offset += serverCap) {
+        mocks.pages.push({ data: rows.slice(offset, offset + serverCap), error: null });
+      }
+      mocks.pages.push({ data: [], error: null });
+
+      const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+      expect(result.ok).toBe(true);
+      expect(result.records.map((record) => record.id)).toEqual(rows.map((row) => row.id));
+      expect(mocks.pageRequests).toHaveLength(Math.ceil(rows.length / serverCap) + 1);
+    },
+  );
+
+  it.each([500, 1_000])(
+    'requires a final empty page when the authorized history is exactly %i rows',
+    async (rowCount) => {
+      const rows = descendingRows(rowCount);
+      for (let offset = 0; offset < rows.length; offset += 500) {
+        mocks.pages.push({ data: rows.slice(offset, offset + 500), error: null });
+      }
+      mocks.pages.push({ data: [], error: null });
+
+      const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+      expect(result.ok).toBe(true);
+      expect(result.records).toHaveLength(rowCount);
+      expect(mocks.pageRequests).toHaveLength(rowCount / 500 + 1);
+    },
+  );
+
   it('uses id as the deterministic tie-breaker when every boundary timestamp is identical', async () => {
     const rows = descendingRows(501);
     mocks.pages.push(
       { data: rows.slice(0, 500), error: null },
       { data: rows.slice(500), error: null },
+      { data: [], error: null },
     );
 
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
@@ -136,12 +172,34 @@ describe('daily_records complete pagination', () => {
     expect(mocks.pageRequests[1].filters[0]).toContain(`id.lt.${rows[499].id}`);
   });
 
+  it('preserves UTC microseconds in a strictly older timestamp cursor', async () => {
+    const newest = recordRow(2, { created_at: '2026-09-05T01:00:00.123456Z' });
+    const older = recordRow(1, { created_at: '2026-09-05T01:00:00.123455Z' });
+    mocks.pages.push(
+      { data: [newest], error: null },
+      { data: [older], error: null },
+      { data: [], error: null },
+    );
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(true);
+    expect(result.records.map((record) => record.id)).toEqual([newest.id, older.id]);
+    expect(mocks.pageRequests[1].filters[0]).toContain(
+      'created_at.lt.2026-09-05T01:00:00.123456Z',
+    );
+    expect(mocks.pageRequests[2].filters[0]).toContain(
+      'created_at.lt.2026-09-05T01:00:00.123455Z',
+    );
+  });
+
   it('deduplicates a repeated boundary row without losing the following record', async () => {
     const first = descendingRows(500, 700);
     const next = recordRow(200);
     mocks.pages.push(
       { data: first, error: null },
       { data: [first.at(-1)!, next], error: null },
+      { data: [], error: null },
     );
 
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
@@ -154,7 +212,7 @@ describe('daily_records complete pagination', () => {
 
   it('fails the whole read when a later page fails instead of publishing a truncated prefix', async () => {
     mocks.pages.push(
-      { data: descendingRows(500), error: null },
+      { data: descendingRows(2), error: null },
       { data: null, error: { code: 'PGRST500', message: 'later page failed' } },
     );
 
@@ -178,6 +236,44 @@ describe('daily_records complete pagination', () => {
     expect(result.records).toEqual([]);
     expect(mocks.pageRequests).toHaveLength(2);
   });
+
+  it('rejects a different cursor that moves newer instead of strictly older', async () => {
+    const boundary = recordRow(100);
+    const newer = recordRow(101);
+    mocks.pages.push(
+      { data: [boundary], error: null },
+      { data: [newer], error: null },
+    );
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(mocks.pageRequests).toHaveLength(2);
+  });
+
+  it.each([
+    ['timestamp', { created_at: '2026-02-30T01:00:00.123456Z' }],
+    ['UUID', { id: uuidAt(10).toUpperCase() }],
+  ])('rejects a non-canonical %s cursor from the last row', async (_label, overrides) => {
+    mocks.pages.push({ data: [recordRow(10, overrides)], error: null });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(mocks.pageRequests).toHaveLength(1);
+  });
+
+  it('rejects data:null with error:null instead of treating it as an empty final page', async () => {
+    mocks.pages.push({ data: null, error: null });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(false);
+    expect(result.records).toEqual([]);
+    expect(mocks.createSignedUrls).not.toHaveBeenCalled();
+  });
 });
 
 describe('record attachment signing batches', () => {
@@ -190,7 +286,7 @@ describe('record attachment signing batches', () => {
         path: `${COUPLE_ID}/${row.id}/${uuidAt(index + 10_000)}.jpg`,
       }],
     }));
-    mocks.pages.push({ data: rows, error: null });
+    mocks.pages.push({ data: rows, error: null }, { data: [], error: null });
 
     const result = await fetchRecordsResultFromDB(COUPLE_ID);
 

@@ -2051,6 +2051,40 @@ describe('StoreProvider auth lifecycle', () => {
     expect(mockSupabase.rpc).toHaveBeenCalledWith('get_my_active_couple_id');
   });
 
+  it('quarantines prior records when the latest refresh resolves ok:false', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB.mockResolvedValueOnce({
+      ok: false,
+      records: [],
+      error: new Error('complete records read failed'),
+    });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent(''));
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('unavailable');
+  });
+
   it('prevents an older records refresh from overwriting a newer same-access refresh', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const older = deferred<{ ok: true; records: never[] }>();
@@ -2147,6 +2181,53 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
   });
 
+  it('ignores an older resolved ok:false refresh after a newer same-access refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const older = deferred<{ ok: false; records: []; error: Error }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(older.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-newest'));
+
+    await act(async () => older.resolve({
+      ok: false,
+      records: [],
+      error: new Error('stale complete records read failed'),
+    }));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
   it('shares the records sequence between SUBSCRIBED reconciliation and a dedicated refresh', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const olderReconciliation = deferred<{ ok: true; records: never[] }>();
@@ -2236,6 +2317,52 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
 
     await act(async () => rejectReconciliation(new Error('stale reconciliation records failed')));
+    expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
+    expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
+  });
+
+  it('ignores stale SUBSCRIBED ok:false reconciliation after a dedicated refresh succeeds', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const olderReconciliation = deferred<{ ok: false; records: []; error: Error }>();
+    fetchFullStateFromDB.mockResolvedValue(serverState({
+      records: [{ id: 'record-before', userId: 'user-a', isPrivate: false }] as never,
+      profile: {
+        myName: '춘향', role: 'gomsin',
+        couple: { coupleId: 'couple-1', partnerName: '몽룡', coupleCode: '', connected: true, status: 'active' },
+        military: {} as never, contact: {} as never,
+      } as never,
+    }));
+    mockSupabase.rpc.mockResolvedValue({ data: 'couple-1', error: null });
+    fetchRecordsResultFromDB
+      .mockReturnValueOnce(olderReconciliation.promise)
+      .mockResolvedValueOnce({
+        ok: true,
+        records: [{ id: 'record-dedicated-newest', userId: 'user-a', isPrivate: false }] as never,
+      });
+
+    render(<StoreProvider><Probe /></StoreProvider>);
+    await waitFor(() => expect(authCallbacks.length).toBeGreaterThan(0));
+    await act(async () => emitAuth('SIGNED_IN', 'user-a'));
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-before'));
+    const channel = createdChannels.find((entry) => entry.name === 'couple-sync:couple-1')!;
+    const subscribeCallback = channel.subscribe.mock.calls[0]?.[0];
+    const invalidationCall = channel.on.mock.calls.find(
+      (call) => call[1]?.table === 'collaboration_invalidations' && call[1]?.event === 'INSERT',
+    );
+
+    await act(async () => subscribeCallback?.('SUBSCRIBED'));
+    await waitFor(() => expect(fetchRecordsResultFromDB).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      invalidationCall?.[2]?.({ new: { slice: 'records' } });
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    await waitFor(() => expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest'));
+
+    await act(async () => olderReconciliation.resolve({
+      ok: false,
+      records: [],
+      error: new Error('stale SUBSCRIBED complete records read failed'),
+    }));
     expect(screen.getByTestId('records')).toHaveTextContent('record-dedicated-newest');
     expect(screen.getByTestId('syncStatus')).toHaveTextContent('live');
   });

@@ -34,6 +34,7 @@ import {
   saveCoupleAnniversary,
   fetchMyCoupleState,
 } from '@/lib/supabase';
+import { appleSessionGuard } from '@/lib/authSessionGuard';
 import {
   fetchFullStateResultFromDB,
   FULL_STATE_UNAVAILABLE,
@@ -5173,6 +5174,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Invalidate Apple before push revocation or any other awaited cleanup.
+    const finishAppleSignOut = appleSessionGuard.beginSignOut();
     /*
       START releasing push tokens first, while the session still authenticates.
 
@@ -5186,15 +5189,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       A hung network can therefore delay neither privacy on this device nor logout
       indefinitely. Migration 048's handover DELETE remains the durable boundary.
     */
-    const pushRevocation = revokeOwnPushTokens();
-    // Purge immediately: even if the RPC hangs, this device must not keep the
-    // previous account's records readable.
-    purgeLocalAccountData();
-    await withTimeout(pushRevocation, PUSH_TOKEN_REVOKE_TIMEOUT_MS, { ok: false });
     try {
-      await authRepository.signOut();
-    } catch {
-      console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway.');
+      const pushRevocation = revokeOwnPushTokens();
+      // Purge immediately: even if the RPC hangs, this device must not keep the
+      // previous account's records readable.
+      purgeLocalAccountData();
+      await withTimeout(pushRevocation, PUSH_TOKEN_REVOKE_TIMEOUT_MS, { ok: false });
+      try {
+        await authRepository.signOut();
+      } catch {
+        console.error('[gomsinlog] Sign-out request failed; local session was cleared anyway.');
+      }
+    } finally {
+      finishAppleSignOut();
     }
   };
 

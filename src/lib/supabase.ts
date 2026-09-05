@@ -27,9 +27,16 @@ import { createPkceTimeoutFetch } from '@/lib/oauthPkce';
 import { toAuthUser } from '@/types';
 import {
   authorizeWithNativeApple,
+  clearAppleNameCandidate,
   createAppleTokenTimeoutFetch,
   stageVerifiedAppleNameCandidate,
 } from '@/lib/appleAuth';
+import {
+  AppleAttemptInvalidatedError,
+  authSessionStorage,
+  appleSessionGuard,
+  type AppleSessionAttempt,
+} from '@/lib/authSessionGuard';
 
 /**
  * Supabase environment variables configuration.
@@ -120,6 +127,7 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
       auth: {
         autoRefreshToken: true,
         persistSession: true,
+        storage: appleSessionGuard.wrapStorage(authSessionStorage()),
         // AuthCallbackPage owns the web code exchange. Letting the client also
         // auto-detect the same single-use PKCE code creates two consumers: the
         // automatic exchange removes the verifier while the page's fallback is
@@ -134,10 +142,40 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
         },
       },
       global: {
-        fetch: createPkceTimeoutFetch(createAppleTokenTimeoutFetch(globalThis.fetch.bind(globalThis))),
+        fetch: createPkceTimeoutFetch(createAppleTokenTimeoutFetch(
+          globalThis.fetch.bind(globalThis), appleSessionGuard.currentAttempt,
+        )),
       },
     })
   : null;
+
+// A synchronous, client-lifetime observer: it is independent of React mounting
+// or hydration, and never awaits/re-enters Auth from an Auth callback.
+supabase?.auth.onAuthStateChange?.((event, session) => {
+  appleSessionGuard.observeSession(event, session);
+  if (event === 'SIGNED_OUT') clearAppleNameCandidate();
+});
+
+/** The store also registers intent before its awaited push-token cleanup. */
+function beginAppleSignOut(): () => void {
+  clearAppleNameCandidate();
+  return appleSessionGuard.beginSignOut();
+}
+
+// Register intent at the public SDK entry, before initialization/network awaits.
+// Signing out other devices deliberately leaves this device's session intact.
+if (supabase && typeof supabase.auth.signOut === 'function') {
+  const sdkSignOut = supabase.auth.signOut.bind(supabase.auth);
+  supabase.auth.signOut = async (options) => {
+    if (options?.scope === 'others') return sdkSignOut(options);
+    const finish = beginAppleSignOut();
+    try {
+      return await sdkSignOut(options);
+    } finally {
+      finish();
+    }
+  };
+}
 
 /**
  * Hash invitation code using Web Crypto API SHA-256.
@@ -849,8 +887,11 @@ export class SupabaseAuthRepository implements IAuthRepository {
     if (!supabase) {
       return { error: 'Supabase URL 및 Key가 설정되지 않았습니다. .env 환경변수를 확인해주세요.' };
     }
+    let attempt: AppleSessionAttempt | undefined;
     try {
+      attempt = appleSessionGuard.beginAppleAttempt();
       const authorization = await authorizeWithNativeApple();
+      attempt.assertCurrent();
       if (authorization.status === 'unavailable') {
         return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
       }
@@ -863,17 +904,23 @@ export class SupabaseAuthRepository implements IAuthRepository {
         token: authorization.identityToken,
         nonce: authorization.rawNonce,
       });
+      attempt.assertCurrent();
       const verifiedUserId = data.session?.user?.id;
       if (error || !verifiedUserId || data.user?.id !== verifiedUserId) {
         return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
       }
       stageVerifiedAppleNameCandidate(verifiedUserId, authorization.fullName);
       return {};
-    } catch {
+    } catch (error) {
+      if (error instanceof AppleAttemptInvalidatedError || attempt?.signal.aborted) {
+        return { cancelled: true };
+      }
       // Never include the thrown value: native and Supabase failures can carry
       // credentials, authorization codes, nonce values, or provider details.
       console.error('[gomsinlog] Native Apple sign-in failed.');
       return { error: '로그인을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.' };
+    } finally {
+      attempt?.finish();
     }
   }
 

@@ -8,6 +8,7 @@ import {
 } from '@gomsinlog/capacitor-apple-auth';
 import { appleLoginEnabled } from '@/lib/appleLoginFeature';
 import { AUTH_CALLBACK_TIMEOUT_MS } from '@/lib/async';
+import type { AppleSessionAttempt } from '@/lib/authSessionGuard';
 
 export const APPLE_AUTH_PLUGIN_NAME = 'GomsinlogAppleAuth';
 
@@ -270,7 +271,10 @@ export function getNativeAppleCredentialState(
 
 /** Bound the ID-token grant before auth-js can persist a late session. Other
  * requests retain the existing Google PKCE/refresh/logout transport unchanged. */
-export function createAppleTokenTimeoutFetch(fetchImpl: typeof fetch): typeof fetch {
+export function createAppleTokenTimeoutFetch(
+  fetchImpl: typeof fetch,
+  currentAttempt?: () => AppleSessionAttempt | undefined,
+): typeof fetch {
   return async (input, init) => {
     let url: URL;
     try {
@@ -281,6 +285,8 @@ export function createAppleTokenTimeoutFetch(fetchImpl: typeof fetch): typeof fe
     if (url.pathname !== '/auth/v1/token' || url.searchParams.get('grant_type') !== 'id_token') {
       return fetchImpl(input, init);
     }
+    const attempt = currentAttempt?.();
+    attempt?.assertCurrent();
     const controller = new AbortController();
     const callerSignal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
     const forwardAbort = () => controller.abort();
@@ -291,9 +297,10 @@ export function createAppleTokenTimeoutFetch(fetchImpl: typeof fetch): typeof fe
     });
     controller.signal.addEventListener('abort', rejectAbort, { once: true });
     callerSignal?.addEventListener('abort', forwardAbort, { once: true });
+    attempt?.signal.addEventListener('abort', forwardAbort, { once: true });
     const timer = setTimeout(forwardAbort, AUTH_CALLBACK_TIMEOUT_MS);
     try {
-      if (callerSignal?.aborted) throw abortError();
+      if (callerSignal?.aborted || attempt?.signal.aborted) throw abortError();
       const response = await Promise.race([
         fetchImpl(input, { ...init, signal: controller.signal }), aborted,
       ]);
@@ -301,12 +308,24 @@ export function createAppleTokenTimeoutFetch(fetchImpl: typeof fetch): typeof fe
         ? null
         : await Promise.race([response.arrayBuffer(), aborted]);
       if (controller.signal.aborted) throw abortError();
-      return new Response(body, {
+      attempt?.assertCurrent();
+      const buffered = new Response(body, {
         status: response.status, statusText: response.statusText, headers: response.headers,
       });
+      if (attempt) {
+        const readJson = buffered.json.bind(buffered);
+        buffered.json = async () => {
+          attempt.assertCurrent();
+          const value: unknown = await readJson();
+          attempt.bindSessionResponse(value);
+          return value;
+        };
+      }
+      return buffered;
     } finally {
       clearTimeout(timer);
       callerSignal?.removeEventListener('abort', forwardAbort);
+      attempt?.signal.removeEventListener('abort', forwardAbort);
       controller.signal.removeEventListener('abort', rejectAbort);
     }
   };

@@ -35,6 +35,7 @@ export function TripsPage() {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<Trip[]>(() => reconcileParentTrips(state.trips));
   const globalTripsSnapshotRef = useRef(state.trips);
+  const tripScopeResetKeyRef = useRef<string | undefined>(undefined);
   const [loadState, setLoadState] = useState<LoadState>('loading');
   const [showModal, setShowModal] = useState(false);
   const [newTrip, setNewTrip] = useState({ title: '', startDate: '', endDate: '' });
@@ -59,6 +60,7 @@ export function TripsPage() {
     userId && coupleId && state.profile.couple.connected && state.profile.couple.status === 'active',
   );
   const tripAccessKey = activeCouple ? `${userId}:${coupleId}` : '';
+  const tripResetKey = `${userId ?? 'anonymous'}:${coupleId ?? 'none'}:${activeCouple ? 'active' : 'inactive'}`;
   const tripAccessKeyRef = useRef(tripAccessKey);
   const tripAccessGenerationRef = useRef(0);
   if (tripAccessKeyRef.current !== tripAccessKey) {
@@ -78,12 +80,15 @@ export function TripsPage() {
   );
 
   useLayoutEffect(() => {
+    if (tripScopeResetKeyRef.current === tripResetKey) return;
+    tripScopeResetKeyRef.current = tripResetKey;
     setTrips(activeCouple ? reconcileParentTrips(state.trips) : []);
     setShowModal(false);
+    setNewTrip({ title: '', startDate: '', endDate: '' });
     setIsCreating(false);
     setFormError(null);
     setLoadState(activeCouple ? 'loading' : userId ? 'disconnected' : 'forbidden');
-  }, [activeCouple, state.trips, tripAccessKey, userId]);
+  }, [activeCouple, state.trips, tripResetKey, userId]);
 
   const loadTrips = useCallback(async () => {
     if (!userId) {

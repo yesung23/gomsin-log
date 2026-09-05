@@ -1,7 +1,40 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { extractPlaceFromOcr, inferPlaceCategory } from '@/lib/placeOcr';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { extractPlaceFromOcr, inferPlaceCategory, recognizePlaceScreenshot } from '@/lib/placeOcr';
+
+const tesseract = vi.hoisted(() => ({
+  createWorker: vi.fn(),
+  OEM: { LSTM_ONLY: 1 },
+}));
+
+vi.mock('tesseract.js', () => tesseract);
+
+type OcrWorker = {
+  recognize: (image: File) => Promise<{ data: { text: string } }>;
+  terminate: () => Promise<void>;
+};
+
+type OcrLoggerMessage = { status: string; progress: number };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}
+
+function screenshotFile(): File {
+  return new File(['image'], 'place.png', { type: 'image/png' });
+}
+
+async function flushAsyncWork() {
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
 
 /**
  * The three fixtures below are the REAL tesseract.js output for three Naver Map
@@ -129,5 +162,83 @@ describe('extractPlaceFromOcr', () => {
     for (const hint of ['국수', '치킨,닭강정', '카페,디저트', '분식', '초밥']) {
       expect(inferPlaceCategory(hint), hint).toBe('food');
     }
+  });
+});
+
+describe('recognizePlaceScreenshot lifecycle', () => {
+  it('times out worker creation without accepting late progress, then terminates the late worker', async () => {
+    vi.useFakeTimers();
+    const lateWorker = deferred<OcrWorker>();
+    const progress = vi.fn();
+    let logger: ((message: OcrLoggerMessage) => void) | undefined;
+    const worker: OcrWorker = {
+      recognize: vi.fn(),
+      terminate: vi.fn().mockResolvedValue(undefined),
+    };
+    tesseract.createWorker.mockImplementation((...args: unknown[]) => {
+      logger = (args[2] as { logger: (message: OcrLoggerMessage) => void }).logger;
+      return lateWorker.promise;
+    });
+
+    const outcome = recognizePlaceScreenshot(screenshotFile(), progress)
+      .then(() => undefined, (error: unknown) => error);
+    await flushAsyncWork();
+    expect(logger).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(45_000);
+    await expect(outcome).resolves.toMatchObject({ message: '사진 인식 시간이 초과됐어요.' });
+
+    const progressCallsAtTimeout = progress.mock.calls.length;
+    logger?.({ status: 'recognizing text', progress: 0.9 });
+    expect(progress).toHaveBeenCalledTimes(progressCallsAtTimeout);
+
+    lateWorker.resolve(worker);
+    await flushAsyncWork();
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the recognition timeout even when worker termination never settles', async () => {
+    vi.useFakeTimers();
+    const worker: OcrWorker = {
+      recognize: vi.fn(() => new Promise(() => undefined)),
+      terminate: vi.fn(() => new Promise(() => undefined)),
+    };
+    tesseract.createWorker.mockResolvedValue(worker);
+    let outcome: unknown;
+    void recognizePlaceScreenshot(screenshotFile()).catch((error: unknown) => { outcome = error; });
+
+    await flushAsyncWork();
+    await vi.advanceTimersByTimeAsync(45_000);
+    await flushAsyncWork();
+
+    expect(outcome).toBeInstanceOf(Error);
+    expect((outcome as Error).message).toBe('사진 인식 시간이 초과됐어요.');
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('returns successful OCR results even if cleanup rejects', async () => {
+    const worker: OcrWorker = {
+      recognize: vi.fn().mockResolvedValue({ data: { text: '연남토마\n서울 마포구 연남로 42' } }),
+      terminate: vi.fn().mockRejectedValue(new Error('cleanup failed')),
+    };
+    tesseract.createWorker.mockResolvedValue(worker);
+
+    await expect(recognizePlaceScreenshot(screenshotFile())).resolves.toMatchObject({
+      title: '연남토마',
+      address: '서울 마포구 연남로 42',
+    });
+  });
+
+  it('preserves a normal recognition failure after cleanup', async () => {
+    const worker: OcrWorker = {
+      recognize: vi.fn().mockRejectedValue(new Error('engine failed')),
+      terminate: vi.fn().mockResolvedValue(undefined),
+    };
+    tesseract.createWorker.mockResolvedValue(worker);
+
+    await expect(recognizePlaceScreenshot(screenshotFile())).rejects.toThrow('engine failed');
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 });

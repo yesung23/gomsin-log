@@ -19,6 +19,7 @@ export interface ExtractedPlace {
 export type InferredPlaceCategory = 'activity' | 'food' | 'lodging' | 'transport';
 
 const OCR_TIMEOUT_MS = 45_000;
+const OCR_CLEANUP_TIMEOUT_MS = 1_000;
 
 function progressForStatus(status: string, progress: number): number | null {
   switch (status) {
@@ -40,6 +41,15 @@ async function rejectAfter<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+function terminateWorkerInBackground(worker: { terminate: () => Promise<unknown> | unknown }) {
+  // Worker cleanup must not delay or replace a recognition result. The bounded
+  // race bounds our observation only; it cannot force an uncooperative worker to stop.
+  void rejectAfter(
+    Promise.resolve().then(() => worker.terminate()),
+    OCR_CLEANUP_TIMEOUT_MS,
+  ).catch(() => undefined);
 }
 
 const UI_NOISE = /^(네이버\s*지도|네이버|지도|저장\s*공유|저장|공유|출발|도착|거리뷰|리뷰|사진|메뉴|홈|검색|길찾기|전화|주문|배달|줄서기|테이블링|알림받기|쿠폰|길찾기)$/;
@@ -179,25 +189,38 @@ export async function recognizePlaceScreenshot(
   onProgress?: (progress: number) => void,
 ): Promise<ExtractedPlace> {
   const { createWorker, OEM } = await import('tesseract.js');
+  let acceptsProgress = true;
   onProgress?.(0.02);
-  const worker = await rejectAfter(
-    createWorker('kor', OEM.LSTM_ONLY, {
+  const workerPromise = createWorker(
+    'kor', OEM.LSTM_ONLY, {
       workerPath: '/ocr/worker.min.js',
       corePath: '/ocr/tesseract-core-lstm.wasm.js',
       langPath: '/ocr',
       workerBlobURL: false,
       logger: (message) => {
+        if (!acceptsProgress) return;
         const progress = progressForStatus(message.status, message.progress);
         if (progress !== null) onProgress?.(progress);
       },
-    }),
-    OCR_TIMEOUT_MS,
+    },
   );
+  void workerPromise.then(
+    (lateWorker) => {
+      if (!acceptsProgress) terminateWorkerInBackground(lateWorker);
+    },
+    () => undefined,
+  );
+  let worker: Awaited<typeof workerPromise> | undefined;
   try {
+    worker = await rejectAfter(
+      workerPromise,
+      OCR_TIMEOUT_MS,
+    );
     const result = await rejectAfter(worker.recognize(image), OCR_TIMEOUT_MS);
     onProgress?.(1);
     return extractPlaceFromOcr(result.data.text);
   } finally {
-    await worker.terminate();
+    acceptsProgress = false;
+    if (worker) terminateWorkerInBackground(worker);
   }
 }

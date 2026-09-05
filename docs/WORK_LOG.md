@@ -11,6 +11,10 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- Trip/OCR 독립 종결: Epicurus SolMax SCOPED LOCAL PASS/C0H0M0L0. 부모4hash일치, 검토는 source/test 정적이며 실행증거는 부모22unit/56browser/TS/lint로 구분. 전환/cleanup 일부 조합의 비차단 테스트 공백은 report에 명시. REVIEW IMPACT scoped DELTA PASS, fullapp/hosted 판정 아님. 다음 exact commit CI→master, 공개는 별도 운영 gate.
+
+- Trip/OCR 후속: `a5abeff` 기반 Noether TerraHigh 4파일 수정, 부모 전체diff·22unit·56browser·TS·scopedlint PASS. Epicurus SolMax 독립 DELTA pending. identity reset은 현재 snapshot/입력 초기화, same-scope refresh는 입력 보존. OCR cleanup은 결과를 막지 않도록 보완. Business N/A, 기존 Product/Engineering 방향 유지/conflict NO. 별도 실패-only/1일 CI artifact 준비. 실제 Linux 원인·새 CI/merge/배포 미검증; [상세와 hash](../control-tower/reports/codex/2026-09-06_trip-runtime-recovery_codex.md).
+
 - D05 후속: 합성 최종 PATCH/status 응답 손실로 테스트 의미를 교정하고 중복 write 카운터 추가. Worker coupleMatrix37PASS, parent 독립D05 1PASS/12.9s·scoped ESLint·diff-check PASS. 런타임/DB 변경 없음, REVIEW IMPACT test DELTA. 다음은 부모가 확인한 Trips 동일-scope refresh 창 닫힘/OCR 무제한 종료 대기 보완. full Linux CI/배포 미검증, [상세](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).
 
 - 후속 exact `12f97ea` CI: browser193PASS/3FAIL로 master HOLD. 그 외 web/native/PG/Edge/security gates PASS. Nietzsche SolHigh bounded correction 진행; Pasteur TerraMax readonly는 과거 Apple lifecycle HOLD와 현재 activation/production HOLD를 구분. Parent가 flag/build fuse/test-only delta를 확인했으며 app/test source는 수정하지 않음. 제품·사업·원격 변경 없음, REVIEW IMPACT DELTA. 다음: 3FAIL 원인 교정→전체 browser 재검증→master→새 Home. [현재 증거와 미검증](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).

@@ -1,0 +1,23 @@
+.service-journey { min-width: 0; }
+.service-journey-emblem { position: relative; width: 72px; height: 80px; flex-shrink: 0; color: var(--ink-accent); }
+.service-journey-emblem > svg { width: 100%; height: 100%; fill: color-mix(in srgb, var(--ink-accent) 8%, var(--paper)); }
+.service-journey-insignia { position: absolute; inset: 21px 22px 27px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 3px; }
+.service-journey-insignia i { width: 24px; height: 4px; border-radius: 1px; background: currentColor; }
+.service-journey-level { color: var(--ink-accent); }
+.service-journey-exp { overflow-wrap: anywhere; font-size: 1.25rem; line-height: 1.5; }
+.service-journey-control { display: grid; place-items: center; min-width: 44px; min-height: 44px; border: 1px solid var(--ink-faint); border-radius: var(--radius-control, 12px); flex-shrink: 0; color: var(--ink); }
+.service-journey-control:focus-visible, .service-journey-details > summary:focus-visible { outline: 2px solid var(--ink-accent); outline-offset: 3px; }
+.service-journey-track { height: 10px; border-radius: 999px; background: var(--paper); border: 1px solid var(--ink-faint); overflow: hidden; }
+.service-journey-track > div { height: 100%; border-radius: inherit; background: var(--ink-accent); }
+.service-journey-track--total { height: 6px; }
+.service-journey-stages { list-style: none; padding: 0; margin: 0; }
+.service-journey-stages li { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 4px 8px; border-bottom: 1px solid var(--ink-faint); }
+.service-journey-stages li[aria-current] { font-weight: 700; background: color-mix(in srgb, var(--ink-accent) 8%, var(--paper)); }
+.service-journey-stop { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; }
+.service-journey--compact .service-journey-emblem { width: 56px; height: 64px; }
+.service-journey--compact .service-journey-insignia { inset: 15px 16px 21px; }
+@media (prefers-reduced-motion: no-preference) {
+  .service-journey-level { animation: service-level-arrive 360ms ease-out; }
+  .service-journey[data-live="true"] .service-journey-track > div { transition: width 900ms linear; }
+}
+@keyframes service-level-arrive { from { opacity: .65; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }

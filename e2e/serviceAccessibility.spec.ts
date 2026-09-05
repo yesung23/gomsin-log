@@ -85,6 +85,7 @@ test('Service stays legible and keyboard-complete on a small iPhone', async ({ b
     if (!bar || !(fill instanceof HTMLElement)) throw new Error('Service progress paint is missing');
     return {
       text: ratio(rgb(heroStyle.color), rgb(heroStyle.backgroundColor)),
+      control: ratio(rgb(getComputedStyle(hero.querySelector('button')!).color), rgb(heroStyle.backgroundColor)),
       progress: ratio(
         rgb(getComputedStyle(bar).backgroundColor),
         rgb(getComputedStyle(fill).backgroundColor),
@@ -93,6 +94,7 @@ test('Service stays legible and keyboard-complete on a small iPhone', async ({ b
   });
   expect(darkContrast.text).toBeGreaterThanOrEqual(4.5);
   expect(darkContrast.progress).toBeGreaterThanOrEqual(3);
+  expect(darkContrast.control).toBeGreaterThanOrEqual(3);
   await page.screenshot({ path: testInfo.outputPath('service-dark.png'), fullPage: true });
   await context.close();
 });

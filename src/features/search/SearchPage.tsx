@@ -7,17 +7,17 @@ import { searchRecords, excerptAround, type SearchResult } from '@/lib/recordSea
 import { localToday } from '@/lib/cycle';
 import {
   computeServiceProgress,
-  effectiveDischargeDate,
   nextUpcomingEvent,
   resolveEffectiveMilitary,
 } from '@/lib/milestones';
 import { daysBetweenLocal, formatLocalDate } from '@/lib/utils';
 import { CycleTrackerSection } from '@/components/CycleTrackerSection';
 import { CycleSupportSection } from '@/components/CycleSupportSection';
-import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent, Branch, MilitaryStatus } from '@/types';
+import type { DailyRecord, MilitaryInfo, ContactPreferences, CoupleEvent } from '@/types';
 import { MobileShell } from '@/components/MobileShell';
 import { AppBar, AppBarAction } from '@/components/ui/AppBar';
 import { resolveRelationshipContext } from '@/lib/relationshipContext';
+import { ServiceJourney } from '@/features/service/ServiceJourney';
 
 /**
  * 찾기 — `우리`의 색인.
@@ -59,34 +59,8 @@ interface SoldierSearchSurfaceProps {
   onOpenService: () => void;
 }
 
-const BRANCH_LABELS: Record<Branch, string> = {
-  army: '육군',
-  marine: '해병대',
-  reserve: '상근예비역',
-  navy: '해군',
-  airforce: '공군',
-  social_service: '사회복무요원',
-  other: '기타',
-};
-
-const STATUS_LABELS: Record<MilitaryStatus, string> = {
-  planned: '입대 예정',
-  serving: '복무 중',
-  discharge_soon: '전역 예정',
-  discharged: '전역',
-  unknown: '미입력',
-};
-
-function formatServicePercent(percent: number): string {
-  return `${Number(percent.toFixed(1))}%`;
-}
-
 function InlineServiceInfo({
-  military,
-  contact,
-  today,
-  onOpenService,
-  title = '내 복무',
+  military, contact, onOpenService, title = '내 복무',
 }: {
   military: MilitaryInfo;
   contact?: ContactPreferences;
@@ -94,105 +68,18 @@ function InlineServiceInfo({
   onOpenService?: () => void;
   title?: string;
 }) {
-  const progress = computeServiceProgress(military, today);
-  if (!progress) return null;
-
-  const isDischarged = progress.isDischarged || military.militaryStatus === 'discharged';
-  const percent = isDischarged ? 100 : progress.percent;
-  const elapsedDays = isDischarged ? progress.totalDays : progress.elapsedDays;
-  const remainingDays = isDischarged ? 0 : progress.remainingDays;
-  const daysUntilEnlistment = progress.daysUntilEnlistment ?? 0;
-  const percentLabel = formatServicePercent(percent);
-  const statusLabel = isDischarged
-    ? '전역했어요'
-    : progress.isBeforeEnlistment
-      ? STATUS_LABELS.planned
-      : military.militaryStatus === 'discharge_soon'
-        ? STATUS_LABELS.discharge_soon
-        : STATUS_LABELS.serving;
-
   return (
-    <section
-      aria-labelledby="service-summary-heading"
-      className="ink-box relative space-y-3.5 overflow-hidden p-4"
-      data-testid="soldier-service-info"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex min-w-0 items-start gap-2.5">
-          <div className="ink-chip flex h-10 w-10 shrink-0 items-center justify-center p-1 text-coral-strong">
-            <Shield size={22} aria-hidden="true" />
-          </div>
-          <div className="min-w-0">
-            <h2
-              id="service-summary-heading"
-              className="text-heading break-keep [overflow-wrap:anywhere]"
-              style={{ color: 'var(--ink)' }}
-            >
-              {title}
-            </h2>
-            <div className="text-caption text-muted-foreground">
-              {BRANCH_LABELS[military.branch]} ·{' '}
-              <span data-testid="service-status">{statusLabel}</span>
-            </div>
-          </div>
-        </div>
-        <div className="shrink-0 text-right">
-          <span className="text-heading font-bold text-card-foreground tabular-nums">
-            {isDischarged
-              ? '전역'
-              : progress.isBeforeEnlistment
-                ? `입대 D-${daysUntilEnlistment}`
-                : `D-${remainingDays}`}
-          </span>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <div
-          className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-label font-semibold text-card-foreground"
-          data-testid="service-progress-summary"
-        >
-          <span>복무율 {percentLabel}</span>
-          <span className="text-muted-foreground tabular-nums">
-            {progress.isBeforeEnlistment
-              ? `입대까지 ${daysUntilEnlistment}일`
-              : `${elapsedDays}일 경과 · ${remainingDays}일 남음`}
-          </span>
-        </div>
-        <div
-          role="progressbar"
-          aria-label="개인 복무 진행률"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-          aria-valuetext={`복무율 ${percentLabel}`}
-          className="h-2 overflow-hidden rounded-full border"
-          style={{ background: 'var(--paper)', borderColor: 'var(--ink-faint)' }}
-        >
-          <div
-            className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700 motion-safe:ease-out"
-            style={{ width: `${percent}%`, background: 'var(--ink-accent)' }}
-          />
-        </div>
-        <div className="flex flex-wrap justify-between gap-x-3 gap-y-1 text-caption text-muted-foreground">
-          <span>입대 {formatLocalDate(military.enlistmentDate!)}</span>
-          <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
-        </div>
-      </div>
-
+    <section aria-labelledby="service-summary-heading" className="ink-box space-y-3 p-4" data-testid="soldier-service-info">
+      <h2 id="service-summary-heading" className="text-heading break-keep [overflow-wrap:anywhere]">{title}</h2>
+      <ServiceJourney military={military} name={title} compact />
       {contact?.enabled ? (
         <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
           평일 {contact.weekdayStart}–{contact.weekdayEnd} · 주말 {contact.weekendStart}–{contact.weekendEnd}
         </p>
       ) : null}
-
       {onOpenService ? (
-        <button
-          type="button"
-          onClick={onOpenService}
-          className="press-response min-h-11 text-caption font-semibold text-coral-strong"
-        >
+        <button type="button" onClick={onOpenService} className="press-response min-h-11 text-caption font-semibold text-coral-strong">
           복무 정보 수정
         </button>
       ) : null}

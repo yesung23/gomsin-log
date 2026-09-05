@@ -8,7 +8,6 @@ import { useDialogFocus } from '@/lib/useDialogFocus';
 import { localToday, toLocalDateString, addMonths, formatLocalDate } from '@/lib/utils';
 import {
   computeServiceProgress,
-  effectiveDischargeDate,
   nextUpcomingEvent,
   resolveEffectiveMilitary,
 } from '@/lib/milestones';
@@ -16,6 +15,7 @@ import { Edit2, Phone, Shield, CalendarPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Branch, MilitaryStatus, DischargeDateSource } from '@/types';
 import { Card } from '@/components/ui/Card';
+import { ServiceJourney } from '@/features/service/ServiceJourney';
 
 /** Standard service length by branch, in months. */
 const SERVICE_MONTHS: Record<Branch, number> = {
@@ -26,24 +26,6 @@ const SERVICE_MONTHS: Record<Branch, number> = {
   airforce: 21,
   social_service: 21,
   other: 0,
-};
-
-const BRANCH_LABELS: Record<Branch, string> = {
-  army: '육군',
-  marine: '해병대',
-  reserve: '상근예비역',
-  navy: '해군',
-  airforce: '공군',
-  social_service: '사회복무요원',
-  other: '기타',
-};
-
-const STATUS_LABELS: Record<MilitaryStatus, string> = {
-  planned: '입대 예정',
-  serving: '복무 중',
-  discharge_soon: '전역 예정',
-  discharged: '전역',
-  unknown: '미입력',
 };
 
 /**
@@ -188,7 +170,7 @@ export function ServicePage() {
           actions={
             isSoldier ? (
               <AppBarAction onClick={openEditor} aria-label="복무 정보 수정">
-                <Edit2 size={18} aria-hidden="true" />
+                <Edit2 size={18} color="var(--ink)" aria-hidden="true" />
               </AppBarAction>
             ) : undefined
           }
@@ -196,63 +178,7 @@ export function ServicePage() {
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (
-          <section className="ink-fill relative overflow-hidden p-5" aria-labelledby="service-progress-title">
-            <Shield className="absolute -right-4 -bottom-4 h-32 w-32 rotate-12 opacity-10" aria-hidden="true" />
-            <div className="relative z-10">
-              <div className="flex justify-between items-start mb-2">
-                <span className="rounded-control border border-current/40 px-3 py-1 text-caption font-bold">
-                  {BRANCH_LABELS[military?.branch || 'army']} ·{' '}
-                  {STATUS_LABELS[military?.militaryStatus || 'serving']}
-                </span>
-                {/* Provenance is only claimed when it is actually known.
-                    `unknown` used to fall through to 자동 계산, which asserted
-                    the date had been derived when nobody had said so. */}
-                {military?.dischargeDateSource !== 'unknown' && (
-                  <span className="rounded-control border border-current/30 px-2.5 py-1 text-caption font-semibold opacity-80">
-                    {military?.dischargeDateSource === 'manual' ? '직접 입력' : '자동 계산'}
-                  </span>
-                )}
-              </div>
-
-              <h2 id="service-progress-title" className="text-display mb-4 tracking-tight tabular-nums">
-                {progress.isDischarged
-                  ? '전역 🎉'
-                  : progress.isBeforeEnlistment
-                    ? `입대 D-${progress.daysUntilEnlistment ?? 0}`
-                    : `D-${progress.remainingDays}`}
-              </h2>
-
-              <div className="space-y-2">
-                <div className="flex justify-between text-label font-medium opacity-80">
-                  <span>복무율 {progress.percent}%</span>
-                  <span>
-                    {progress.isBeforeEnlistment
-                      ? `입대까지 ${progress.daysUntilEnlistment ?? 0}일`
-                      : `${progress.remainingDays}일 남음`}
-                  </span>
-                </div>
-                <div
-                  role="progressbar"
-                  aria-label={`${soldierName} 복무 진행률`}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={progress.percent}
-                  aria-valuetext={`복무율 ${progress.percent}%`}
-                  className="h-2.5 overflow-hidden rounded-full"
-                  style={{ background: 'var(--paper)' }}
-                >
-                  <div
-                    className="h-full rounded-full motion-safe:transition-[width] motion-safe:duration-700"
-                    style={{ width: `${progress.percent}%`, background: 'var(--ink-accent)' }}
-                  />
-                </div>
-                <div className="flex justify-between text-caption pt-1 opacity-65">
-                  <span>입대 {formatLocalDate(military!.enlistmentDate!)}</span>
-                  <span>전역 {formatLocalDate(effectiveDischargeDate(military)!)}</span>
-                </div>
-              </div>
-            </div>
-          </section>
+          <ServiceJourney military={military} name={soldierName} />
         ) : (
           <div className="rounded-surface border border-dashed border-border bg-muted/40 p-5 text-center space-y-3">
             <Shield className="w-8 h-8 text-muted-foreground/60 mx-auto" />

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
@@ -123,11 +123,14 @@ function renderSearch() {
 beforeEach(() => {
   vi.clearAllMocks();
   mockLocalToday.mockReturnValue('2026-08-27');
+  vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-08-27T00:00:00+09:00'));
   currentState = stateWith();
 });
 
+afterEach(() => vi.restoreAllMocks());
+
 describe('군화(soldier) 기본 주 콘텐츠', () => {
-  it('복무 정보가 있으면 압박 장치 없이 날짜 기반 진행 정보 하나를 보여준다', () => {
+  it('복무 정보가 있으면 시간 기반 EXP와 사실 기반 복무율을 함께 보여준다', () => {
     currentState = stateWith({ role: 'soldier', military: SERVING_MILITARY });
     renderSearch();
 
@@ -148,14 +151,13 @@ describe('군화(soldier) 기본 주 콘텐츠', () => {
     const progressbar = screen.getByRole('progressbar', { name: '개인 복무 진행률' });
     expect(progressbar).toHaveAttribute('aria-valuenow', String(progress!.percent));
     expect(progressbar).toHaveAttribute('aria-valuetext', `복무율 ${progress!.percent}%`);
-    expect(progressbar.firstElementChild)
-      .toHaveClass('motion-safe:transition-[width]');
-    expect(screen.getAllByRole('progressbar')).toHaveLength(1);
-    expect(screen.queryByTestId('service-level')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('service-exp-readout')).not.toBeInTheDocument();
+    expect(progressbar.firstElementChild).toHaveStyle({ width: `${progress!.percent}%` });
+    expect(screen.getAllByRole('progressbar')).toHaveLength(2);
+    expect(screen.getByTestId('service-level')).toBeInTheDocument();
+    expect(screen.getByTestId('service-exp-readout')).toBeInTheDocument();
     expect(screen.queryByTestId('service-today-exp')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '전체 단계' })).not.toBeInTheDocument();
-    expect(screen.queryByText(/EXP|Lv\./)).not.toBeInTheDocument();
+    expect(screen.getByText('예상 계급')).toBeInTheDocument();
     expect(screen.getByText(/평일 18:00–21:00/)).toBeInTheDocument();
     expect(screen.queryByTestId('cycle-tracker-section')).not.toBeInTheDocument();
   });
@@ -283,7 +285,7 @@ describe('곰신(gomsin) 기본 주 콘텐츠', () => {
     expect(screen.getByText('지수의 복무')).toBeInTheDocument();
     expect(screen.getByTestId('soldier-service-info')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toBeInTheDocument();
-    expect(screen.queryByText(/EXP|Lv\./)).not.toBeInTheDocument();
+    expect(screen.getByTestId('service-level')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '복무 정보 수정' })).not.toBeInTheDocument();
   });
 
@@ -537,6 +539,6 @@ describe('복무 진행의 다군 지원', () => {
 
     expect(screen.getByText(/해군/)).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: '개인 복무 진행률' })).toBeInTheDocument();
-    expect(screen.queryByText(/EXP|Lv\./)).not.toBeInTheDocument();
+    expect(screen.getByTestId('service-level')).toBeInTheDocument();
   });
 });

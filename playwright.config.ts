@@ -7,7 +7,14 @@ import { defineConfig, devices } from '@playwright/test';
  */
 const localChromiumExecutable = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH?.trim() || undefined;
 const partnerBriefingSuite = process.env.GOMSINLOG_E2E_PARTNER_BRIEFING === 'true';
-const previewPort = partnerBriefingSuite ? 4174 : 4173;
+const requestedE2ePort = process.env.GOMSINLOG_E2E_PORT?.trim();
+const previewPort = requestedE2ePort === undefined || requestedE2ePort === ''
+  ? (partnerBriefingSuite ? 4174 : 4173)
+  : Number(requestedE2ePort);
+
+if (!Number.isInteger(previewPort) || previewPort < 1 || previewPort > 65_535) {
+  throw new Error('GOMSINLOG_E2E_PORT must be an integer from 1 through 65535');
+}
 const previewUrl = `http://127.0.0.1:${previewPort}`;
 
 /**

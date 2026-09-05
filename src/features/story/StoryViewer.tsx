@@ -487,7 +487,7 @@ function CoverCard({
       : '기기 AI로 긴 문장 줄이기';
   const reasonLabel = refinementReason ? REFINEMENT_REASON_LABEL[refinementReason] : undefined;
   const statusLabel = refinementStatus === 'running'
-    ? '기기 AI로 긴 문장 줄이는 중 · 1/1 · 기본 시간순 정리는 계속 보여요'
+    ? '기기 AI로 긴 문장 줄이는 중 · 기본 시간순 정리는 계속 보여요'
     : refinementStatus === 'applied'
       ? '기기 AI로 긴 문장 줄이기 완료 · 원문 연결은 그대로예요'
       : refinementStatus === 'fallback'

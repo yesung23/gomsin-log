@@ -13564,3 +13564,12 @@ PRODUCTION
 - Browser source/fixtures are a separate active workstream, not staged with these fixes. Production NOT APPLIED. iPhone unavailable.
 - Proposed Book bookmark contract records the separate owner's handoff without claiming persistence exists.
 - Evidence/remaining/rollback: [PR93 repair report](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).
+# 2026-09-06 — Browser CI closure and truthful summary progress
+
+- PLAN POSITION: pre-notebook master integration; base `be085e1`, PR93.
+- DIRECTION CHECK: latest approved EXP and summary original-link direction; business NOT APPLICABLE; no conflict. Live CI/current source checked.
+- CHANGED: narrow browser mock contracts/negative cases, current EXP expectations, isolated test port, watchdog timer cleanup, remove false fixed 1/1 summary progress. No security algorithms/DB/production change.
+- VERIFICATION: parent browser27 PASS/28.4s, StoryViewer52 PASS, Edge82 PASS, diff PASS. Worker normal-trace27 and Deno2.5.6 focused26 PASS. Hosted/device and new GitHub run pending.
+- REVIEW IMPACT: DELTA. Parent full diff review; mock authorization limitations explicit.
+- NEXT: push final test fixes, require GitHub checks, merge existing work, then actual notebook Home. Goal remains active; not beta complete.
+- Report: [Browser CI closure](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).

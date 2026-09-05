@@ -68,8 +68,10 @@ test('곰신은 군인 파트너의 날짜 기반 복무 진행을 읽기 전용
   await expect(page.getByTestId('gomsin-search-surface')).toBeVisible();
   await expect(page.getByTestId('soldier-service-info')).toBeVisible();
   await expect(page.getByText('몽룡의 복무')).toBeVisible();
-  await expect(page.getByTestId('soldier-service-info').getByRole('progressbar')).toHaveCount(1);
-  await expect(page.getByTestId('soldier-service-info')).not.toContainText(/EXP|Lv\./);
+  const service = page.getByTestId('soldier-service-info');
+  await expect(service.getByRole('progressbar')).toHaveCount(2);
+  await expect(service.getByTestId('service-level')).toContainText(/Lv\./);
+  await expect(service.getByTestId('service-exp-readout')).toContainText(/EXP/);
   await expect(page.getByRole('button', { name: '복무 정보 수정' })).toHaveCount(0);
   await page.screenshot({ path: `${OUT}/gomsin-partner-service-390.png`, fullPage: true });
   expect(unrouted).toEqual([]);
@@ -90,8 +92,10 @@ test('군인은 자기 복무 카드를 수정할 수 있고 상대 projection �
   await expect(page.getByTestId('soldier-search-surface')).toBeVisible();
   await expect(page.getByText('내 복무')).toBeVisible();
   await expect(page.getByRole('button', { name: '복무 정보 수정' })).toBeVisible();
-  await expect(page.getByTestId('soldier-service-info').getByRole('progressbar')).toHaveCount(1);
-  await expect(page.getByTestId('soldier-service-info')).not.toContainText(/EXP|Lv\./);
+  const service = page.getByTestId('soldier-service-info');
+  await expect(service.getByRole('progressbar')).toHaveCount(2);
+  await expect(service.getByTestId('service-level')).toContainText(/Lv\./);
+  await expect(service.getByTestId('service-exp-readout')).toContainText(/EXP/);
   await page.screenshot({ path: `${OUT}/soldier-own-service-390.png`, fullPage: true });
   expect(unrouted).toEqual([]);
   expect(partnerServiceRpcCalls).toBe(0);
@@ -119,8 +123,9 @@ test('찾기는 작은 iPhone과 reduced motion에서 검색과 복무 정보를
     await expect(page.locator('#record-search-results')).toBeAttached();
     await expect(field).toHaveCSS('background-color', 'rgb(252, 251, 247)');
     await expect(service.getByRole('progressbar', { name: '개인 복무 진행률' })).toBeVisible();
-    await expect(service.getByRole('progressbar')).toHaveCount(1);
-    await expect(service).not.toContainText(/EXP|Lv\./);
+    await expect(service.getByRole('progressbar')).toHaveCount(2);
+    await expect(service.getByTestId('service-level')).toContainText(/Lv\./);
+    await expect(service.getByTestId('service-exp-readout')).toContainText(/EXP/);
 
     const overflow = await page.evaluate(() => (
       document.documentElement.scrollWidth - document.documentElement.clientWidth
@@ -129,8 +134,10 @@ test('찾기는 작은 iPhone과 reduced motion에서 검색과 복무 정보를
     expect((await progressContrast(service)).every((ratio) => ratio >= 3)).toBe(true);
     expect(await placeholderContrast(input, field)).toBeGreaterThanOrEqual(4.5);
 
-    const progressFill = service.getByRole('progressbar').locator(':scope > div');
-    expect(await progressFill.evaluate((element) => getComputedStyle(element).transitionDuration)).toBe('0s');
+    const progressFills = service.getByRole('progressbar').locator(':scope > div');
+    expect(await progressFills.evaluateAll((elements) => (
+      elements.map((element) => getComputedStyle(element).transitionDuration)
+    ))).toEqual(['0s', '0s']);
 
     await input.fill('공개기록');
     await expect(page.locator('#record-search-results [role="status"]')).toContainText('1개 찾았어요');

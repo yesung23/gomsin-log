@@ -508,7 +508,7 @@ describe('시간순 baseline과 선택형 기기 AI 상태', () => {
     expect(screen.queryByText(/AI/)).toBeNull();
   });
 
-  it('running은 role=status로 1/1과 baseline이 계속 보인다는 사실을 알리고 모션에 의존하지 않는다', () => {
+  it('running은 role=status로 baseline이 계속 보인다는 사실을 알리고 모션에 의존하지 않는다', () => {
     view({
       cards: [cover],
       initialIndex: 0,
@@ -517,7 +517,7 @@ describe('시간순 baseline과 선택형 기기 AI 상태', () => {
     });
 
     expect(screen.getByRole('status')).toHaveTextContent(
-      '기기 AI로 긴 문장 줄이는 중 · 1/1 · 기본 시간순 정리는 계속 보여요',
+      '기기 AI로 긴 문장 줄이는 중 · 기본 시간순 정리는 계속 보여요',
     );
     const action = screen.getByRole('button', { name: '긴 문장 줄이는 중' });
     expect(action).toHaveAttribute('aria-busy', 'true');

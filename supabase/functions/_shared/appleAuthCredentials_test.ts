@@ -338,12 +338,19 @@ Deno.test('Apple exchange and revoke deadlines do not await a non-cooperative st
     pull() { return new Promise(() => {}); },
     cancel() { return new Promise(() => {}); },
   }), { status: 400 });
-  const watchdog = async <T>(operation: Promise<T>) => await Promise.race([
-    operation,
-    new Promise<T>((_resolve, reject) => {
-      setTimeout(() => reject(new Error('non-cooperative cancel exceeded watchdog')), 150);
-    }),
-  ]);
+  const watchdog = async <T>(operation: Promise<T>) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        operation,
+        new Promise<T>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error('non-cooperative cancel exceeded watchdog')), 150);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
 
   const exchangeStartedAt = Date.now();
   await assert.rejects(

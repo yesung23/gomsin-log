@@ -9,6 +9,16 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
+
+- PLAN POSITION: predesign integration → hosted compatibility → beta readiness. 이전 배포 승인 대기는 최신 사용자 지시로 해소.
+- DIRECTION CHECK: V5/Business/Engineering/Current State/최신 원장 확인, 제품·사업 변경 NO, conflict NO. master-before-notebook 유지.
+- OWNERSHIP: parent orchestrator, 시작 HEAD `fc3f43a`; Nash DB Architect / Godel native readonly / Copernicus scanner scoped worker. Parent app/test source 수정 없음.
+- CHANGED: Vercel gomsin-log Ignored Build Step `exit 0` 일시 보류 APPLIED; 기존 서비스 유지. App Store Connect 곰신로그 iOS 항목 `6809005110` 생성 APPLIED, 목록 재조회 확인.
+- VERIFIED: remote master `bd4a9f3`; Supabase legacy schema/Book14 tracking/최신 media RPC 부재/Edge v6/backup 없음 재확인. diff-check PASS. Gitleaks9 의심 항목 검증 중.
+- NOT VERIFIED: restore drill, hosted actor/Storage matrix, native signed archive/로그인, TestFlight 배포. DB/Edge/master 변경 NOT APPLIED. Apple activation fuse 유지.
+- REVIEW IMPACT: operational DELTA. NEXT: scanner 판정→원격 CI→통제된 master 통합; 복구·DB 호환성 gate 후 공개. [상세 보고서](../control-tower/reports/codex/2026-09-06_deployment-resumed_codex.md).
+
 ## 2026-09-06 — Apple caller lifecycle M1 확인·좁은 교정 배정
 
 - PLAN POSITION: predesign Apple final DELTA HOLD. Product/Engineering/Current State와 기존 master-first 지시 유지; business NOT APPLICABLE, conflict NO.

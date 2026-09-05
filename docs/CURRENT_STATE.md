@@ -27,6 +27,14 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
+- **2026-09-06 배포 승인 이후:** 이전 자동배포 승인 대기는 해소됐다. Vercel gomsin-log만
+  Ignored Build Step `Don't build anything` / `exit 0`로 저장·재조회 확인했다. 서버 호환성 준비 중
+  기존 served artifact를 유지하기 위한 임시 조치이며, 준비 후 Automatic 복원이 필요하다.
+  App Store Connect iOS 앱 **곰신로그 (`6809005110`, `app.gomsinlog`)** 생성·목록 확인 완료.
+  빌드 업로드/베타 초대/심사 제출은 하지 않았다. remote master는 여전히 `bd4a9f3`, DB의 최신
+  사진 함수·private tables 부재와 복구 가능한 제공업체 백업 없음이 live 재확인됐다.
+  [배포 재개 증거 및 남은 gate](../control-tower/reports/codex/2026-09-06_deployment-resumed_codex.md).
+
 - **2026-09-06 추가 checkpoint:** 아래 과거 개별 검토 상태보다 이 항목이 최신이다.
   photo SliceB 및 권한 보완 round2는 독립 Terra Max Spec/Quality PASS(C/H/M/L0),
   현재 build 브라우저8PASS 후 사진15파일을 `7d8805db87bc060c455e576ff13057f8c28b0384`로 커밋했다.

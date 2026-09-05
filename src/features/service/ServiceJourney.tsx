@@ -14,9 +14,12 @@ function formatLevelWait(seconds: number | null) {
 }
 
 /** Local clock only: no polling, profile writes, earned-point ledger or analytics. */
-export function ServiceJourney({ military, name, compact = false }: {
+export function ServiceJourney({ military, name, viewerId, subjectId, coupleId, compact = false }: {
   military: MilitaryInfo | undefined;
   name: string;
+  viewerId?: string;
+  subjectId?: string;
+  coupleId?: string;
   compact?: boolean;
 }) {
   const [now, setNow] = useState(Date.now);
@@ -24,11 +27,14 @@ export function ServiceJourney({ military, name, compact = false }: {
   const [reduced, setReduced] = useState(() => typeof matchMedia === 'function'
     && matchMedia('(prefers-reduced-motion: reduce)').matches);
   const [onScreen, setOnScreen] = useState(true);
-  const [levelEvent, setLevelEvent] = useState<{ id: number; level: number; gained: number } | null>(null);
+  const [levelEvent, setLevelEvent] = useState<{ id: number; scope: string; level: number; gained: number } | null>(null);
   const container = useRef<HTMLDivElement>(null);
   const titleId = useId();
   const progress = computeServiceJourney(military, now);
-  const scope = `${military?.branch}:${military?.enlistmentDate}:${effectiveDischargeDate(military)}`;
+  // Missing stable identity disables celebrations, never the time/EXP projection.
+  const scope = viewerId && subjectId
+    ? JSON.stringify([viewerId, subjectId, coupleId ?? null, military?.branch, military?.enlistmentDate, effectiveDischargeDate(military)])
+    : null;
   const progressRef = useRef(progress);
   const scopeRef = useRef(scope);
   const highestLevelRef = useRef(progress?.level ?? 0);
@@ -72,6 +78,7 @@ export function ServiceJourney({ military, name, compact = false }: {
     const visible = typeof document === 'undefined' || document.visibilityState !== 'hidden';
     if (
       allowLevelEvent
+      && scope !== null
       && scopeRef.current === scope
       && visible
       && onScreen
@@ -85,7 +92,7 @@ export function ServiceJourney({ military, name, compact = false }: {
     ) {
       const gained = next.level - highestLevelRef.current;
       eventIdRef.current += 1;
-      setLevelEvent({ id: eventIdRef.current, level: next.level, gained });
+      setLevelEvent({ id: eventIdRef.current, scope, level: next.level, gained });
     }
     if (next) highestLevelRef.current = Math.max(highestLevelRef.current, next.level);
     progressRef.current = next;
@@ -142,7 +149,7 @@ export function ServiceJourney({ military, name, compact = false }: {
       data-testid="service-journey"
       data-live={active && live}
     >
-      {levelEvent && live && (
+      {levelEvent && levelEvent.scope === scope && live && (
         <div
           key={levelEvent.id}
           className="service-journey-level-event"

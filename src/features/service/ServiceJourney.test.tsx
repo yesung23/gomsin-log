@@ -9,6 +9,7 @@ const military: MilitaryInfo = {
   expectedDischargeDate: '2026-07-02', dischargeDateSource: 'manual',
 };
 const serviceStart = serviceDateAtMs(military.enlistmentDate!)!;
+const identity = { viewerId: 'viewer-1', subjectId: 'soldier-1', coupleId: 'couple-1' };
 let reduced = false;
 
 function setElapsed(seconds: number) {
@@ -44,7 +45,7 @@ describe('live service journey', () => {
 
   it('celebrates and politely announces only a genuine live hour crossing', () => {
     setElapsed(3599);
-    const view = render(<ServiceJourney military={military} name="민우" />);
+    const view = render(<ServiceJourney {...identity} military={military} name="민우" />);
     expect(screen.queryByTestId('service-level-event')).toBeNull();
 
     act(() => vi.advanceTimersByTime(1000));
@@ -59,7 +60,7 @@ describe('live service journey', () => {
 
   it('coalesces skipped visible levels into one truthful event', () => {
     setElapsed(3599);
-    render(<ServiceJourney military={military} name="민우" />);
+    render(<ServiceJourney {...identity} military={military} name="민우" />);
     vi.setSystemTime(serviceStart + 3 * 3600 * 1000);
     act(() => vi.advanceTimersByTime(1000));
 
@@ -69,7 +70,7 @@ describe('live service journey', () => {
 
   it('does not replay a crossed level after a backward clock edit', () => {
     setElapsed(3599);
-    render(<ServiceJourney military={military} name="민우" />);
+    render(<ServiceJourney {...identity} military={military} name="민우" />);
     act(() => vi.advanceTimersByTime(1000));
     expect(screen.getByTestId('service-level-event')).toHaveTextContent('Lv.2 달성');
     act(() => vi.advanceTimersByTime(2000));
@@ -82,16 +83,16 @@ describe('live service journey', () => {
 
   it('does not celebrate an initial mount or a profile/date switch', () => {
     setElapsed(3600);
-    const view = render(<ServiceJourney military={military} name="민우" />);
+    const view = render(<ServiceJourney {...identity} military={military} name="민우" />);
     expect(screen.queryByTestId('service-level-event')).toBeNull();
 
-    view.rerender(<ServiceJourney military={{ ...military, enlistmentDate: '2024-12-31' }} name="민우" />);
+    view.rerender(<ServiceJourney {...identity} military={{ ...military, enlistmentDate: '2024-12-31' }} name="민우" />);
     expect(screen.queryByTestId('service-level-event')).toBeNull();
   });
 
   it('pauses, catches up without celebration, then resumes live ticking', () => {
     setElapsed(3599);
-    render(<ServiceJourney military={military} name="민우" />);
+    render(<ServiceJourney {...identity} military={military} name="민우" />);
     fireEvent.click(screen.getByRole('button', { name: 'EXP 실시간 표시 멈추기' }));
     const paused = screen.getByTestId('service-exp-readout').textContent;
     vi.setSystemTime(serviceStart + 7200 * 1000);
@@ -107,7 +108,7 @@ describe('live service journey', () => {
 
   it('stops in the background, suppresses catch-up celebration and cleans up on unmount', () => {
     setElapsed(3599);
-    const view = render(<ServiceJourney military={military} name="민우" />);
+    const view = render(<ServiceJourney {...identity} military={military} name="민우" />);
     const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     fireEvent(document, new Event('visibilitychange'));
     expect(vi.getTimerCount()).toBe(0);
@@ -124,7 +125,7 @@ describe('live service journey', () => {
   it('uses a still manual readout with no celebration under reduced motion', () => {
     reduced = true;
     setElapsed(3599);
-    render(<ServiceJourney military={military} name="민우" />);
+    render(<ServiceJourney {...identity} military={military} name="민우" />);
     vi.setSystemTime(serviceStart + 3600 * 1000);
     act(() => vi.advanceTimersByTime(60000));
     expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.1');
@@ -201,7 +202,7 @@ describe('live service journey', () => {
       disconnect = disconnect;
     });
     setElapsed(3599);
-    const view = render(<ServiceJourney military={military} name="민우" />);
+    const view = render(<ServiceJourney {...identity} military={military} name="민우" />);
     act(() => intersect!([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver));
     expect(vi.getTimerCount()).toBe(0);
     vi.setSystemTime(serviceStart + 7200 * 1000);
@@ -210,5 +211,38 @@ describe('live service journey', () => {
     expect(screen.queryByTestId('service-level-event')).toBeNull();
     view.unmount();
     expect(disconnect).toHaveBeenCalled();
+  });
+
+  it.each([
+    { ...identity, subjectId: 'soldier-2' },
+    { ...identity, viewerId: 'viewer-2' },
+    { ...identity, coupleId: 'couple-2' },
+    { ...identity, subjectId: undefined },
+    { ...identity, viewerId: undefined },
+  ])('clears an existing banner immediately when identity changes to %j', nextIdentity => {
+    setElapsed(3599);
+    const view = render(<ServiceJourney {...identity} military={military} name="민우" />);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId('service-level-event')).toHaveTextContent('Lv.2 달성');
+
+    // Same component, name and service dates; only real identity changes.
+    view.rerender(<ServiceJourney {...nextIdentity} military={military} name="민우" />);
+    expect(screen.queryByTestId('service-level-event')).toBeNull();
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.2');
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('10 / 36,000 EXP');
+    expect(screen.queryByTestId('service-level-event')).toBeNull();
+  });
+
+  it.each([
+    { ...identity, subjectId: undefined },
+    { ...identity, viewerId: undefined },
+  ])('keeps EXP visible without inventing an event identity: %j', missingIdentity => {
+    setElapsed(3599);
+    render(<ServiceJourney {...missingIdentity} military={military} name="민우" />);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.2');
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('0 / 36,000 EXP');
+    expect(screen.queryByTestId('service-level-event')).toBeNull();
   });
 });

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { AppState, DailyRecord, MilitaryInfo, CoupleEvent } from '@/types';
 import { computeServiceProgress } from '@/lib/milestones';
@@ -127,7 +127,38 @@ beforeEach(() => {
   currentState = stateWith();
 });
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe('search service celebration identity wiring', () => {
+  it.each([
+    ['soldier', 'viewer'], ['soldier', 'couple'],
+    ['gomsin', 'viewer'], ['gomsin', 'subject'], ['gomsin', 'couple'],
+  ] as const)('clears a real event on a same-name/same-dates %s %s switch', (role, changedIdentity) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout'] });
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })));
+    const start = Date.parse('2025-09-01T00:00:00+09:00');
+    vi.mocked(Date.now).mockReturnValue(start + 3599000);
+    currentState = stateWith({ role, partnerMilitary: SERVING_MILITARY });
+    currentState.profile.couple.partnerUserId = 'soldier-1';
+    const view = renderSearch();
+    vi.mocked(Date.now).mockReturnValue(start + 3600000);
+    act(() => vi.advanceTimersByTime(1000));
+    expect(screen.getByTestId('service-level-event')).toHaveTextContent('Lv.2 달성');
+
+    if (changedIdentity === 'viewer') currentState.authenticatedUser = { ...currentState.authenticatedUser!, id: 'viewer-2' };
+    if (changedIdentity === 'subject') currentState.profile.couple.partnerUserId = 'soldier-2';
+    if (changedIdentity === 'couple') currentState.profile.couple.coupleId = 'couple-2';
+    view.rerender(<MemoryRouter><SearchPage /></MemoryRouter>);
+    expect(screen.queryByTestId('service-level-event')).toBeNull();
+    expect(screen.getByTestId('service-level')).toHaveTextContent('Lv.2');
+    expect(screen.getByTestId('service-exp-readout')).toHaveTextContent('0 / 36,000 EXP');
+    expect(screen.queryByRole('button', { name: '복무 정보 수정' }) !== null).toBe(role === 'soldier');
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
 
 describe('군화(soldier) 기본 주 콘텐츠', () => {
   it('복무 정보가 있으면 시간 기반 EXP와 사실 기반 복무율을 함께 보여준다', () => {

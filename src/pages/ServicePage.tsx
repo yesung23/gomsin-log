@@ -178,7 +178,13 @@ export function ServicePage() {
 
         {/* D-Day / progress. Shown only when real dates exist. */}
         {progress ? (
-          <ServiceJourney military={military} name={soldierName} />
+          <ServiceJourney
+            military={military}
+            name={soldierName}
+            viewerId={state.authenticatedUser?.id}
+            subjectId={isSoldier ? state.authenticatedUser?.id : state.profile.couple?.partnerUserId}
+            coupleId={state.profile.couple?.coupleId}
+          />
         ) : (
           <div className="rounded-surface border border-dashed border-border bg-muted/40 p-5 text-center space-y-3">
             <Shield className="w-8 h-8 text-muted-foreground/60 mx-auto" />

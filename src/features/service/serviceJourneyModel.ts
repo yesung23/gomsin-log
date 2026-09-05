@@ -11,6 +11,7 @@ interface JourneyStageSeed {
   label: string;
   atSec: number;
   estimatedRankLabel?: string;
+  bars?: number;
 }
 
 function finishStages(seeds: JourneyStageSeed[], elapsedSec: number, totalSec: number, waiting: boolean, complete: boolean) {
@@ -49,14 +50,15 @@ function buildMilitaryStages(
 
   rankStops.forEach((stop, index) => {
     const labels = labelsByRank[stop.key];
-    const startSec = Math.round(stop.day * SECONDS_PER_DAY);
-    const nextSec = Math.round((rankStops[index + 1]?.day ?? stop.day) * SECONDS_PER_DAY);
+    const startSec = stop.day * SECONDS_PER_DAY;
+    const nextSec = (rankStops[index + 1]?.day ?? stop.day) * SECONDS_PER_DAY;
     const intervalSec = Math.max(0, nextSec - startSec);
     labels.forEach((label, labelIndex) => {
       seeds.push({
         label,
-        atSec: Math.round(startSec + intervalSec * labelIndex / labels.length),
+        atSec: startSec + intervalSec * labelIndex / labels.length,
         estimatedRankLabel: stop.key === 'vet' ? '전역' : stop.label,
+        bars: stop.bars,
       });
     });
   });
@@ -82,6 +84,7 @@ export function computeServiceJourney(military: MilitaryInfo | undefined, nowMs:
   if (!exp) return null;
 
   const estimatedRanks = exp.branch !== 'social_service' && exp.branch !== 'other';
+  // Whole seconds are for the EXP readout; stage boundaries keep sub-second time.
   const elapsedSec = Math.floor(exp.elapsedSec);
   const maxLevel = Math.floor(exp.totalSec / SERVICE_SECONDS_PER_LEVEL) + 1;
   const level = exp.isBeforeEnlistment
@@ -98,8 +101,8 @@ export function computeServiceJourney(military: MilitaryInfo | undefined, nowMs:
     ? null
     : SERVICE_SECONDS_PER_LEVEL - intoLevelSec;
   const stages = estimatedRanks
-    ? buildMilitaryStages(exp.stages, elapsedSec, exp.totalSec, exp.isBeforeEnlistment, exp.isDischarged)
-    : buildNeutralStages(elapsedSec, exp.totalSec, exp.isBeforeEnlistment, exp.isDischarged);
+    ? buildMilitaryStages(exp.stages, exp.elapsedSec, exp.totalSec, exp.isBeforeEnlistment, exp.isDischarged)
+    : buildNeutralStages(exp.elapsedSec, exp.totalSec, exp.isBeforeEnlistment, exp.isDischarged);
   const currentIndex = stages.findIndex(stage => stage.current);
   const currentStage = currentIndex >= 0 ? stages[currentIndex] : null;
   const nextStage = exp.isDischarged ? null : stages[exp.isBeforeEnlistment ? 0 : currentIndex + 1];
@@ -112,7 +115,7 @@ export function computeServiceJourney(military: MilitaryInfo | undefined, nowMs:
   const nextStageDays = exp.isBeforeEnlistment
     ? exp.daysUntilEnlistment
     : nextStage
-      ? Math.max(0, Math.ceil((nextStage.atSec - elapsedSec) / SECONDS_PER_DAY))
+      ? Math.max(0, Math.ceil((nextStage.atSec - exp.elapsedSec) / SECONDS_PER_DAY))
       : null;
 
   return {
@@ -138,7 +141,7 @@ export function computeServiceJourney(military: MilitaryInfo | undefined, nowMs:
     stageLabel,
     estimatedRankLabel,
     estimatedRanks,
-    bars: estimatedRanks ? exp.rank.bars : 0,
+    bars: estimatedRanks ? currentStage?.bars ?? 0 : 0,
     nextStageLabel: nextStage?.label ?? null,
     nextStageDays,
   };

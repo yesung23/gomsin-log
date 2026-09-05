@@ -64,12 +64,20 @@ describe('service journey presentation contract', () => {
       [425 * day + sgtThird * 2, '말년', '병장'],
     ];
 
-    for (const [seconds, stageLabel, estimatedRankLabel] of boundaries) {
-      expect(computeServiceJourney(info, atSecond(seconds))).toMatchObject({
+    for (const [index, [seconds, stageLabel, estimatedRankLabel]] of boundaries.entries()) {
+      // Bracket at millisecond precision: unrounded legacy scaling can put a
+      // nominal integer-second boundary a fraction of a nanosecond after it.
+      expect(computeServiceJourney(info, atSecond(seconds) + 1)).toMatchObject({
         stageLabel,
         estimatedRankLabel,
         estimatedRanks: true,
       });
+      if (index > 0) {
+        expect(computeServiceJourney(info, atSecond(seconds) - 1)).toMatchObject({
+          stageLabel: boundaries[index - 1][1],
+          estimatedRankLabel: boundaries[index - 1][2],
+        });
+      }
     }
     expect(computeServiceJourney(info, atSecond(totalDays * day))).toMatchObject({
       stageLabel: '전역',
@@ -127,6 +135,19 @@ describe('service journey presentation contract', () => {
     expect(computeServiceJourney(military, NaN)).toBeNull();
     expect(computeServiceJourney(military, Infinity)).toBeNull();
     expect(computeServiceJourney({ ...military, branch: 'invalid' as Branch }, start)).toBeNull();
+  });
+
+  it.each([
+    [963510000, '신병', '이등병', 1],
+    [963510054, '신병', '이등병', 1],
+    [963510055, '일초', '일병', 2],
+    [963510999, '일초', '일병', 2],
+  ] as const)('keeps nickname, estimated rank and insignia aligned at custom-duration millisecond %i', (elapsedMs, stageLabel, estimatedRankLabel, bars) => {
+    // 100-day custom service: pfc begins at 61/547 * 100 days = 963510054.844... ms.
+    const info = { ...military, expectedDischargeDate: '2025-04-11' };
+    expect(computeServiceJourney(info, start + elapsedMs)).toMatchObject({
+      stageLabel, estimatedRankLabel, bars, level: 268, levelExp: 23100,
+    });
   });
 
   it('does not award future EXP when a discharged flag contradicts the entered dates', () => {

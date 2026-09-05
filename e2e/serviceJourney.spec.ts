@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { installMockBackend } from './fixtures/mockBackend';
 import { CREATOR, PARTNER } from './scenarios';
+import type { MilitaryInfo } from '../src/types';
 
 test('Hourly service EXP ticks by ten, pauses, resumes, and opens the growth journey', async ({ browser }, testInfo) => {
   const context = await browser.newContext({ viewport: { width: 402, height: 874 }, reducedMotion: 'no-preference' });
@@ -29,13 +30,32 @@ test('Hourly service EXP ticks by ten, pauses, resumes, and opens the growth jou
 
 test('Both roles see a paper journey; partner never gets the service editor', async ({ browser }, testInfo) => {
   const projectedLevels: string[] = [];
+  const sharedMilitary: MilitaryInfo = {
+    branch: 'army', militaryStatus: 'serving', enlistmentDate: '2026-01-01',
+    expectedDischargeDate: '2027-07-01', dischargeDateSource: 'manual',
+  };
   for (const scenario of [CREATOR, PARTNER]) {
     const context = await browser.newContext({ viewport: { width: 375, height: 812 }, reducedMotion: 'reduce' });
     await context.addInitScript(() => { Date.now = () => Date.parse('2026-09-05T12:34:56+09:00'); });
-    await installMockBackend(context, scenario);
+    await installMockBackend(context, { ...scenario, partnerMilitary: sharedMilitary });
+    // Both the partner projection and the owner's profile use this exact source.
+    await context.route('**/rest/v1/profiles*', route => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const profile = {
+        id: scenario.userId, display_name: scenario.displayName, role: scenario.role,
+        gender_identity: scenario.genderIdentity ?? null, avatar_path: null,
+        onboarding_completed_at: '2026-01-02T00:00:00Z', military_info: sharedMilitary,
+      };
+      const single = route.request().headers()['accept']?.includes('pgrst.object');
+      return route.fulfill({
+        headers: { 'Access-Control-Allow-Origin': '*', 'Content-Range': '0-0/*' },
+        json: single ? profile : [profile],
+      });
+    });
     const page = await context.newPage();
     await page.goto('/search');
     await expect(page.getByTestId('service-level')).toBeVisible();
+    await expect(page.getByTestId('service-level')).toHaveText('Lv.5941');
     await expect(page.getByTestId('service-rank-estimate')).toContainText('예상 계급 ·');
     projectedLevels.push((await page.getByTestId('service-level').innerText()).trim());
     await expect(page.getByRole('button', { name: '복무 정보 수정' })).toHaveCount(scenario.role === 'soldier' ? 1 : 0);

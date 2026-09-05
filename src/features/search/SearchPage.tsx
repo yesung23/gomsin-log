@@ -53,6 +53,8 @@ import { ServiceJourney } from '@/features/service/ServiceJourney';
 
 interface SoldierSearchSurfaceProps {
   military: MilitaryInfo;
+  viewerId?: string;
+  coupleId?: string;
   contact: ContactPreferences;
   events: CoupleEvent[];
   today: string;
@@ -60,9 +62,12 @@ interface SoldierSearchSurfaceProps {
 }
 
 function InlineServiceInfo({
-  military, contact, onOpenService, title = '내 복무',
+  military, viewerId, subjectId, coupleId, contact, onOpenService, title = '내 복무',
 }: {
   military: MilitaryInfo;
+  viewerId?: string;
+  subjectId?: string;
+  coupleId?: string;
   contact?: ContactPreferences;
   today: string;
   onOpenService?: () => void;
@@ -71,7 +76,7 @@ function InlineServiceInfo({
   return (
     <section aria-labelledby="service-summary-heading" className="ink-box space-y-3 p-4" data-testid="soldier-service-info">
       <h2 id="service-summary-heading" className="text-heading break-keep [overflow-wrap:anywhere]">{title}</h2>
-      <ServiceJourney military={military} name={title} compact />
+      <ServiceJourney military={military} name={title} viewerId={viewerId} subjectId={subjectId} coupleId={coupleId} compact />
       {contact?.enabled ? (
         <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-caption text-muted-foreground">
           <Clock size={13} aria-hidden="true" />
@@ -89,6 +94,8 @@ function InlineServiceInfo({
 
 function SoldierSearchSurface({
   military,
+  viewerId,
+  coupleId,
   contact,
   events,
   today,
@@ -105,6 +112,9 @@ function SoldierSearchSurface({
       {hasRealProgress ? (
         <InlineServiceInfo
           military={military}
+          viewerId={viewerId}
+          subjectId={viewerId}
+          coupleId={coupleId}
           contact={contact}
           today={today}
           onOpenService={onOpenService}
@@ -180,6 +190,7 @@ function SoldierSearchSurface({
 function GomsinSearchSurface({
   authenticated,
   userId,
+  partnerUserId,
   coupleId,
   connected,
   partnerName,
@@ -191,6 +202,7 @@ function GomsinSearchSurface({
 }: {
   authenticated: boolean;
   userId?: string;
+  partnerUserId?: string;
   coupleId?: string;
   connected: boolean;
   partnerName: string;
@@ -208,6 +220,9 @@ function GomsinSearchSurface({
       {hasPartnerService ? (
         <InlineServiceInfo
           military={partnerMilitary!}
+          viewerId={userId}
+          subjectId={partnerUserId}
+          coupleId={coupleId}
           today={today}
           title={partnerName ? `${partnerName}의 복무` : '상대 복무'}
         />
@@ -383,6 +398,8 @@ function SearchPageBody() {
             ) : isSoldier ? (
               <SoldierSearchSurface
                 military={state.profile.military}
+                viewerId={state.authenticatedUser?.id}
+                coupleId={state.profile.couple?.coupleId}
                 contact={state.profile.contact}
                 events={state.events}
                 today={today}
@@ -396,6 +413,7 @@ function SearchPageBody() {
                 connected={Boolean(state.profile.couple?.connected)}
                 partnerName={state.profile.couple?.partnerName || ''}
                 partnerMilitary={resolveEffectiveMilitary(state.profile)}
+                partnerUserId={state.profile.couple?.partnerUserId}
                 today={today}
               />
             )}

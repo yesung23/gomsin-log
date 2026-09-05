@@ -14,6 +14,8 @@ export const SANITIZED_PHOTO_QUALITY = 0.84;
 
 /** Refuse unusually large decoded images before drawing them into another buffer. */
 export const MAX_DECODED_PHOTO_PIXELS = 40_000_000;
+const DECODE_TIMEOUT_MS = 15_000;
+const ENCODE_TIMEOUT_MS = 10_000;
 
 type DecodedPhoto = {
   source: CanvasImageSource;
@@ -117,8 +119,38 @@ const BROWSER_RUNTIME: PhotoSanitizerRuntime = {
 };
 
 function canvasBlob(canvas: CanvasLike): Promise<Blob | null> {
-  return new Promise((resolve) => {
-    canvas.toBlob(resolve, SANITIZED_PHOTO_MIME, SANITIZED_PHOTO_QUALITY);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(null), ENCODE_TIMEOUT_MS);
+    try {
+      canvas.toBlob((blob) => {
+        clearTimeout(timer);
+        resolve(blob);
+      }, SANITIZED_PHOTO_MIME, SANITIZED_PHOTO_QUALITY);
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error);
+    }
+  });
+}
+
+/** Decoders cannot always be cancelled. Stop waiting, then release late pixels
+ * instead of letting them reach a subsequent upload or retaining the bitmap. */
+function boundedDecode(runtime: PhotoSanitizerRuntime, original: File): Promise<DecodedPhoto> {
+  return new Promise((resolve, reject) => {
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      reject(new Error('Photo decoding timed out'));
+    }, DECODE_TIMEOUT_MS);
+    Promise.resolve().then(() => runtime.decode(original)).then((decoded) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        try { decoded.release(); } catch { /* Best-effort decoder cleanup. */ }
+      } else resolve(decoded);
+    }, (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
 }
 
@@ -135,7 +167,7 @@ export async function sanitizePhotoForUpload(
   let decoded: DecodedPhoto | null = null;
 
   try {
-    decoded = await runtime.decode(original);
+    decoded = await boundedDecode(runtime, original);
     const pixelCount = decoded.width * decoded.height;
     if (
       !Number.isSafeInteger(pixelCount)
@@ -165,7 +197,7 @@ export async function sanitizePhotoForUpload(
     context.drawImage(decoded.source, 0, 0, size.width, size.height);
 
     const blob = await canvasBlob(canvas);
-    if (!blob || blob.size <= 0) {
+    if (!blob || blob.size <= 0 || blob.type !== SANITIZED_PHOTO_MIME) {
       return { error: '사진을 안전하게 변환하지 못했어요. 다른 사진을 선택해 주세요.' };
     }
 

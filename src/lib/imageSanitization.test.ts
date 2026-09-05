@@ -112,4 +112,41 @@ describe('privacy-preserving photo sanitization', () => {
     expect(result).toHaveProperty('error');
     expect(release).toHaveBeenCalledOnce();
   });
+
+  it('bounds decoding and releases an image that arrives after the timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, release } = runtimeFor(4032, 3024);
+      let resolve!: (value: Awaited<ReturnType<PhotoSanitizerRuntime['decode']>>) => void;
+      runtime.decode = () => new Promise((done) => { resolve = done; });
+      const settled = vi.fn();
+      void sanitizePhotoForUpload(new File(['raw'], 'photo.jpg'), runtime).then(settled);
+      await vi.advanceTimersByTimeAsync(15_001);
+      expect(settled).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+      expect(runtime.createCanvas).not.toHaveBeenCalled();
+      resolve({ source: {} as CanvasImageSource, width: 4032, height: 3024, release });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(release).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('bounds a stuck encoder and releases the decoded pixels', async () => {
+    vi.useFakeTimers();
+    try {
+      const { runtime, canvas, release } = runtimeFor(800, 600);
+      canvas.toBlob.mockImplementation(() => {});
+      const settled = vi.fn();
+      void sanitizePhotoForUpload(new File(['raw'], 'photo.jpg'), runtime).then(settled);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(settled).toHaveBeenCalledWith(expect.objectContaining({ error: expect.any(String) }));
+      expect(release).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not relabel a browser PNG fallback as a JPEG', async () => {
+    const { runtime, release } = runtimeFor(800, 600, new Blob(['png'], { type: 'image/png' }));
+    const result = await sanitizePhotoForUpload(new File(['raw'], 'photo.jpg'), runtime);
+    expect(result).toHaveProperty('error');
+    expect(release).toHaveBeenCalledOnce();
+  });
 });

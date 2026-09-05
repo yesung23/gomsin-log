@@ -36,7 +36,12 @@ function PhotoTile({
   coupleId?: string;
   onOpen: (recordId: string) => void;
 }) {
-  const { url, reportLoadFailure, unavailable } = useMediaAttachment(tile.photo, coupleId, tile.recordId);
+  const { url, reportLoadFailure, unavailable } = useMediaAttachment(
+    tile.photo,
+    coupleId,
+    tile.recordId,
+    'thumbnail',
+  );
   return (
     <button
       type="button"

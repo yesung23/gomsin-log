@@ -66,8 +66,8 @@ vi.mock('@/lib/useStore', () => ({
 
 /** 서명 URL을 실제로 부르지 않는다. 이 테스트가 세는 것은 선택과 순서다. */
 vi.mock('@/lib/useMediaAttachment', () => ({
-  useMediaAttachment: (attachment: { path?: string }) => ({
-    url: attachment.path ? `blob:${attachment.path}` : undefined,
+  useMediaAttachment: (attachment: { path?: string }, _coupleId: string, _recordId: string, variant?: string) => ({
+    url: attachment.path ? `${variant === 'thumbnail' ? 'thumbnail' : 'master'}:${attachment.path}` : undefined,
     refreshing: false,
     reportLoadFailure: () => {},
   }),
@@ -202,6 +202,8 @@ describe('게시물 만들기 3단계', () => {
     } as Partial<DailyRecord> & { id: string })];
     open();
     await userEvent.click(screen.getByRole('button', { name: '게시물 만들기' }));
+    expect(screen.getByTestId('post-source-photo').querySelector('img'))
+      .toHaveAttribute('src', 'thumbnail:couple-1/r1/a.jpg');
     await userEvent.click(screen.getAllByTestId('post-source-photo')[0]);
     await userEvent.click(screen.getByRole('button', { name: '다음' }));
     expect(screen.getByText('글 쓰기')).toBeTruthy();

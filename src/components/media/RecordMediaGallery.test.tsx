@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { useLayoutEffect, useState } from 'react';
 import type { Attachment, DailyRecord } from '@/types';
 
 /**
@@ -34,12 +35,53 @@ const { MediaArchiveGrid } = await import('@/components/media/MediaArchiveGrid')
 const COUPLE = 'couple-1';
 const RECORD = 'rec-1';
 
+const originalShowModal = HTMLDialogElement.prototype.showModal;
+const originalClose = HTMLDialogElement.prototype.close;
+const originalScrollTo = window.scrollTo;
+beforeAll(() => {
+  HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute('open', ''); };
+  HTMLDialogElement.prototype.close = function close() { this.removeAttribute('open'); };
+  window.scrollTo = (() => {}) as typeof window.scrollTo;
+});
+afterAll(() => {
+  HTMLDialogElement.prototype.showModal = originalShowModal;
+  HTMLDialogElement.prototype.close = originalClose;
+  window.scrollTo = originalScrollTo;
+});
+beforeEach(() => {
+  resolveAttachmentUrls.mockReset();
+});
+
 function photo(name: string): Attachment {
   return {
     type: 'photo',
     name,
     url: `https://example.supabase.co/signed/${name}?token=t`,
     path: `${COUPLE}/${RECORD}/${name}`,
+  };
+}
+
+function photoWithThumbnail(name = 'thumb-photo.jpg'): Attachment {
+  return {
+    type: 'photo',
+    name,
+    url: 'https://media.test/master.jpg',
+    path: `${COUPLE}/${RECORD}/33333333-3333-4333-8333-333333333333.jpg`,
+    photoRendition: {
+      sourceRevision: '55555555-5555-4555-8555-555555555555',
+      screenMaster: {
+        mediaObjectId: '33333333-3333-4333-8333-333333333333',
+        widthPx: 2048, heightPx: 1536, byteSize: 900_000,
+        sha256: 'a'.repeat(64), mimeType: 'image/jpeg',
+      },
+      thumbnail: {
+        mediaObjectId: '44444444-4444-4444-8444-444444444444',
+        widthPx: 640, heightPx: 480, byteSize: 90_000,
+        sha256: 'b'.repeat(64), mimeType: 'image/jpeg',
+        path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+        url: 'https://media.test/thumbnail.jpg',
+      },
+    },
   };
 }
 
@@ -245,5 +287,226 @@ describe('the archive grid', () => {
       />,
     );
     expect(screen.getAllByRole('button')).toHaveLength(1);
+  });
+
+  it('loads only the thumbnail before expansion and gives the lightbox the exact master', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([
+      { ...photoWithThumbnail(), url: 'https://media.test/fresh-master.jpg' },
+    ]);
+    const { container } = render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [photoWithThumbnail()] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    expect(container.querySelectorAll('img')).toHaveLength(1);
+    expect(container.querySelector('img')).toHaveAttribute('src', 'https://media.test/thumbnail.jpg');
+    expect(container.querySelector('dialog')).toBeNull();
+
+    screen.getByRole('button', { name: /thumb-photo\.jpg 크게 보기/ }).click();
+
+    await waitFor(() => expect(container.querySelector('dialog img')).not.toBeNull());
+    expect(resolveAttachmentUrls).toHaveBeenCalledWith(
+      [photoWithThumbnail()],
+      COUPLE,
+      RECORD,
+    );
+    expect(container.querySelector('dialog img')).toHaveAttribute('src', 'https://media.test/fresh-master.jpg');
+  });
+
+  it('does not request master bytes while a closed thumbnail transport failure is handled', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      type: 'photo',
+      name: 'thumb-photo.jpg',
+      path: photoWithThumbnail().photoRendition!.thumbnail.path,
+      urlUnavailable: 'unreachable',
+    }]);
+    const { container } = render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [photoWithThumbnail()] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    fireEvent.error(container.querySelector('img')!);
+
+    await waitFor(() => expect(container.querySelector('img')).toBeNull());
+    expect(resolveAttachmentUrls).toHaveBeenCalledWith(
+      [{
+        type: 'photo',
+        name: 'thumb-photo.jpg',
+        path: photoWithThumbnail().photoRendition!.thumbnail.path,
+        url: 'https://media.test/thumbnail.jpg',
+        urlUnavailable: undefined,
+      }],
+      COUPLE,
+      RECORD,
+    );
+    expect(container.querySelector('[src="https://media.test/master.jpg"]')).toBeNull();
+    expect(container.querySelector('dialog')).toBeNull();
+  });
+
+  it('freshly signs the exact clicked master after a transient initial master failure', async () => {
+    const transient = photoWithThumbnail();
+    transient.url = undefined;
+    transient.urlUnavailable = 'unreachable';
+    resolveAttachmentUrls.mockResolvedValueOnce([
+      { ...transient, url: 'https://media.test/recovered-master.jpg', urlUnavailable: undefined },
+    ]);
+    const { container } = render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [transient] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    screen.getByRole('button', { name: /thumb-photo\.jpg 크게 보기/ }).click();
+
+    await waitFor(() => expect(container.querySelector('dialog img')).not.toBeNull());
+    expect(resolveAttachmentUrls).toHaveBeenCalledWith([transient], COUPLE, RECORD);
+    expect(container.querySelector('dialog img')).toHaveAttribute(
+      'src',
+      'https://media.test/recovered-master.jpg',
+    );
+  });
+
+  it.each(['server', 'unreachable'] as const)(
+    'does not turn a fetch metadata authority failure into a master-signing retry: %s',
+    (reason) => {
+      const blocked: Attachment = {
+        type: 'photo',
+        name: 'blocked-photo.jpg',
+        path: `${COUPLE}/${RECORD}/33333333-3333-4333-8333-333333333333.jpg`,
+        urlUnavailable: reason,
+        photoMetadataUnavailable: reason,
+      };
+      resolveAttachmentUrls.mockResolvedValueOnce([{
+        ...blocked,
+        url: 'https://media.test/signer-would-succeed.jpg',
+        urlUnavailable: undefined,
+      }]);
+      const { container } = render(
+        <MediaArchiveGrid
+          records={[record({ attachments: [blocked] })]}
+          coupleId={COUPLE}
+          emptyDescription=""
+        />,
+      );
+
+      screen.getByRole('button', { name: /blocked-photo\.jpg 크게 보기/ }).click();
+
+      expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+      expect(container.querySelector('dialog')).toBeNull();
+    },
+  );
+
+  it('removes an open cached master before paint when authority refresh denies the source', async () => {
+    const allowed = photoWithThumbnail();
+    const blocked: Attachment = {
+      type: 'photo',
+      name: allowed.name,
+      path: allowed.path,
+      urlUnavailable: 'forbidden',
+      photoMetadataUnavailable: 'forbidden',
+    };
+    const beforePaintSources: string[] = [];
+
+    function AuthorityRefreshHarness() {
+      const [denied, setDenied] = useState(false);
+      useLayoutEffect(() => {
+        if (denied) {
+          beforePaintSources.push(
+            document.querySelector('dialog img')?.getAttribute('src') ?? 'none',
+          );
+        }
+      }, [denied]);
+      return (
+        <>
+          <button type="button" onClick={() => setDenied(true)}>deny current source</button>
+          <MediaArchiveGrid
+            records={[record({ attachments: [denied ? blocked : allowed] })]}
+            coupleId={COUPLE}
+            emptyDescription=""
+          />
+        </>
+      );
+    }
+
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      ...allowed,
+      url: 'https://media.test/fresh-master-before-denial.jpg',
+    }]);
+    const { container } = render(<AuthorityRefreshHarness />);
+    screen.getByRole('button', { name: /thumb-photo\.jpg 크게 보기/ }).click();
+    await waitFor(() => expect(container.querySelector('dialog img')).toHaveAttribute(
+      'src',
+      'https://media.test/fresh-master-before-denial.jpg',
+    ));
+
+    fireEvent.click(screen.getByRole('button', { name: 'deny current source' }));
+
+    expect(beforePaintSources).toEqual(['none']);
+    expect(container.querySelector('dialog')).toBeNull();
+  });
+
+  it('does not open the second item when fresh signing of the first clicked master fails', async () => {
+    const first = photoWithThumbnail('first.jpg');
+    first.url = undefined;
+    first.urlUnavailable = 'unreachable';
+    const second = photo('second.jpg');
+    resolveAttachmentUrls.mockResolvedValueOnce([
+      { ...first, url: undefined, urlUnavailable: 'unreachable' },
+    ]);
+    const { container } = render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [first, second] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    screen.getByRole('button', { name: /first\.jpg 크게 보기/ }).click();
+
+    await waitFor(() => expect(resolveAttachmentUrls).toHaveBeenCalledWith([first], COUPLE, RECORD));
+    expect(container.querySelector('dialog')).toBeNull();
+  });
+
+  it('does not retry an authoritative master permission denial on click', () => {
+    const denied = photoWithThumbnail();
+    denied.url = undefined;
+    denied.urlUnavailable = 'forbidden';
+    render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [denied] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    screen.getByRole('button', { name: /thumb-photo\.jpg 크게 보기/ }).click();
+
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+    expect(document.querySelector('dialog')).toBeNull();
+  });
+
+  it('does not open an adjacent photo when the tapped master is unavailable', () => {
+    const unavailable = photo('unavailable.jpg');
+    unavailable.url = undefined;
+    unavailable.urlUnavailable = 'forbidden';
+    render(
+      <MediaArchiveGrid
+        records={[record({ attachments: [unavailable, photo('available.jpg')] })]}
+        coupleId={COUPLE}
+        emptyDescription=""
+      />,
+    );
+
+    screen.getByRole('button', { name: /unavailable\.jpg 크게 보기/ }).click();
+
+    expect(document.querySelector('dialog')).toBeNull();
   });
 });

@@ -54,6 +54,23 @@ const PNG = Buffer.from(
   'base64',
 );
 
+const ENRICHED_RECORD_ID = '11111111-1111-4111-8111-111111111111';
+const ENRICHED_MASTER_ID = '33333333-3333-4333-8333-333333333333';
+const ENRICHED_THUMBNAIL_ID = '44444444-4444-4444-8444-444444444444';
+const ENRICHED_SOURCE_REVISION = '55555555-5555-4555-8555-555555555555';
+const ENRICHED_MASTER_PATH = `couple-1/${ENRICHED_RECORD_ID}/${ENRICHED_MASTER_ID}.jpg`;
+const ENRICHED_THUMBNAIL_PATH = `couple-1/${ENRICHED_RECORD_ID}/${ENRICHED_THUMBNAIL_ID}.jpg`;
+
+const ENRICHED_PHOTO_RECORD = record({
+  id: ENRICHED_RECORD_ID,
+  user_id: 'user-creator',
+  record_date: `${TODAY.slice(0, 8)}01`,
+  log_text: '과거 썸네일 경로 확인',
+  attachments: [{ type: 'photo', name: 'past-thumbnail.jpg', path: ENRICHED_MASTER_PATH }],
+  cipher_format: 0,
+  media_contract_version: 1,
+});
+
 const PHOTO_RECORD = record({
   id: 'rec-photos',
   user_id: 'user-partner',
@@ -82,9 +99,38 @@ const WITH_MEDIA = {
 async function boot(
   browser: import('@playwright/test').Browser,
   viewport = { width: 390, height: 844 },
+  scenario: Parameters<typeof installMockBackend>[1] = WITH_MEDIA,
 ): Promise<Page> {
   const context = await browser.newContext({ viewport });
-  await installMockBackend(context, WITH_MEDIA);
+  await installMockBackend(context, scenario);
+  await context.route('**/rest/v1/rpc/get_record_photo_metadata', async (route) => {
+    const body = route.request().postDataJSON() as { p_record_ids?: string[] } | null;
+    const requested = Array.isArray(body?.p_record_ids) ? body.p_record_ids : [];
+    const data = requested.includes(ENRICHED_RECORD_ID)
+      ? [{
+          record_id: ENRICHED_RECORD_ID,
+          media_id: ENRICHED_MASTER_ID,
+          source_revision: ENRICHED_SOURCE_REVISION,
+          screen_master: {
+            media_object_id: ENRICHED_MASTER_ID,
+            width_px: 2048,
+            height_px: 1536,
+            byte_size: 900_000,
+            sha256: 'a'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+          thumbnail: {
+            media_object_id: ENRICHED_THUMBNAIL_ID,
+            width_px: 640,
+            height_px: 480,
+            byte_size: 90_000,
+            sha256: 'b'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+        }]
+      : [];
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
+  });
   /*
    * The mock backend signs every object to `/storage/v1/object/signed-stub`,
    * which returns nothing. An `<img>` pointed at it fires `error`, the gallery
@@ -258,6 +304,38 @@ test('the photo lens shows a grid, and opens a photo full-screen', async ({ brow
   // 3 from the carousel record + 1 single = 4 frames, voice excluded.
   await expect(cells).toHaveCount(4);
   await page.screenshot({ path: './ui-audit-results/after/media-grid-390.png' });
+
+  await page.context().close();
+});
+
+test('the archive requests a thumbnail first and the exact master only after expansion', async ({ browser }) => {
+  const scenario = { ...WITH_MEDIA, records: [...WITH_MEDIA.records, ENRICHED_PHOTO_RECORD] };
+  const page = await boot(browser, { width: 390, height: 844 }, scenario);
+  const requestedPaths: string[] = [];
+  const metadataRequests: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname.endsWith('/rest/v1/rpc/get_record_photo_metadata')) {
+      metadataRequests.push(request.postData() ?? '');
+    }
+    const path = url.searchParams.get('p');
+    if (url.pathname.includes('signed-stub') && path) requestedPaths.push(decodeURIComponent(path));
+  });
+
+  await page.goto('/record');
+  await ready(page);
+  await recordsLoaded(page);
+  await lens(page, '사진').click();
+
+  const cell = page.getByRole('button', { name: /past-thumbnail\.jpg 크게 보기/ });
+  await expect(cell).toBeVisible();
+  await expect.poll(() => metadataRequests.length).toBeGreaterThan(0);
+  await expect.poll(() => requestedPaths.join('\n')).toContain(ENRICHED_THUMBNAIL_PATH);
+  expect(requestedPaths).not.toContain(ENRICHED_MASTER_PATH);
+
+  await cell.click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect.poll(() => requestedPaths.includes(ENRICHED_MASTER_PATH)).toBe(true);
 
   await page.context().close();
 });

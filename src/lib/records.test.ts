@@ -14,6 +14,8 @@ import {
   deleteRecordFromDB,
   downloadRecordPhotoForReuse,
   fetchRecordsFromDB,
+  fetchRecordsResultFromDB,
+  resolveAttachmentUrls,
   saveRecordToDB,
   setRecordCryptoEnvironment,
   uploadRecordPhotoRendition,
@@ -26,7 +28,8 @@ import {
   requireCoupleProtection,
 } from '@/app/e2ee/coupleProtectionBarrier';
 
-const { mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase } = vi.hoisted(() => {
+const { mockCreateSignedUrls, mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase } = vi.hoisted(() => {
+  const mockCreateSignedUrls = vi.fn();
   const mockFrom = vi.fn();
   const mockRpc = vi.fn();
   const mockStorageDownload = vi.fn();
@@ -35,10 +38,14 @@ const { mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase 
     from: mockFrom,
     rpc: mockRpc,
     storage: {
-      from: vi.fn(() => ({ download: mockStorageDownload, upload: mockStorageUpload })),
+      from: vi.fn(() => ({
+        createSignedUrls: mockCreateSignedUrls,
+        download: mockStorageDownload,
+        upload: mockStorageUpload,
+      })),
     },
   };
-  return { mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase };
+  return { mockCreateSignedUrls, mockFrom, mockRpc, mockStorageDownload, mockStorageUpload, mockSupabase };
 });
 
 vi.mock('@/lib/supabase', () => ({
@@ -356,6 +363,475 @@ describe('fetchRecordsFromDB profile-post metadata', () => {
   });
 });
 
+describe('fetchRecordsResultFromDB photo display enrichment', () => {
+  const RECORD_ID = '11111111-1111-4111-8111-111111111111';
+  const MASTER_ID = '33333333-3333-4333-8333-333333333333';
+  const THUMBNAIL_ID = '44444444-4444-4444-8444-444444444444';
+  const SECOND_MASTER_ID = '88888888-8888-4888-8888-888888888888';
+  const SECOND_THUMBNAIL_ID = '99999999-9999-4999-8999-999999999999';
+  const SOURCE_REVISION = '55555555-5555-4555-8555-555555555555';
+  const COUPLE_ID = '66666666-6666-4666-8666-666666666666';
+  const masterPath = `${COUPLE_ID}/${RECORD_ID}/${MASTER_ID}.jpg`;
+  const thumbnailPath = `${COUPLE_ID}/${RECORD_ID}/${THUMBNAIL_ID}.jpg`;
+
+  function installRecordPage(
+    attachments: unknown[] = [{ type: 'photo', name: 'photo.jpg', path: masterPath }],
+    rowOverrides: Record<string, unknown> = {},
+  ) {
+    let pageIndex = 0;
+    const builder = {
+      select: vi.fn(() => builder),
+      eq: vi.fn(() => builder),
+      or: vi.fn(() => builder),
+      order: vi.fn(() => builder),
+      limit: vi.fn(async () => pageIndex++ === 0
+        ? {
+            data: [{
+              id: RECORD_ID,
+              user_id: '22222222-2222-4222-8222-222222222222',
+              record_date: '2026-09-05',
+              record_time: '09:07:33',
+              log_text: '사진 기록',
+              attachments,
+              is_private: false,
+              created_at: '2026-09-05T00:07:33.000000Z',
+              content_revision: 9,
+              media_contract_version: 1,
+              last_media_operation_id: '77777777-7777-4777-8777-777777777777',
+              cipher_format: 0,
+              ...rowOverrides,
+            }],
+            error: null,
+          }
+        : { data: [], error: null }),
+    };
+    mockFrom.mockReturnValue(builder);
+  }
+
+  function metadata(overrides: Record<string, unknown> = {}) {
+    return {
+      record_id: RECORD_ID,
+      media_id: MASTER_ID,
+      source_revision: SOURCE_REVISION,
+      screen_master: {
+        media_object_id: MASTER_ID,
+        width_px: 2048,
+        height_px: 1536,
+        byte_size: 900_000,
+        sha256: 'a'.repeat(64),
+        mime_type: 'image/jpeg',
+      },
+      thumbnail: {
+        media_object_id: THUMBNAIL_ID,
+        width_px: 640,
+        height_px: 480,
+        byte_size: 90_000,
+        sha256: 'b'.repeat(64),
+        mime_type: 'image/jpeg',
+      },
+      ...overrides,
+    };
+  }
+
+  afterEach(() => {
+    mockCreateSignedUrls.mockReset();
+    mockFrom.mockReset();
+    mockRpc.mockReset();
+  });
+
+  it('joins an authorized pair by record and canonical master id, then signs both variants', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: [metadata()], error: null });
+    mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+      error: null,
+    }));
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(mockRpc).toHaveBeenCalledWith('get_record_photo_metadata', {
+      p_record_ids: [RECORD_ID],
+    });
+    expect(mockCreateSignedUrls).toHaveBeenCalledWith(
+      [masterPath, thumbnailPath],
+      3600,
+    );
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      url: `https://media.test/${masterPath}`,
+      photoRendition: {
+        sourceRevision: SOURCE_REVISION,
+        screenMaster: { mediaObjectId: MASTER_ID, widthPx: 2048, heightPx: 1536 },
+        thumbnail: {
+          mediaObjectId: THUMBNAIL_ID,
+          path: thumbnailPath,
+          url: `https://media.test/${thumbnailPath}`,
+          widthPx: 640,
+          heightPx: 480,
+        },
+      },
+    });
+  });
+
+  it('keeps old photo generations bound by master id when attachment order changes', async () => {
+    const secondMasterPath = `${COUPLE_ID}/${RECORD_ID}/${SECOND_MASTER_ID}.jpg`;
+    installRecordPage([
+      { type: 'photo', name: 'second.jpg', path: secondMasterPath },
+      { type: 'photo', name: 'first.jpg', path: masterPath },
+    ]);
+    const second = metadata({
+      media_id: SECOND_MASTER_ID,
+      source_revision: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      screen_master: {
+        media_object_id: SECOND_MASTER_ID, width_px: 1200, height_px: 900,
+        byte_size: 500_000, sha256: 'c'.repeat(64), mime_type: 'image/jpeg',
+      },
+      thumbnail: {
+        media_object_id: SECOND_THUMBNAIL_ID, width_px: 640, height_px: 480,
+        byte_size: 80_000, sha256: 'd'.repeat(64), mime_type: 'image/jpeg',
+      },
+    });
+    mockRpc.mockResolvedValueOnce({ data: [metadata(), second], error: null });
+    mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+      error: null,
+    }));
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.map((attachment) => ({
+      name: attachment.name,
+      master: attachment.photoRendition?.screenMaster.mediaObjectId,
+      thumbnail: attachment.photoRendition?.thumbnail.mediaObjectId,
+    }))).toEqual([
+      { name: 'second.jpg', master: SECOND_MASTER_ID, thumbnail: SECOND_THUMBNAIL_ID },
+      { name: 'first.jpg', master: MASTER_ID, thumbnail: THUMBNAIL_ID },
+    ]);
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(uuid[]) does not exist' },
+  ])('uses the legacy master path only for a confirmed missing 090 RPC: %j', async (error) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, records: [{ attachments: [{ path: masterPath }] }] });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result).not.toHaveProperty('mediaUnavailable');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+  });
+
+  it('reports a metadata permission denial and does not retain a thumbnail', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({
+      data: null,
+      error: { code: '42501', message: 'permission denied' },
+    });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'forbidden' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'forbidden',
+      photoMetadataUnavailable: 'forbidden',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('blocks an eligible master when the authoritative metadata response omits its row', async () => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: [], error: null });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'forbidden' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'forbidden',
+      photoMetadataUnavailable: 'forbidden',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [{ code: 'PGRST301', message: 'JWT expired' }, 'auth_expired'],
+    [{ status: 503, message: 'service unavailable' }, 'server'],
+  ] as const)('blocks eligible master signing after authoritative metadata failure: %j', async (error, reason) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: reason });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it('carries a thrown metadata transport failure as an authority block', async () => {
+    installRecordPage();
+    mockRpc.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'unreachable' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      path: masterPath,
+      urlUnavailable: 'unreachable',
+      photoMetadataUnavailable: 'unreachable',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(other_ids) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(uuid[]) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.other_rpc(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(text[]) does not exist' },
+    { code: '42883', message: 'function public.other_rpc(uuid[]) does not exist' },
+  ])('does not treat another function or signature as the missing photo metadata RPC: %j', async (error) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: null, error });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: 'server',
+      photoMetadataUnavailable: 'server',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [metadata(), metadata()],
+    [metadata({ record_id: '99999999-9999-4999-8999-999999999999' })],
+    [metadata({ thumbnail: { media_object_id: THUMBNAIL_ID, width_px: 641, height_px: 480,
+      byte_size: 90_000, sha256: 'b'.repeat(64), mime_type: 'image/jpeg' } })],
+    [metadata({ screen_master: { media_object_id: MASTER_ID, width_px: '2048', height_px: 1536,
+      byte_size: 900_000, sha256: 'a'.repeat(64), mime_type: 'image/jpeg' } })],
+  ])('rejects duplicate, cross-record, or malformed metadata as an unavailable enrichment', async (rpcData) => {
+    installRecordPage();
+    mockRpc.mockResolvedValueOnce({ data: rpcData, error: null });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+    if (!result.ok) throw new Error('record fetch failed');
+    expect(result.records[0].attachments?.[0]).toMatchObject({
+      urlUnavailable: 'server',
+      photoMetadataUnavailable: 'server',
+    });
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('url');
+    expect(result.records[0].attachments?.[0]).not.toHaveProperty('photoRendition');
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'auth_expired',
+    'forbidden',
+    'not_found',
+    'offline',
+    'unreachable',
+    'server',
+    'unknown',
+  ] as const)('never signs a master carrying a metadata authority block: %s', async (reason) => {
+    const blocked = {
+      type: 'photo' as const,
+      name: 'photo.jpg',
+      path: masterPath,
+      url: 'https://media.test/stale-master.jpg',
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    };
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: 'https://media.test/signer-would-succeed.jpg' }],
+      error: null,
+    });
+
+    await expect(resolveAttachmentUrls([blocked], COUPLE_ID, RECORD_ID)).resolves.toEqual([{
+      type: 'photo',
+      name: 'photo.jpg',
+      path: masterPath,
+      urlUnavailable: reason,
+      photoMetadataUnavailable: reason,
+    }]);
+    expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+  });
+
+  it.each(['master', 'thumbnail', 'cross-role'] as const)(
+    'rejects a %s media UUID collision across metadata batches and records',
+    async (collision) => {
+      const uuid = (seed: number) => {
+        const head = seed.toString(16).padStart(8, '0');
+        const tail = seed.toString(16).padStart(12, '0');
+        return `${head}-0000-4000-8000-${tail}`;
+      };
+      const rows = Array.from({ length: 101 }, (_, index) => {
+        const recordId = uuid(index + 1);
+        const masterId = uuid(index + 1_001);
+        const thumbnailId = uuid(index + 2_001);
+        return {
+          record_id: recordId,
+          media_id: masterId,
+          source_revision: uuid(index + 3_001),
+          screen_master: {
+            media_object_id: masterId,
+            width_px: 2048,
+            height_px: 1536,
+            byte_size: 900_000,
+            sha256: 'a'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+          thumbnail: {
+            media_object_id: thumbnailId,
+            width_px: 640,
+            height_px: 480,
+            byte_size: 90_000,
+            sha256: 'b'.repeat(64),
+            mime_type: 'image/jpeg',
+          },
+        };
+      });
+      const first = rows[0];
+      const last = rows.at(-1)!;
+      if (collision === 'master') {
+        last.media_id = first.media_id;
+        last.screen_master.media_object_id = first.screen_master.media_object_id;
+      } else if (collision === 'thumbnail') {
+        last.thumbnail.media_object_id = first.thumbnail.media_object_id;
+      } else {
+        last.media_id = first.thumbnail.media_object_id;
+        last.screen_master.media_object_id = first.thumbnail.media_object_id;
+      }
+
+      let pageIndex = 0;
+      const builder = {
+        select: vi.fn(() => builder),
+        eq: vi.fn(() => builder),
+        or: vi.fn(() => builder),
+        order: vi.fn(() => builder),
+        limit: vi.fn(async () => pageIndex++ === 0
+          ? {
+              data: rows.map((item) => ({
+                id: item.record_id,
+                user_id: '22222222-2222-4222-8222-222222222222',
+                record_date: '2026-09-05',
+                record_time: '09:07:33',
+                log_text: '사진 기록',
+                attachments: [{
+                  type: 'photo',
+                  name: 'photo.jpg',
+                  path: `${COUPLE_ID}/${item.record_id}/${item.screen_master.media_object_id}.jpg`,
+                }],
+                is_private: false,
+                created_at: `2026-09-05T00:07:${String(item.record_id).slice(0, 2)}.000000Z`,
+                content_revision: 9,
+                media_contract_version: 1,
+                last_media_operation_id: item.source_revision,
+                cipher_format: 0,
+              })),
+              error: null,
+            }
+          : { data: [], error: null }),
+      };
+      mockFrom.mockReturnValue(builder);
+      mockRpc
+        .mockResolvedValueOnce({ data: rows.slice(0, 100), error: null })
+        .mockResolvedValueOnce({ data: rows.slice(100), error: null });
+      mockCreateSignedUrls.mockImplementation(async (paths: string[]) => ({
+        data: paths.map((path) => ({ path, signedUrl: `https://media.test/${path}` })),
+        error: null,
+      }));
+
+      const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+      expect(result).toMatchObject({ ok: true, mediaUnavailable: 'server' });
+      if (!result.ok) throw new Error('record fetch failed');
+      expect(result.records.every((record) =>
+        record.attachments?.[0]?.photoMetadataUnavailable === 'server')).toBe(true);
+      expect(mockCreateSignedUrls).not.toHaveBeenCalled();
+    },
+  );
+
+  it('does not request plaintext thumbnail metadata for an encrypted record', async () => {
+    installRecordPage(undefined, { cipher_format: 1, content_envelope: '\\x00' });
+    mockCreateSignedUrls.mockResolvedValueOnce({
+      data: [{ path: masterPath, signedUrl: `https://media.test/${masterPath}` }],
+      error: null,
+    });
+
+    const result = await fetchRecordsResultFromDB(COUPLE_ID);
+
+    expect(mockRpc).not.toHaveBeenCalled();
+    expect(mockCreateSignedUrls).toHaveBeenCalledWith([masterPath], 3600);
+    expect(result).toMatchObject({
+      ok: true,
+      records: [{ attachments: [{ path: masterPath, url: `https://media.test/${masterPath}` }] }],
+    });
+  });
+});
+
 describe('deleteRecordFromDB', () => {
   const recordId = 'rec-001';
   const userId = 'user-001';
@@ -451,12 +927,16 @@ describe('record media mutation RPCs', () => {
     });
   });
 
-  it.each(['PGRST202', '42883'])(
-    'allows legacy fallback only for a confirmed missing photo RPC: %s',
-    async (code) => {
-      mockRpc.mockResolvedValueOnce({ data: null, error: {
-        code, message: 'function public.get_record_photo_metadata(uuid[]) does not exist',
-      } });
+  it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(p_record_ids) in the schema cache',
+    },
+    { code: '42883', message: 'function public.get_record_photo_metadata(uuid[]) does not exist' },
+  ])(
+    'allows legacy fallback only for a confirmed missing photo RPC: $code',
+    async (error) => {
+      mockRpc.mockResolvedValueOnce({ data: null, error });
 
       await expect(getRecordPhotoRenditionCapability()).resolves.toEqual({
         ok: true,
@@ -478,7 +958,17 @@ describe('record media mutation RPCs', () => {
   });
 
   it.each([
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(other_ids) in the schema cache',
+    },
+    {
+      code: 'PGRST202',
+      message: 'Could not find the function public.get_record_photo_metadata(uuid[]) in the schema cache',
+    },
+    { code: 'PGRST202', message: 'Could not find the function public.other_rpc(p_record_ids) in the schema cache' },
     { code: '42883', message: 'operator does not exist: uuid = text' },
+    { code: '42883', message: 'function public.get_record_photo_metadata(text[]) does not exist' },
     { code: '42883', message: 'function public.internal_helper(uuid) does not exist' },
     { code: '42883' },
     { status: 500, message: 'internal server error' },
@@ -731,6 +1221,41 @@ describe('saveRecordToDB', () => {
     });
     const payload = insert.mock.calls[0][0] as Record<string, unknown>;
     expect(payload).not.toHaveProperty('is_profile_post');
+  });
+
+  it('never persists transient thumbnail enrichment or signed URLs', async () => {
+    const insert = mockUpsert(null);
+    await saveRecordToDB({
+      ...record,
+      attachments: [{
+        type: 'photo',
+        name: 'photo.jpg',
+        path: 'couple-001/rec-001/33333333-3333-4333-8333-333333333333.jpg',
+        url: 'https://media.test/master-signed',
+        photoMetadataUnavailable: 'server',
+        photoRendition: {
+          sourceRevision: '55555555-5555-4555-8555-555555555555',
+          screenMaster: {
+            mediaObjectId: '33333333-3333-4333-8333-333333333333',
+            widthPx: 2048, heightPx: 1536, byteSize: 900_000,
+            sha256: 'a'.repeat(64), mimeType: 'image/jpeg',
+          },
+          thumbnail: {
+            mediaObjectId: '44444444-4444-4444-8444-444444444444',
+            widthPx: 640, heightPx: 480, byteSize: 90_000,
+            sha256: 'b'.repeat(64), mimeType: 'image/jpeg',
+            path: 'couple-001/rec-001/44444444-4444-4444-8444-444444444444.jpg',
+            url: 'https://media.test/thumbnail-signed',
+          },
+        },
+      }],
+    }, 'couple-001', 'user-001');
+
+    expect((insert.mock.calls[0][0] as { attachments: unknown[] }).attachments).toEqual([{
+      type: 'photo',
+      name: 'photo.jpg',
+      path: 'couple-001/rec-001/33333333-3333-4333-8333-333333333333.jpg',
+    }]);
   });
 
   it('persists explicit profile publication as clear routing metadata', async () => {

@@ -436,6 +436,13 @@ function Probe({
           .map((a) => a.name)
           .join(',')}
       </span>
+      <span data-testid="thumbnailUrls">
+        {state.records
+          .flatMap((r) => r.attachments || [])
+          .map((a) => a.photoRendition?.thumbnail.url ?? '')
+          .filter(Boolean)
+          .join(',')}
+      </span>
       <span data-testid="logs">{state.records.map((r) => r.log).join('|')}</span>
       <span data-testid="privacy">{state.records.map((r) => r.isPrivate ? 'private' : 'public').join(',')}</span>
       <span data-testid="outbox">{outboxWaiting}:{outboxBlocked}</span>
@@ -2028,7 +2035,23 @@ describe('StoreProvider auth lifecycle', () => {
 
     fetchRecordsResultFromDB.mockResolvedValueOnce({
       ok: true,
-      records: [{ id: 'record-after', userId: 'user-a', isPrivate: false, log: 'authoritative' }],
+      records: [{
+        id: 'record-after',
+        userId: 'user-a',
+        isPrivate: false,
+        log: 'authoritative',
+        attachments: [{
+          type: 'photo',
+          name: 'photo.jpg',
+          path: 'couple-1/record-after/master.jpg',
+          url: 'https://media.test/master.jpg',
+          photoRendition: {
+            sourceRevision: 'source-revision',
+            screenMaster: {},
+            thumbnail: { url: 'https://media.test/thumbnail.jpg' },
+          },
+        }],
+      }],
     });
     await act(async () => {
       invalidationCalls[0]?.[2]?.({
@@ -2040,6 +2063,7 @@ describe('StoreProvider auth lifecycle', () => {
     expect(screen.getByTestId('records')).toHaveTextContent('record-after');
     expect(screen.getByTestId('logs')).toHaveTextContent('authoritative');
     expect(screen.getByTestId('logs')).not.toHaveTextContent('payload must not become state');
+    expect(screen.getByTestId('thumbnailUrls')).toHaveTextContent('https://media.test/thumbnail.jpg');
   });
 
   it('reconciles every shared slice after SUBSCRIBED before considering the channel live', async () => {

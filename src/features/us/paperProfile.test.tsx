@@ -517,7 +517,27 @@ describe('PaperProfile (우리 화면)', () => {
       date: '2026-08-11',
       log: '제주도 바다 도착!',
       isProfilePost: true,
-      attachments: [{ type: 'photo', name: '제주도.jpg', url: 'https://example.test/jeju.jpg' }],
+      attachments: [{
+        type: 'photo',
+        name: '제주도.jpg',
+        path: 'couple-1/rec-travel/33333333-3333-4333-8333-333333333333.jpg',
+        url: 'https://example.test/jeju-master.jpg',
+        photoRendition: {
+          sourceRevision: '55555555-5555-4555-8555-555555555555',
+          screenMaster: {
+            mediaObjectId: '33333333-3333-4333-8333-333333333333',
+            widthPx: 2048, heightPx: 1536, byteSize: 900_000,
+            sha256: 'a'.repeat(64), mimeType: 'image/jpeg',
+          },
+          thumbnail: {
+            mediaObjectId: '44444444-4444-4444-8444-444444444444',
+            widthPx: 640, heightPx: 480, byteSize: 90_000,
+            sha256: 'b'.repeat(64), mimeType: 'image/jpeg',
+            path: 'couple-1/rec-travel/44444444-4444-4444-8444-444444444444.jpg',
+            url: 'https://example.test/jeju-thumbnail.jpg',
+          },
+        },
+      }],
     });
 
     storeState = {
@@ -538,11 +558,13 @@ describe('PaperProfile (우리 화면)', () => {
     expect(screen.getByTestId('post-tile-rec-travel')).toHaveAttribute('data-kind', 'photo');
 
     const tile = screen.getByTestId('post-tile-rec-travel');
+    expect(tile.querySelector('img')).toHaveAttribute('src', 'https://example.test/jeju-thumbnail.jpg');
     tile.focus();
     fireEvent.click(tile);
     const viewer = screen.getByTestId('photo-post-viewer');
     expect(viewer).toBeInTheDocument();
-    expect(viewer.querySelector('[data-testid="record-attachment"] img[alt="제주도.jpg"]')).not.toBeNull();
+    expect(viewer.querySelector('[data-testid="record-attachment"] img[alt="제주도.jpg"]'))
+      .toHaveAttribute('src', 'https://example.test/jeju-master.jpg');
     expect(within(viewer).getByText('제주도 바다 도착!')).toHaveClass('record-copy');
 
     fireEvent.keyDown(document, { key: 'Escape' });

@@ -29,6 +29,27 @@ export type CoupleStatus = 'pending' | 'active' | 'disconnected';
 
 export type ReactionType = 'good' | 'event' | 'hard' | 'thought_of_you';
 
+export interface PhotoRenditionDescriptor {
+  mediaObjectId: string;
+  widthPx: number;
+  heightPx: number;
+  byteSize: number;
+  sha256: string;
+  mimeType: 'image/jpeg';
+  /** Derived locally from the authorized record namespace; never accepted from RPC data. */
+  path?: string;
+  /** Ephemeral signed URL. Never persisted. */
+  url?: string;
+  urlUnavailable?: ServerErrorKind;
+}
+
+export interface PhotoRenditionMetadata {
+  /** Immutable operation that originally registered this master/thumbnail pair. */
+  sourceRevision: string;
+  screenMaster: PhotoRenditionDescriptor;
+  thumbnail: PhotoRenditionDescriptor & { path: string };
+}
+
 export interface Attachment {
   type: 'photo' | 'video' | 'voice';
   name: string;
@@ -43,8 +64,18 @@ export interface Attachment {
    * explanation. Set to the classified cause when signing was ATTEMPTED and
    * failed, so a surface can say so instead of pretending the media is fine.
    * Never persisted -- writes project attachments down to type/name/path.
-   */
+  */
   urlUnavailable?: ServerErrorKind;
+  /**
+   * The authoritative photo-pair metadata read could not authorize this master.
+   *
+   * This is deliberately separate from a Storage signing failure: every reason
+   * here blocks both master and thumbnail re-signing until a fresh authoritative
+   * record fetch returns valid pair metadata. It is transient and never persisted.
+   */
+  photoMetadataUnavailable?: ServerErrorKind;
+  /** Authorized, transient display enrichment. Writes continue to project type/name/path only. */
+  photoRendition?: PhotoRenditionMetadata;
 }
 
 export type EmotionGroup =

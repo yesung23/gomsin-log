@@ -881,7 +881,7 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/partnerUsername.ts': 1,
       'src/lib/profileAvatars.ts': 1,
       'src/lib/pushTokens.ts': 3,
-      'src/lib/records.ts': 6, // Adds the read-only capability probe and Store-gated paired begin.
+      'src/lib/records.ts': 7, // Includes the separately classified authoritative metadata read below.
       'src/lib/relationshipSnapshot.ts': 1,
       'src/lib/sensitiveConsent.ts': 2,
       'src/lib/store.tsx': 3,
@@ -898,6 +898,79 @@ describe('Whole-source server mutation inventory', () => {
       'src/lib/supabase.ts': 1,
     },
   };
+
+  it('classifies all seven records RPC paths, including authoritative metadata hydration', () => {
+    const source = readFileSync(resolve(process.cwd(), 'src/lib/records.ts'), 'utf8');
+    const functionDeclarations = Array.from(
+      source.matchAll(/^(?:export\s+)?(?:async\s+)?function\s+(\w+)\b/gm),
+      (match) => ({ owner: match[1], index: match.index }),
+    );
+    const classifications = new Map<string, string>([
+      ['fetchRecordPhotoMetadata:get_record_photo_metadata', 'read-only authoritative metadata'],
+      ['getRecordPhotoRenditionCapability:get_record_photo_metadata', 'read-only capability probe'],
+      ['beginRecordMediaMutation:begin_record_media_mutation', 'store-gated write'],
+      ['beginRecordPhotoMutation:begin_record_photo_mutation', 'store-gated write'],
+      ['getRecordMediaMutationStatus:record_media_mutation_status', 'read-only status'],
+      ['abandonRecordMediaMutation:abandon_record_media_mutation', 'store-gated write'],
+      ['deleteRecordFromDB:delete_my_record', 'store-gated write'],
+    ]);
+    const discovered = Array.from(
+      source.matchAll(/\.rpc\s*\(\s*(['"])([^'"]+)\1/g),
+      (match) => {
+        const owner = functionDeclarations
+          .filter((declaration) => declaration.index <= match.index)
+          .at(-1)?.owner;
+        const target = match[2];
+        return {
+          owner,
+          target,
+          classification: classifications.get(`${owner}:${target}`),
+        };
+      },
+    );
+
+    expect(discovered).toEqual([
+      {
+        owner: 'fetchRecordPhotoMetadata',
+        target: 'get_record_photo_metadata',
+        classification: 'read-only authoritative metadata',
+      },
+      {
+        owner: 'getRecordPhotoRenditionCapability',
+        target: 'get_record_photo_metadata',
+        classification: 'read-only capability probe',
+      },
+      {
+        owner: 'beginRecordMediaMutation',
+        target: 'begin_record_media_mutation',
+        classification: 'store-gated write',
+      },
+      {
+        owner: 'beginRecordPhotoMutation',
+        target: 'begin_record_photo_mutation',
+        classification: 'store-gated write',
+      },
+      {
+        owner: 'getRecordMediaMutationStatus',
+        target: 'record_media_mutation_status',
+        classification: 'read-only status',
+      },
+      {
+        owner: 'abandonRecordMediaMutation',
+        target: 'abandon_record_media_mutation',
+        classification: 'store-gated write',
+      },
+      {
+        owner: 'deleteRecordFromDB',
+        target: 'delete_my_record',
+        classification: 'store-gated write',
+      },
+    ]);
+
+    const fetchBody = extractFunctionBody(source, 'fetchRecordsResultFromDB');
+    expect(fetchBody).not.toBeNull();
+    expect(fetchBody).toContain('await fetchRecordPhotoMetadata(eligibleRecordIds)');
+  });
 
   it.each(Object.keys(SERVER_TRANSPORT_PATTERNS) as TransportKind[])(
     '%s transport occurrence counts remain explicitly reviewed',

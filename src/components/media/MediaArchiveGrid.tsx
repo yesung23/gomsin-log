@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Film, Lock } from 'lucide-react';
 import { Lightbox, type LightboxMedia } from '@astryxdesign/core/Lightbox';
 import { useMediaAttachment } from '@/lib/useMediaAttachment';
+import { resolveAttachmentUrls } from '@/lib/records';
 import { EmptyState } from '@/components/ui/EmptyState';
-import type { Attachment, DailyRecord } from '@/types';
+import type { Attachment, DailyRecord, ServerErrorKind } from '@/types';
 
 /**
  * Every photo of a period, as one surface.
@@ -41,7 +42,53 @@ function sortNewestFirst(a: { record: DailyRecord }, b: { record: DailyRecord })
   return left.localeCompare(right);
 }
 
-type Cell = { record: DailyRecord; attachment: Attachment; key: string };
+type Cell = {
+  record: DailyRecord;
+  attachment: Attachment;
+  key: string;
+  sourceGeneration: string;
+};
+
+type ResolvedEntry = {
+  sourceGeneration: string;
+  media?: LightboxMedia;
+};
+
+type LightboxSelection = {
+  key: string;
+  sourceGeneration: string;
+};
+
+function isPermissionDenied(reason: ServerErrorKind | undefined): boolean {
+  return reason === 'auth_expired' || reason === 'forbidden';
+}
+
+function isMasterResolutionBlocked(attachment: Attachment): boolean {
+  return !!attachment.photoMetadataUnavailable || isPermissionDenied(attachment.urlUnavailable);
+}
+
+function sourceGenerationFor(
+  record: DailyRecord,
+  attachment: Attachment,
+  coupleId: string | undefined,
+): string {
+  return JSON.stringify([
+    coupleId,
+    record.id,
+    attachment.type,
+    attachment.name,
+    attachment.path,
+    attachment.url,
+    attachment.urlUnavailable,
+    attachment.photoMetadataUnavailable,
+    attachment.photoRendition?.sourceRevision,
+    attachment.photoRendition?.screenMaster.mediaObjectId,
+    attachment.photoRendition?.thumbnail.mediaObjectId,
+    attachment.photoRendition?.thumbnail.path,
+    attachment.photoRendition?.thumbnail.url,
+    attachment.photoRendition?.thumbnail.urlUnavailable,
+  ]);
+}
 
 /**
  * One square.
@@ -53,31 +100,39 @@ type Cell = { record: DailyRecord; attachment: Attachment; key: string };
 function GridCell({
   cell,
   coupleId,
-  position,
   onResolved,
   onOpen,
 }: {
   cell: Cell;
   coupleId?: string;
-  position: number;
-  onResolved: (position: number, media: LightboxMedia | undefined) => void;
-  onOpen: (position: number) => void;
+  onResolved: (key: string, sourceGeneration: string, media: LightboxMedia | undefined) => void;
+  onOpen: (key: string) => void;
 }) {
-  const { url, reportLoadFailure } = useMediaAttachment(
+  const { url, unavailable, reportLoadFailure } = useMediaAttachment(
     cell.attachment,
     coupleId,
     cell.record.id,
+    'thumbnail',
   );
   const isVideo = cell.attachment.type === 'video';
-
   useEffect(() => {
     onResolved(
-      position,
-      url
-        ? { src: url, alt: cell.attachment.name, type: isVideo ? 'video' : 'image' }
+      cell.key,
+      cell.sourceGeneration,
+      cell.attachment.url
+        && !isMasterResolutionBlocked(cell.attachment)
+        && !isPermissionDenied(unavailable)
+        ? { src: cell.attachment.url, alt: cell.attachment.name, type: isVideo ? 'video' : 'image' }
         : undefined,
     );
-  }, [onResolved, position, url, cell.attachment.name, isVideo]);
+  }, [
+    cell.attachment,
+    cell.key,
+    cell.sourceGeneration,
+    isVideo,
+    onResolved,
+    unavailable,
+  ]);
 
   /*
    * A video's poster frame, not a player. Twelve `<video controls>` elements on
@@ -88,7 +143,7 @@ function GridCell({
   return (
     <button
       type="button"
-      onClick={() => onOpen(position)}
+      onClick={() => onOpen(cell.key)}
       aria-label={`${cell.record.date} ${cell.record.time || ''} ${cell.attachment.name} 크게 보기`}
       className="press-response relative aspect-square overflow-hidden bg-muted cursor-pointer"
     >
@@ -145,26 +200,45 @@ export function MediaArchiveGrid({ records, coupleId, emptyDescription }: MediaA
   const cells = useMemo(() => {
     const collected: Cell[] = [];
     for (const record of records) {
-      for (const [index, attachment] of (record.attachments ?? []).entries()) {
+      for (const attachment of record.attachments ?? []) {
         // Voice has no frame to put in a square; it stays in the timeline.
         if (attachment.type === 'voice') continue;
         collected.push({
           record,
           attachment,
-          key: `${record.id}-${attachment.path ?? attachment.name}-${index}`,
+          key: `${record.id}-${attachment.path ?? attachment.name}`,
+          sourceGeneration: sourceGenerationFor(record, attachment, coupleId),
         });
       }
     }
     return collected.sort(sortNewestFirst);
-  }, [records]);
+  }, [coupleId, records]);
 
-  const [resolved, setResolved] = useState<Record<number, LightboxMedia | undefined>>({});
-  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [resolved, setResolved] = useState<Record<string, ResolvedEntry | undefined>>({});
+  const [lightboxSelection, setLightboxSelection] = useState<LightboxSelection | null>(null);
+  const openGeneration = useRef(0);
 
-  const onResolved = useCallback((position: number, media: LightboxMedia | undefined) => {
+  useLayoutEffect(() => {
+    openGeneration.current += 1;
+    setLightboxSelection((current) => current && cells.some((cell) =>
+      cell.key === current.key
+      && cell.sourceGeneration === current.sourceGeneration
+      && !isMasterResolutionBlocked(cell.attachment))
+      ? current
+      : null);
+  }, [cells, coupleId]);
+
+  const onResolved = useCallback((
+    key: string,
+    sourceGeneration: string,
+    media: LightboxMedia | undefined,
+  ) => {
     setResolved((current) => {
-      if (current[position]?.src === media?.src) return current;
-      return { ...current, [position]: media };
+      const previous = current[key];
+      if (previous?.sourceGeneration === sourceGeneration && previous.media?.src === media?.src) {
+        return current;
+      }
+      return { ...current, [key]: { sourceGeneration, media } };
     });
   }, []);
 
@@ -174,21 +248,59 @@ export function MediaArchiveGrid({ records, coupleId, emptyDescription }: MediaA
    * list. Handing the raw grid position to the Lightbox opens the wrong photo as
    * soon as one file in the middle fails to sign.
    */
-  const media = useMemo(
-    () =>
-      cells
-        .map((_, position) => resolved[position])
-        .filter((entry): entry is LightboxMedia => Boolean(entry)),
+  const mediaEntries = useMemo(
+    () => cells.flatMap((cell) => {
+      const entry = resolved[cell.key];
+      return entry
+        && entry.sourceGeneration === cell.sourceGeneration
+        && entry.media
+        && !isMasterResolutionBlocked(cell.attachment)
+        ? [{ key: cell.key, sourceGeneration: cell.sourceGeneration, media: entry.media }]
+        : [];
+    }),
     [cells, resolved],
   );
+  const media = useMemo(() => mediaEntries.map((entry) => entry.media), [mediaEntries]);
+  const lightboxIndex = lightboxSelection === null
+    ? null
+    : mediaEntries.findIndex((entry) =>
+        entry.key === lightboxSelection.key
+        && entry.sourceGeneration === lightboxSelection.sourceGeneration);
 
   const openAt = useCallback(
-    (position: number) => {
-      let mapped = 0;
-      for (let i = 0; i < position; i += 1) if (resolved[i]) mapped += 1;
-      setLightboxIndex(mapped);
+    (key: string) => {
+      const cell = cells.find((candidate) => candidate.key === key);
+      if (!cell || isMasterResolutionBlocked(cell.attachment)) return;
+      const requestGeneration = ++openGeneration.current;
+      void (async () => {
+        const cached = resolved[key];
+        let media = cached?.sourceGeneration === cell.sourceGeneration ? cached.media : undefined;
+        if (coupleId && cell.attachment.path) {
+          try {
+            const [signed] = await resolveAttachmentUrls(
+              [cell.attachment],
+              coupleId,
+              cell.record.id,
+            );
+            if (openGeneration.current !== requestGeneration || !signed?.url) return;
+            media = {
+              src: signed.url,
+              alt: cell.attachment.name,
+              type: cell.attachment.type === 'video' ? 'video' : 'image',
+            };
+          } catch {
+            return;
+          }
+        }
+        if (openGeneration.current !== requestGeneration || !media) return;
+        setResolved((current) => ({
+          ...current,
+          [key]: { sourceGeneration: cell.sourceGeneration, media },
+        }));
+        setLightboxSelection({ key, sourceGeneration: cell.sourceGeneration });
+      })();
     },
-    [resolved],
+    [cells, coupleId, resolved],
   );
 
   if (cells.length === 0) {
@@ -210,25 +322,29 @@ export function MediaArchiveGrid({ records, coupleId, emptyDescription }: MediaA
         jsdom cannot see it, because it lays nothing out.
       */}
       <div className="grid grid-cols-3 gap-px rounded-surface overflow-hidden">
-        {cells.map((cell, position) => (
+        {cells.map((cell) => (
           <GridCell
             key={cell.key}
             cell={cell}
             coupleId={coupleId}
-            position={position}
             onResolved={onResolved}
             onOpen={openAt}
           />
         ))}
       </div>
 
-      {media.length > 0 && (
+      {lightboxSelection !== null && lightboxIndex !== null && lightboxIndex >= 0 && media.length > 0 && (
         <Lightbox
-          isOpen={lightboxIndex !== null}
-          onOpenChange={(open) => setLightboxIndex(open ? (lightboxIndex ?? 0) : null)}
+          isOpen
+          onOpenChange={(open) => { if (!open) setLightboxSelection(null); }}
           media={media}
-          index={lightboxIndex ?? 0}
-          onIndexChange={setLightboxIndex}
+          index={lightboxIndex}
+          onIndexChange={(index) => {
+            const entry = mediaEntries[index];
+            setLightboxSelection(entry
+              ? { key: entry.key, sourceGeneration: entry.sourceGeneration }
+              : null);
+          }}
           hasZoom
         />
       )}

@@ -816,7 +816,12 @@ function SharedRecordList({ records, coupleId, onOpen }: { records: DailyRecord[
 
 function SharedRecordRow({ record, coupleId, onOpen }: { record: DailyRecord; coupleId?: string; onOpen: (recordId: string) => void }) {
   const photo = getPhotoAttachments(record)[0];
-  const { url, reportLoadFailure } = useMediaAttachment(photo || EMPTY_RECORD_ATTACHMENT, coupleId, record.id);
+  const { url, reportLoadFailure } = useMediaAttachment(
+    photo || EMPTY_RECORD_ATTACHMENT,
+    coupleId,
+    record.id,
+    'thumbnail',
+  );
   const summary = record.contentUnavailable
     ? '이 기록의 글을 아직 열 수 없어요.'
     : record.log.trim() || (photo ? '사진을 남겼어요.' : '기록을 남겼어요.');
@@ -878,7 +883,7 @@ function ProfileHighlightButton({ highlight, records, coupleId, onOpen, onEdit }
 }
 
 function HighlightMedia({ photo, coupleId, recordId }: { photo: NonNullable<ReturnType<typeof getPhotoAttachments>[number]>; coupleId?: string; recordId: string }) {
-  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId);
+  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId, 'thumbnail');
   return (
     <InkCircle size={60} ring="seen">
       {url ? <img src={url} alt="" onError={reportLoadFailure} className="h-full w-full rounded-full object-cover" /> : <ImageIcon size={22} color="var(--ink-soft)" aria-hidden="true" />}
@@ -972,7 +977,7 @@ function HighlightPickerTile({ record, coupleId, selected, cover, onToggle, onSe
 }
 
 function HighlightPickerMedia({ photo, coupleId, recordId }: { photo: NonNullable<ReturnType<typeof getPhotoAttachments>[number]>; coupleId?: string; recordId: string }) {
-  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId);
+  const { url, reportLoadFailure } = useMediaAttachment(photo, coupleId, recordId, 'thumbnail');
   return url ? <img src={url} alt="" onError={reportLoadFailure} className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center"><ImageIcon size={20} color="var(--ink-soft)" /></span>;
 }
 

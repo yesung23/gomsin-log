@@ -16,7 +16,7 @@ import {
   type RecordCryptoEnvironment,
 } from '@/app/records/contentCrypto';
 import { fromBase64 } from '@/crypto/bytes';
-import { DailyRecord, Attachment } from '@/types';
+import { DailyRecord, Attachment, type PhotoRenditionDescriptor } from '@/types';
 
 // ==========================================
 // E2EE routing (P5)
@@ -212,6 +212,165 @@ function mapAuthenticatedAttachment(
   };
 }
 
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_TEXT = /^[0-9a-f]{64}$/;
+const PHOTO_METADATA_BATCH_SIZE = 100;
+
+function recordPhotoMediaId(
+  attachment: Attachment,
+  coupleId: string,
+  recordId: string,
+): string | null {
+  if (attachment.type !== 'photo' || !isCanonicalRecordMediaPath(attachment.path, coupleId, recordId)) {
+    return null;
+  }
+  const filename = attachment.path.split('/')[2];
+  const match = /^([0-9a-f-]+)\.jpg$/i.exec(filename);
+  return match && UUID_TEXT.test(match[1]) ? match[1].toLowerCase() : null;
+}
+
+function readPhotoDescriptor(
+  value: unknown,
+  maximumPixels: number,
+  maximumBytes: number,
+): PhotoRenditionDescriptor | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const mediaObjectId = typeof candidate.media_object_id === 'string'
+    ? candidate.media_object_id.toLowerCase()
+    : '';
+  const widthPx = candidate.width_px;
+  const heightPx = candidate.height_px;
+  const byteSize = candidate.byte_size;
+  if (
+    !UUID_TEXT.test(mediaObjectId)
+    || typeof widthPx !== 'number' || !Number.isSafeInteger(widthPx) || widthPx < 1 || widthPx > maximumPixels
+    || typeof heightPx !== 'number' || !Number.isSafeInteger(heightPx) || heightPx < 1 || heightPx > maximumPixels
+    || typeof byteSize !== 'number' || !Number.isSafeInteger(byteSize) || byteSize < 1 || byteSize > maximumBytes
+    || typeof candidate.sha256 !== 'string' || !SHA256_TEXT.test(candidate.sha256)
+    || candidate.mime_type !== SANITIZED_PHOTO_MIME
+  ) return null;
+  return {
+    mediaObjectId,
+    widthPx,
+    heightPx,
+    byteSize,
+    sha256: candidate.sha256,
+    mimeType: SANITIZED_PHOTO_MIME,
+  };
+}
+
+type ValidPhotoMetadata = {
+  recordId: string;
+  masterMediaObjectId: string;
+  sourceRevision: string;
+  screenMaster: PhotoRenditionDescriptor;
+  thumbnail: PhotoRenditionDescriptor;
+};
+
+function readPhotoMetadata(value: unknown): ValidPhotoMetadata | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const recordId = typeof candidate.record_id === 'string' ? candidate.record_id.toLowerCase() : '';
+  const masterMediaObjectId = typeof candidate.media_id === 'string'
+    ? candidate.media_id.toLowerCase()
+    : '';
+  const sourceRevision = typeof candidate.source_revision === 'string'
+    ? candidate.source_revision.toLowerCase()
+    : '';
+  const screenMaster = readPhotoDescriptor(candidate.screen_master, 2048, 10_485_760);
+  const thumbnail = readPhotoDescriptor(candidate.thumbnail, 640, 1_048_576);
+  if (
+    !UUID_TEXT.test(recordId)
+    || !UUID_TEXT.test(masterMediaObjectId)
+    || !UUID_TEXT.test(sourceRevision)
+    || !screenMaster
+    || !thumbnail
+    || screenMaster.mediaObjectId !== masterMediaObjectId
+    || thumbnail.mediaObjectId === masterMediaObjectId
+    || thumbnail.widthPx > screenMaster.widthPx
+    || thumbnail.heightPx > screenMaster.heightPx
+  ) return null;
+  return { recordId, masterMediaObjectId, sourceRevision, screenMaster, thumbnail };
+}
+
+function isMissingRecordPhotoMetadataRpc(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as Record<string, unknown>;
+  const code = typeof candidate.code === 'string' ? candidate.code : '';
+  const message = typeof candidate.message === 'string' ? candidate.message : '';
+  const exactPostgrestMissing = /^Could not find the function public\.get_record_photo_metadata\(p_record_ids\) in the schema cache$/;
+  const exactPostgresMissing = /^function public\.get_record_photo_metadata\(uuid\[\]\) does not exist$/;
+  return (code === 'PGRST202' && exactPostgrestMissing.test(message))
+    || (code === '42883' && exactPostgresMissing.test(message));
+}
+
+type PhotoMetadataAvailability = {
+  byRecordAndMaster: Map<string, ValidPhotoMetadata>;
+  unavailable?: ServerErrorKind;
+  legacyMasterAllowed?: boolean;
+};
+
+function photoMetadataKey(recordId: string, masterMediaObjectId: string): string {
+  return `${recordId.toLowerCase()}\u0000${masterMediaObjectId.toLowerCase()}`;
+}
+
+async function fetchRecordPhotoMetadata(recordIds: string[]): Promise<PhotoMetadataAvailability> {
+  const byRecordAndMaster = new Map<string, ValidPhotoMetadata>();
+  const seenMasterIds = new Set<string>();
+  const seenThumbnailIds = new Set<string>();
+  const requested = new Set(recordIds.map((id) => id.toLowerCase()));
+  for (let offset = 0; offset < recordIds.length; offset += PHOTO_METADATA_BATCH_SIZE) {
+    const batch = recordIds.slice(offset, offset + PHOTO_METADATA_BATCH_SIZE);
+    let data: unknown;
+    let error: unknown;
+    try {
+      const response = await supabase!.rpc('get_record_photo_metadata', { p_record_ids: batch });
+      data = response.data;
+      error = response.error;
+    } catch (caught) {
+      return { byRecordAndMaster: new Map(), unavailable: classifyServerError(caught).kind };
+    }
+    if (error) {
+      if (isMissingRecordPhotoMetadataRpc(error)) {
+        return { byRecordAndMaster: new Map(), legacyMasterAllowed: true };
+      }
+      return { byRecordAndMaster: new Map(), unavailable: classifyServerError(error).kind };
+    }
+    if (!Array.isArray(data)) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+
+    const valid = data.map(readPhotoMetadata).filter((item): item is ValidPhotoMetadata => !!item);
+    if (valid.length !== data.length) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+    const keyCounts = new Map<string, number>();
+    const masterCounts = new Map<string, number>();
+    const thumbnailCounts = new Map<string, number>();
+    for (const item of valid) {
+      const key = photoMetadataKey(item.recordId, item.masterMediaObjectId);
+      keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+      masterCounts.set(item.masterMediaObjectId, (masterCounts.get(item.masterMediaObjectId) ?? 0) + 1);
+      thumbnailCounts.set(item.thumbnail.mediaObjectId, (thumbnailCounts.get(item.thumbnail.mediaObjectId) ?? 0) + 1);
+    }
+    for (const item of valid) {
+      const key = photoMetadataKey(item.recordId, item.masterMediaObjectId);
+      if (
+        !requested.has(item.recordId)
+        || keyCounts.get(key) !== 1
+        || masterCounts.get(item.masterMediaObjectId) !== 1
+        || thumbnailCounts.get(item.thumbnail.mediaObjectId) !== 1
+        || byRecordAndMaster.has(key)
+        || seenMasterIds.has(item.masterMediaObjectId)
+        || seenThumbnailIds.has(item.thumbnail.mediaObjectId)
+        || seenThumbnailIds.has(item.masterMediaObjectId)
+        || seenMasterIds.has(item.thumbnail.mediaObjectId)
+      ) return { byRecordAndMaster: new Map(), unavailable: 'server' };
+      byRecordAndMaster.set(key, item);
+      seenMasterIds.add(item.masterMediaObjectId);
+      seenThumbnailIds.add(item.thumbnail.mediaObjectId);
+    }
+  }
+  return { byRecordAndMaster };
+}
+
 /**
  * Sign a validated attachment list.
  *
@@ -300,8 +459,17 @@ function applySignedUrlAvailability(
 }
 
 async function signValidatedAttachments(attachments: Attachment[]): Promise<Attachment[]> {
-  const availability = await buildSignedUrlAvailability(attachments);
+  const availability = await buildSignedUrlAvailability(
+    attachments.filter((attachment) => !attachment.photoMetadataUnavailable),
+  );
   return attachments.map((attachment) => {
+    if (attachment.photoMetadataUnavailable) {
+      return {
+        ...attachment,
+        url: undefined,
+        urlUnavailable: attachment.photoMetadataUnavailable,
+      };
+    }
     return applySignedUrlAvailability(attachment, availability);
   });
 }
@@ -437,7 +605,61 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
   const allAttachments = records.flatMap((record) => record.attachments || []);
   if (allAttachments.length === 0) return { ok: true, records };
 
-  const signedUrlAvailability = await buildSignedUrlAvailability(allAttachments);
+  const eligibleRecordIds = Array.from(new Set(
+    fetched.rows
+      .filter((row: any) => row?.cipher_format === RECORD_CIPHER_PLAINTEXT && row?.media_contract_version === 1)
+      .map((row: any) => String(row.id).toLowerCase())
+      .filter((recordId) => UUID_TEXT.test(recordId))
+      .filter((recordId) => {
+        const record = records.find((candidate) => candidate.id.toLowerCase() === recordId);
+        return record?.attachments?.some((attachment) => !!recordPhotoMediaId(attachment, coupleId, record.id));
+      }),
+  ));
+  const photoMetadata = eligibleRecordIds.length > 0
+    ? await fetchRecordPhotoMetadata(eligibleRecordIds)
+    : { byRecordAndMaster: new Map<string, ValidPhotoMetadata>() };
+  const eligibleRecordIdSet = new Set(eligibleRecordIds);
+  const enriched = records.map((record) => ({
+    ...record,
+    attachments: record.attachments?.map((attachment) => {
+      const masterMediaObjectId = recordPhotoMediaId(attachment, coupleId, record.id);
+      const metadata = masterMediaObjectId
+        ? photoMetadata.byRecordAndMaster.get(photoMetadataKey(record.id, masterMediaObjectId))
+        : undefined;
+      if (!metadata) {
+        const requiresAuthoritativeMetadata = !!masterMediaObjectId
+          && eligibleRecordIdSet.has(record.id.toLowerCase());
+        if (!requiresAuthoritativeMetadata || photoMetadata.legacyMasterAllowed) return attachment;
+        const unavailable = photoMetadata.unavailable ?? 'forbidden';
+        return {
+          ...attachment,
+          urlUnavailable: unavailable,
+          photoMetadataUnavailable: unavailable,
+        };
+      }
+      const thumbnailPath = `${coupleId}/${record.id}/${metadata.thumbnail.mediaObjectId}.jpg`;
+      if (!isCanonicalRecordMediaPath(thumbnailPath, coupleId, record.id)) return attachment;
+      return {
+        ...attachment,
+        photoRendition: {
+          sourceRevision: metadata.sourceRevision,
+          screenMaster: { ...metadata.screenMaster, path: attachment.path },
+          thumbnail: { ...metadata.thumbnail, path: thumbnailPath },
+        },
+      };
+    }),
+  }));
+
+  const signTargets = enriched.flatMap((record) => (record.attachments || []).flatMap((attachment) => {
+    if (attachment.photoMetadataUnavailable || attachment.urlUnavailable) return [];
+    return [
+      attachment,
+      ...(attachment.photoRendition
+        ? [{ type: 'photo' as const, name: attachment.name, path: attachment.photoRendition.thumbnail.path }]
+        : []),
+    ];
+  }));
+  const signedUrlAvailability = await buildSignedUrlAvailability(signTargets);
 
   /**
    * The records themselves loaded, so this stays `ok: true` -- a media-signing
@@ -446,15 +668,33 @@ export async function fetchRecordsResultFromDB(coupleId: string): Promise<Record
    * classified cause so a surface can tell the user why the media will not open,
    * and each affected attachment carries the same reason.
    */
-  const withUrls = records.map((record) => ({
+  const withUrls = enriched.map((record) => ({
     ...record,
-    attachments: record.attachments?.map((attachment) =>
-      applySignedUrlAvailability(attachment, signedUrlAvailability)),
+    attachments: record.attachments?.map((attachment) => {
+      const withMasterUrl = applySignedUrlAvailability(attachment, signedUrlAvailability);
+      if (!withMasterUrl.photoRendition) return withMasterUrl;
+      const thumbnailAvailability = signedUrlAvailability.get(withMasterUrl.photoRendition.thumbnail.path);
+      return {
+        ...withMasterUrl,
+        photoRendition: {
+          ...withMasterUrl.photoRendition,
+          thumbnail: thumbnailAvailability
+            ? { ...withMasterUrl.photoRendition.thumbnail, ...thumbnailAvailability }
+            : withMasterUrl.photoRendition.thumbnail,
+        },
+      };
+    }),
   }));
 
-  const mediaUnavailable = withUrls
+  const signedMediaUnavailable = withUrls
     .flatMap((record) => record.attachments || [])
-    .find((attachment) => !!attachment.urlUnavailable)?.urlUnavailable;
+    .flatMap((attachment) => [
+      attachment.photoMetadataUnavailable,
+      attachment.urlUnavailable,
+      attachment.photoRendition?.thumbnail.urlUnavailable,
+    ])
+    .find((reason): reason is ServerErrorKind => !!reason);
+  const mediaUnavailable = photoMetadata.unavailable ?? signedMediaUnavailable;
 
   return mediaUnavailable
     ? { ok: true, records: withUrls, mediaUnavailable }
@@ -676,12 +916,7 @@ export async function getRecordPhotoRenditionCapability(): Promise<RecordPhotoRe
     if (!error) return Array.isArray(data) && data.length === 0
       ? { ok: true, supported: true }
       : { ok: false, reason: 'server' };
-    const code = typeof error === 'object' && error && 'code' in error
-      ? String(error.code)
-      : '';
-    const confirmedMissingSqlFunction = code === '42883'
-      && /^function (?:public\.)?get_record_photo_metadata\(uuid\[\]\) does not exist$/i.test(error.message ?? '');
-    if (code === 'PGRST202' || confirmedMissingSqlFunction) {
+    if (isMissingRecordPhotoMetadataRpc(error)) {
       return { ok: true, supported: false };
     }
     return { ok: false, reason: classifyServerError(error).kind };
@@ -1324,9 +1559,18 @@ export async function resolveAttachmentUrls(
   recordId: string,
 ): Promise<Attachment[]> {
   const validated = attachments
-    .map((attachment) =>
-      mapAuthenticatedAttachment(attachment, coupleId, recordId, false),
-    )
+    .map((attachment) => {
+      // Read the transient metadata authority result before normalization strips
+      // every non-persisted member. Storage signing cannot overrule this gate.
+      const metadataUnavailable = attachment.photoMetadataUnavailable;
+      const normalized = mapAuthenticatedAttachment(attachment, coupleId, recordId, false);
+      if (!normalized || !metadataUnavailable) return normalized;
+      return {
+        ...normalized,
+        urlUnavailable: metadataUnavailable,
+        photoMetadataUnavailable: metadataUnavailable,
+      };
+    })
     .filter((attachment: Attachment | null): attachment is Attachment => !!attachment);
   return signValidatedAttachments(validated);
 }

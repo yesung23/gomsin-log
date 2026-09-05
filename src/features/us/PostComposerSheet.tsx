@@ -419,7 +419,7 @@ function ExistingPhotoButton({
   picked: boolean;
   onAdd: (photo: SelectablePhoto) => void;
 }) {
-  const media = useMediaAttachment(photo.attachment, coupleId, photo.recordId);
+  const media = useMediaAttachment(photo.attachment, coupleId, photo.recordId, 'thumbnail');
   return (
     <button
       type="button"
@@ -581,7 +581,7 @@ function DraftThumb({ item, coupleId }: { item: PostDraftItem; coupleId?: string
 }
 
 function ExistingThumb({ attachment, coupleId, recordId }: { attachment: Attachment; coupleId?: string; recordId: string }) {
-  const media = useMediaAttachment(attachment, coupleId, recordId);
+  const media = useMediaAttachment(attachment, coupleId, recordId, 'thumbnail');
   if (!media.url) {
     return (
       <span className="flex h-14 w-14 items-center justify-center rounded-control" style={{ background: 'var(--paper)' }}>

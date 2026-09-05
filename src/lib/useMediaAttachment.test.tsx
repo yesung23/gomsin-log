@@ -37,6 +37,7 @@ const COUPLE = 'couple-1';
 const RECORD = 'rec-1';
 const FIRST = 'https://example.supabase.co/signed/voice?token=first';
 const SECOND = 'https://example.supabase.co/signed/voice?token=second';
+const THUMBNAIL = 'https://example.supabase.co/signed/thumb?token=first';
 
 function attachment(overrides: Partial<Attachment> = {}): Attachment {
   return {
@@ -46,6 +47,37 @@ function attachment(overrides: Partial<Attachment> = {}): Attachment {
     path: `${COUPLE}/${RECORD}/voice.webm`,
     ...overrides,
   };
+}
+
+function photoWithThumbnail(overrides: Partial<Attachment> = {}): Attachment {
+  return attachment({
+    type: 'photo',
+    name: '사진.jpg',
+    path: `${COUPLE}/${RECORD}/33333333-3333-4333-8333-333333333333.jpg`,
+    url: FIRST,
+    photoRendition: {
+      sourceRevision: '55555555-5555-4555-8555-555555555555',
+      screenMaster: {
+        mediaObjectId: '33333333-3333-4333-8333-333333333333',
+        widthPx: 2048,
+        heightPx: 1536,
+        byteSize: 900_000,
+        sha256: 'a'.repeat(64),
+        mimeType: 'image/jpeg',
+      },
+      thumbnail: {
+        mediaObjectId: '44444444-4444-4444-8444-444444444444',
+        widthPx: 640,
+        heightPx: 480,
+        byteSize: 90_000,
+        sha256: 'b'.repeat(64),
+        mimeType: 'image/jpeg',
+        path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+        url: THUMBNAIL,
+      },
+    },
+    ...overrides,
+  });
 }
 
 /*
@@ -60,8 +92,124 @@ function renderOne(att: Attachment = attachment(), coupleId?: string) {
   );
 }
 
+function renderThumbnail(att: Attachment = photoWithThumbnail(), coupleId?: string) {
+  return renderHook(
+    ({ a, c }: { a: Attachment; c: string | undefined }) =>
+      useMediaAttachment(a, c, RECORD, 'thumbnail'),
+    { initialProps: { a: att, c: coupleId } },
+  );
+}
+
 beforeEach(() => {
   resolveAttachmentUrls.mockReset();
+});
+
+describe('the explicit thumbnail variant', () => {
+  it('uses the authorized thumbnail URL while the default variant stays on master', () => {
+    const thumbnail = renderThumbnail(photoWithThumbnail(), COUPLE);
+    const master = renderOne(photoWithThumbnail(), COUPLE);
+
+    expect(thumbnail.result.current.url).toBe(THUMBNAIL);
+    expect(master.result.current.url).toBe(FIRST);
+  });
+
+  it.each([
+    'auth_expired',
+    'forbidden',
+    'not_found',
+    'offline',
+    'unreachable',
+    'server',
+    'unknown',
+  ] as const)('blocks both variants when metadata authority is unavailable: %s', (reason) => {
+    const blocked = photoWithThumbnail({
+      photoMetadataUnavailable: reason,
+      urlUnavailable: reason,
+    });
+    const thumbnail = renderThumbnail(blocked, COUPLE);
+    const master = renderOne(blocked, COUPLE);
+
+    expect(thumbnail.result.current).toMatchObject({ url: undefined, unavailable: reason });
+    expect(master.result.current).toMatchObject({ url: undefined, unavailable: reason });
+    act(() => thumbnail.result.current.reportLoadFailure());
+    act(() => master.result.current.reportLoadFailure());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+  });
+
+  it('does not expose master bytes after a thumbnail transport failure', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      type: 'photo',
+      name: '사진.jpg',
+      path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+      urlUnavailable: 'unreachable',
+    }]);
+    const { result } = renderThumbnail(photoWithThumbnail(), COUPLE);
+
+    act(() => result.current.reportLoadFailure());
+
+    await waitFor(() => expect(result.current.unavailable).toBe('unreachable'));
+    expect(result.current.url).toBeUndefined();
+    expect(resolveAttachmentUrls).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose the master URL after a thumbnail permission denial', async () => {
+    resolveAttachmentUrls.mockResolvedValueOnce([{
+      type: 'photo',
+      name: '사진.jpg',
+      path: `${COUPLE}/${RECORD}/44444444-4444-4444-8444-444444444444.jpg`,
+      urlUnavailable: 'forbidden',
+    }]);
+    const { result } = renderThumbnail(photoWithThumbnail(), COUPLE);
+
+    act(() => result.current.reportLoadFailure());
+
+    await waitFor(() => expect(result.current.unavailable).toBe('forbidden'));
+    expect(result.current.url).toBeUndefined();
+  });
+
+  it('rejects a late response from an older source revision', async () => {
+    let finish!: (value: Attachment[]) => void;
+    resolveAttachmentUrls.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const { result, rerender } = renderThumbnail(photoWithThumbnail(), COUPLE);
+    act(() => result.current.reportLoadFailure());
+    const newer = photoWithThumbnail({
+      photoRendition: {
+        ...photoWithThumbnail().photoRendition!,
+        sourceRevision: '77777777-7777-4777-8777-777777777777',
+        thumbnail: {
+          ...photoWithThumbnail().photoRendition!.thumbnail,
+          url: 'https://example.test/new-generation-thumbnail',
+        },
+      },
+    });
+
+    rerender({ a: newer, c: COUPLE });
+    await act(async () => finish([{
+      type: 'photo', name: '사진.jpg', path: photoWithThumbnail().photoRendition!.thumbnail.path,
+      url: 'https://example.test/stale-thumbnail',
+    }]));
+
+    expect(result.current.url).toBe('https://example.test/new-generation-thumbnail');
+  });
+
+  it('clears a stale thumbnail on denied refresh and bypasses hook retry', async () => {
+    const { result, rerender } = renderThumbnail(photoWithThumbnail(), COUPLE);
+    expect(result.current.url).toBe(THUMBNAIL);
+
+    rerender({
+      a: photoWithThumbnail({
+        url: undefined,
+        urlUnavailable: 'forbidden',
+        photoRendition: undefined,
+      }),
+      c: COUPLE,
+    });
+
+    expect(result.current.url).toBeUndefined();
+    expect(result.current.unavailable).toBe('forbidden');
+    act(() => result.current.reportLoadFailure());
+    expect(resolveAttachmentUrls).not.toHaveBeenCalled();
+  });
 });
 
 describe('an expired signed URL recovers instead of staying broken', () => {

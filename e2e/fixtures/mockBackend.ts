@@ -70,6 +70,16 @@ export type Scenario = {
     | { ok: false; errorCode: string };
   /** Force a specific table/rpc to fail, to prove honest error copy. */
   failures?: Partial<Record<string, { status: number; code: string; message: string }>>;
+  /**
+   * Browser-only transport fault for media commit reconciliation.
+   *
+   * The fixture updates only its own in-memory mutation state, then closes the
+   * PATCH response and the following status response. This does NOT emulate or
+   * prove a real database transaction, trigger, RLS policy, or storage commit;
+   * it proves only that the browser avoids duplicate writes when both
+   * authoritative responses are unavailable after one attempted commit.
+   */
+  mediaCommitFault?: 'applied_response_lost_status_unavailable';
   invitationActive?: boolean;
   invitationExpiresAt?: string | null;
   /**
@@ -381,9 +391,22 @@ export async function installMockBackend(
   context: BrowserContext,
   scenario: Scenario,
   options: { theme?: 'light' | 'dark' } = {},
-): Promise<{ unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
+): Promise<{
+  unrouted: string[];
+  dailyRecordWrites: Array<Record<string, unknown>>;
+  mediaMutationTraffic: {
+    storageWrites: number;
+    commitWrites: number;
+    statusReads: number;
+  };
+}> {
   const unrouted: string[] = [];
   const dailyRecordWrites: Array<Record<string, unknown>> = [];
+  const mediaMutationTraffic = {
+    storageWrites: 0,
+    commitWrites: 0,
+    statusReads: 0,
+  };
   const records = new Map<string, MockRecordState>((scenario.records ?? []).map((record) => [
     record.id,
     {
@@ -559,6 +582,13 @@ export async function installMockBackend(
       // Writes echo the payload back, as PostgREST does with `return=representation`.
       const body = request.postDataJSON();
       const payloads = Array.isArray(body) ? body : [body];
+      const isMediaCommitWrite = method === 'PATCH' && payloads.some((payload) => (
+        !!payload
+        && typeof payload === 'object'
+        && !Array.isArray(payload)
+        && typeof (payload as Record<string, unknown>).last_media_operation_id === 'string'
+      ));
+      if (isMediaCommitWrite) mediaMutationTraffic.commitWrites += 1;
       if (method !== 'GET') {
         // Test-only observation: prove that a connected protection-required
         // save never reaches a plaintext daily_records write.
@@ -603,6 +633,14 @@ export async function installMockBackend(
               : previous?.contentRevision ?? 1,
           });
         }
+      }
+      if (
+        isMediaCommitWrite
+        && scenario.mediaCommitFault === 'applied_response_lost_status_unavailable'
+      ) {
+        // The fixture state above records one applied commit attempt before the
+        // client loses the response. This is not a claim about backend atomicity.
+        return route.abort('connectionreset');
       }
       // Migration 032 supplies this server-side DEFAULT for legacy plaintext
       // inserts, and saveRecordToDB selects it to pin the next CAS revision.
@@ -812,6 +850,10 @@ export async function installMockBackend(
     }
 
     if (path === '/rest/v1/rpc/record_media_mutation_status' && method === 'POST') {
+      mediaMutationTraffic.statusReads += 1;
+      if (scenario.mediaCommitFault === 'applied_response_lost_status_unavailable') {
+        return route.abort('connectionreset');
+      }
       const body = request.postDataJSON() as Record<string, unknown> | null;
       const operationId = typeof body?.p_operation_id === 'string' ? body.p_operation_id : null;
       const mutation = operationId ? mediaMutations.get(operationId) : undefined;
@@ -1133,6 +1175,7 @@ export async function installMockBackend(
       const failure = failureFor(scenario, 'storage_upload');
       if (failure) return json(route, failure, failure.status);
       if (method === 'POST' || method === 'PUT') {
+        mediaMutationTraffic.storageWrites += 1;
         return json(route, { Key: path.replace('/storage/v1/object/', '') });
       }
       if (method === 'DELETE') return json(route, []);
@@ -1145,5 +1188,5 @@ export async function installMockBackend(
     return json(route, { message: `unrouted in mock backend: ${method} ${path}` }, 500);
   });
 
-  return { unrouted, dailyRecordWrites };
+  return { unrouted, dailyRecordWrites, mediaMutationTraffic };
 }

@@ -25,16 +25,25 @@ import {
  */
 
 type Harness = { context: BrowserContext; page: Page; errors: string[] };
+type MediaMutationTraffic = {
+  storageWrites: number;
+  commitWrites: number;
+  statusReads: number;
+};
 
 async function open(browser: import('@playwright/test').Browser, scenario: Scenario, options?: {
   viewport?: { width: number; height: number };
   colorScheme?: 'light' | 'dark';
-}): Promise<Harness & { unrouted: string[]; dailyRecordWrites: Array<Record<string, unknown>> }> {
+}): Promise<Harness & {
+  unrouted: string[];
+  dailyRecordWrites: Array<Record<string, unknown>>;
+  mediaMutationTraffic: MediaMutationTraffic;
+}> {
   const context = await browser.newContext({
     viewport: options?.viewport ?? { width: 390, height: 844 },
     colorScheme: options?.colorScheme ?? 'light',
   });
-  const { unrouted, dailyRecordWrites } = await installMockBackend(context, scenario);
+  const { unrouted, dailyRecordWrites, mediaMutationTraffic } = await installMockBackend(context, scenario);
   /*
    * Make `colorScheme: 'dark'` actually reach the app.
    *
@@ -60,7 +69,7 @@ async function open(browser: import('@playwright/test').Browser, scenario: Scena
     if (message.type() === 'error') errors.push(message.text());
   });
   page.on('pageerror', (error) => errors.push(`PAGEERROR ${error.message}`));
-  return { context, page, errors, unrouted, dailyRecordWrites };
+  return { context, page, errors, unrouted, dailyRecordWrites, mediaMutationTraffic };
 }
 
 /** Settle: the splash resolves and the routed screen has rendered. */
@@ -293,13 +302,20 @@ test('owner edit/delete controls are hit-testable and not intercepted by the bot
 // 6. An unknown attachment commit must not create a duplicate record
 // ---------------------------------------------------------------------------
 test('an unknown attachment commit holds the saved record without retrying (D-05, in a browser)', async ({ browser }) => {
-  const { context, page, errors } = await open(browser, {
+  const {
+    context,
+    page,
+    errors,
+    unrouted,
+    dailyRecordWrites,
+    mediaMutationTraffic,
+  } = await open(browser, {
     // A connected couple is protection-required until a real E2EE device/CSK
     // ceremony confirms the irreversible floor. This test targets the distinct
-    // storage failure path, so use the legitimate pre-partner owner state where
+    // media response-loss path, so use the legitimate pre-partner owner state where
     // the absent floor means the migration's legacy plaintext contract applies.
     ...CREATOR_PENDING,
-    failures: { storage_upload: { status: 500, code: 'StorageError', message: 'upload failed' } },
+    mediaCommitFault: 'applied_response_lost_status_unavailable',
   });
   await goto(page, '/');
 
@@ -314,18 +330,18 @@ test('an unknown attachment commit holds the saved record without retrying (D-05
   /*
     A photo, not the voice memo this used to use.
 
-    The defect under test is "a failed UPLOAD destroys the chip", which has
-    nothing to do with the file's kind. Audio stopped being a valid choice on
+    The defect under test is an UNKNOWN FINAL COMMIT, which has nothing to do
+    with the file's kind. Audio stopped being a valid choice on
     2026-08-21: `classifyMediaFile` now refuses it by policy before any upload is
-    attempted, so this test would have been asserting the refusal path and never
-    reaching the storage failure it was written for.
+    attempted, so this test would have been asserting the refusal path instead
+    of reaching the media commit response-loss path.
   */
   await page.locator('input[type="file"]').first().setInputFiles({
     name: '노을.png',
     mimeType: 'image/png',
     // A REAL 1x1 PNG, not a placeholder string. Photos are decoded and re-encoded
     // to strip EXIF before upload, so undecodable bytes would fail in the
-    // sanitizer and never reach the storage failure this test injects.
+    // sanitizer and never reach the final commit this test injects.
     buffer: Buffer.from(
       'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
       'base64',
@@ -341,9 +357,9 @@ test('an unknown attachment commit holds the saved record without retrying (D-05
   await page.getByRole('button', { name: '남기기', exact: true }).click();
 
   /*
-    업로드 응답만 실패하면 서버가 실제로 반영했는지 브라우저는 알 수 없다. 여기서 같은
-    사진을 자동 재시도하면 중복 기록을 만들 수 있으므로 저장된 기록으로 이동하는 안전한
-    hold 상태를 보여준다. 정확한 단일-flight 계약은 단위 테스트가 mutation 횟수로 보강한다.
+    업로드는 정상 완료된다. 이후 fixture는 한 번의 최종 PATCH를 자체 메모리에 반영한 뒤
+    응답 연결을 끊고, 상태 조회 연결도 끊는다. 이는 실제 백엔드 트랜잭션을 증명하지 않고,
+    브라우저가 커밋 여부를 알 수 없을 때 자동 재시도하지 않는 계약만 검증한다.
   */
   const hold = page.getByRole('status').filter({ hasText: '기록은 저장했어요' });
   await expect(hold).toContainText('기록은 저장했어요', { timeout: 15_000 });
@@ -354,6 +370,21 @@ test('an unknown attachment commit holds the saved record without retrying (D-05
   await expect(textarea).toHaveValue('');
   await expect(textarea).toHaveJSProperty('readOnly', true);
   await expect(page.getByRole('button', { name: '남기기', exact: true })).toBeDisabled();
+
+  // One initial insert plus one media commit PATCH. A duplicate save or
+  // automatic retry would add another write; these counters pin the complete
+  // browser flight without logging payload bodies or object paths.
+  expect(dailyRecordWrites).toHaveLength(2);
+  expect(new Set(dailyRecordWrites.map((write) => write.id)).size).toBe(1);
+  expect(dailyRecordWrites.filter((write) => (
+    typeof write.last_media_operation_id === 'string'
+  ))).toHaveLength(1);
+  expect(mediaMutationTraffic).toEqual({
+    storageWrites: 1,
+    commitWrites: 1,
+    statusReads: 1,
+  });
+  expect(unrouted, `unrouted supabase calls: ${unrouted.join(', ')}`).toEqual([]);
 
   expect(errors.filter((e) => e.startsWith('PAGEERROR'))).toEqual([]);
   await context.close();

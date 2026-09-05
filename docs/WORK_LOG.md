@@ -11,6 +11,10 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- D05 후속: 합성 최종 PATCH/status 응답 손실로 테스트 의미를 교정하고 중복 write 카운터 추가. Worker coupleMatrix37PASS, parent 독립D05 1PASS/12.9s·scoped ESLint·diff-check PASS. 런타임/DB 변경 없음, REVIEW IMPACT test DELTA. 다음은 부모가 확인한 Trips 동일-scope refresh 창 닫힘/OCR 무제한 종료 대기 보완. full Linux CI/배포 미검증, [상세](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).
+
+- 후속 exact `12f97ea` CI: browser193PASS/3FAIL로 master HOLD. 그 외 web/native/PG/Edge/security gates PASS. Nietzsche SolHigh bounded correction 진행; Pasteur TerraMax readonly는 과거 Apple lifecycle HOLD와 현재 activation/production HOLD를 구분. Parent가 flag/build fuse/test-only delta를 확인했으며 app/test source는 수정하지 않음. 제품·사업·원격 변경 없음, REVIEW IMPACT DELTA. 다음: 3FAIL 원인 교정→전체 browser 재검증→master→새 Home. [현재 증거와 미검증](../control-tower/reports/codex/2026-09-06_browser-ci-closure_codex.md).
+
 - PLAN POSITION: predesign integration → hosted compatibility → beta readiness. 이전 배포 승인 대기는 최신 사용자 지시로 해소.
 - DIRECTION CHECK: V5/Business/Engineering/Current State/최신 원장 확인, 제품·사업 변경 NO, conflict NO. master-before-notebook 유지.
 - OWNERSHIP: parent orchestrator, 시작 HEAD `fc3f43a`; Nash DB Architect / Godel native readonly / Copernicus scanner scoped worker. Parent app/test source 수정 없음.

@@ -301,6 +301,16 @@ jobs:
       - name: Record media actor and concurrency contracts
         run: npm run test:record-media-cleanup
 
+      - name: Photo rendition fresh chain and legacy cleanup compatibility
+        # Both modes must isolate inherited libpq settings before opening their
+        # private Unix socket. Poison defaults fail safely if the fence regresses.
+        env:
+          PGSERVICE: gomsin_harness_missing_service
+          PGSERVICEFILE: /dev/null
+          PGHOSTADDR: invalid-address
+          PGOPTIONS: invalid-options
+        run: npm run test:record-photo-renditions
+
       - name: E2EE pairing and partner-visibility contracts
         run: npm run test:p5
 

@@ -11,6 +11,12 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 const MIGRATIONS = join(ROOT, 'supabase/migrations');
+// libpq service/hostaddr/options can override environment connection defaults.
+// Never inherit a developer's database target or credentials into this local
+// fixture, including the legacy harness subprocess used by regression mode.
+const localProcessEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith('PG')),
+);
 // Run the original 084..088 regression assertions with 090 installed, without
 // editing/copying that shared harness on disk. Only two missing catalog columns
 // in its deliberately minimal fixture are supplied. Every original test stays.
@@ -28,7 +34,7 @@ if (process.argv.includes('--regression-084')) {
     `expectOk(psql(['-q','-f',join(ROOT,'supabase/migrations/090_record_photo_renditions.sql')]), 'install 090 before unchanged legacy regression');\n`);
   console.log('090 integration mode — unchanged existing 084..088 actor/race assertions follow.');
   const regression = spawnSync(process.execPath,['--input-type=module'],{
-    input:source,encoding:'utf8',stdio:['pipe','inherit','inherit'],timeout:120_000,
+    input:source,encoding:'utf8',stdio:['pipe','inherit','inherit'],timeout:120_000,env:localProcessEnv,
   });
   if (regression.error) console.error(regression.error.message);
   process.exit(regression.status ?? 1);
@@ -43,7 +49,7 @@ const scratchRoot = mkdtempSync('/tmp/gsl-photo-');
 const dataDir = join(scratchRoot, 'data'), socketDir = join(scratchRoot, 'socket');
 mkdirSync(socketDir);
 const pgEnv = {
-  ...process.env, LC_ALL: 'C', LANG: 'C', PGHOST: socketDir,
+  ...localProcessEnv, LC_ALL: 'C', LANG: 'C', PGHOST: socketDir,
   PGPORT: '5432', PGUSER: 'postgres', PGDATABASE: 'record_photo_renditions_harness',
 };
 let started = false;

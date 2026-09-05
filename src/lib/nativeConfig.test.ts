@@ -986,10 +986,31 @@ describe('Capacitor Apple Auth is iOS-only and capability-safe', () => {
     expect(swift).not.toContain('rawNonce');
   });
 
-  it('ships a local podspec without prematurely adding the Apple entitlement', () => {
+  it('ships a local podspec for the native Apple bridge', () => {
     const podspec = read(podspecPath);
     expect(podspec).toContain("s.name = 'GomsinlogCapacitorAppleAuth'");
-    expect(withoutComments(entitlements)).not.toContain('com.apple.developer.applesignin');
+  });
+
+  it('declares the Sign in with Apple entitlement as exactly Default', () => {
+    const parsed = new DOMParser().parseFromString(entitlements, 'application/xml');
+    const rootDict = parsed.documentElement.getElementsByTagName('dict')[0];
+    const children = [...rootDict.children];
+    const keyIndex = children.findIndex(
+      (element) => element.tagName === 'key'
+        && element.textContent === 'com.apple.developer.applesignin',
+    );
+
+    expect(keyIndex).toBeGreaterThanOrEqual(0);
+    const value = children[keyIndex + 1];
+    expect(value?.tagName).toBe('array');
+    expect([...value.children].map((element) => [element.tagName, element.textContent]))
+      .toEqual([['string', 'Default']]);
+  });
+
+  it('enables Sign in with Apple in the existing App target capabilities', () => {
+    expect(pbxproj).toMatch(
+      /TargetAttributes = \{\s*504EC3031FED79650016851F = \{[\s\S]*?SystemCapabilities = \{[\s\S]*?com\.apple\.SignInWithApple = \{\s*enabled = 1;\s*\};[\s\S]*?\};[\s\S]*?ProvisioningStyle = Automatic;/,
+    );
   });
 });
 

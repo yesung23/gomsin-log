@@ -9,8 +9,8 @@
 > 이 문서는 default branch reality와 active development checkpoint를 분리한다.
 > active draft PR의 코드가 default branch에 구현된 것으로 보이지 않게 한다.
 
-- 현재 검증 기준은 §0의 격리 worktree와 실행 결과다. GitHub, remote Supabase/Auth/Vercel,
-  TestFlight/App Store 상태는 이번 workstream에서 다시 확인하지 않았으므로 **UNVERIFIED**다.
+- 현재 검증 기준은 §0의 격리 worktree와 실행 결과다. GitHub·Supabase inventory는
+  2026-09-05 live 조회 결과를 아래에 구분했다. 실기기·App Store·전체 원격 actor 검증은 **UNVERIFIED**다.
 - §0 아래의 2026-08 역사 기록은 당시 증거와 의사결정 추적용이며 현재 branch·HEAD·배포 상태로
   사용하지 않는다.
 
@@ -27,18 +27,31 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
+- **최신 live 원격 확인(17:20–17:40KST):** master `bd4a9f3`, RC branch 원격 미존재.
+  과거 master CI/Production deployment는 해당SHA의 success이며 최신 RC 증거가 아니다.
+  Supabase project healthy, Google ON/Apple OFF. 최신 app media/avatars/IAP 테이블·Edge 없음,
+  14개 Book migration tracking만 존재하나 legacy app schema는 있으므로 전체001..090재적용 금지.
+  backups:null/PITRfalse, Book 담당도 DB restore증거 미확보. 명확한 복구 gate 없이 DDL/merge 금지.
+  anon 기록/건강 query거절과 UID없는authenticated 0행은 live확인; 전체권한승인은 아님.
+  [세부 근거·실패/교정·공유 DB 경계](../control-tower/reports/codex/2026-09-05_1730_live-remote-baseline_codex.md).
+- **최신 복무 변경 `206ebb0` → `ac6ea50`:** 시간당1레벨·초당10EXP·왕고/말년칭호.
+  동일 날짜의 계정 전환 배너, 역할별 fixture, 밀리초 계급 경계를 수정했다. 최종 worker90tests/
+  typecheck/lint PASS, parent rebuild/builtbrowser4PASS, 독립 Sol Max DELTA C/H/M/L0 PASS
+  (선택34PASS/56의도적제외). **복무 local gate 종결**, 전체 앱·실기기·Production 승인이 아니다.
+  [현재 결과](../control-tower/reports/codex/2026-09-05_hourly-growth-rc-closure_codex.md).
+- **Summary M1 `2a420b2` 종결:** 원문 절단 여부를 후보 길이 필터보다 먼저 검사한다.
+  독립 Sol Max67tests + pending취소1probe PASS, C/H/M/L0. AI flag OFF 유지.
+  18:09KST CoreDevice에서 실물 iPhone이 unavailable이므로 실제 모델 성능/발열은 미검증이다.
+- Apple 독립 활성화 검토 C0/H2/M2/L1: 동일verified-email 자동연결금지계약 vs hosted지원 충돌,
+  삭제tokenrevoke구현없음, signingcapability없음, webApple경로없음. Provider/flagOFF를 유지한다.
+  기존auth race의PASS와 실제Apple활성화준비를 구분한다. 사용자에게 이메일연결정책선택을 요청했다.
+
 - Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
-  `codex/rc-v5-final-fixes`, service checkpoint `c6cddd8` (구현 `361cfc7`, 이전 application/CI `e35ff9d`). 이 문서 이후에도
+  `codex/rc-v5-final-fixes`, service checkpoint `ac6ea50` (hourly `206ebb0`, summary `2a420b2`). 이 문서 이후에도
   작업은 진행 중이므로 실행 전 live HEAD/status를 확인한다. master/Production에 통합됐다는 뜻은 아니다.
-- 최신 요청의 시간 기반 복무 EXP 여정이 찾기/복무 상세에 연결됐다. 예상 계급·Lv.1–200,
-  1초=1EXP, 중립 사회복무/기타, 날짜 모순 차단, 일시정지/동작 줄이기/화면 밖 중지를 포함한다.
-  관련 102 Vitest, typecheck/scoped lint/build PASS. source-entry browser4 PASS.
-  built browser3PASS/1FAIL(테마 전환 시 아이콘 대비) → 좁은 CSS 수정 후4PASS.
-  독립 검토 H1(구형 WebView 함수)/M1(입대 대기 수동 갱신 없음)을 c6cddd8에서 수정하고,
-  parent 재현RED2건→57tests/typecheck/scopedlint/rebuild/built4 PASS.
-  최종 독립 exactc6cddd8 DELTA는 C/H/M/L0 PASS, reviewer21tests PASS다. 복무 local gate만 종결했다.
-  독립 DELTA 결과는 [복무 여정 리포트](../control-tower/reports/codex/2026-09-05_service-journey_codex.md) 참조.
-  Production/실기기 확인은 별도이며 현재 NOT APPLIED / UNVERIFIED다.
+- 찾기/복무 상세의 날짜·예상 계급·중립 사회복무/기타·일시정지/동작 줄이기·화면 밖 중지는 유지했다.
+  이전 Lv.1–200/1초1EXP는 최신 승인으로 대체됐다. 이전 `c6cddd8` 검증의 역사 근거는
+  [복무 여정 리포트](../control-tower/reports/codex/2026-09-05_service-journey_codex.md)에 보존한다.
 - My에서 새로 선택한 사진을 본인·파트너 Home story ring에 표시하는 실제 경로가 로컬에 구현됐다
   (`c59f874`, `b6408e3`, `4b78ab7`). migration 089의 private 256px/64KiB JPEG,
   버전 조건부 교체·삭제, 현재 커플·삭제 상태 확인, 메모리 전용 클라이언트 조회를 사용한다.
@@ -75,7 +88,7 @@
   보안 리뷰 PASS다. 기존PG518, 083–088 tests62, Edge33을 독립 확인했다. Edge 첫 실행의
   권한 제한8FAIL은 선언된 권한 재실행33PASS와 구분한다. 새 client가 이 계약을 우회하면 안 된다.
 - 이번 checkpoint의 Supabase·Apple·배포·master 변경: **NOT APPLIED**.
-  실제 원격 migration catalog, 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
+  원격 catalog는 위 live inventory 참조. 청구/수용량, iPhone 온디바이스 추론/메모리/발열: **UNVERIFIED**.
 - 온디바이스 `d01793a`는 관찰된 HIGH2 반례를 수정했고 독립 Sol Max에서 해당 반례 종결을 확인했다.
   전체 원문 보존/결과 무효화, 총20 상한, 완전한 마지막 문장 발췌, 원문 편집 뒤 새 수동 요청,
   Story test 수집을 고쳤다. 독립258PASS와 추가 부정 재현에서 **C0/H0/M1/L0, DELTA FAIL**다.

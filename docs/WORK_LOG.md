@@ -9,6 +9,45 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — 시간당 레벨업 종결 · Summary M1 종결 · 실제 원격 기준 확인
+
+- PLAN POSITION: RC Task5 최신 승인 delta / Task3 M1 / Task6 원격 사전조건. Previous Gate b4b479b;
+  This Gate 서비스 local·독립 PASS, Summary M1 CLOSED, 전체 RC HOLD.
+- DIRECTION CHECK: 최신 사용자 요청, V5§1–3/§11, V4_AS_BUILT/Backlog, BUSINESS§9.5 무료핵심,
+  ENGINEERING§0/6-task plan, CURRENT_STATE와 직전 복무·요약·사진 WORK_LOG/rollback 확인.
+  MASTER PLAN V5/2026-09-05. Conflict YES: 이전1EXP/Lv200은 최신 명시승인으로 시간당레벨로 변경.
+  Apple 자동verified-email연결은 별도 정책 충돌이라 변경하지 않고 사용자 선택을 요청했다.
+- OWNERSHIP: parent Control Tower/문서·통합검증; Carver SolHigh 복무 구현, Locke SolMax 독립검토;
+  Sartre FlashHigh Summary M1, Russell SolMax 독립검토; Bohr SolMax Apple 읽기전용 Architect.
+  branch `codex/rc-v5-final-fixes`, Base/Old HEAD b4b479b, New/Reviewed HEAD ac6ea50, PR없음.
+- CHANGED: `206ebb0` hourly model/UI/tests, `2a420b2` summary hook/2tests,
+  `ac6ea50` 이벤트 실계정 scope·실제caller·동일역할fixture·소수시간경계9files.
+  V5/V4/current/report 문서에 최신 승인/서버 사실을 분리했다. 상세 근거는 아래 두 보고서만 소유한다.
+- EXPLICITLY NOT CHANGED: crypto/DB/migration/ack/realtime/건강동의/Book/Production 의미.
+  photo9WIP 보존; parent는 기존ok+failedFiles계약 테스트와 legacy mock만 교정했다.
+  Now는 claim script로만 변경했고 수동편집/stage하지 않았다.
+- VERIFICATION: 복무 worker90tests/typecheck/scopedlintPASS; parent 실제diff/rebuildPASS,
+  built Playwright4/4PASS(8.1s). 이전3PASS/1FAIL은 동등하지 않은fixture 원인으로 교정해 보존.
+  Locke독립34PASS/56의도적제외, 모든M1/M2/L1 CLOSED, C/H/M/L0 Spec/QualityPASS.
+  Summary worker67PASS; parent2newPASS; Russell독립67PASS+취소probe1PASS/parentblob2RED,
+  C/H/M/L0 DELTAPASS. 실제 모델/실기기 시험이 아님.
+- REMOTE VERIFIED: master bd4a9f3와 해당 과거CI/Production배포성공, Supabase healthy,
+  GoogleON/AppleOFF, Book14schema-history/legacy앱schema존재, 새media/avatar/IAP대상 부재.
+  063 partner서비스RPC존재를 확인해 과거NOTAPPLIED단정을 교정. anon차단/UID없는0행은
+  일부 negative증거일 뿐 owner/partner/former JWT 전체승인 아님. 백업API복구본반환없음/PITRfalse.
+- REVIEW IMPACT: service/summary DELTA fresh at 해당SHA. Apple 활성화 C0/H2/M2/L1은
+  이전auth race PASS를 취소하지 않지만 Apple 출시준비완료 주장을 금지한다.
+- BLOCKERS: 사진 client SliceA/B, 오류E2E, Apple계정정책·revoke·서명·provider,
+  실물iPhone unavailable, 서버backup/restore·Book호환forward계획/actorcanary,
+  실제판매권리·상품·Sandbox·제공증빙, 안정HEAD 전체검증/독립review. 무조건 masterpush 금지.
+- STOPPED AT: **복무 기능과 Summary M1 gate만 종결**. Hegel SolHigh가 photo SliceA9WIP를 재개했다.
+- NEXT ACTION: parent가 photoSliceAdiff/실패경로확인 → 독립Max → 실제thumbnail/master표시 SliceB.
+- DO NOT ADVANCE UNTIL: 미해결HIGH/외부정책·복구조건·실기기와Task1–6 gate 충족.
+- PRODUCTION: **NOT APPLIED** — DDL/provider/Edge/flag/merge/push 없음. 서비스·요약은
+  개별commit revert 가능; photo실데이터 발생 후는 companion보존 forwardfix 필요.
+- 상세: [복무·요약 종결](../control-tower/reports/codex/2026-09-05_hourly-growth-rc-closure_codex.md),
+  [실제 원격 기준](../control-tower/reports/codex/2026-09-05_1730_live-remote-baseline_codex.md).
+
 ## 2026-09-05 — 최신 승인 복무 EXP 여정
 
 - PLAN POSITION: RC Task5의 최신 사용자 우선 작업. 이전 e35ff9d; This Gate 복무 기능 local/독립 DELTA.

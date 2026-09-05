@@ -1,5 +1,31 @@
 # Supabase 마이그레이션 안내
 
+## 현재 로컬 추가분 — 2026-09-05 / 090
+
+아래 과거 날짜의 원격 확인과 다음 번호는 당시 기록이다. 현재 격리 RC checkout의 마지막 번호는
+**090**, 다음 미사용 번호는 **091**이다. 실제 Production catalog는 이번 작업에서 조회하지 않았다.
+기존 원격에 SQL 파일을 일괄 재적용하지 않는다. 대상 catalog·선행 migration·rollback 검증이 먼저다.
+
+| 파일 | 보존·변경 | 실제 확인 / 미확인 |
+|---|---|---|
+| `090_record_photo_renditions.sql` | 기존 cleanup contract4와 attachment/crypto 형식을 보존. 신규 사진 master+thumbnail 예약·읽기, 논리32/물리64 상한, 구버전 master 유지 시 thumbnail 보존 | `fb880ed`: full001..090(88파일)187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS. remote **NOT APPLIED**, 독립 review/client 연동 미완료 |
+
+등록은 같은 소유자·record·couple·operation에 결속된 2048px/10MiB master와 640px/1MiB thumbnail을
+함께 예약한다. JPEG 치수/bytes/SHA256은 **클라이언트 보고값**이며 서버 바이트 검증·인쇄 품질 보증이 아니다.
+새 RPC는 authenticated만 실행 가능하며 metadata 테이블은 API 역할의 직접 읽기/쓰기를 허용하지 않는다.
+현재 활성 커플, private/shared, 삭제 상태, 실제 published pair를 검사한다. cipher>=1의 새 metadata 조회는
+본인·상대 모두 제외하고 기존 master 경로를 유지한다. 원문/암호 형식이나 Storage 공개 범위는 바꾸지 않는다.
+
+삭제·교체·부분 실패는 새 삭제 worker가 아니라 기존 원장을 사용한다. immutable 등록 이력은 terminal
+operation의 동일 요청/변경된 요청을 구별하기 위해 record/account 삭제까지 남고, retired metadata는 읽기에
+노출하지 않는다. 시도 이력의 누적 행 수는 active 첨부32개와 다른 개념이며 운영 보존 검토 대상이다.
+
+Rollback은 우선 새 클라이언트 경로의 사용을 중단한다. 이미 pair가 존재한다면 구버전 편집 호환 wrapper와
+64 물리 상한·binding을 유지해야 하므로 테이블 DROP/상한32복귀로 되돌리지 않는다. 실제 적용 전에는
+빈 DB뿐 아니라 기존 데이터/양방향 호환, 백업·forward fix·hosted canary를 별도로 검증한다.
+
+## 과거 적용 안내 및 이력
+
 이 폴더의 `.sql` 파일은 **번호 순서대로** 적용합니다. 파일을 직접 수정하지 말고,
 변경이 필요하면 새 번호의 파일을 추가하세요.
 

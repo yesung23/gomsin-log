@@ -28,7 +28,7 @@
 ## 0. Current V5 control-tower checkpoint — 2026-09-05
 
 - Active worktree: `/Users/han-yejun/Desktop/gomsinlog-rc-v5-final-fixes`, branch
-  `codex/rc-v5-final-fixes`, application checkpoint `d08519f`. 이 문서 이후에도
+  `codex/rc-v5-final-fixes`, application checkpoint `fb880ed`. 이 문서 이후에도
   작업은 진행 중이므로 실행 전 live HEAD/status를 확인한다. master/Production에 통합됐다는 뜻은 아니다.
 - My에서 새로 선택한 사진을 본인·파트너 Home story ring에 표시하는 실제 경로가 로컬에 구현됐다
   (`c59f874`, `b6408e3`, `4b78ab7`). migration 089의 private 256px/64KiB JPEG,
@@ -47,7 +47,10 @@
 - 일반 사진은 현재 긴 변 2048px JPEG .84이며 EXIF/원래 파일명 제거, 작은 사진 비확대다.
   `70c16cd`는 decode/encode 대기 상한과 JPEG 결과 확인을 추가했다(관련 50 tests PASS).
   합성 브라우저 실측과 비용 계산기는 [media-economics](operations/media-economics.md)에 있다.
-  **thumbnail, 인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현**이다.
+  `fb880ed`에 사진 pair 예약·metadata·구버전 호환 backend090이 로컬 구현됐다. 전체001..090
+  187 assertions, 기존084–088+090회귀520 assertions, migration security contracts209 PASS.
+  **클라이언트 thumbnail 생성/표시, 인쇄 배치별 PPI·원본 재선택·Book Studio 미디어 버전 연동은 아직 미구현**이다.
+  backend090 독립 리뷰도 진행 중이며 remote NOT APPLIED다.
 - 유료 가치는 권리가 확인된 정원/종이 상품, 책 제작, 지속 가치가 실제 제공되는 선택형 Plus다.
   무료 기록·정상 사진·보안을 유료로 막지 않는다. 6종 IAP catalog와 서버 원장은 코드에 있지만
   판매 OFF, 실제 승인·가격·Sandbox·소비 증빙 caller·운영 통합은 별도 gate다.
@@ -69,7 +72,8 @@
   실기기 모델 실행은 아직 UNVERIFIED다. Mac availability는 Apple Intelligence OFF였다.
   [구체적인 반례·수정 범위](../control-tower/reports/codex/2026-09-05_1526_summary-meaning-gate_codex.md).
 - 다음 우선순위와 역할/모델/완료 조건은 [6개 종결 계획](operations/rc-closure-plan-2026-09-05.md).
-  auth reviewer는 종료했다. 현재 photo backend worker와 온디바이스 Sol Max 후속 설계가 진행 중이다.
+  auth reviewer와 photo backend writer/요약 Architect는 종료했다. parent가090검증을 인수해 고정했고,
+  현재 Sol High 요약 Worker와 Sol Max 누적 media/090 독립 Reviewer가 병렬 진행 중이다.
   신규 역할은 Flash High 탐색/좁은 구현, Sol High 통합/검증, Sol Max critical 설계/독립 리뷰로 나눈다.
   상세 근거는
   [Control Tower report](../control-tower/reports/codex/2026-09-05_1445_avatar-auth-photo-operations_codex.md).

@@ -9,6 +9,23 @@
 > [`BUSINESS_MEMORY_ROADMAP_V1.md`](BUSINESS_MEMORY_ROADMAP_V1.md)가 각각 canonical이다.
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
+## 2026-09-05 — Photo090 backend 로컬 구현·parent 검증
+
+- PLAN POSITION: Task2 backend local gate PASS / 독립 검토·client 미완료. 다음 Task3 HIGH 구현 병렬.
+- DIRECTION CHECK: 최신 사진/운영 요청, V5 §7/8, 사업 무료 정상 사진 원칙, 로드맵6단계/current/log 확인.
+  NO conflict. 초기 metadata 즉시 GC 제안 대신 record/account까지 private 등록 이력을 보존한 이유는 상세 report.
+- OWNERSHIP: Astra backend worker → 명시적 중단 후 parent 인수; `codex/rc-v5-final-fixes`, old09aec23,
+  new/reviewed **fb880ed85a20dde96a3774300be8503eaac1bb04**, PR/remote 없음.
+- CHANGED: 신규090SQL, 전용 PG harness; parent NOTIFY와 실제 mutation controls 추가. 기존SQL/Edge/crypto/app/Now보존.
+- VERIFICATION: parent full001..090187 PASS / 기존회귀+090520 PASS / schema contract1FAIL→209PASS /
+  syntax/diff PASS. missing semicolon은 새 harness 문법 실패였으며 교정 후 final187PASS.
+- REVIEW IMPACT: C영역 새 DB/권한 계약, fresh 독립 Sol Max review PENDING. 과거 PASS 자동승계 없음.
+- BLOCKERS/STOPPED AT: 새 backend local만 완료. client 준비/표시, CI연결, hosted/실기기/전체RC 미완료.
+- NEXT ACTION: Kepler Sol High summary HIGH수정, Russell Sol Max cleanup+090 read-only검토.
+  그 뒤 photo client 실제 업로드/목록/master를 연결. 해당HIGH·negative검증 전 다음 활성화 금지.
+- PRODUCTION: NOT APPLIED. 미배포 commit revert 가능; 실제 pair가 생긴 뒤 schema 제거가 아닌 forward fix.
+- 상세: [Photo backend local gate](../control-tower/reports/codex/2026-09-05_1548_photo-backend-local_codex.md).
+
 ## 2026-09-05 — 온디바이스 의미 보존 HIGH 재현 / 활성화 HOLD
 
 - PLAN POSITION: RC Task3 설계·재현; Task2 photo090은 별도 단일 worker 진행 중. 전체 RC HOLD.

@@ -25,6 +25,9 @@ function line(over: Partial<DailySummaryLine> = {}): DailySummaryLine {
   const sourceText = Object.prototype.hasOwnProperty.call(over, 'sourceText')
     ? over.sourceText ?? null
     : text;
+  const fullSourceText = Object.prototype.hasOwnProperty.call(over, 'fullSourceText')
+    ? over.fullSourceText ?? null
+    : sourceText;
   return {
     recordId: 'record-uuid',
     time: '09:00',
@@ -32,6 +35,7 @@ function line(over: Partial<DailySummaryLine> = {}): DailySummaryLine {
     ...over,
     text,
     sourceText,
+    fullSourceText,
     sourceWasTruncated: over.sourceWasTruncated ?? false,
   };
 }
@@ -115,7 +119,11 @@ describe('표지 40자 상한', () => {
   });
 
   it('deterministic 표시 텍스트는 별도 표지 함수에서 40자 상한을 지킨다', () => {
-    const items = buildOnDeviceItems([line({ text: '나'.repeat(200) }), line({ text: '짧다' })]);
+    const items = buildOnDeviceItems([
+      line({ text: '오전에는 생활관에서 편지를 정리하고 쉬었어. 오후에는 운동장을 세 바퀴 걸었어.' }),
+      line({ text: '짧다' }),
+    ]);
+    expect(items).toHaveLength(2);
     for (const item of items) {
       expect(item.text.length).toBeGreaterThan(0);
       expect(item.text.length).toBeLessThanOrEqual(MAX_DAILY_SUMMARY_SOURCE_CHARS);
@@ -157,24 +165,64 @@ describe('표지 40자 상한', () => {
 });
 
 describe('원문 입력 상한과 모델 호출 상한', () => {
-  it('모델 입력은 120 UTF-16 단위까지 보존하고 40자 표지 상한을 적용하지 않는다', () => {
-    const items = buildOnDeviceItems([line({ text: '가'.repeat(121) })]);
+  it('정규화한 full source를 로컬 검증용으로 보존하고 native text만 120단위로 제한한다', () => {
+    const fullText = `${'가'.repeat(120)} 뒤에 붙은 정정`;
+    expect(normalizeDailySummarySource(fullText)).toEqual({
+      text: '가'.repeat(120),
+      fullText,
+      wasTruncated: true,
+    });
+  });
+
+  it('120단위에서 잘린 원문은 native 후보가 되지 않는다', () => {
+    const truncated = line({
+      text: '가'.repeat(120),
+      sourceText: '가'.repeat(120),
+      sourceWasTruncated: true,
+    });
+    expect(buildOnDeviceItems([truncated])).toEqual([]);
+    expect(buildAllOnDeviceBatches([truncated])).toBeNull();
+  });
+
+  it('깨진 surrogate나 열린 인용을 포함한 긴 원문은 native에 보내지 않는다', () => {
+    const brokenUnicode = `오전에는 ${'가'.repeat(30)} 길게 기록했어. 오후에는 ${String.fromCharCode(0xd800)} 운동장을 걸었어.`;
+    const brokenQuote = `오전에는 “${'가'.repeat(30)} 긴 설명을 적었어. 오후에는 운동장을 걸었어.`;
+    for (const source of [brokenUnicode, brokenQuote]) {
+      expect(buildAllOnDeviceBatches([line({
+        text: source,
+        sourceText: source,
+        fullSourceText: source,
+      })])).toBeNull();
+    }
+  });
+
+  it('완전한 원문이면 모델 입력은 120 UTF-16 단위까지 보존하고 40자 표지 상한을 적용하지 않는다', () => {
+    const suffix = '오후에는 운동장을 세 바퀴 걸었어.';
+    const source = `${'가'.repeat(120 - suffix.length - 2)}. ${suffix}`;
+    const items = buildOnDeviceItems([line({ text: source })]);
     expect(items[0].text).toHaveLength(120);
     expect(items[0].text.endsWith('…')).toBe(false);
   });
 
-  it('120 단위 상한도 grapheme 중간을 자르지 않는다', () => {
+  it('120 단위 상한을 계산할 때 grapheme 중간을 자르지 않는다', () => {
     const source = `${'a'.repeat(118)}👨‍👩‍👧‍👦b`;
-    const items = buildOnDeviceItems([line({ text: source })]);
-    expect(items[0].text).toBe('a'.repeat(118));
-    expect(items[0].text).not.toContain('\u200d');
+    const normalized = normalizeDailySummarySource(source);
+    expect(normalized?.text).toBe('a'.repeat(118));
+    expect(normalized?.text).not.toContain('\u200d');
+    expect(normalized?.fullText).toBe(source);
+    expect(buildOnDeviceItems([line({
+      text: normalized!.text,
+      sourceText: normalized!.text,
+      fullSourceText: normalized!.fullText,
+      sourceWasTruncated: true,
+    })])).toEqual([]);
   });
 
   it('상한보다 큰 단일 grapheme 때문에 짧은 prefix만 남아도 절단 사실을 보존한다', () => {
     const source = `안녕하세요 e${'\u0301'.repeat(200)}`;
     const normalized = normalizeDailySummarySource(source);
 
-    expect(normalized).toEqual({ text: '안녕하세요 ', wasTruncated: true });
+    expect(normalized).toEqual({ text: '안녕하세요 ', fullText: source.normalize('NFC'), wasTruncated: true });
   });
 
   it('21개 이상이면 모델 배치를 만들지 않고 null로 fail-closed 한다', () => {

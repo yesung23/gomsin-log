@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CoupleStatus, DailyRecord } from '@/types';
 import type { StoryMode } from '@/features/story/StoryViewer';
 import {
@@ -84,6 +84,26 @@ export function useOnDeviceDailySummary(
     status: DailySummaryRefinementStatus;
     reason?: OnDeviceSummaryFailure;
   }>({ payloadKey: '[]', requestVersion: 0, values: NO_REFINEMENT, status: 'idle' });
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === 'undefined' || document.visibilityState !== 'hidden',
+  );
+  const [cancelledRequestVersion, setCancelledRequestVersion] = useState<number | null>(null);
+  const generationEpochRef = useRef(0);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return undefined;
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState !== 'hidden';
+      setDocumentVisible(visible);
+      if (!visible) {
+        generationEpochRef.current += 1;
+        setCancelledRequestVersion(requestVersion);
+        cancelOnDeviceSummary();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [requestVersion]);
 
   const corpus = useMemo(() => {
     if (!enabled || mode !== 'today') {
@@ -116,9 +136,27 @@ export function useOnDeviceDailySummary(
       line.recordId,
       line.text,
       line.sourceText,
+      line.fullSourceText,
       line.sourceWasTruncated,
     ]));
   }, [summaryLines]);
+
+  // A click authorizes this exact source, not every later edit delivered by
+  // realtime. Keep intent in state rather than a discardable memo/ref cache.
+  const [requestBinding, setRequestBinding] = useState<{
+    requestVersion: number;
+    payloadKey: string | null;
+  }>({ requestVersion: 0, payloadKey: null });
+  useEffect(() => {
+    if (requestBinding.requestVersion !== requestVersion) {
+      setRequestBinding({ requestVersion, payloadKey });
+    } else if (requestBinding.payloadKey !== null && requestBinding.payloadKey !== payloadKey) {
+      // A → B → A must not resurrect A's old click after any source change.
+      setRequestBinding({ requestVersion, payloadKey: null });
+    }
+  }, [requestVersion, payloadKey, requestBinding]);
+  const requestMatchesSource = requestBinding.requestVersion === requestVersion
+    && requestBinding.payloadKey === payloadKey;
 
   const nativeGate = onDeviceSummaryGate();
 
@@ -134,15 +172,18 @@ export function useOnDeviceDailySummary(
       line.sourceText !== null
       && line.sourceText.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
     )),
-    [summaryLines],
+    // payloadKey가 같으면 전체 원문까지 같으므로 진행 중인 요청의 배열 신원도 유지한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [payloadKey],
   );
   const candidateBatches = useMemo(
     () => buildAllOnDeviceBatches(candidateLines),
     [candidateLines],
   );
-  const tooManyCandidates = candidateLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS;
+  const tooManyCandidates = summaryLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS;
   const candidatePayloadReady = candidateLines.length > 0
     && !tooManyCandidates
+    && documentVisible
     && candidateBatches !== null
     && candidateBatches.length > 0;
 
@@ -179,6 +220,8 @@ export function useOnDeviceDailySummary(
     const preflightReady = preflight.payloadKey === payloadKey && preflight.status === 'ready';
     if (
       requestVersion <= 0
+      || !requestMatchesSource
+      || cancelledRequestVersion === requestVersion
       || !corpus.ok
       || !candidatePayloadReady
       || nativeGate !== 'ready'
@@ -204,6 +247,7 @@ export function useOnDeviceDailySummary(
     }
 
     let active = true;
+    const generationEpoch = generationEpochRef.current;
     setResult({ payloadKey, requestVersion, values: NO_REFINEMENT, status: 'running', reason: undefined });
 
     const fallback = (reason: OnDeviceSummaryFailure) => {
@@ -220,12 +264,12 @@ export function useOnDeviceDailySummary(
       // 검증된 batch도 하루 전체가 성공하기 전에는 화면에 공개하지 않는다.
       const staged = new Map<string, string>();
       for (const batch of candidateBatches) {
-        if (!active) return;
+        if (!active || generationEpoch !== generationEpochRef.current) return;
         const outcome = await refineOnDeviceSummary(
           batch.items,
           { timeoutMs: ON_DEVICE_SUMMARY_TIMEOUT_MS },
         );
-        if (!active) return;
+        if (!active || generationEpoch !== generationEpochRef.current) return;
         if (!outcome.ok) {
           fallback(outcome.reason);
           return;
@@ -239,7 +283,7 @@ export function useOnDeviceDailySummary(
           staged.set(recordId, refinedText);
         }
       }
-      if (!active) return;
+      if (!active || generationEpoch !== generationEpochRef.current) return;
       if (staged.size !== candidateLines.length) {
         fallback('rejected');
         return;
@@ -261,12 +305,14 @@ export function useOnDeviceDailySummary(
     candidateBatches,
     candidateLines,
     candidatePayloadReady,
+    cancelledRequestVersion,
     corpus.ok,
     nativeGate,
     payloadKey,
     preflight.payloadKey,
     preflight.status,
     requestVersion,
+    requestMatchesSource,
   ]);
 
   // payload나 요청 번호가 바뀐 렌더에서는 이전 모델 결과를 즉시 숨긴다.
@@ -314,6 +360,13 @@ export function useOnDeviceDailySummary(
       status: 'unavailable',
       reason: preflight.reason,
       canRequest: false,
+    };
+  }
+  if (!requestMatchesSource) {
+    return {
+      refined: NO_REFINEMENT,
+      status: 'idle',
+      canRequest: requestVersion === 0 || requestBinding.requestVersion === requestVersion,
     };
   }
   if (result.payloadKey !== payloadKey || result.requestVersion !== requestVersion) {

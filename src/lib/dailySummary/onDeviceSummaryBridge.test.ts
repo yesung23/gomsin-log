@@ -106,6 +106,15 @@ describe('패키징: iOS 전용 로컬 플러그인 하나', () => {
 });
 
 describe('브리지 이름이 세 곳에서 같다', () => {
+  it('TypeScript availability reason union이 Swift raw value와 정확히 같다', () => {
+    const union = definitions.match(/export type OnDeviceSummaryUnavailableReason\s*=([\s\S]*?);/)?.[1] ?? '';
+    const typeReasons = [...union.matchAll(/'([^']+)'/g)].map((match) => match[1]).sort();
+    const swiftReasons = [...swiftEngine.matchAll(/case\s+\w+\s*=\s*"([^"]+)"/g)]
+      .map((match) => match[1]);
+    expect(typeReasons).toEqual(['apple_intelligence_disabled', 'device_not_eligible', 'locale_unsupported', 'model_not_ready', 'platform_unsupported', 'ready']);
+    expect(swiftReasons.sort()).toEqual(typeReasons.filter((reason) => reason !== 'ready'));
+  });
+
   it('TypeScript registerPlugin · Swift jsName · 어댑터 상수', () => {
     expect(ON_DEVICE_SUMMARY_PLUGIN_NAME).toBe('GomsinlogOnDeviceSummary');
     expect(jsPlugin).toMatch(
@@ -152,12 +161,13 @@ describe('Swift 소스가 계약을 어길 수 없는 모양이다', () => {
     expect(swiftBridge).not.toContain('.intValue');
   });
 
-  it('prompt와 Guide가 exact contiguous source excerpt를 요구하고 rewriting/inference를 금지한다', () => {
-    expect(swiftEngine).toContain('정확한 원문 연속 부분 문자열');
+  it('prompt와 Guide가 완전한 trailing sentence suffix를 요구하고 rewriting/inference를 금지한다', () => {
+    expect(swiftEngine).toContain('완전한 마지막 문장');
+    expect(swiftEngine).toContain('원문 suffix');
     expect(swiftEngine).toContain('원문을 다시 쓰거나 추론하지 않는다');
     expect(swiftEngine).toContain('문맥을 덧붙이지 않는다');
     expect(swiftEngine).toContain('8~38 UTF-16 단위');
-    expect(swiftEngine).toContain('단어, 이모지, 결합문자의 중간');
+    expect(swiftEngine).toContain('문장·인용·괄호·단어·이모지·결합문자 중간');
   });
 
   it('FoundationModels를 canImport와 @available로만 만진다', () => {

@@ -53,6 +53,7 @@ export function verifyRefinedItems(
   raw: unknown,
   expected: readonly OnDeviceSummaryItem[],
   sourceWasTruncated: readonly boolean[] = [],
+  fullSources: readonly (string | null)[] = [],
 ): RefineVerification {
   if (!Array.isArray(raw)) return { ok: false, rejection: 'not_an_array' };
   if (raw.length !== expected.length) return { ok: false, rejection: 'count_mismatch' };
@@ -90,7 +91,7 @@ export function verifyRefinedItems(
     // 길이·형식만 맞는 문장도 사실을 지어낼 수 있다. raw 후보를 그대로 검사하므로 zero-width나
     // 제어문자를 collapse가 지워 안전해 보이게 만드는 우회도 통과하지 못한다.
     const excerpt = guardSummaryExcerpt(
-      expected[position].text,
+      fullSources[position] ?? expected[position].text,
       text,
       sourceWasTruncated[position] ?? false,
     );
@@ -131,6 +132,7 @@ export function verifyAndBindRefinedLines(
     raw,
     expected,
     lines.map((line) => line.sourceWasTruncated === true),
+    lines.map((line) => line.fullSourceText),
   );
   if (!verified.ok) return verified;
   return { ok: true, refined: bindRefinedTexts(lines, verified.texts) };

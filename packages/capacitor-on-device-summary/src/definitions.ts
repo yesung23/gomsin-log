@@ -49,16 +49,14 @@ export interface OnDeviceSummaryItem {
 /**
  * Why the on-device path is not usable. A bounded code, never content.
  *
- * `os_too_old` and `framework_missing` are separate on purpose: the first is an
- * iOS 14-25 device running a build that HAS the framework, the second is a build
- * compiled against an SDK that does not, and treating them alike would hide a
- * packaging mistake behind a device-capability message.
+ * These are the exact bounded reason strings emitted by the Swift bridge.
  */
 export type OnDeviceSummaryUnavailableReason =
   | 'ready'
-  | 'os_too_old'
-  | 'framework_missing'
-  | 'model_unavailable'
+  | 'platform_unsupported'
+  | 'device_not_eligible'
+  | 'apple_intelligence_disabled'
+  | 'model_not_ready'
   | 'locale_unsupported';
 
 export interface OnDeviceSummaryPlugin {

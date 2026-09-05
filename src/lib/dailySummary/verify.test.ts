@@ -14,9 +14,9 @@ import {
  */
 
 const LINES: DailySummaryLine[] = [
-  { recordId: 'rec-a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오늘 시험 끝났어', sourceWasTruncated: false },
-  { recordId: 'rec-b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '점심 먹었어', sourceWasTruncated: false },
-  { recordId: 'rec-c', text: '사진을 남겼어요', time: '18:00', date: '2026-08-22', sourceText: '사진을 남겼어요', sourceWasTruncated: false },
+  { recordId: 'rec-a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오늘 시험 끝났어', fullSourceText: '오늘 시험 끝났어', sourceWasTruncated: false },
+  { recordId: 'rec-b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '점심 먹었어', fullSourceText: '점심 먹었어', sourceWasTruncated: false },
+  { recordId: 'rec-c', text: '사진을 남겼어요', time: '18:00', date: '2026-08-22', sourceText: '사진을 남겼어요', fullSourceText: '사진을 남겼어요', sourceWasTruncated: false },
 ];
 const ITEMS = buildOnDeviceItems(LINES);
 
@@ -25,15 +25,15 @@ function refined(items: unknown) {
 }
 
 describe('통과하는 응답', () => {
-  it('긴 원문의 정확한 excerpt를 앞뒤 말줄임표와 함께 표시한다', () => {
-    const source = '오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어';
+  it('긴 원문의 완전한 마지막 문장 suffix를 앞 말줄임표와 함께 표시한다', () => {
+    const source = '오전에는 생활관에서 편지를 정리하고 쉬었어. 오후에는 운동장을 세 바퀴 걸었어.';
     const result = verifyRefinedItems(
-      [{ index: 0, text: '시험이 끝났고 점심을 먹은 다음' }],
+      [{ index: 0, text: '오후에는 운동장을 세 바퀴 걸었어.' }],
       [{ index: 0, text: source }],
     );
     expect(result).toEqual({
       ok: true,
-      texts: ['…시험이 끝났고 점심을 먹은 다음…'],
+      texts: ['…오후에는 운동장을 세 바퀴 걸었어.'],
     });
   });
 
@@ -56,12 +56,12 @@ describe('통과하는 응답', () => {
     )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
   });
 
-  it('120 단위에서 잘린 짧은 prefix에도 생략 표시를 붙인다', () => {
+  it('120 단위에서 잘린 prefix는 완전한 원문으로 검증할 수 없어 거부한다', () => {
     expect(verifyRefinedItems(
       [{ index: 0, text: '안녕하세요' }],
       [{ index: 0, text: '안녕하세요' }],
       [true],
-    )).toEqual({ ok: true, texts: ['안녕하세요…'] });
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
   });
 
   it('바깥 공백은 접어서 받아들인다', () => {
@@ -96,6 +96,46 @@ describe('통과하는 응답', () => {
 });
 
 describe('거부하는 응답', () => {
+  it.each([
+    [
+      '나는 그 사람이 싫다 라고 말한 적이 없고 오히려 많이 아낀다고 여러 번 분명하게 설명했어',
+      '나는 그 사람이 싫다',
+    ],
+    [
+      '우리는 헤어졌어 라고 친구가 농담했지만 실제로는 오래 함께하고 싶다고 분명하게 말했어',
+      '우리는 헤어졌어',
+    ],
+    [
+      '비가 오면 만나지 말자고 한 게 아니라 실내에서 만나 오래 이야기하자고 분명하게 적었어',
+      '비가 오면 만나지 말자고',
+    ],
+    [
+      '세 번 전화했어 라고 쓴 건 오타였고 실제로는 두 번만 전화했다고 바로 고쳐 적었어',
+      '세 번 전화했어',
+    ],
+    [
+      '오늘은 통화하지 말자고 적은 게 아니고 저녁에 길게 통화하자고 나중에 다시 설명했어',
+      '오늘은 통화하지 말자고',
+    ],
+    [
+      '내일 안 만날 거야 라는 말은 농담이었고 실제로는 약속한 시간에 꼭 만나겠다고 확인했어',
+      '내일 안 만날 거야',
+    ],
+    [
+      '눈이 오면 외출하지 말자고 한 게 아니라 근처 카페에서 만나자고 조건을 붙여 설명했어',
+      '눈이 오면 외출하지 말자고',
+    ],
+    [
+      '다섯 번 만났다고 쓴 건 내가 잘못 적은 거고 실제로는 네 번이라고 바로 정정했어',
+      '다섯 번 만났다고',
+    ],
+  ])('뒤 부정·농담·조건·정정을 버린 앞 발췌을 실제 verifier가 거부한다', (source, candidate) => {
+    expect(verifyRefinedItems(
+      [{ index: 0, text: candidate }],
+      [{ index: 0, text: source }],
+    )).toEqual({ ok: false, rejection: 'semantic_mismatch' });
+  });
+
   it('장식한 표시가 40자를 넘으면 원문 출처가 맞아도 거부한다', () => {
     const source = `${'가'.repeat(20)} ${'나'.repeat(20)} ${'다'.repeat(20)}`;
     expect(verifyRefinedItems(
@@ -270,9 +310,9 @@ describe('index를 원래 recordId에 다시 붙인다', () => {
 
   it('두 번째 배치(batch 2, index 0..2)가 records 6..8에 정확히 매핑된다', () => {
     const batch2Lines: DailySummaryLine[] = [
-      { recordId: 'rec-6', text: '여섯째 기록', time: '14:00', date: '2026-08-22', sourceText: '여섯째 기록', sourceWasTruncated: false },
-      { recordId: 'rec-7', text: '일곱째 기록', time: '15:00', date: '2026-08-22', sourceText: '일곱째 기록', sourceWasTruncated: false },
-      { recordId: 'rec-8', text: '여덟째 기록', time: '16:00', date: '2026-08-22', sourceText: '여덟째 기록', sourceWasTruncated: false },
+      { recordId: 'rec-6', text: '여섯째 기록', time: '14:00', date: '2026-08-22', sourceText: '여섯째 기록', fullSourceText: '여섯째 기록', sourceWasTruncated: false },
+      { recordId: 'rec-7', text: '일곱째 기록', time: '15:00', date: '2026-08-22', sourceText: '일곱째 기록', fullSourceText: '일곱째 기록', sourceWasTruncated: false },
+      { recordId: 'rec-8', text: '여덟째 기록', time: '16:00', date: '2026-08-22', sourceText: '여덟째 기록', fullSourceText: '여덟째 기록', sourceWasTruncated: false },
     ];
     const batch2Items = buildOnDeviceItems(batch2Lines);
     expect(batch2Items.map((it) => it.index)).toEqual([0, 1, 2]);

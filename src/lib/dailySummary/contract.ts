@@ -1,3 +1,5 @@
+import { isSummarySourceEligible } from '@/lib/dailySummary/semanticGuard';
+
 /**
  * 하루 요약을 온디바이스 모델이 다듬을 때, 무엇이 계약인가.
  *
@@ -55,12 +57,20 @@ export interface DailySummaryLine {
   date: string;
   /** 모델에 보낼 정규화된 원문. `null`이면 본문이 없어 모델 호출을 생략한다. */
   sourceText: string | null;
+  /**
+   * 정규화하되 잘라내지 않은 전체 원문. 검증·stale 결과 무효화에만 쓰고
+   * native payload·로그·저장소·URL에는 절대 넣지 않는다.
+   */
+  fullSourceText: string | null;
   /** 원문이 120 UTF-16 단위에서 잘렸다는 로컬 사실. bridge에는 보내지 않는다. */
   sourceWasTruncated: boolean;
 }
 
 export interface DailySummarySource {
+  /** Native에 보낼 수 있는 최대 120 UTF-16 단위. */
   text: string;
+  /** 로컬 검증과 무효화에만 쓰는 전체 정규화 원문. */
+  fullText: string;
   wasTruncated: boolean;
 }
 
@@ -204,7 +214,7 @@ export function normalizeDailySummarySource(raw: string): DailySummarySource | n
     // Segmenter가 없으면 모델을 불렀다가 무조건 버리게 되므로 호출 전에 fail-closed 한다.
     if (collapsed.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
       && typeof Intl.Segmenter !== 'function') return null;
-    return { text: collapsed, wasTruncated: false };
+    return { text: collapsed, fullText: collapsed, wasTruncated: false };
   }
   if (typeof Intl.Segmenter !== 'function') return null;
   const segments = [...new Intl.Segmenter('ko', { granularity: 'grapheme' }).segment(collapsed)]
@@ -214,7 +224,7 @@ export function normalizeDailySummarySource(raw: string): DailySummarySource | n
     if (text.length + segment.length > MAX_DAILY_SUMMARY_SOURCE_CHARS) break;
     text += segment;
   }
-  return { text, wasTruncated: true };
+  return { text, fullText: collapsed, wasTruncated: true };
 }
 
 /**
@@ -230,9 +240,16 @@ export function buildOnDeviceItems(
   for (const [index, line] of lines.slice(0, ON_DEVICE_SUMMARY_BATCH_SIZE).entries()) {
     // 첨부만 있는 기록의 deterministic 문장은 앱이 만든 표시 문구이지 사용자 원문이 아니다.
     // 하루 중 하나라도 본문이 없으면 합성 문구를 모델에 보내지 않고 전체 refinement를 생략한다.
-    if (line.sourceText === null) return [];
-    const source = normalizeDailySummarySource(line.sourceText);
-    if (source === null || source.text.length === 0) return [];
+    if (
+      line.sourceText === null
+      || line.fullSourceText === null
+      || line.sourceWasTruncated
+      || line.sourceText !== line.fullSourceText
+    ) return [];
+    const source = normalizeDailySummarySource(line.fullSourceText);
+    if (source === null || source.wasTruncated || source.text.length === 0) return [];
+    if (source.text.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
+      && !isSummarySourceEligible(source.fullText)) return [];
     items.push({ index, text: source.text });
   }
   return items;

@@ -108,6 +108,18 @@ describe('applyRefinedCoverText', () => {
     expect(lines.map((l) => l.recordId)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
   });
 
+  it('120단위 뒤 tail까지 NFC·공백 접기를 한 full source로 로컬 라인에 보존한다', () => {
+    const raw = `${'가'.repeat(120)}  cafe\u0301\n뒤 정정`;
+    const [summary] = deterministicSummaryLines([{
+      id: 'full-source', userId: 'partner', date: '2026-08-22', time: '09:00', authorRole: 'gomsin',
+      log: raw, isPrivate: false, createdAt: '2026-08-22T00:00:00.000Z',
+    }]);
+
+    expect(summary.sourceText).toBe('가'.repeat(120));
+    expect(summary.fullSourceText).toBe(`${'가'.repeat(120)} café 뒤 정정`);
+    expect(summary.sourceWasTruncated).toBe(true);
+  });
+
   it('본문 없는 사진 기록은 표지에는 남기되 모델 입력을 합성하지 않아 하루 전체 refinement를 생략한다', () => {
     const records: DailyRecord[] = [
       {

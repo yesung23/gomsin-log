@@ -10,12 +10,67 @@ function expectRejected(source: string, candidate: string) {
 }
 
 describe('온디바이스 요약 의미 방화벽', () => {
-  it('긴 원문에서는 단어 경계의 정확한 contiguous excerpt를 허용한다', () => {
-    const source = '오늘은 시험이 끝났고 점심을 먹은 다음 생활관으로 돌아와서 저녁에는 편지를 썼어';
-    expect(guardSummaryExcerpt(source, '시험이 끝났고 점심을 먹은 다음')).toEqual({
+  it('긴 원문에서 완전한 마지막 문장 suffix를 허용한다', () => {
+    const source = '오전에는 생활관에서 편지를 정리하고 쉬었어. 오후에는 운동장을 세 바퀴 걸었어.';
+    expect(guardSummaryExcerpt(source, '오후에는 운동장을 세 바퀴 걸었어.')).toEqual({
       ok: true,
-      text: '…시험이 끝났고 점심을 먹은 다음…',
+      text: '…오후에는 운동장을 세 바퀴 걸었어.',
     });
+  });
+
+  it('사용자가 직접 쓴 건강·장소 문장도 정확한 trailing suffix면 허용한다', () => {
+    const source = '오전에는 생리통이 있어 집에서 조용히 쉬었어. 오후에는 서울역 근처 약국에 들렀어.';
+    expect(guardSummaryExcerpt(source, '오후에는 서울역 근처 약국에 들렀어.')).toEqual({
+      ok: true,
+      text: '…오후에는 서울역 근처 약국에 들렀어.',
+    });
+  });
+
+  it('완전한 뒷문장이 아닌 앞·중간·끝 생략 발췌을 거부한다', () => {
+    const source = '오전에는 편지를 정리했어. 오후에는 운동장을 세 바퀴 걸었어.';
+    expect(guardSummaryExcerpt(source, '오전에는 편지를 정리했어.').ok).toBe(false);
+    expect(guardSummaryExcerpt(source, '편지를 정리했어. 오후에는').ok).toBe(false);
+    expect(guardSummaryExcerpt(source, '오후에는 운동장을 세 바퀴').ok).toBe(false);
+  });
+
+  it('인용·괄호를 잘라 열거나 닫은 suffix는 fail-closed한다', () => {
+    const balanced = '오전에는 편지와 하루 계획을 빠뜨리지 않게 차근차근 정리했어. 오후에는 “약국에 들렀어.”';
+    expect(guardSummaryExcerpt(balanced, '오후에는 “약국에 들렀어.”').ok).toBe(true);
+    expect(guardSummaryExcerpt(
+      '오전에는 “긴 설명을 적었어. 오후에는 약국에 들렀어.”',
+      '오후에는 약국에 들렀어.”',
+    ).ok).toBe(false);
+    expect(guardSummaryExcerpt(
+      '오전에는 (긴 설명을 적었어. 오후에는 약국에 들렀어.)',
+      '오후에는 약국에 들렀어.)',
+    ).ok).toBe(false);
+  });
+
+  it('NFC/NFD·ZWJ·반복 문자열에서도 실제 마지막 문장을 정확히 검증한다', () => {
+    const unicodeSource = '오전에는 기록을 길게 정리했어. 오후에는 cafe\u0301에서 가족 👨‍👩‍👧‍👦을 만났어.';
+    expect(guardSummaryExcerpt(
+      unicodeSource,
+      '오후에는 café에서 가족 👨‍👩‍👧‍👦을 만났어.',
+    ).ok).toBe(true);
+
+    const repeated = '오전에는 같은 말을 오래 생각하며 다시 적었어. 오후에는 같은 말을 적었어.';
+    expect(guardSummaryExcerpt(repeated, '오후에는 같은 말을 적었어.')).toEqual({
+      ok: true,
+      text: '…오후에는 같은 말을 적었어.',
+    });
+  });
+
+  it('sentence Segmenter가 없으면 완전한 suffix도 추측하지 않는다', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(Intl, 'Segmenter');
+    Object.defineProperty(Intl, 'Segmenter', { configurable: true, value: undefined });
+    try {
+      expect(guardSummaryExcerpt(
+        '오전에는 편지를 정리했어. 오후에는 운동장을 세 바퀴 걸었어.',
+        '오후에는 운동장을 세 바퀴 걸었어.',
+      ).ok).toBe(false);
+    } finally {
+      if (descriptor) Object.defineProperty(Intl, 'Segmenter', descriptor);
+    }
   });
 
   it('확장 grapheme cluster 중간에서 시작하거나 끝나는 발췌를 거부한다', () => {
@@ -50,11 +105,9 @@ describe('온디바이스 요약 의미 방화벽', () => {
     expect(guardSummaryExcerpt(source, candidate).ok).toBe(false);
   });
 
-  it('잘린 원문이 40자보다 짧아져도 생략 표시를 붙이고 표시 상한을 넘으면 거부한다', () => {
-    expect(guardSummaryExcerpt('안녕하세요', '안녕하세요', true)).toEqual({
-      ok: true,
-      text: '안녕하세요…',
-    });
+  it('잘린 원문은 길이와 관계없이 전체를 거부한다', () => {
+    expect(guardSummaryExcerpt('안녕하세요', '안녕하세요', true))
+      .toEqual({ ok: false, rejection: 'truncated_source' });
     expect(guardSummaryExcerpt('가'.repeat(40), '가'.repeat(40), true).ok).toBe(false);
   });
 

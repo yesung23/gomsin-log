@@ -19,8 +19,8 @@ import {
  */
 
 const ITEMS = buildOnDeviceItems([
-  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오늘 시험이 끝나서 집에 돌아오는 길에 있었던 일을 아주 길게 적어 두었어', sourceWasTruncated: false },
-  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '점심을 먹고 오후에 있었던 일을 빠뜨리지 않도록 차근차근 아주 길게 적어 두었어', sourceWasTruncated: false },
+  { recordId: 'a', text: '오늘 시험 끝났어', time: '09:00', date: '2026-08-22', sourceText: '오전에는 시험 준비 과정을 차근차근 길게 정리했어. 오후에는 운동장을 세 바퀴 걸었어.', fullSourceText: '오전에는 시험 준비 과정을 차근차근 길게 정리했어. 오후에는 운동장을 세 바퀴 걸었어.', sourceWasTruncated: false },
+  { recordId: 'b', text: '점심 먹었어', time: '13:00', date: '2026-08-22', sourceText: '오전에는 점심 이후 계획을 빠뜨리지 않게 길게 적었어. 오후에는 편지를 다시 읽었어.', fullSourceText: '오전에는 점심 이후 계획을 빠뜨리지 않게 길게 적었어. 오후에는 편지를 다시 읽었어.', sourceWasTruncated: false },
 ]);
 
 const platform = vi.hoisted(() => ({ native: false, name: 'web', pluginAvailable: false }));

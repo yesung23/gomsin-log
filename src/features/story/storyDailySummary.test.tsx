@@ -33,9 +33,7 @@ vi.mock('@capacitor/core', () => ({
     getPlatform: () => platform.name,
     isPluginAvailable: () => platform.pluginAvailable,
   },
-  registerPlugin: () => {
-    throw new Error('no native bridge in this environment');
-  },
+  registerPlugin: vi.fn(() => ({})),
 }));
 
 const TODAY = '2026-08-22';
@@ -125,19 +123,12 @@ async function requestAiSummary() {
 function safeRefinedText(text: string): string {
   const normalized = text.normalize('NFC').trim();
   if (normalized.length <= 38) return normalized;
-
-  // Production accepts an excerpt only when omitted context starts at a real
-  // whitespace boundary. Keep the fake model response inside that same
-  // contract instead of cutting a Korean word in half.
-  const boundary = [...normalized.matchAll(/\s/gu)]
-    .map((match) => match.index)
-    .filter((index) => index >= 8 && index <= 38)
-    .at(-1);
-  return boundary === undefined ? normalized : normalized.slice(0, boundary);
+  const lastSentence = normalized.slice(normalized.lastIndexOf('. ') + 2);
+  return lastSentence.length <= 38 ? lastSentence : normalized;
 }
 
 function longBody(prefix: string): string {
-  return `${prefix} 오늘 있었던 일을 빠뜨리지 않도록 차근차근 길게 적어 두었어 꼭`;
+  return `오전에 있었던 일을 빠뜨리지 않게 차근차근 적었어. ${prefix} 내용을 다시 확인했어.`;
 }
 
 type WireItem = { index: number; text: string };
@@ -338,7 +329,7 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
   it('공유된 원문 본문에 health/location 사실은 포함하되 ID·시각·메타데이터는 보내지 않는다', async () => {
     const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
-    const sharedBody = '생리통이 있어 서울역 근처 약국에 들렀고 집에 와서 따뜻한 물을 마시며 쉬었어';
+    const sharedBody = '오전에는 생리통이 있어 집에서 조용히 쉬었어. 오후에는 서울역 근처 약국에 들렀어.';
     surface = [record({
       id: 'health-location-record',
       log: sharedBody,
@@ -369,6 +360,10 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     ]) {
       expect(sent).not.toContain(forbidden);
     }
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
+    await userEvent.click(screen.getByRole('button', { name: /오후에는 서울역 근처 약국에 들렀어/ }));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=health-location-record'));
+    expect(screen.getByText(sharedBody)).toBeTruthy();
   });
 
   it('긴 문장 후보 6개를 [5, 1]로 처리하고 baseline 6줄과 원본 이동을 모두 보존한다', async () => {
@@ -391,6 +386,28 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await userEvent.click(screen.getByText(/긴 기록 5 /));
     await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=r5'));
     expect(screen.getByText(longBody('긴 기록 5'))).toBeTruthy();
+  });
+
+  it('총 21개 중 긴 본문이 1개여도 native를 부르지 않고 마지막 원본까지 열린다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = Array.from({ length: 21 }, (_, index) => record({
+      id: `total-${index}`,
+      time: `${String(8 + Math.floor(index / 2)).padStart(2, '0')}:${index % 2 ? '30' : '00'}`,
+      log: index === 0 ? longBody('첫 긴 기록') : `짧은 기록 ${index}`,
+    }));
+    records = surface;
+
+    open('/story/partner');
+    expect(screen.getByText('오늘 기록 21개 · 시간순 정리됨')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: '16개 더 보기' }));
+    await userEvent.click(screen.getByText('짧은 기록 20'));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=total-20'));
+    expect(screen.getByText('짧은 기록 20')).toBeTruthy();
   });
 
   it('모든 본문이 40 UTF-16 단위 이하면 CTA와 native call이 없다', async () => {
@@ -472,16 +489,8 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(screen.getByText(longB)).toBeTruthy();
   });
 
-  it('120자를 넘긴 원문은 모델이 앞부분을 그대로 돌려도 suffix ellipsis를 강제한다', async () => {
-    const plugin = stubPlugin({
-      refineLines: vi.fn(async (options) => ({
-        requestId: options.requestId,
-        items: options.items.map((item) => ({
-          index: item.index,
-          text: item.index === 0 ? `${'가 '.repeat(19)}가` : safeRefinedText(item.text),
-        })),
-      })),
-    });
+  it('120자를 넘긴 원문은 preflight와 모델을 생략하고 규칙 결과를 유지한다', async () => {
+    const plugin = stubPlugin();
     __setOnDeviceSummaryPluginForTests(plugin);
     surface = [
       record({ id: 'long', log: '가 '.repeat(61) }),
@@ -490,9 +499,10 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     records = surface;
 
     open('/story/partner');
-    await requestAiSummary();
-    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
-    expect(screen.getByText(`${'가 '.repeat(19)}가…`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /가 가 가/ })).toBeTruthy();
   });
 
   it('다듬기 전과 후의 이동 대상이 같다', async () => {
@@ -551,6 +561,17 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     await userEvent.click(screen.getByTestId('story-acknowledge'));
     expect(acknowledge).toHaveBeenCalledTimes(1);
+  });
+
+  it('AI 다듬기는 확인·안 읽음 mutation을 추가로 발생시키지 않는다', async () => {
+    __setOnDeviceSummaryPluginForTests(stubPlugin());
+    surface = twoToday();
+    records = surface;
+
+    open('/story/partner');
+    await requestAiSummary();
+    await waitFor(() => expect(screen.getByRole('button', { name: '긴 문장 줄이기 완료' })).toBeDisabled());
+    expect(acknowledge).not.toHaveBeenCalled();
   });
 
   it.each(CURRENT_VERIFICATION_FAILURES)(

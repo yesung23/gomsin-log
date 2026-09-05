@@ -33,6 +33,7 @@ export function deterministicSummaryLines(
       // 오직 사용자가 쓴 정규화 본문만 모델 경계를 건넌다. 첨부만 있는 기록은 표지에는
       // deterministic 문장으로 남지만 sourceText=null이므로 그날 모델 호출 전체를 생략한다.
       sourceText: source?.text ?? null,
+      fullSourceText: source?.fullText ?? null,
       sourceWasTruncated: source?.wasTruncated ?? false,
     };
   });

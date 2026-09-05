@@ -505,6 +505,40 @@ describe('기능 ON: 상대의 오늘 표지 문장만 바뀐다', () => {
     expect(screen.getByRole('button', { name: /가 가 가/ })).toBeTruthy();
   });
 
+  it('combining cluster로 잘린 원문이 포함되면 다른 긴 문장이 있어도 preflight와 모델을 호출하지 않고 원본 이동을 유지한다', async () => {
+    const plugin = stubPlugin();
+    __setOnDeviceSummaryPluginForTests(plugin);
+    surface = [
+      record({ id: 'r-cluster', log: `안녕하세요 e${'\u0301'.repeat(200)}` }),
+      record({ id: 'r-safe', time: '13:00', log: longBody('점심 먹었어') }),
+    ];
+    records = surface;
+
+    const view = open('/story/partner');
+
+    expect(screen.queryByRole('button', { name: '기기 AI로 긴 문장 줄이기' })).toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(plugin.availability).not.toHaveBeenCalled();
+    expect(plugin.refineLines).not.toHaveBeenCalled();
+
+    // 두 원본 행의 deterministic 텍스트와 원본 이동 모두 온전하게 유지된다
+    expect(screen.getByRole('button', { name: /안녕하세요/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /점심 먹었어/ })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole('button', { name: /안녕하세요/ }));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=r-cluster'));
+    expect(screen.getByText(/안녕하세요 e/)).toBeTruthy();
+    view.unmount();
+
+    open('/story/partner');
+    await userEvent.click(screen.getByRole('button', { name: /점심 먹었어/ }));
+    await waitFor(() => expect(screen.getByTestId('story-location')).toHaveTextContent('?at=r-safe'));
+    expect(screen.getByText(longBody('점심 먹었어'))).toBeTruthy();
+  });
+
   it('다듬기 전과 후의 이동 대상이 같다', async () => {
     // 기능 OFF에서 규칙 문장을 눌렀을 때의 대상을 먼저 잡는다.
     vi.stubEnv('VITE_ON_DEVICE_DAILY_SUMMARY_ENABLED', 'false');

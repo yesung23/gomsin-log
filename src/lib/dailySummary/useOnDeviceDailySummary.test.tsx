@@ -428,4 +428,34 @@ describe('useOnDeviceDailySummary sequential atomic batching', () => {
     await act(async () => { pending.resolve(successful(oldItems)); });
     expect(native.refine).toHaveBeenCalledTimes(1);
   });
+
+  it('combining cluster로 40자 이하로 잘린 truncated 원문이 포함되면 safe 긴 본문이 있어도 preflight와 모델을 모두 0회 유지한다', async () => {
+    const clusterRecord: DailyRecord = {
+      id: 'record-cluster',
+      userId: 'partner',
+      date: '2026-09-04',
+      time: '08:00',
+      authorRole: 'gomsin',
+      log: `안녕하세요 e${'\u0301'.repeat(200)}`,
+      isPrivate: false,
+      createdAt: '2026-09-04T08:00:00.000Z',
+    } as DailyRecord;
+    const safeLongRecord = records(1)[0];
+    const sourceRecords = [clusterRecord, safeLongRecord];
+
+    const view = renderHook(
+      ({ value }) => useOnDeviceDailySummary(value),
+      { initialProps: { value: input(sourceRecords, { requestVersion: 1 }) } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(native.preflight).not.toHaveBeenCalled();
+    expect(native.refine).not.toHaveBeenCalled();
+    expect(view.result.current.canRequest).toBe(false);
+    expect(view.result.current.refined.size).toBe(0);
+  });
 });

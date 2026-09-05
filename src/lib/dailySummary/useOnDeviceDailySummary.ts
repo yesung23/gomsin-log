@@ -166,22 +166,29 @@ export function useOnDeviceDailySummary(
     attachment-only/짧은 본문은 즉시 그려진 기준선에 그대로 남고 네이티브 경계에는 가지
     않는다. 긴 문장 후보는 시간순 그대로 5개씩 나누며, 20개를 넘으면 일부만 고르지 않고
     모델 호출 전체를 생략한다.
+
+    원문 중 단 하나라도 120단위 경계에서 잘린 경우(grapheme cluster로 인해 잘린
+    경우 포함), 일부 레코드만 선별하여 다듬지 않고 그날 전체를 결정론적 요약으로 유지한다.
   */
+  const hasTruncatedSource = summaryLines.some((line) => line.sourceWasTruncated);
   const candidateLines = useMemo(
-    () => summaryLines.filter((line) => (
-      line.sourceText !== null
-      && line.sourceText.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
-    )),
+    () => (hasTruncatedSource
+      ? []
+      : summaryLines.filter((line) => (
+          line.sourceText !== null
+          && line.sourceText.length > MAX_DAILY_SUMMARY_EXCERPT_CHARS
+        ))),
     // payloadKey가 같으면 전체 원문까지 같으므로 진행 중인 요청의 배열 신원도 유지한다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payloadKey],
+    [hasTruncatedSource, payloadKey],
   );
   const candidateBatches = useMemo(
     () => buildAllOnDeviceBatches(candidateLines),
     [candidateLines],
   );
   const tooManyCandidates = summaryLines.length > MAX_DAILY_SUMMARY_MODEL_RECORDS;
-  const candidatePayloadReady = candidateLines.length > 0
+  const candidatePayloadReady = !hasTruncatedSource
+    && candidateLines.length > 0
     && !tooManyCandidates
     && documentVisible
     && candidateBatches !== null

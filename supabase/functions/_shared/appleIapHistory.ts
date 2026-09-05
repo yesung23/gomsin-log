@@ -4,6 +4,7 @@ import {
   GetTransactionHistoryVersion,
   Order,
 } from 'npm:@apple/app-store-server-library@3.1.0';
+import type { Buffer } from 'node:buffer';
 import { URLSearchParams } from 'node:url';
 import type { AppleIapReconcileTarget } from '../apple-iap-reconcile/handler.ts';
 

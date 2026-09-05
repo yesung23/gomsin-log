@@ -1,5 +1,14 @@
 # PR 93 first CI findings and configuration repair
 
+## Second runner delta
+
+- `44034d3` GitHub rerun passed signing/history scanner and unsigned iOS validation. Web jobs correctly failed because PG17 was absent; Deno dependency resolution succeeded but exposed two missing Buffer type imports.
+- Bounded worker added explicit official PGDG setup and PostgreSQL17 install to both web jobs; parent inspected exact package/version gate and parsed both YAML files successfully.
+- Two Apple IAP files receive type-only `node:buffer` imports; runtime request/auth/payment semantics unchanged. Parent `npm run check:edge` and scoped diff check PASS locally. Actual runner revalidation remains pending.
+- Parent froze these four files for separate commit while the worker continues non-overlapping browser fixtures. No whole-tree stage; no hosted changes.
+- Physical iPhone was rechecked and remains unavailable. Signed login/performance validation remains UNVERIFIED.
+- Book Studio owner reply is recorded as a proposed, not implemented, contract in `docs/operations/book-bookmark-handoff-2026-09-06.md`.
+
 - Base: `065592f48c582d5a87d75c1b8082fe435e7f20f1`, `codex/rc-v5-final-fixes`.
 - GitHub first runs: master `33980196939`, native `33980196942`. Not a release pass.
 - Web Vitest: 6177 passed, 3 failed, 3 skipped. Missing three Apple sources in check:edge; PostgreSQL 16 selected while two suites require 17.

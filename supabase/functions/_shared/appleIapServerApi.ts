@@ -5,6 +5,7 @@ import {
 } from 'npm:@apple/app-store-server-library@3.1.0';
 import type { RequestInit, Response } from 'npm:@types/node-fetch@2.6.13';
 import fetch from 'npm:node-fetch@2.7.0';
+import type { Buffer } from 'node:buffer';
 import { URLSearchParams } from 'node:url';
 
 type Env = (key: string) => string | undefined;

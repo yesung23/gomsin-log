@@ -13557,3 +13557,10 @@ PRODUCTION
 - REVIEW IMPACT: DELTA; initial scanner findings addressed and parent verified. No full-app approval implied.
 - NEXT: browser repair and CI, then merge before Home implementation. Hosted recovery/compatibility and beta gates remain open.
 - Report: [PR93 CI repair](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).
+# 2026-09-06 — PR93 second runner delta
+
+- Step: CI environment closure; base `44034d3`. Actual GitHub iOS and secret/signing checks PASS, but PG17 absent and Buffer type imports failed.
+- Changed: two web workflows install PG17 from official PGDG; two type-only IAP imports. Parent check:edge, YAML parse, scoped diff PASS. REVIEW IMPACT DELTA; runtime semantics unchanged; actual runner rerun pending.
+- Browser source/fixtures are a separate active workstream, not staged with these fixes. Production NOT APPLIED. iPhone unavailable.
+- Proposed Book bookmark contract records the separate owner's handoff without claiming persistence exists.
+- Evidence/remaining/rollback: [PR93 repair report](../control-tower/reports/codex/2026-09-06_pr93-ci-repair_codex.md).

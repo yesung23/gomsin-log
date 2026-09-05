@@ -82,6 +82,21 @@ export type RecordMutationResult =
   | { ok: true }
   | { ok: false; reason: RecordMutationReason; error: string };
 
+export interface RecordMediaMutationResult {
+  ok: boolean;
+  failedFiles: string[];
+  /** Exact `addFiles` positions whose upload definitely failed before a row commit. */
+  retryableFailedFileIndexes?: number[];
+  error?: string;
+  reason?: RecordMutationReason;
+}
+
+export interface RecordCreateWithMediaResult extends RecordMediaMutationResult {
+  queued?: boolean;
+  /** Present once the record row exists, including a durable queued intent. */
+  recordId?: string;
+}
+
 /**
  * A conversation-mark write and its immediate authoritative reconciliation.
  *
@@ -171,15 +186,7 @@ export interface StoreContextType {
       /** A post keeps its selected order by committing either every photo or none. */
       allOrNothingMedia?: boolean;
     },
-  ) => Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    queued?: boolean;
-    reason?: RecordMutationReason;
-    /** Present once the record row exists, including a durable queued intent. */
-    recordId?: string;
-  }>;
+  ) => Promise<RecordCreateWithMediaResult>;
   /**
    * Store a record for later without attempting the write.
    *
@@ -220,13 +227,7 @@ export interface StoreContextType {
       /** Keep the existing row unchanged unless every added file succeeds. */
       allOrNothing?: boolean;
     },
-  ) => Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    /** Preserves retryable transport causes for offline post replay. */
-    reason?: RecordMutationReason;
-  }>;
+  ) => Promise<RecordMediaMutationResult>;
   addEvent: (event: Omit<CoupleEvent, 'id' | 'createdAt'>) => Promise<boolean>;
   updateEvent: (
     id: string,

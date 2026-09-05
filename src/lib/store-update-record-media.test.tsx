@@ -154,7 +154,12 @@ vi.mock('@/lib/trips', () => ({
 const { StoreProvider } = await import('@/lib/store');
 const { useStore } = await import('@/lib/useStore');
 
-let lastResult: { ok: boolean; failedFiles: string[]; error?: string } | null = null;
+let lastResult: {
+  ok: boolean;
+  failedFiles: string[];
+  retryableFailedFileIndexes?: number[];
+  error?: string;
+} | null = null;
 
 const EXISTING_PATH = 'couple-1/rec-1/existing.png';
 
@@ -881,6 +886,7 @@ describe('updateRecordMedia', () => {
 
     expect(lastResult?.ok).toBe(true);
     expect(lastResult?.failedFiles).toEqual(['bad.png']);
+    expect(lastResult?.retryableFailedFileIndexes).toEqual([1]);
     const begins = beginRecordMediaMutation.mock.calls.map(([request]) => request as {
       baseContentRevision: number;
       existingPaths: string[];
@@ -920,6 +926,7 @@ describe('updateRecordMedia', () => {
       failedFiles: ['unfinished.png'],
       reason: 'forbidden',
     });
+    expect(lastResult).not.toHaveProperty('retryableFailedFileIndexes');
     expect(beginRecordMediaMutation).toHaveBeenCalledTimes(2);
     expect(uploadRecordMedia.mock.calls.map(([file]) => (file as File).name))
       .toEqual(['committed.png']);
@@ -1065,6 +1072,7 @@ describe('updateRecordMedia', () => {
       failedFiles: ['missing.png'],
       reason: 'server',
     });
+    expect(lastResult).not.toHaveProperty('retryableFailedFileIndexes');
     expect(callOrder).toEqual([
       'begin:1:1',
       'upload:missing.png',
@@ -1096,6 +1104,7 @@ describe('updateRecordMedia', () => {
     expect(lastResult).toEqual({
       ok: true,
       failedFiles: ['good.png', 'bad.png'],
+      retryableFailedFileIndexes: [0, 1],
       error: '파일을 올리지 못했어요.',
       reason: 'unknown',
     });

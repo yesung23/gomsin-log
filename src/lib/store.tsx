@@ -139,6 +139,8 @@ import { isValidUsername, normalizeUsername, PROFILE_CAPTION_MAX_LENGTH } from '
 import type {
   RecordMutationReason,
   RecordMutationResult,
+  RecordCreateWithMediaResult,
+  RecordMediaMutationResult,
   SharedSyncStatus,
   TalkAboutSyncStatus,
   TalkAboutMutationResult,
@@ -3500,19 +3502,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       mediaObjectIds?: string[];
       deletionLease?: AccountDeletionLockLease;
     },
-  ): Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    queued?: boolean;
-    recordId?: string;
-    /**
-     * The classified cause, for the outbox to decide with. Absent on success and on
-     * the stale/no-workspace paths, which a retry cannot change either way, so the
-     * caller treats a missing reason as definitive.
-     */
-    reason?: RecordMutationReason;
-  }> => {
+  ): Promise<RecordCreateWithMediaResult> => {
     const recordId = options?.recordId ?? crypto.randomUUID();
     const allowQueue = options?.allowQueue !== false;
     if (!validStableMediaObjectIds(files, options?.mediaObjectIds)) {
@@ -3679,14 +3669,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const mediaObjectIds = options?.mediaObjectIds ?? files.map(() => crypto.randomUUID());
     const uploads = files.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
+    const retryableFailedFileIndexes: number[] = [];
     let mediaFailureReason: RecordMutationReason | undefined;
     let mediaFailureMessage: string | undefined;
     let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
     let terminalFailedFiles: string[] = [];
     let finalRecord = savedRecord;
 
-    const rememberUploadFailure = (result: Extract<MediaRevisionCommitResult, { ok: false }>) => {
+    const rememberUploadFailure = (
+      result: Extract<MediaRevisionCommitResult, { ok: false }>,
+      inputIndexes: number[],
+    ) => {
       failedFiles.push(...result.failedFiles);
+      retryableFailedFileIndexes.push(...inputIndexes);
       mediaFailureReason ??= result.reason;
       mediaFailureMessage ??= result.error;
       console.error('[gomsinlog] Attachment upload failed.');
@@ -3706,7 +3701,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         uploads,
       );
       if (batch.ok) finalRecord = batch.record;
-      else if (batch.phase === 'upload') rememberUploadFailure(batch);
+      else if (batch.phase === 'upload') {
+        rememberUploadFailure(batch, files.map((_, index) => index));
+      }
       else {
         terminalFailure = batch;
         terminalFailedFiles = files.map((file) => file.name);
@@ -3725,7 +3722,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (addition.ok) {
           finalRecord = addition.record;
         } else if (addition.phase === 'upload') {
-          rememberUploadFailure(addition);
+          rememberUploadFailure(addition, [index]);
         } else {
           terminalFailure = addition;
           terminalFailedFiles = [
@@ -3765,6 +3762,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return {
         ok: true,
         failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        ...(retryableFailedFileIndexes.length > 0
+          ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+          : {}),
         error: terminalFailure.error,
         reason: terminalFailure.reason,
         recordId,
@@ -3778,6 +3778,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               ? files.map((file) => file.name)
               : failedFiles,
           )),
+          ...(retryableFailedFileIndexes.length > 0
+            ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+            : {}),
           ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
           ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
           recordId,
@@ -4627,12 +4630,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       mediaObjectIds?: string[];
     },
     internal?: { deletionLease?: AccountDeletionLockLease },
-  ): Promise<{
-    ok: boolean;
-    failedFiles: string[];
-    error?: string;
-    reason?: RecordMutationReason;
-  }> => {
+  ): Promise<RecordMediaMutationResult> => {
     const addFiles = changes.addFiles || [];
     const removePaths = changes.removePaths || [];
     const allFileNames = addFiles.map((file) => file.name);
@@ -4698,7 +4696,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       reason: 'stale' as const,
     };
 
-    return withOrdinaryServerMutation(
+    return withOrdinaryServerMutation<RecordMediaMutationResult>(
       workspace,
       () => isCurrentLinkedCouple(workspace),
       internal?.deletionLease,
@@ -4716,6 +4714,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const mediaObjectIds = changes.mediaObjectIds ?? addFiles.map(() => crypto.randomUUID());
     const uploads = addFiles.map((file, index) => ({ file, objectId: mediaObjectIds[index] }));
     const failedFiles: string[] = [];
+    const retryableFailedFileIndexes: number[] = [];
     let mediaFailureReason: RecordMutationReason | undefined;
     let mediaFailureMessage: string | undefined;
     let terminalFailure: Extract<MediaRevisionCommitResult, { ok: false }> | null = null;
@@ -4727,8 +4726,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       workingRecord = result.record;
       committedAnyRevision = true;
     };
-    const rememberUploadFailure = (result: Extract<MediaRevisionCommitResult, { ok: false }>) => {
+    const rememberUploadFailure = (
+      result: Extract<MediaRevisionCommitResult, { ok: false }>,
+      inputIndexes: number[],
+    ) => {
       failedFiles.push(...result.failedFiles);
+      retryableFailedFileIndexes.push(...inputIndexes);
       mediaFailureReason ??= result.reason;
       mediaFailureMessage ??= result.error;
       console.error('[gomsinlog] Attachment upload failed.');
@@ -4746,7 +4749,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       } else if (batch.phase === 'upload') {
         // The row was never updated. Abandon owns cleanup of every reservation,
         // including uploads that succeeded earlier in this batch.
-        rememberUploadFailure(batch);
+        rememberUploadFailure(batch, addFiles.map((_, index) => index));
       } else {
         terminalFailure = batch;
         terminalFailedFiles = allFileNames;
@@ -4780,7 +4783,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           if (addition.ok) {
             adoptCommit(addition);
           } else if (addition.phase === 'upload') {
-            rememberUploadFailure(addition);
+            rememberUploadFailure(addition, [index]);
           } else {
             terminalFailure = addition;
             terminalFailedFiles = [
@@ -4825,6 +4828,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return {
         ok: committedAnyRevision,
         failedFiles: Array.from(new Set([...failedFiles, ...terminalFailedFiles])),
+        ...(retryableFailedFileIndexes.length > 0
+          ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+          : {}),
         error: terminalFailure.error,
         reason: terminalFailure.reason,
       };
@@ -4834,6 +4840,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       failedFiles: Array.from(new Set(
         changes.allOrNothing && failedFiles.length > 0 ? allFileNames : failedFiles,
       )),
+      ...(retryableFailedFileIndexes.length > 0
+        ? { retryableFailedFileIndexes: Array.from(new Set(retryableFailedFileIndexes)).sort((a, b) => a - b) }
+        : {}),
       ...(failedFiles.length > 0 ? { error: mediaFailureMessage } : {}),
       ...(failedFiles.length > 0 ? { reason: mediaFailureReason ?? 'unknown' as const } : {}),
     };

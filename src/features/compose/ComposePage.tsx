@@ -14,6 +14,28 @@ import { buildEmotionFlow } from '@/lib/composeEmotionFlow';
 import { localToday } from '@/lib/cycle';
 import type { BasicEmotion, EmotionFlowItem } from '@/types';
 
+type MediaHold = {
+  recordId?: string;
+  retryFiles: File[];
+};
+
+/**
+ * A basename is not file identity. Only accept the store's exact, validated
+ * input positions so a response-loss result can never upload an already
+ * committed photo a second time.
+ */
+function pickExactRetryFiles(inputFiles: File[], inputIndexes?: number[]): File[] {
+  if (!inputIndexes || inputIndexes.length === 0) return [];
+  const uniqueIndexes = new Set(inputIndexes);
+  if (
+    uniqueIndexes.size !== inputIndexes.length
+    || inputIndexes.some((index) => !Number.isInteger(index) || index < 0 || index >= inputFiles.length)
+  ) return [];
+  return [...uniqueIndexes]
+    .sort((left, right) => left - right)
+    .map((index) => inputFiles[index]);
+}
+
 /**
  * 남기기 — 인스타의 만들기 흐름과 같은 자리, 뒤집힌 순서.
  *
@@ -43,7 +65,12 @@ import type { BasicEmotion, EmotionFlowItem } from '@/types';
 
 export function ComposePage() {
   const navigate = useNavigate();
-  const { state, addRecordWithMedia, queueRecordForLater } = useStore();
+  const {
+    state,
+    addRecordWithMedia,
+    updateRecordMedia,
+    queueRecordForLater,
+  } = useStore();
 
   const userId = state.authenticatedUser?.id || state.profile.id || '';
   const restored = useRef(readComposerDraft(userId)).current;
@@ -84,7 +111,7 @@ export function ComposePage() {
   const [files, setFiles] = useState<File[]>([]);
   const [photoPreviews, setPhotoPreviews] = useState<Array<{ file: File; url: string }>>([]);
   const [saving, setSaving] = useState(false);
-  const [mediaHold, setMediaHold] = useState<{ recordId?: string } | null>(null);
+  const [mediaHold, setMediaHold] = useState<MediaHold | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const saveInFlightRef = useRef(false);
   const mountedRef = useRef(false);
@@ -187,6 +214,19 @@ export function ComposePage() {
   const buildFlow = (now: Date): EmotionFlowItem[] =>
     buildEmotionFlow({ mood, now, isPrivate: effectivePrivate });
 
+  const finishAndReturnHome = (message: string) => {
+    clearComposerDraft(userId);
+    review.reset();
+    setMood([]);
+    setFiles([]);
+    setLog('');
+    setMediaHold(null);
+    seededFrom.current = '';
+    moodTouched.current = false;
+    toast.success(message);
+    navigate('/home');
+  };
+
   const runSave = async () => {
     if (saving || mediaHold || !hasContent) return;
 
@@ -222,16 +262,6 @@ export function ComposePage() {
       emotionUpdatedAt: flow.length > 0 ? now.toISOString() : null,
     };
 
-    const done = (message: string) => {
-      clearComposerDraft(userId);
-      review.reset();
-      setMood([]);
-      seededFrom.current = '';
-      moodTouched.current = false;
-      toast.success(message);
-      navigate('/home');
-    };
-
     /*
       오프라인은 OS 가 믿을 만한 유일한 연결 사실이므로 쓰기를 시도하지 않고 **저장한다.**
 
@@ -251,7 +281,7 @@ export function ComposePage() {
         toast.error(queued.error || '지금은 저장할 수 없어요.');
         return;
       }
-      done('오프라인이라 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      finishAndReturnHome('오프라인이라 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
       return;
     }
 
@@ -265,7 +295,7 @@ export function ComposePage() {
     if (!requestIsCurrent()) return;
 
     if (result.queued) {
-      done('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
+      finishAndReturnHome('지금은 보내지 못해 저장해 뒀어요. 연결되면 자동으로 보낼게요.');
       return;
     }
 
@@ -305,12 +335,14 @@ export function ComposePage() {
 
     /*
       `failedFiles`에는 업로드 실패와 attachment-row 응답 유실이 함께 들어올 수 있다.
-      따라서 파일명으로 성공/실패를 맞추거나 자동 재업로드하면 이미 commit된 사진을
-      중복 저장할 수 있다. 기록만 완료된 상태로 고정하고, 사용자가 정확한 원본 기록을
-      확인하거나 화면을 떠나는 것만 허용한다.
+      이름은 사람에게 보여 줄 설명일 뿐 파일 identity가 아니다. Store가 row commit 전의
+      확정 실패로 표시한 입력 위치만 원본 File과 다시 묶고, 나머지는 자동 재시도하지 않는다.
     */
     if (result.failedFiles.length > 0) {
-      setMediaHold({ recordId: result.recordId });
+      const retryFiles = result.recordId
+        ? pickExactRetryFiles(files, result.retryableFailedFileIndexes)
+        : [];
+      setMediaHold({ recordId: result.recordId, retryFiles });
       setFiles([]);
       setLog('');
       clearComposerDraft(userId);
@@ -321,7 +353,7 @@ export function ComposePage() {
       return;
     }
 
-    done('남겼어요.');
+    finishAndReturnHome('남겼어요.');
   };
 
   async function save() {
@@ -331,6 +363,60 @@ export function ComposePage() {
     saveInFlightRef.current = true;
     try {
       await runSave();
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }
+
+  const runHeldMediaRetry = async () => {
+    const held = mediaHold;
+    if (saving || !held?.recordId || held.retryFiles.length === 0) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      toast.warning('연결되면 사진을 다시 올려 주세요.');
+      return;
+    }
+
+    const requestIdentity = {
+      authenticatedUserId: state.authenticatedUser?.id || '',
+      coupleId: state.profile.couple.coupleId || '',
+    };
+    const requestIsCurrent = () => (
+      mountedRef.current
+      && currentIdentityRef.current.authenticatedUserId === requestIdentity.authenticatedUserId
+      && currentIdentityRef.current.coupleId === requestIdentity.coupleId
+    );
+
+    setSaving(true);
+    let result: Awaited<ReturnType<typeof updateRecordMedia>>;
+    try {
+      result = await updateRecordMedia(held.recordId, { addFiles: held.retryFiles });
+    } finally {
+      if (requestIsCurrent()) setSaving(false);
+    }
+    if (!requestIsCurrent()) return;
+
+    if (result.ok && result.failedFiles.length === 0) {
+      finishAndReturnHome('사진도 남겼어요.');
+      return;
+    }
+
+    const retryFiles = pickExactRetryFiles(
+      held.retryFiles,
+      result.retryableFailedFileIndexes,
+    );
+    setMediaHold({ recordId: held.recordId, retryFiles });
+    if (retryFiles.length > 0) {
+      toast.warning('올리지 못한 사진만 다시 시도할 수 있어요.');
+    } else {
+      toast.warning(result.error || '사진 저장 여부를 확인하지 못했어요.');
+    }
+  };
+
+  async function retryHeldMedia() {
+    if (saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
+    try {
+      await runHeldMediaRetry();
     } finally {
       saveInFlightRef.current = false;
     }
@@ -394,20 +480,36 @@ export function ComposePage() {
         {mediaHold ? (
           <div role="status" aria-live="polite" className="ink-box mb-4 p-4">
             <p className="text-body font-semibold" style={{ color: 'var(--ink)' }}>
-              기록은 저장했어요. 사진 일부는 저장 여부를 확인하지 못했어요.
+              기록은 저장했어요.
             </p>
             <p className="pt-1 text-caption" style={{ color: 'var(--ink-soft)' }}>
-              이 화면을 나가면 나중에 사진을 다시 선택해 주세요.
+              {mediaHold.retryFiles.length > 0
+                ? `확실히 실패한 사진 ${mediaHold.retryFiles.length}장만 다시 올릴 수 있어요.`
+                : '사진 일부는 저장 여부를 확인하지 못했어요. 나중에 사진을 다시 선택해 주세요.'}
             </p>
-            <button
-              type="button"
-              onClick={() => navigate(mediaHold.recordId
-                ? `/record?record=${encodeURIComponent(mediaHold.recordId)}`
-                : '/record')}
-              className="ink-chip mt-3 px-3.5 py-2"
-            >
-              <span className="text-label font-semibold">저장된 기록 보기</span>
-            </button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {mediaHold.retryFiles.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => void retryHeldMedia()}
+                  disabled={saving}
+                  className="ink-fill min-h-11 px-3.5 py-2"
+                >
+                  <span className="text-label font-semibold">
+                    {saving ? '사진 올리는 중' : '사진 다시 올리기'}
+                  </span>
+                </button>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => navigate(mediaHold.recordId
+                  ? `/record?record=${encodeURIComponent(mediaHold.recordId)}`
+                  : '/record')}
+                className="ink-chip min-h-11 px-3.5 py-2"
+              >
+                <span className="text-label font-semibold">저장된 기록 보기</span>
+              </button>
+            </div>
           </div>
         ) : null}
 

@@ -12,6 +12,7 @@ import {
 type MediaResult = {
   ok: boolean;
   failedFiles: string[];
+  retryableFailedFileIndexes?: number[];
   recordId?: string;
   error?: string;
   queued?: boolean;
@@ -24,7 +25,12 @@ const addRecordWithMedia = vi.fn(
     recordId: 'record-default',
   }),
 );
-const updateRecordMedia = vi.fn(async () => ({ ok: true, failedFiles: [] as string[] }));
+const updateRecordMedia = vi.fn(
+  async (_recordId: string, _changes: { addFiles: File[] }): Promise<MediaResult> => ({
+    ok: true,
+    failedFiles: [],
+  }),
+);
 const queueRecordForLater = vi.fn(async () => ({ queued: true }));
 const recordProductEvent = vi.fn(async () => undefined);
 const resetEmotionReview = vi.fn();
@@ -169,7 +175,8 @@ describe('ComposePage partial-media containment', () => {
       failedFiles: [],
       recordId: 'record-default',
     });
-    updateRecordMedia.mockClear();
+    updateRecordMedia.mockReset();
+    updateRecordMedia.mockResolvedValue({ ok: true, failedFiles: [] });
     queueRecordForLater.mockClear();
     recordProductEvent.mockClear();
     resetEmotionReview.mockClear();
@@ -355,22 +362,128 @@ describe('ComposePage partial-media containment', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('does not reconcile or retry two selected files that share a basename', async () => {
+  it('retries only the exact failed file on the same saved record even when basenames match', async () => {
     const first = new File(['first'], 'same-name.jpg', { type: 'image/jpeg' });
     const second = new File(['second'], 'same-name.jpg', { type: 'image/jpeg' });
     addRecordWithMedia.mockResolvedValueOnce({
       ok: true,
       failedFiles: ['same-name.jpg'],
+      retryableFailedFileIndexes: [1],
       recordId: 'record-1',
     });
+    updateRecordMedia.mockResolvedValueOnce({ ok: true, failedFiles: [] });
 
-    await submitRecord([first, second]);
+    const { user } = await submitRecord([first, second]);
     await screen.findByRole('status');
+    await user.click(screen.getByRole('button', { name: '사진 다시 올리기' }));
 
     expect(addRecordWithMedia).toHaveBeenCalledTimes(1);
     expect(addRecordWithMedia.mock.calls[0]?.[1]).toEqual([first, second]);
-    expect(updateRecordMedia).not.toHaveBeenCalled();
+    expect(updateRecordMedia).toHaveBeenCalledWith('record-1', { addFiles: [second] });
     expect(queueRecordForLater).not.toHaveBeenCalled();
-    expect(screen.queryByRole('img', { name: /선택한 사진/ })).not.toBeInTheDocument();
+    expect(navigate).toHaveBeenCalledWith('/home');
+  });
+
+  it('keeps the exact failed file available when a same-record retry fails again', async () => {
+    const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['photo.jpg'],
+      retryableFailedFileIndexes: [0],
+      recordId: 'record-1',
+    });
+    updateRecordMedia
+      .mockResolvedValueOnce({
+        ok: true,
+        failedFiles: ['photo.jpg'],
+        retryableFailedFileIndexes: [0],
+      })
+      .mockResolvedValueOnce({ ok: true, failedFiles: [] });
+
+    const { user } = await submitRecord([photo]);
+    const retry = await screen.findByRole('button', { name: '사진 다시 올리기' });
+    await user.click(retry);
+    expect(updateRecordMedia).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '사진 다시 올리기' })).toBeEnabled();
+    expect(navigate).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: '사진 다시 올리기' }));
+    expect(updateRecordMedia).toHaveBeenCalledTimes(2);
+    expect(navigate).toHaveBeenCalledWith('/home');
+  });
+
+  it('single-flights rapid same-record retry taps', async () => {
+    const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+    const pending = deferred<MediaResult>();
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['photo.jpg'],
+      retryableFailedFileIndexes: [0],
+      recordId: 'record-1',
+    });
+    updateRecordMedia.mockImplementationOnce(() => pending.promise);
+
+    await submitRecord([photo]);
+    const retry = await screen.findByRole('button', { name: '사진 다시 올리기' });
+    fireEvent.click(retry);
+    fireEvent.click(retry);
+
+    expect(updateRecordMedia).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve({ ok: true, failedFiles: [] });
+      await pending.promise;
+    });
+    expect(navigate).toHaveBeenCalledWith('/home');
+  });
+
+  it('keeps the exact retry available while offline without issuing a mutation', async () => {
+    const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['photo.jpg'],
+      retryableFailedFileIndexes: [0],
+      recordId: 'record-1',
+    });
+
+    const { user } = await submitRecord([photo]);
+    setOnline(false);
+    await user.click(await screen.findByRole('button', { name: '사진 다시 올리기' }));
+
+    expect(updateRecordMedia).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '사진 다시 올리기' })).toBeEnabled();
+    expect(toastWarning).toHaveBeenCalledWith('연결되면 사진을 다시 올려 주세요.');
+  });
+
+  it('ignores a late same-record retry result after the active couple changes', async () => {
+    const photo = new File(['photo'], 'photo.jpg', { type: 'image/jpeg' });
+    const pending = deferred<MediaResult>();
+    addRecordWithMedia.mockResolvedValueOnce({
+      ok: true,
+      failedFiles: ['photo.jpg'],
+      retryableFailedFileIndexes: [0],
+      recordId: 'record-1',
+    });
+    updateRecordMedia.mockImplementationOnce(() => pending.promise);
+
+    const { user, view } = await submitRecord([photo]);
+    await user.click(await screen.findByRole('button', { name: '사진 다시 올리기' }));
+    await waitFor(() => expect(updateRecordMedia).toHaveBeenCalledTimes(1));
+    state.profile.couple.coupleId = 'couple-2';
+    view.rerender(composer());
+
+    await act(async () => {
+      pending.resolve({ ok: true, failedFiles: [] });
+      await pending.promise;
+    });
+
+    expect(navigate).not.toHaveBeenCalled();
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it('does not offer an upload retry when the result lacks exact safe indexes', async () => {
+    await reachHeldState('record-1');
+
+    expect(screen.queryByRole('button', { name: '사진 다시 올리기' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '저장된 기록 보기' })).toBeEnabled();
   });
 });

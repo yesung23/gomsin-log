@@ -338,6 +338,7 @@ const STORE_KEY = 'gomsinlog.state.v2';
 let lastMediaResult: {
   ok: boolean;
   failedFiles: string[];
+  retryableFailedFileIndexes?: number[];
   error?: string;
   reason?: string;
   recordId?: string;
@@ -2944,6 +2945,7 @@ describe('StoreProvider auth lifecycle', () => {
     // Text survived, the failure is surfaced to the caller instead of silently swallowed.
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual(['broken.png']);
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([0]);
     expect(screen.getByTestId('attachments')).toHaveTextContent('');
   });
 
@@ -3001,6 +3003,7 @@ describe('StoreProvider auth lifecycle', () => {
     await waitFor(() => expect(lastMediaResult).not.toBeNull());
 
     expect(lastMediaResult).toMatchObject({ ok: true, failedFiles: ['broken.png'] });
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([1]);
     expect(screen.getByTestId('attachments')).toHaveTextContent('good.png');
     expect(beginRecordMediaMutation.mock.calls.map(([request]) => (
       (request as { baseContentRevision: number }).baseContentRevision
@@ -3057,6 +3060,7 @@ describe('StoreProvider auth lifecycle', () => {
       failedFiles: ['unfinished.png'],
       reason: 'forbidden',
     });
+    expect(lastMediaResult).not.toHaveProperty('retryableFailedFileIndexes');
     expect(uploadRecordMedia.mock.calls.map(([file]) => (file as File).name))
       .toEqual(['committed.png']);
     expect(saveRecordToDB).toHaveBeenCalledTimes(2);
@@ -3172,6 +3176,7 @@ describe('StoreProvider auth lifecycle', () => {
 
     expect(lastMediaResult?.ok).toBe(true);
     expect(lastMediaResult?.failedFiles).toEqual(['good.png', 'broken.png']);
+    expect(lastMediaResult?.retryableFailedFileIndexes).toEqual([0, 1]);
     expect(lastMediaResult?.recordId).toBeTruthy();
     expect(beginRecordMediaMutation).toHaveBeenCalledTimes(1);
     expect(abandonRecordMediaMutation).toHaveBeenCalledTimes(1);

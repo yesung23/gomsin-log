@@ -176,6 +176,8 @@ describe('C5 - dependency posture is verified, not assumed', () => {
     // violation, and a latent break because 1.x is a single CommonJS export
     // while 5.x uses named exports.
     expect(pkg.overrides).toEqual({
+      // Keep Capacitor's plist parser on the audited xmldom patch line.
+      '@xmldom/xmldom': '0.9.12',
       // GHSA-5p4m-2wfm-xmqj / CVE-2026-59870 is fixed in 4.3.1. eslint
       // reaches it transitively, so keep the safe patch explicit until eslint
       // itself requires that line.
@@ -195,6 +197,15 @@ describe('C5 - dependency posture is verified, not assumed', () => {
       'minimatch@3': { 'brace-expansion': '1.1.18' },
     });
     expect(pkg.overrides?.['brace-expansion']).toBeUndefined();
+  });
+
+  it('resolves every xmldom consumer to the approved patched version', () => {
+    const copies = Object.entries(lock.packages)
+      .filter(([path]) => path.endsWith('node_modules/@xmldom/xmldom'))
+      .map(([path, entry]) => `${path}@${entry.version}`);
+
+    expect(copies, `xmldom copies: ${copies.join(', ')}`).toHaveLength(1);
+    expect(copies[0]).toMatch(/@0\.9\.12$/);
   });
 
   it('keeps the nanoid override safe by having only one consumer to satisfy', () => {

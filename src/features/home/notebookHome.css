@@ -66,12 +66,14 @@
 }
 
 .notebook-home__story-time {
-  flex: 0 0 60px;
+  flex: 0 0 64px;
   min-height: 76px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  padding: 2px 4px;
+  border-radius: 18px;
   color: var(--ink-soft);
   font-variant-numeric: tabular-nums;
 }
@@ -80,18 +82,16 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: 52px;
+  height: 52px;
   border-radius: 50%;
   overflow: hidden;
-  background: var(--notebook-home-leaf);
-  border: 2px solid var(--notebook-home-leaf);
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 18%, transparent);
+  background: color-mix(in srgb, var(--notebook-home-leaf) 84%, var(--coral) 16%);
+  border: 1px solid color-mix(in srgb, var(--ink-faint) 52%, transparent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 12%, transparent);
 }
 
 .notebook-home__story-photo img {
-  position: absolute;
-  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;

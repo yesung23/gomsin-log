@@ -7,8 +7,7 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
 import type { SharedSyncStatus } from '@/lib/storeContext';
 import type { DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
-import { useMediaAttachment } from '@/lib/useMediaAttachment';
-import { useState } from 'react';
+import { useProfileAvatar } from '@/lib/useProfileAvatar';
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -30,10 +29,9 @@ let online = true;
 let mediaShouldThrow = false;
 let coupleId = 'couple-1';
 let viewerId = 'me';
+let avatarDataUrl: string | null = null;
 
-vi.mock('@/lib/useMediaAttachment', () => ({ useMediaAttachment: vi.fn(() => ({
-  url: undefined, refreshing: false, reportLoadFailure: vi.fn(),
-})) }));
+vi.mock('@/lib/useProfileAvatar', () => ({ useProfileAvatar: vi.fn(() => ({ dataUrl: avatarDataUrl })) }));
 
 vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
@@ -114,9 +112,7 @@ beforeEach(() => {
   mediaShouldThrow = false;
   coupleId = 'couple-1';
   viewerId = 'me';
-  vi.mocked(useMediaAttachment).mockReset().mockReturnValue({
-    url: undefined, refreshing: false, reportLoadFailure: vi.fn(),
-  });
+  avatarDataUrl = null;
   markTalkAbout.mockResolvedValue({ ok: true });
   unmarkTalkAbout.mockResolvedValue({ ok: true });
   records = [{
@@ -319,29 +315,31 @@ describe('Home 출시 상태 표현', () => {
 });
 
 describe('홈의 상대방 전용 7일 피드', () => {
-  it('시간 사진은 기존 thumbnail 권위·오류 복구를 사용하며 viewer/couple 변경 시 새로 마운트한다', () => {
-    const reportLoadFailure = vi.fn();
-    vi.mocked(useMediaAttachment).mockImplementation(function useThumbnail(_attachment, currentCouple) {
-      const [url] = useState(() => `https://qa.invalid/${currentCouple}/${viewerId}.jpg`);
-      return { url, refreshing: false, reportLoadFailure };
-    });
-    const attachment = { type: 'photo' as const, name: 'QA', urlUnavailable: 'permission' as const };
-    records = [{ ...records[0], attachments: [attachment] }];
+  it('시간 원은 현재 연결된 상대 한 명의 프로필 사진만 재사용하고 새 사진으로 복구한다', () => {
+    avatarDataUrl = 'https://qa.invalid/partner-first.jpg';
+    records = [
+      { ...records[0], id: 'with-photo', attachments: [{ type: 'photo', name: 'QA' }] },
+      { ...records[0], id: 'text-only', time: '02:34:00', attachments: [] },
+    ];
     const rendered = view();
-    const image = () => screen.getByRole('region', { name: '스토리' }).querySelector('img')!;
-    expect(useMediaAttachment).toHaveBeenCalledWith(attachment, 'couple-1', 'record-1', 'thumbnail');
-    expect(image()).toHaveAttribute('loading', 'lazy');
-    fireEvent.error(image());
-    expect(reportLoadFailure).toHaveBeenCalledTimes(1);
-    coupleId = 'couple-2';
+    const rail = screen.getByRole('region', { name: '스토리' });
+    const circles = () => rail.querySelectorAll('.notebook-home__story-photo img');
+    expect(circles()).toHaveLength(2);
+    expect([...circles()].every((image) => image.getAttribute('src') === avatarDataUrl)).toBe(true);
+    expect(vi.mocked(useProfileAvatar).mock.calls.filter(([ownerId]) => ownerId === 'partner')).toHaveLength(2);
+    expect(rail.querySelector('[data-testid="home-story-avatar-fallback"]')).toBeNull();
+
+    fireEvent.error(circles()[0]);
+    expect(circles()).toHaveLength(1);
+    expect(rail.querySelector('[data-testid="home-story-avatar-fallback"]')).not.toBeNull();
+    avatarDataUrl = 'https://qa.invalid/partner-replacement.jpg';
     rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
-    expect(image()).toHaveAttribute('src', 'https://qa.invalid/couple-2/me.jpg');
-    viewerId = 'next-viewer';
-    rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
-    expect(image()).toHaveAttribute('src', 'https://qa.invalid/couple-2/next-viewer.jpg');
+    expect(circles()).toHaveLength(2);
+    expect([...circles()].every((image) => image.getAttribute('src') === avatarDataUrl)).toBe(true);
+
     sharedSyncStatus = 'unavailable';
     rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
-    expect(screen.getByRole('region', { name: '스토리' }).querySelector('img')).toBeNull();
+    expect(rail.querySelectorAll('.notebook-home__story-photo img')).toHaveLength(0);
   });
 
   it('시간 레일은 날짜·시간·ID 오름차순이며 각 원본으로 연결된다', () => {

@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext } from '@playwright/test';
 import sharp from 'sharp';
 import { installMockBackend, type Scenario } from './fixtures/mockBackend';
-import { CREATOR } from './scenarios';
+import { CREATOR, record } from './scenarios';
 
 const A = '10000000-0000-4000-8000-000000000001';
 const B = '10000000-0000-4000-8000-000000000002';
@@ -12,7 +12,10 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   let refuseWrite = false;
   const setup = async (context: BrowserContext, id: string, partner: string) => {
     const scenario: Scenario = { ...CREATOR, userId: id, partnerUserId: partner,
-      displayName: id === A ? '봄' : '여름', partnerName: id === A ? '여름' : '봄', records: [] };
+      displayName: id === A ? '봄' : '여름', partnerName: id === A ? '여름' : '봄', records: [
+        record({ id: `owner-${partner}-morning`, user_id: partner, record_time: '09:00' }),
+        record({ id: `owner-${partner}-evening`, user_id: partner, record_time: '18:00' }),
+      ] };
     await installMockBackend(context, scenario, { theme: id === B ? 'dark' : 'light' });
     await context.route('**/rest/v1/rpc/*profile_avatar', async (route) => {
       const params = route.request().postDataJSON();
@@ -50,6 +53,10 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   await partner.evaluate(() => window.dispatchEvent(new Event('focus')));
   const partnerPhoto = partner.getByRole('button', { name: '봄의 스토리' }).locator('img');
   await expect(partnerPhoto).toHaveAttribute('src', `data:image/jpeg;base64,${saved.jpeg_base64}`);
+  const partnerTimePhotos = partner.getByRole('region', { name: '스토리', exact: true }).getByRole('link').locator('img');
+  await expect(partnerTimePhotos).toHaveCount(2);
+  await expect.poll(() => partnerTimePhotos.evaluateAll((images) => images.map((image) => image.getAttribute('src'))))
+    .toEqual([`data:image/jpeg;base64,${saved.jpeg_base64}`, `data:image/jpeg;base64,${saved.jpeg_base64}`]);
   await partner.screenshot({ path: testInfo.outputPath('partner-story-photo.png'), fullPage: true });
   expect(await owner.evaluate(() => Object.entries(localStorage).some(([key, value]) => key.startsWith('gomsinlog.avatar.') || value.includes('data:image/')))).toBe(false);
 
@@ -68,6 +75,8 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   expect(replaced.jpeg_base64).not.toBe(saved.jpeg_base64);
   await partner.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(partnerPhoto).toHaveAttribute('src', `data:image/jpeg;base64,${replaced.jpeg_base64}`);
+  await expect.poll(() => partnerTimePhotos.evaluateAll((images) => images.map((image) => image.getAttribute('src'))))
+    .toEqual([`data:image/jpeg;base64,${replaced.jpeg_base64}`, `data:image/jpeg;base64,${replaced.jpeg_base64}`]);
   // Sonner pauses dismissal while the pointer hovers the top toast stack.
   // Move away and let feedback finish before interacting with the covered avatar.
   await owner.mouse.move(350, 550);
@@ -78,6 +87,7 @@ test('My photo appears in both story rails, can be replaced and removed, and is 
   await expect(owner.getByText('기본 그림으로 돌아갔어요.', { exact: true })).toBeVisible();
   await partner.evaluate(() => window.dispatchEvent(new Event('focus')));
   await expect(partnerPhoto).toHaveCount(0);
+  await expect(partnerTimePhotos).toHaveCount(0);
   expect(photos.get(A)?.jpeg_base64).toBeNull();
   expect(photos.get(A)?.version).not.toBe(saved.version);
   await a.close(); await b.close();

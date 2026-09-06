@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bookmark as BookmarkIcon, ChevronRight, FileText, Phone, Plus } from 'lucide-react';
+import { Bookmark as BookmarkIcon, ChevronRight, Phone, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
@@ -21,6 +21,7 @@ import { parseLocalDate, toLocalDateString } from '@/lib/utils';
 import { Bookmark, InkCircle, PenFace } from '@/components/paper';
 import { BrandMark } from '@/components/BrandMark';
 import { ProfileAvatar } from '@/components/ProfileAvatar';
+import { useProfileAvatar } from '@/lib/useProfileAvatar';
 import { CoupleStatusBanner } from '@/components/CoupleStatusBanner';
 import { usePartnerCareNote } from '@/lib/usePartnerCareNote';
 import { selectOnThisDay, onThisDayLabel } from '@/lib/onThisDay';
@@ -35,7 +36,6 @@ import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus
 import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 import { NotebookFeed, NotebookReadingModeToggle } from '@/features/home/NotebookFeed';
 import { useHomeReadingMode } from '@/features/home/useHomeReadingMode';
-import { useMediaAttachment } from '@/lib/useMediaAttachment';
 import './notebookHome.css';
 
 const loadRecordMediaGallery = () =>
@@ -467,7 +467,7 @@ export function PaperHome() {
             records={feed}
             today={todayStr}
             partnerName={partnerName}
-            coupleId={profile.couple.coupleId}
+            activePartnerUserId={activePartnerUserId}
           />
         ) : null}
       </section>
@@ -592,16 +592,18 @@ export function PaperHome() {
   );
 }
 
-function HomeStoryTimes({ records, today, partnerName, coupleId }: {
+function HomeStoryTimes({ records, today, partnerName, activePartnerUserId }: {
   records: DailyRecord[];
   today: string;
   partnerName: string;
-  coupleId?: string;
+  activePartnerUserId: string;
 }) {
+  // Do this once for the rail, rather than mounting one ProfileAvatar reader per
+  // record. The hook still enforces the active-couple and sync authorization.
+  const { dataUrl } = useProfileAvatar(activePartnerUserId);
   const chronological = [...records].sort((a, b) =>
     a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
   return chronological.map((record) => {
-    const photo = record.attachments?.find((item) => item.type === 'photo');
     const date = record.date === today ? '오늘' : record.date;
     return (
       <Link
@@ -611,8 +613,7 @@ function HomeStoryTimes({ records, today, partnerName, coupleId }: {
         className="notebook-home__story-time press-response"
       >
         <span className="notebook-home__story-photo" aria-hidden="true">
-          <FileText size={24} />
-          {photo ? <HomeStoryThumbnail attachment={photo} coupleId={coupleId} recordId={record.id} /> : null}
+          <HomeStoryAvatar dataUrl={dataUrl} />
         </span>
         <span className="text-caption">{record.time.slice(0, 5)}</span>
         {record.date !== today ? <span className="text-caption">{record.date.slice(5).replace('-', '/')}</span> : null}
@@ -621,13 +622,11 @@ function HomeStoryTimes({ records, today, partnerName, coupleId }: {
   });
 }
 
-function HomeStoryThumbnail({ attachment, coupleId, recordId }: {
-  attachment: Attachment;
-  coupleId?: string;
-  recordId: string;
-}) {
-  const { url, reportLoadFailure } = useMediaAttachment(attachment, coupleId, recordId, 'thumbnail');
-  return url ? <img src={url} alt="" loading="lazy" decoding="async" onError={reportLoadFailure} /> : null;
+function HomeStoryAvatar({ dataUrl }: { dataUrl: string | null }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  return dataUrl && dataUrl !== failedUrl
+    ? <img src={dataUrl} alt="" width={52} height={52} decoding="async" onError={() => setFailedUrl(dataUrl)} />
+    : <span data-testid="home-story-avatar-fallback"><PenFace size={34} tone="a" /></span>;
 }
 
 function Post({

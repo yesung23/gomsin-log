@@ -11,6 +11,10 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- **PR94 master 통합·서명 개발앱 설치:** exact5e22d1c 양CI SUCCESS 확인후 match-head merge, master4c8afcf 재조회. Gibbs npm복구/Pod무차이 부모확인; 새realbuild+syncPASS. 초기Apple entitlement profile오류 뒤 Xcode자동프로비저닝으로 signedDebug build/codesignPASS, 기존동일bundle에 devicectl설치PASS(삭제없음). 실행·실제로그인/AI성능/보존상태는별도검증중. Development provisioning/기기설치 APPLIED, Supabase/공개배포/TestFlight NOT APPLIED. [증거와경계](../control-tower/reports/codex/2026-09-06_native-device-readiness_codex.md).
+
+- **실기기 연결·native 환경 gate:** physicaliPhone16Pro available로 바뀜, Xcode26.6/유효서명identity 확인. 기존app profile에 Apple권한 누락(제거우회안함). capsync realindex일치지만 Deno로설치된Capacitor7.6.9 vsnpm lock7.6.8 drift발견, 부모가만든Podfile/lock변경만Gibbs 복구중. 실제설치/서명빌드/원격변경 아직UNVERIFIED/NOT APPLIED. [현재증거](../control-tower/reports/codex/2026-09-06_native-device-readiness_codex.md).
+
 - **스크랩북 frozen DELTA 종결:** Pauli TerraMax 5hash/diff c61e836 일치, C/H/Medium actionable0; 부모 실행검증·실제4193 화면과 분리하여 기록. scopedDELTA PASS이며 앱전체/운영보안 PASS 아님. Now 제외 named7파일 source commit→freshCI 진행, master/배포 아직NOT APPLIED. [최종로컬gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
 
 - **스크랩북 실제 미리보기 반영:** 부모75unit/2fresh-browser/TS/scopedlint PASS, worker123unit/20browser와 구분. frozen5파일diff c61e836. 운영공개설정 release buildPASS를 별도immutable artifact로4193에 연결하고 기존로그인 유지 새로고침·스크랩/시간레일 직접확인. 실제계정사진업로드 없음, 사용자본문 보고서미포함. PauliMax DELTA 대기, 새source CI/merge/Production NOT APPLIED. [증거·hash·남은gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).

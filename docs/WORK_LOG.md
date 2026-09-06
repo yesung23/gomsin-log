@@ -11,6 +11,10 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- **PR94 sticky 회귀 검사 교정:** Boyle test 1파일만 수정; 320/390 실제 Y=7→0 정상 clamp 확인. 부모 diff 검토·fresh build 영향 browser2/2PASS(20.8s), scopedlint/diffcheckPASS; worker 관련7/7PASS와 구분. 앱/CSS·DB·Production 변경 없음. REVIEW IMPACT test-only DELTA, 새 exact-head CI 대기. Backup 연구 완료이나 실제 복원 미실행; FileVault ON/여유14GiB/Docker없음 확인. [상세](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).
+
+- **PR94 CI / 실제환경 후속:** ad57014 exact CI browser210PASS/2FAIL(초기header7px→sticky0px), 나머지gatePASS; Boyle 한정 재현/검사 교정 중. 부모 운영형식 공개키를 메모리로만 사용해 release buildPASS, 별도4193에서 실제Google provider표시 확인(동의/로그인 안함). 운영catalog의 media/photo함수·테이블 부재 재확인, schema변경NOT APPLIED. BackupArchitect 연결오류는 동일agentresume; 복원가능백업 아직미확인. REVIEW IMPACT test-only delta예정, 배포/merge보류. [증거](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).
+
 - **노트 Home scoped gate 종결:** Boyle 구현, Euclid TerraMax 독립 DELTA로 P1/P2 3건 closed; 마지막 P3는 parent가 실제 data attribute/CSS 경로 확인·direct10PASS로 종결. 교정 후 부모115unit/2영향browserPASS, 전 단계25browser/type/lintPASS의 범위 구분. Source commit 준비, Now 제외 named paths만 통합. REVIEW IMPACT scoped DELTA+trivial visual delta, 원격·DB·crypto·Book 변경 없음/Production NOT APPLIED. 다음 CI 및 실제환경/운영 gate; 책 북마크·실기기·AI성능 미완료. [상세](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
 
 - **노트 Home 로컬 구현 / 독립 검증:** Boyle sole writer, parent는 source 수정 없음. 사진 누락 fixture와 상단 여백, 320px/200% 통화 버튼 잘림을 실제 화면으로 발견·교정. 부모 113 unit/25 browser/type/scopedlint PASS. Euclid TerraMax 리뷰 P1 긴/짧은 기록 선택·P2 우클릭·P2 ARIA 상태는 근거 확인 후 좁은 교정 진행; 이전 PASS가 이 미검증 경계를 증명하지 않음. Product 최신 노트 승인, Business N/A, Engineering/Current/원장 확인/conflict NO. REVIEW IMPACT DELTA required; 미커밋·원격 NOT APPLIED. 4174가 이전 QA 주소 빌드인 원인도 확인. 다음 교정→fresh 검증→미리보기 환경/운영 gate. [증거](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).

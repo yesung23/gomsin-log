@@ -36,9 +36,57 @@ for (const width of [320, 390]) {
     await page.goto('/home');
     const homeHeader = page.getByTestId('home-sticky-header');
     await expect(homeHeader).toBeVisible({ timeout: 20_000 });
-    const homeTop = (await homeHeader.boundingBox())!.y;
+    const measureHome = () => homeHeader.evaluate((header) => {
+      const main = document.querySelector<HTMLElement>('#main-content')!;
+      const sheet = header.parentElement!;
+      const mainBox = main.getBoundingClientRect();
+      return {
+        headerY: header.getBoundingClientRect().top,
+        mainViewportY: mainBox.top + main.clientTop,
+        stickyInset: Number.parseFloat(getComputedStyle(header).top),
+        position: getComputedStyle(header).position,
+        sheetMarginTop: getComputedStyle(sheet).marginTop,
+        sheetBorderTop: getComputedStyle(sheet).borderTopWidth,
+        scrollTop: main.scrollTop,
+        maxScroll: main.scrollHeight - main.clientHeight,
+      };
+    });
+    const initial = await measureHome();
+    expect(initial.position).toBe('sticky');
+    expect(Number.isFinite(initial.stickyInset)).toBe(true);
+    expect(initial.scrollTop).toBe(0);
+    const pinnedTop = initial.mainViewportY + initial.stickyInset;
+    const travel = initial.headerY - pinnedTop;
+    expect(travel).toBeGreaterThanOrEqual(0);
+    // The sheet's margin and border precede the header in normal flow. Sticky
+    // may travel through that space before clamping to the main scrollport.
+    expect(initial.maxScroll / 2).toBeGreaterThan(travel);
+    await page.locator('#main-content').evaluate((node) => {
+      node.scrollTop = (node.scrollHeight - node.clientHeight) / 2;
+    });
+    await expect.poll(async () => (await measureHome()).headerY).toBeCloseTo(pinnedTop, 0);
+    const middle = await measureHome();
     await page.locator('#main-content').evaluate((node) => { node.scrollTop = node.scrollHeight; });
-    expect((await homeHeader.boundingBox())!.y).toBeCloseTo(homeTop, 0);
+    await expect.poll(async () => {
+      const measurement = await measureHome();
+      return measurement.maxScroll - measurement.scrollTop;
+    }).toBe(0);
+    await expect.poll(async () => (await measureHome()).headerY).toBeCloseTo(pinnedTop, 0);
+    const deep = await measureHome();
+    expect(middle.scrollTop).toBeGreaterThan(travel);
+    expect(deep.scrollTop).toBeGreaterThan(middle.scrollTop);
+    for (const measurement of [middle, deep]) {
+      const expectedTop = Math.max(
+        initial.headerY - measurement.scrollTop,
+        measurement.mainViewportY + measurement.stickyInset,
+      );
+      expect(measurement.headerY).toBeCloseTo(expectedTop, 0);
+    }
+    expect(deep.headerY).toBeCloseTo(middle.headerY, 0);
+    await test.info().attach(`home-sticky-geometry-${width}`, {
+      body: JSON.stringify({ width, initial, middle, deep }, null, 2),
+      contentType: 'application/json',
+    });
 
     await page.goto('/us');
     const profileHeader = page.getByTestId('profile-sticky-header');

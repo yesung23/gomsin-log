@@ -27,6 +27,16 @@
 
 ## 0. Current V5 control-tower checkpoint — 2026-09-06
 
+- **최신 확인 — PR #94 master 통합 / 개발용 iPhone 설치:** 원격 master `4c8afcf5eb62d6fb0515104938c879c180bf4a99`.
+  `5e22d1c`의 전체 CI 34009396423·34009396430 SUCCESS와 scoped 독립 리뷰 확인 후 병합했다.
+  승인 스크랩북 Home·시간별 원본 진입 레일은 master에 포함된다. 로컬4193에서 실제 로그인된 홈 표시를 확인했다.
+  npm 고정 버전 복구 후 실제 설정 release web build·iOS sync PASS, Xcode26.6 자동 프로비저닝으로
+  Apple 로그인/Complete Protection 권한을 포함한 signed Debug build 및 codesign 검증 PASS.
+  연결된 실제 iPhone에 기존 bundle을 삭제하지 않고 설치·실행 성공. 이는 개발용 설치이며 TestFlight나 RC 완료가 아니다.
+  실제 기기 Google 로그인·데이터 보존/조작·온디바이스 성능은 아직 UNVERIFIED. Apple provider·공개 배포·DB 변경은 미적용.
+  다음 운영/기기 gate는 `codex/beta-device-gates`에서 진행하며 아래 PR93/Home 초안 항목은 이전 단계 이력이다.
+  [기기·병합 증거](../control-tower/reports/codex/2026-09-06_native-device-readiness_codex.md)
+
 - **2026-09-06 PR #93 통합 완료:** 원격 master는 `2d0c7f621bfe95aaa6b5e4ddc55b58a189a4ef89`.
   PR head `13eb1b9`의 모든 GitHub 검사를 확인하고 merge했으며 원격 SHA를 재조회했다.
   Vitest 363 files / 6188 PASS / 2 SKIP, browser 196 PASS; 타입·lint·build/CSP/assets,

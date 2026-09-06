@@ -1,5 +1,7 @@
 # 작업 기록 (Work Log)
 
+- **OCR file chooser 검증:** base961b197, Meitner TerraHigh test1파일만 수정. Parent 전체diff·ESLint·diff-check PASS, 실제 HTML 결과215 expected/0unexpected/0flaky/0skipped 및371.55초 직접확인. 기존timeout/assertions 보존; hidden-input 원인은 가설, 실제앱 OCR수정으로 주장하지 않음. Product 기존사진읽기 유지/Business N/A/Engineering·Current·최근원장 확인/conflict NO. REVIEW IMPACT test-only DELTA; remote/master새변경/Production NOT APPLIED. 다음 exactCI와 native/복원운영gate. [근거](../control-tower/reports/codex/2026-09-06_ocr-filechooser-ci-delta_codex.md).
+
 > AI 에이전트가 수행한 작업의 누적 기록. `CLAUDE.md`의 지시에 따라 유지한다.
 >
 > **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는 최신 사용자 승인 V4 방향과
@@ -10,6 +12,8 @@
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
+
+- **진단 보존·백업환경 기동:** native961b197 로컬commit(미push), compilePASS/실기기 추가계측미실행. Colima93402exit0·Docker29.5.2응답·전역contextdefault·9.2GiB여유. read-onlyproject metadata에서 sourcePG17.6.1.164확인, 동일태그이미지준비(기본CLI159로대체안함). backup/restore/운영변경없음. OCRtest사용자filechooser교정중. [상세](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
 
 - **합성 모델 진단 추가:** testSwift만 bounded JSON/배치 단조시계 계측, assertion·budget유지. 부모signed generic-iOS compilePASS; physicaldestination70와live unavailable로 추가기기실행안함. 원인대조전engine변경없음. Colima93402시작진행·guestSSH3단계대기/runtime아직미준비·host10GiB. Meitner OCRreadonly계속. REVIEW IMPACT test-only DELTA, ReleaseHOLD. [근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
 

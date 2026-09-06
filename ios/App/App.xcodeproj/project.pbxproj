@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E5A22D1C0000000000000201 /* NativeOnDeviceModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000102 /* NativeOnDeviceModelTests.swift */; };
+		E5A22D1C0000000000000202 /* OnDeviceSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000103 /* OnDeviceSummary.swift */; };
+		E5A22D1C0000000000000203 /* OnDeviceBriefing.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000104 /* OnDeviceBriefing.swift */; };
+		E5A22D1C0000000000000204 /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000105 /* XCTest.framework */; };
+		E5A22D1C0000000000000210 /* ModelTestHostAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000111 /* ModelTestHostAppDelegate.swift */; };
+		E5A22D1C0000000000000211 /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = E5A22D1C0000000000000112 /* UIKit.framework */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
 		504EC3081FED79650016851F /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 504EC3071FED79650016851F /* AppDelegate.swift */; };
@@ -20,6 +26,14 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		E5A22D1C0000000000000101 /* NativeOnDeviceModelTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = NativeOnDeviceModelTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5A22D1C0000000000000102 /* NativeOnDeviceModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeOnDeviceModelTests.swift; sourceTree = "<group>"; };
+		E5A22D1C0000000000000103 /* OnDeviceSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnDeviceSummary.swift; path = ../../packages/capacitor-on-device-summary/ios/Sources/OnDeviceSummaryPlugin/OnDeviceSummary.swift; sourceTree = SOURCE_ROOT; };
+		E5A22D1C0000000000000104 /* OnDeviceBriefing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = OnDeviceBriefing.swift; path = ../../packages/capacitor-on-device-briefing/ios/Sources/OnDeviceBriefingPlugin/OnDeviceBriefing.swift; sourceTree = SOURCE_ROOT; };
+		E5A22D1C0000000000000105 /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		E5A22D1C0000000000000110 /* ModelTestHost.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ModelTestHost.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E5A22D1C0000000000000111 /* ModelTestHostAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelTestHostAppDelegate.swift; sourceTree = "<group>"; };
+		E5A22D1C0000000000000112 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
 		504EC3041FED79650016851F /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -47,6 +61,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E5A22D1C0000000000000402 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5A22D1C0000000000000204 /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5A22D1C0000000000000411 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5A22D1C0000000000000211 /* UIKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -63,16 +93,38 @@
 			children = (
 				A1F0C0DE0000000000000104 /* Config.xcconfig */,
 				504EC3061FED79650016851F /* App */,
+				E5A22D1C0000000000000310 /* NativeOnDeviceModelTestHost */,
+				E5A22D1C0000000000000301 /* NativeOnDeviceModelTests */,
 				504EC3051FED79650016851F /* Products */,
 				7F8756D8B27F46E3366F6CEA /* Pods */,
 				27E2DDA53C4D2A4D1A88CE4A /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
+		E5A22D1C0000000000000301 /* NativeOnDeviceModelTests */ = {
+			isa = PBXGroup;
+			children = (
+				E5A22D1C0000000000000102 /* NativeOnDeviceModelTests.swift */,
+				E5A22D1C0000000000000103 /* OnDeviceSummary.swift */,
+				E5A22D1C0000000000000104 /* OnDeviceBriefing.swift */,
+			);
+			path = NativeOnDeviceModelTests;
+			sourceTree = "<group>";
+		};
+		E5A22D1C0000000000000310 /* NativeOnDeviceModelTestHost */ = {
+			isa = PBXGroup;
+			children = (
+				E5A22D1C0000000000000111 /* ModelTestHostAppDelegate.swift */,
+			);
+			path = NativeOnDeviceModelTestHost;
+			sourceTree = "<group>";
+		};
 		504EC3051FED79650016851F /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				504EC3041FED79650016851F /* App.app */,
+				E5A22D1C0000000000000110 /* ModelTestHost.app */,
+				E5A22D1C0000000000000101 /* NativeOnDeviceModelTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -107,6 +159,39 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		E5A22D1C0000000000000002 /* ModelTestHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E5A22D1C0000000000000512 /* Build configuration list for PBXNativeTarget "ModelTestHost" */;
+			buildPhases = (
+				E5A22D1C0000000000000410 /* Sources */,
+				E5A22D1C0000000000000411 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ModelTestHost;
+			productName = ModelTestHost;
+			productReference = E5A22D1C0000000000000110 /* ModelTestHost.app */;
+			productType = "com.apple.product-type.application";
+		};
+		E5A22D1C0000000000000001 /* NativeOnDeviceModelTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E5A22D1C0000000000000503 /* Build configuration list for PBXNativeTarget "NativeOnDeviceModelTests" */;
+			buildPhases = (
+				E5A22D1C0000000000000401 /* Sources */,
+				E5A22D1C0000000000000402 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				E5A22D1C0000000000000403 /* PBXTargetDependency */,
+			);
+			name = NativeOnDeviceModelTests;
+			productName = NativeOnDeviceModelTests;
+			productReference = E5A22D1C0000000000000101 /* NativeOnDeviceModelTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		504EC3031FED79650016851F /* App */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
@@ -127,6 +212,24 @@
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
+
+/* Begin PBXContainerItemProxy section */
+		E5A22D1C0000000000000404 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 504EC2FC1FED79650016851F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E5A22D1C0000000000000002;
+			remoteInfo = ModelTestHost;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		E5A22D1C0000000000000403 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E5A22D1C0000000000000002 /* ModelTestHost */;
+			targetProxy = E5A22D1C0000000000000404 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin PBXProject section */
 		504EC2FC1FED79650016851F /* Project object */ = {
@@ -166,6 +269,8 @@
 			projectRoot = "";
 			targets = (
 				504EC3031FED79650016851F /* App */,
+				E5A22D1C0000000000000002 /* ModelTestHost */,
+				E5A22D1C0000000000000001 /* NativeOnDeviceModelTests */,
 			);
 		};
 /* End PBXProject section */
@@ -224,6 +329,24 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		E5A22D1C0000000000000410 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5A22D1C0000000000000210 /* ModelTestHostAppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E5A22D1C0000000000000401 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E5A22D1C0000000000000201 /* NativeOnDeviceModelTests.swift in Sources */,
+				E5A22D1C0000000000000202 /* OnDeviceSummary.swift in Sources */,
+				E5A22D1C0000000000000203 /* OnDeviceBriefing.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		504EC3001FED79650016851F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -255,6 +378,72 @@
 /* End PBXVariantGroup section */
 
 /* Begin XCBuildConfiguration section */
+		E5A22D1C0000000000000510 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = app.gomsinlog.ModelTestHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		E5A22D1C0000000000000511 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = app.gomsinlog.ModelTestHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		E5A22D1C0000000000000501 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = app.gomsinlog.NativeOnDeviceModelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ModelTestHost.app/ModelTestHost";
+			};
+			name = Debug;
+		};
+		E5A22D1C0000000000000502 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks @loader_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = app.gomsinlog.NativeOnDeviceModelTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/ModelTestHost.app/ModelTestHost";
+			};
+			name = Release;
+		};
 		504EC3141FED79650016851F /* Debug */ = {
 			isa = XCBuildConfiguration;
 			baseConfigurationReference = A1F0C0DE0000000000000104 /* Config.xcconfig */;
@@ -408,6 +597,24 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		E5A22D1C0000000000000512 /* Build configuration list for PBXNativeTarget "ModelTestHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E5A22D1C0000000000000510 /* Debug */,
+				E5A22D1C0000000000000511 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E5A22D1C0000000000000503 /* Build configuration list for PBXNativeTarget "NativeOnDeviceModelTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E5A22D1C0000000000000501 /* Debug */,
+				E5A22D1C0000000000000502 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		504EC2FF1FED79650016851F /* Build configuration list for PBXProject "App" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

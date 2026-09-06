@@ -1,5 +1,7 @@
 # 작업 기록 (Work Log)
 
+- **OCR file chooser 검증:** base961b197, Meitner TerraHigh test1파일만 수정. Parent 전체diff·ESLint·diff-check PASS, 실제 HTML 결과215 expected/0unexpected/0flaky/0skipped 및371.55초 직접확인. 기존timeout/assertions 보존; hidden-input 원인은 가설, 실제앱 OCR수정으로 주장하지 않음. Product 기존사진읽기 유지/Business N/A/Engineering·Current·최근원장 확인/conflict NO. REVIEW IMPACT test-only DELTA; remote/master새변경/Production NOT APPLIED. 다음 exactCI와 native/복원운영gate. [근거](../control-tower/reports/codex/2026-09-06_ocr-filechooser-ci-delta_codex.md).
+
 > AI 에이전트가 수행한 작업의 누적 기록. `CLAUDE.md`의 지시에 따라 유지한다.
 >
 > **이 문서는 "무엇을 했는가"의 기록이다.** 제품 의도는 최신 사용자 승인 V4 방향과
@@ -10,6 +12,29 @@
 > 여기에 제품 결정을 새로 쓰지 않는다. `PRODUCT_V3.md`는 legacy 역사 기록이다.
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
+
+- **진단 보존·백업환경 기동:** native961b197 로컬commit(미push), compilePASS/실기기 추가계측미실행. Colima93402exit0·Docker29.5.2응답·전역contextdefault·9.2GiB여유. read-onlyproject metadata에서 sourcePG17.6.1.164확인, 동일태그이미지준비(기본CLI159로대체안함). backup/restore/운영변경없음. OCRtest사용자filechooser교정중. [상세](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **합성 모델 진단 추가:** testSwift만 bounded JSON/배치 단조시계 계측, assertion·budget유지. 부모signed generic-iOS compilePASS; physicaldestination70와live unavailable로 추가기기실행안함. 원인대조전engine변경없음. Colima93402시작진행·guestSSH3단계대기/runtime아직미준비·host10GiB. Meitner OCRreadonly계속. REVIEW IMPACT test-only DELTA, ReleaseHOLD. [근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **master 후속 CI 회귀 HOLD:** native34011502362SUCCESS, validation34011502352 browser214PASS/1FAIL(지도스크린샷OCR realUsability409). Meitner readonly원인분석배정, 무조건재실행/timeout완화없음. Nativebriefing실측13.777817s로5s초과, 추가assertion원인검토중. Production공개보류유지. [근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **실제 온디바이스7검사 실행:4PASS/3FAIL:** 격리H CLOSED·부모codesignPASS후 ModelTestHost 설치/실행. 모델가용성·사전취소PASS, suffix원본대응/briefing assertion/요청rateLimit FAIL.20줄검사는19.249초뒤제한오류로 끝나 완주성능아님. xcresult직접확인·자동진단zip비공개보호/미열람·업로드없음. Averroes readonly원인분석중, 모델성공으로판정안함. Docker/Colima/Lima로컬설치완료(VM/백업/운영변경안함), Pascal 최소공식복원계획중. REVIEW IMPACT runtimefailure DELTA·ReleaseHOLD. [정확한근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **격리 host 서명 검증:** Averroes scene/UIKit 전용host4파일동결. 부모 별도profile부재65→자동개발provisioning→signed build/codesignPASS, bundleID·scene manifest확인. 기존앱/개인기록/기기설치변경없음. Fermat Hclosure검토·잠금해제·모델실행 남음. 운영Dashboard FREE scheduledbackup없음 live확인(결제/복원안함). REVIEW IMPACT native DELTA pending. [상세](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **PR95 master 통합:** exacta59bd6b 양CI SUCCESS·8파일경계 확인, READY TO MERGE 후 match-head merge. master22f718d 원격재확인 APPLIED. Native WIP 제외·로컬branch보존·DB/공개배포 NOT APPLIED. 독립호스트 기기OS27 scene대응 추가검증 중. [상세](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **실기기 검사 격리·운영 사진 원인 확정:** Fermat C0/H1/M1/L1, 실제로그인 App호스트기동 위험으로 실행보류·별도 UIKit 시험컨테이너를 Averroes에 배정. 실제앱삭제/로그아웃안함. CLI linked metadata query에서 avatar read/write와 media/photo RPC부재 확인; CLI loginrole초기화 메시지의 역할수명은 UNVERIFIED, schema/content mutation없음. UI와운영완료 구분. [근거·다음gate](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **Native 모델 gate 교정·실기기 대기:** Averroes team하드코딩/거짓12s watchdog제거, 고유20suffix대응 검사. 부모 최신3hash·signed build-for-testing exit0 확인. Fermat TerraMax 독립 scopedreview 진행; physical lockState passcodeRequired true라 사용자잠금해제 요청. 모델실행/성능은 UNVERIFIED. Home a59bd6b PR95 push APPLIED·CI진행, native WIP분리·master/Production NOT APPLIED. REVIEW IMPACT native testpackaging DELTA. [근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **시간별 스토리 작성자 사진:** 최신 요청으로 문서/첨부 썸네일을 활성 partner의 My 프로필 사진으로 변경. Tesla TerraHigh 4파일, 부모 app코드 미작성. 레일당 권한hook1회, 실패기본그림/새사진복구/원본순서 유지. 부모 avatar15/Home36/초기browser4 PASS, 최종 realbuild+4193 실제 화면 확인; 최종browser 재검증 중. 실제계정은 기본그림이며 운영 사진 RPC 정상은 아직입증안됨. REVIEW IMPACT scoped DELTA, DB/공개배포 NOT APPLIED. [상세](../control-tower/reports/codex/2026-09-06_story-owner-avatar_codex.md).
+- 후속: 최종 소스 fresh QA build·동일 browser4 PASS. 4193은 별도 real artifact 유지(테스트용 설정으로 교체하지 않음).
+
+- **master postmerge·실제iPhone 화면:** master4c8afcf 후속 양CI SUCCESS. 공식devicectl screen capture로1206×2622 실제앱 스크랩홈·시간레일·로그인UI·기존표시기록 확인(새OAuth/전체보존 증거아님). 캡처는 repo밖private임시파일600, 사용자본문로그/커밋없음. AI모델검증은여전히UNVERIFIED. [검증범위](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
+
+- **실제 온디바이스 모델 gate 시작:** nativeAI 실기기harness/XCTest부재 확인, 현재설치본의생성flagsOFF를완료로보지않음. Averroes TerraHigh에게 기존engine source-membership XCTest목표/합성한국어fixture만구현배정, 앱코드/featuregate/개인기록/DB수정금지. 실제모델·4s/5s예산·취소·원본대응 측정예정이며 아직UNVERIFIED. REVIEW IMPACT testpackaging DELTA, phone실행전부모검토. [범위와근거](../control-tower/reports/codex/2026-09-06_on-device-model-test-gate_codex.md).
 
 - **PR94 master 통합·서명 개발앱 설치:** exact5e22d1c 양CI SUCCESS 확인후 match-head merge, master4c8afcf 재조회. Gibbs npm복구/Pod무차이 부모확인; 새realbuild+syncPASS. 초기Apple entitlement profile오류 뒤 Xcode자동프로비저닝으로 signedDebug build/codesignPASS, 기존동일bundle에 devicectl설치PASS(삭제없음). 실행·실제로그인/AI성능/보존상태는별도검증중. Development provisioning/기기설치 APPLIED, Supabase/공개배포/TestFlight NOT APPLIED. [증거와경계](../control-tower/reports/codex/2026-09-06_native-device-readiness_codex.md).
 

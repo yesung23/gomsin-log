@@ -14,7 +14,9 @@ function longRecords() {
     couple_id: 'couple-1',
     record_date: TODAY,
     record_time: `${String(9 + index).padStart(2, '0')}:07:59`,
-    log_text: index === 0 ? '사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장' : `스크롤 검증 기록 ${index}`,
+    // Home now follows the photo's natural ratio. Make scroll travel come from
+    // genuinely long content, not the former fixed portrait frame.
+    log_text: index === 0 ? '사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장 '.repeat(24) : `스크롤 검증 기록 ${index}`,
     is_private: false,
     is_profile_post: true,
     attachments: [{
@@ -129,7 +131,7 @@ for (const width of [320, 390]) {
     await page.goto('/home');
     // Home is partner-oriented: for this fixture long-0 belongs to the signed-in
     // user's partner, while long-1 is the signed-in user's own record.
-    const largeHomeCopy = page.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장', { exact: true });
+    const largeHomeCopy = page.getByText('사진과 함께 남긴 조금 더 크게 읽히는 스토리 문장 '.repeat(24).trim(), { exact: true });
     await expect(largeHomeCopy).toBeVisible();
     expect(await largeHomeCopy.evaluate((node) => getComputedStyle(node).fontSize)).toBe('20px');
     await expect(page.getByText('스크롤 검증 기록 1', { exact: true })).toHaveCount(0);

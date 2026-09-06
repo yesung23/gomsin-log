@@ -124,6 +124,41 @@ async function settlePhotos(page: Page) {
 
 test.beforeAll(async () => mkdir(SCREENSHOT_DIR, { recursive: true }));
 
+test('time rail opens the exact chronological source without acknowledging the story', async ({ browser }) => {
+  const { context, page } = await openNotebookHome(browser, {
+    width: 402, height: 874, theme: 'light',
+  });
+  const rail = page.getByRole('region', { name: '스토리', exact: true });
+  await expect(rail.getByRole('link')).toHaveCount(3);
+  expect(await rail.getByRole('link').evaluateAll((links) => links.map((link) => link.getAttribute('href'))))
+    .toEqual(['/record?record=notebook-multi', '/record?record=notebook-long', '/record?record=notebook-photo']);
+  await expect(rail.getByRole('button', { name: /의 스토리/ })).toBeVisible();
+  const source = rail.getByRole('link', { name: /18:42 기록 열기/ });
+  const box = await source.boundingBox();
+  expect(box!.width).toBeGreaterThanOrEqual(44);
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  await source.click();
+  await expect(page).toHaveURL(/\/record\?record=notebook-long$/);
+  await expect(page.getByText(partnerRecords[1].log_text, { exact: true }).first()).toBeVisible();
+  await context.close();
+});
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`text-only scrap has no photo placeholder ${theme}`, async ({ browser }) => {
+    const { context, page } = await openNotebookHome(browser, {
+      width: theme === 'light' ? 402 : 320, height: 874, theme,
+      scenario: { ...NOTEBOOK_SCENARIO, records: [{ ...partnerRecords[1], log_text: '오늘은 잠깐 쉬면서 네 생각을 했어.' }] },
+    });
+    const scrap = page.locator('.notebook-home__post');
+    await expect(scrap.getByText('오늘은 잠깐 쉬면서 네 생각을 했어.')).toBeVisible();
+    await expect(scrap.locator('[data-record-media-region]')).toHaveCount(0);
+    const panel = scrap.locator('.notebook-home__text-panel');
+    await expect(panel).toHaveCSS('min-height', '0px');
+    await page.screenshot({ path: join(SCREENSHOT_DIR, `${theme === 'light' ? 402 : 320}-${theme}-text-only.png`) });
+    await context.close();
+  });
+}
+
 for (const shot of [
   { name: '402-light-horizontal', width: 402, height: 874, theme: 'light', mode: 'horizontal' },
   { name: '402-light-vertical', width: 402, height: 874, theme: 'light', mode: 'vertical' },
@@ -141,6 +176,13 @@ for (const shot of [
   test(`Notebook Home screenshot ${shot.name}`, async ({ browser }) => {
     const { context, page } = await openNotebookHome(browser, shot);
     await settlePhotos(page);
+
+    const photo = page.locator('[data-record-media-region] img').first();
+    const photoRatio = await photo.evaluate((img: HTMLImageElement) => {
+      const box = img.getBoundingClientRect();
+      return Math.abs(box.width / box.height - img.naturalWidth / img.naturalHeight);
+    });
+    expect(photoRatio, 'the scrap shows the full photo without portrait letterboxing').toBeLessThan(0.02);
 
     const sheet = page.getByTestId('home-core');
     await expect(sheet).toHaveCSS('position', 'relative');
@@ -310,6 +352,19 @@ test('long text at 200%, reduced motion and keyboard controls remain readable', 
   expect(callBox, 'the existing call action must remain on-screen at 200%').not.toBeNull();
   expect(callBox!.x).toBeGreaterThanOrEqual(0);
   expect(callBox!.x + callBox!.width).toBeLessThanOrEqual(320);
+  const brandGeometry = await page.locator('.notebook-home__header').evaluate((header) => {
+    const brand = header.querySelector('h1')!;
+    const brandBox = brand.getBoundingClientRect();
+    const actionsBox = header.lastElementChild!.getBoundingClientRect();
+    return { brandRight: brandBox.right, actionsLeft: actionsBox.left,
+      clientWidth: brand.clientWidth, scrollWidth: brand.scrollWidth, fontSize: getComputedStyle(brand).fontSize };
+  });
+  await test.info().attach('320-200-brand-geometry', {
+    body: JSON.stringify(brandGeometry), contentType: 'application/json',
+  });
+  console.info('QA 320px/200% brand geometry', brandGeometry);
+  expect(brandGeometry.brandRight).toBeLessThanOrEqual(brandGeometry.actionsLeft);
+  expect(brandGeometry.scrollWidth).toBeLessThanOrEqual(brandGeometry.clientWidth);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: join(SCREENSHOT_DIR, '320-dark-longtext-200-reduced.png'), fullPage: true });
   await context.close();

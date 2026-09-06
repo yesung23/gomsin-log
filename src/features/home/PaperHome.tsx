@@ -10,7 +10,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Bookmark as BookmarkIcon, ChevronRight, Phone, Plus } from 'lucide-react';
+import { Bookmark as BookmarkIcon, ChevronRight, FileText, Phone, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { useStore } from '@/lib/useStore';
 import { isOwnRecord, visibleRecordsForViewer } from '@/lib/privacy';
@@ -35,6 +35,7 @@ import { OFFLINE_READONLY_MESSAGE, useOnlineStatus } from '@/lib/useOnlineStatus
 import { TALK_ABOUT_SYNC_PENDING_MESSAGE } from '@/lib/talkAbout';
 import { NotebookFeed, NotebookReadingModeToggle } from '@/features/home/NotebookFeed';
 import { useHomeReadingMode } from '@/features/home/useHomeReadingMode';
+import { useMediaAttachment } from '@/lib/useMediaAttachment';
 import './notebookHome.css';
 
 const loadRecordMediaGallery = () =>
@@ -63,7 +64,7 @@ function DeferredRecordMediaGallery({
         />
       )}
     >
-      <Gallery attachments={attachments} recordId={recordId} />
+      <Gallery attachments={attachments} recordId={recordId} fit="contain" />
     </Suspense>
   );
 }
@@ -393,17 +394,9 @@ export function PaperHome() {
         <CoupleStatusBanner />
       </div>
 
-      {/*
-        스토리 레일 — 두 사람만 남긴 컴팩트한 높이, 익숙한 순서.
-
-        **내 스토리가 맨 왼쪽이다.** 인스타에서 왼쪽 끝은 언제나 자기 자신이고 `+` 배지가
-        거기 붙는다. 손이 기억하는 자리를 바꾸면 인스타 문법을 빌려 온 이유가 사라진다.
-
-        링은 둘에서 끝난다. 인스타라면 여기부터 팔로우한 사람들이 이어지지만 이 앱에는
-        두 사람뿐이라 그 자리가 비고, **비는 것이 맞다**(§5.2: 링은 정확히 두 개다).
-      */}
-      <section aria-label="스토리" className="notebook-home__stories flex items-start gap-5 px-4">
-        <div className="relative">
+      {/* Own compose/story stays first; time links use only the authorized Home window. */}
+      <section aria-label="스토리" className="notebook-home__stories flex items-start gap-2 px-4">
+        <div className="relative shrink-0">
           <button
             type="button"
             onClick={() => navigate('/story/mine')}
@@ -437,13 +430,13 @@ export function PaperHome() {
           </button>
         </div>
 
-        <div className="relative">
+        <div className="relative shrink-0">
           {activePartnerUserId && partnerName ? (
             <button
               type="button"
               onClick={() => navigate('/story/partner')}
               aria-label={`${partnerName}의 스토리${hasUnseen ? ', 새 기록 있음' : ''}`}
-              className="press-response flex w-[72px] flex-col items-center gap-1"
+              className="notebook-home__whole-story press-response flex min-h-11 w-11 flex-col items-center gap-1"
             >
               {/*
                 링의 상태가 유일하게 말하는 것: 아직 안 본 것이 있는가.
@@ -451,12 +444,12 @@ export function PaperHome() {
                 열람 시각도, 본 사람 목록도, 읽음 표시도 아니다(§16). 링은 **내 쪽의 사실**만
                 말한다 -- 상대는 내가 봤는지 알 수 없다.
               */}
-              <InkCircle size={66} ring={hasUnseen ? 'new' : 'seen'}><ProfileAvatar userId={activePartnerUserId} size={54}><PenFace size={44} /></ProfileAvatar></InkCircle>
+              <InkCircle size={38} ring={hasUnseen ? 'new' : 'seen'}><ProfileAvatar userId={activePartnerUserId} size={30}><PenFace size={26} /></ProfileAvatar></InkCircle>
               <span
                 className="max-w-[72px] truncate text-caption leading-none"
                 style={{ color: hasUnseen ? 'var(--ink)' : 'var(--ink-soft)' }}
               >
-                {partnerName}
+                전체
               </span>
             </button>
           ) : (
@@ -468,6 +461,15 @@ export function PaperHome() {
             </div>
           )}
         </div>
+        {sharedPartnerContentAvailable && partnerName ? (
+          <HomeStoryTimes
+            key={`${profile.id}:${profile.couple.coupleId ?? 'none'}:${activePartnerUserId}`}
+            records={feed}
+            today={todayStr}
+            partnerName={partnerName}
+            coupleId={profile.couple.coupleId}
+          />
+        ) : null}
       </section>
 
       <div className="ink-rule mx-4" aria-hidden="true" />
@@ -590,6 +592,44 @@ export function PaperHome() {
   );
 }
 
+function HomeStoryTimes({ records, today, partnerName, coupleId }: {
+  records: DailyRecord[];
+  today: string;
+  partnerName: string;
+  coupleId?: string;
+}) {
+  const chronological = [...records].sort((a, b) =>
+    a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || a.id.localeCompare(b.id));
+  return chronological.map((record) => {
+    const photo = record.attachments?.find((item) => item.type === 'photo');
+    const date = record.date === today ? '오늘' : record.date;
+    return (
+      <Link
+        key={record.id}
+        to={`/record?record=${encodeURIComponent(record.id)}`}
+        aria-label={`${partnerName} ${date} ${record.time.slice(0, 5)} 기록 열기`}
+        className="notebook-home__story-time press-response"
+      >
+        <span className="notebook-home__story-photo" aria-hidden="true">
+          <FileText size={24} />
+          {photo ? <HomeStoryThumbnail attachment={photo} coupleId={coupleId} recordId={record.id} /> : null}
+        </span>
+        <span className="text-caption">{record.time.slice(0, 5)}</span>
+        {record.date !== today ? <span className="text-caption">{record.date.slice(5).replace('-', '/')}</span> : null}
+      </Link>
+    );
+  });
+}
+
+function HomeStoryThumbnail({ attachment, coupleId, recordId }: {
+  attachment: Attachment;
+  coupleId?: string;
+  recordId: string;
+}) {
+  const { url, reportLoadFailure } = useMediaAttachment(attachment, coupleId, recordId, 'thumbnail');
+  return url ? <img src={url} alt="" loading="lazy" decoding="async" onError={reportLoadFailure} /> : null;
+}
+
 function Post({
   record,
   partnerName,
@@ -624,7 +664,7 @@ function Post({
 
         빈 사진 틀을 남기면 화면이 로딩 실패처럼 보인다. 글이 주인공인 하루는 구멍이 아니다.
       */}
-      <div className="px-4">
+      <div className="notebook-home__post-content">
         {hasMedia ? (
           <div className="notebook-home__media" data-record-media-region>
             <RetryableRecordMediaGallery

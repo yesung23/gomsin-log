@@ -11,6 +11,12 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- **스크랩북 frozen DELTA 종결:** Pauli TerraMax 5hash/diff c61e836 일치, C/H/Medium actionable0; 부모 실행검증·실제4193 화면과 분리하여 기록. scopedDELTA PASS이며 앱전체/운영보안 PASS 아님. Now 제외 named7파일 source commit→freshCI 진행, master/배포 아직NOT APPLIED. [최종로컬gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
+- **스크랩북 실제 미리보기 반영:** 부모75unit/2fresh-browser/TS/scopedlint PASS, worker123unit/20browser와 구분. frozen5파일diff c61e836. 운영공개설정 release buildPASS를 별도immutable artifact로4193에 연결하고 기존로그인 유지 새로고침·스크랩/시간레일 직접확인. 실제계정사진업로드 없음, 사용자본문 보고서미포함. PauliMax DELTA 대기, 새source CI/merge/Production NOT APPLIED. [증거·hash·남은gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
+- **사용자 스크랩북 기준 재확인:** 기존 Home의 희미한 테이프·평평한 사진 영역·두 사람만 있는 스토리 레일을 부모 화면으로 재확인. 최신 명시승인에 따라 사진+글 통합 스크랩과 시간순 직접진입 레일로 Boyle 단일 구현 중. 부모 source 수정 없음, 보안/Story상태/DB/Book 변경 금지. 새 화면 아직 UNVERIFIED, REVIEW IMPACT DELTA 필요; 이전 CI로 완료 주장하지 않음. [현재 결정과 범위](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
 - **PR94 sticky 회귀 검사 교정:** Boyle test 1파일만 수정; 320/390 실제 Y=7→0 정상 clamp 확인. 부모 diff 검토·fresh build 영향 browser2/2PASS(20.8s), scopedlint/diffcheckPASS; worker 관련7/7PASS와 구분. 앱/CSS·DB·Production 변경 없음. REVIEW IMPACT test-only DELTA, 새 exact-head CI 대기. Backup 연구 완료이나 실제 복원 미실행; FileVault ON/여유14GiB/Docker없음 확인. [상세](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).
 
 - **PR94 CI / 실제환경 후속:** ad57014 exact CI browser210PASS/2FAIL(초기header7px→sticky0px), 나머지gatePASS; Boyle 한정 재현/검사 교정 중. 부모 운영형식 공개키를 메모리로만 사용해 release buildPASS, 별도4193에서 실제Google provider표시 확인(동의/로그인 안함). 운영catalog의 media/photo함수·테이블 부재 재확인, schema변경NOT APPLIED. BackupArchitect 연결오류는 동일agentresume; 복원가능백업 아직미확인. REVIEW IMPACT test-only delta예정, 배포/merge보류. [증거](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).

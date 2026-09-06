@@ -1,7 +1,8 @@
 /* Home is one warm, flat notebook sheet. The existing paper tokens remain authoritative. */
 .notebook-home {
-  --notebook-home-sheet: color-mix(in srgb, var(--paper) 94%, #ead8b5 6%);
-  --notebook-home-tape: color-mix(in srgb, var(--paper) 76%, #d6c29c 24%);
+  --notebook-home-sheet: color-mix(in srgb, var(--paper) 70%, #eddfc5 30%);
+  --notebook-home-leaf: color-mix(in srgb, var(--paper) 85%, #fffdf4 15%);
+  --notebook-home-tape: #daca9e;
   position: relative;
   isolation: isolate;
   min-height: 100%;
@@ -12,8 +13,8 @@
   background-color: var(--notebook-home-sheet);
   background-image: repeating-linear-gradient(
     180deg,
-    transparent 0 calc(var(--rule-gap) - 1px),
-    color-mix(in srgb, var(--rule) 76%, transparent) calc(var(--rule-gap) - 1px) var(--rule-gap)
+    transparent 0 35px,
+    color-mix(in srgb, var(--ink-soft) 8%, transparent) 35px 36px
   );
   border: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 58%, transparent);
   box-shadow: 0 2px 10px color-mix(in srgb, var(--ink) 7%, transparent);
@@ -22,17 +23,15 @@
 .notebook-home::before {
   content: '';
   position: absolute;
-  z-index: 0;
+  z-index: 2;
   inset: 0 auto 0 0;
   width: 12px;
   pointer-events: none;
-  border-right: var(--stroke-thin) solid color-mix(in srgb, var(--margin-rule) 78%, transparent);
-  background-image: radial-gradient(
-    circle at 4px 12px,
-    color-mix(in srgb, var(--ink-faint) 68%, transparent) 0 1.7px,
-    transparent 2px
-  );
-  background-size: 10px 28px;
+  border-right: 1px solid color-mix(in srgb, var(--ink-soft) 16%, transparent);
+  background-image:
+    linear-gradient(180deg, transparent 8px, #76736c 9px, #e8e6dc 11px, #96948c 13px, transparent 15px),
+    linear-gradient(90deg, transparent 7px, #79766e 8px, #e8e5da 9px, transparent 11px);
+  background-size: 12px 28px;
   background-repeat: repeat-y;
 }
 
@@ -43,32 +42,72 @@
 
 [data-theme='dark'] .notebook-home {
   --notebook-home-sheet: color-mix(in srgb, var(--paper) 88%, #5b422f 12%);
-  --notebook-home-tape: color-mix(in srgb, var(--paper) 68%, #8f7759 32%);
+  --notebook-home-leaf: color-mix(in srgb, var(--paper) 78%, #70563e 22%);
+  --notebook-home-tape: #a18b60;
   box-shadow: 0 2px 12px rgb(0 0 0 / 24%);
 }
 
 .notebook-home__header {
   position: sticky;
   z-index: 40;
-  background-color: color-mix(in srgb, var(--notebook-home-sheet) 96%, transparent);
-  background-image: repeating-linear-gradient(
-    180deg,
-    transparent 0 calc(var(--rule-gap) - 1px),
-    color-mix(in srgb, var(--rule) 76%, transparent) calc(var(--rule-gap) - 1px) var(--rule-gap)
-  );
-  border-bottom: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 48%, transparent);
+  background-color: var(--notebook-home-sheet);
+  background-image: none;
 }
 
 .notebook-home__stories {
-  min-height: 88px;
-  padding-top: 2px;
-  padding-bottom: 2px;
-  background: color-mix(in srgb, var(--notebook-home-sheet) 86%, transparent);
+  min-height: 84px;
+  padding-block: 4px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.notebook-home__whole-story {
+  padding-top: 14px;
+}
+
+.notebook-home__story-time {
+  flex: 0 0 60px;
+  min-height: 76px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+.notebook-home__story-photo {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--notebook-home-leaf);
+  border: 2px solid var(--notebook-home-leaf);
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.notebook-home__story-photo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .notebook-home .ink-rule {
-  height: var(--stroke-thin);
-  opacity: 0.56;
+  display: none;
+}
+
+.notebook-home__feed-top button {
+  font-weight: 400;
+  color: var(--ink-soft);
+}
+
+.notebook-home__feed-top button > span {
+  font-weight: 400;
 }
 
 .notebook-home__feed-top .notebook-feed__mode-toggle {
@@ -120,7 +159,7 @@
 }
 
 .notebook-feed__vertical-record + .notebook-feed__vertical-record {
-  border-top: var(--stroke-thin) dashed color-mix(in srgb, var(--ink-faint) 70%, transparent);
+  padding-top: 12px;
 }
 
 .notebook-feed__pagination {
@@ -145,51 +184,70 @@
 }
 
 .notebook-home__post {
-  padding: 2px 0 4px;
+  margin: 8px 14px 12px;
+  padding: 10px 8px 4px;
+  background: var(--notebook-home-leaf);
+  box-shadow: 0 2px 4px color-mix(in srgb, var(--ink) 12%, transparent),
+    1px 0 0 color-mix(in srgb, var(--ink) 5%, transparent);
 }
 
 .notebook-home__media {
   position: relative;
-  padding-top: 8px;
+  padding-top: 0;
 }
 
 .notebook-home__media::before {
   content: '';
   position: absolute;
   z-index: 4;
-  top: 0;
+  top: -17px;
   left: 50%;
-  width: 72px;
-  height: 18px;
+  width: 106px;
+  height: 30px;
   pointer-events: none;
-  transform: translateX(-50%) rotate(-1.2deg);
+  transform: translateX(-50%) rotate(-3deg);
   background: var(--notebook-home-tape);
-  opacity: 0.78;
-  clip-path: polygon(2% 8%, 98% 0, 96% 92%, 4% 100%);
+  opacity: 0.62;
+  clip-path: polygon(1% 5%, 98% 0, 96% 14%, 100% 27%, 97% 44%, 99% 61%, 96% 78%, 98% 96%, 2% 100%, 4% 83%, 0 68%, 3% 48%, 1% 31%, 4% 16%);
   box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 10%, transparent);
 }
 
 .notebook-home__media [data-testid='record-attachment'] {
-  border: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 76%, transparent);
-  border-radius: 3px;
-  background: var(--paper);
+  border: 0;
+  border-radius: 0;
+  background: var(--notebook-home-leaf);
+}
+
+/* The Home scrap follows the full photo's intrinsic ratio, not a letterboxed
+   portrait template. Keep the gallery's own loading/error/video layout. */
+.notebook-home__media div:has(> [data-astryx-aspect-ratio-override] > img) {
+  aspect-ratio: auto !important;
+}
+
+.notebook-home__media [data-astryx-aspect-ratio-override]:has(> img) {
+  position: relative;
+  height: auto;
+}
+
+.notebook-home__media [data-astryx-aspect-ratio-override] > img {
+  display: block;
+  height: auto;
 }
 
 .notebook-home__text-panel {
-  min-height: 132px;
-  padding: 24px 20px;
+  padding: 18px 10px 8px;
   border: 0;
   border-radius: 0;
-  background: color-mix(in srgb, var(--notebook-home-sheet) 82%, transparent);
+  background: transparent;
 }
 
 .notebook-home__caption {
-  padding: 16px 18px 8px;
+  padding: 12px 10px 4px;
   line-height: max(var(--record-copy-leading), 1.7em);
 }
 
 .notebook-home__actions {
-  border-top: var(--stroke-thin) solid color-mix(in srgb, var(--ink-faint) 42%, transparent);
+  border: 0;
 }
 
 @media (max-width: 350px) {

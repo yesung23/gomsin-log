@@ -7,6 +7,8 @@ import type { CoupleLifecycle } from '@/lib/coupleLifecycle';
 import type { SharedSyncStatus } from '@/lib/storeContext';
 import type { DailyRecord, TalkAboutMark } from '@/types';
 import { toast } from 'sonner';
+import { useMediaAttachment } from '@/lib/useMediaAttachment';
+import { useState } from 'react';
 
 const navigate = vi.fn();
 vi.mock('react-router-dom', async () => {
@@ -26,6 +28,12 @@ const unmarkTalkAbout = vi.fn();
 const acknowledgePartnerDay = vi.fn();
 let online = true;
 let mediaShouldThrow = false;
+let coupleId = 'couple-1';
+let viewerId = 'me';
+
+vi.mock('@/lib/useMediaAttachment', () => ({ useMediaAttachment: vi.fn(() => ({
+  url: undefined, refreshing: false, reportLoadFailure: vi.fn(),
+})) }));
 
 vi.mock('@/lib/useOnlineStatus', async () => {
   const actual = await vi.importActual<typeof import('@/lib/useOnlineStatus')>('@/lib/useOnlineStatus');
@@ -42,13 +50,13 @@ vi.mock('@/lib/useStore', () => ({
       records,
       talkAboutMarks,
       profile: {
-        id: 'me',
+        id: viewerId,
         role: 'soldier',
         myName: '나',
         couple: {
           connected: true,
           status: 'active',
-          coupleId: 'couple-1',
+          coupleId,
           partnerUserId,
           partnerName,
         },
@@ -95,6 +103,7 @@ function dateFromToday(offset: number): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  localStorage.clear();
   partnerSurface = [];
   partnerUserId = 'partner';
   partnerName = '예성';
@@ -103,6 +112,11 @@ beforeEach(() => {
   talkAboutMarks = [];
   online = true;
   mediaShouldThrow = false;
+  coupleId = 'couple-1';
+  viewerId = 'me';
+  vi.mocked(useMediaAttachment).mockReset().mockReturnValue({
+    url: undefined, refreshing: false, reportLoadFailure: vi.fn(),
+  });
   markTalkAbout.mockResolvedValue({ ok: true });
   unmarkTalkAbout.mockResolvedValue({ ok: true });
   records = [{
@@ -150,6 +164,7 @@ describe('Home 출시 상태 표현', () => {
 
     expect(screen.getByText('공유 정보를 아직 확인하지 못했어요')).toBeInTheDocument();
     expect(screen.queryByText('오늘 하루도 함께해줘서 고마워')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '스토리' })).queryAllByRole('link')).toHaveLength(0);
     expect(screen.queryByText('최근 7일에 공유된 기록이 없어요')).not.toBeInTheDocument();
   });
 
@@ -304,6 +319,53 @@ describe('Home 출시 상태 표현', () => {
 });
 
 describe('홈의 상대방 전용 7일 피드', () => {
+  it('시간 사진은 기존 thumbnail 권위·오류 복구를 사용하며 viewer/couple 변경 시 새로 마운트한다', () => {
+    const reportLoadFailure = vi.fn();
+    vi.mocked(useMediaAttachment).mockImplementation(function useThumbnail(_attachment, currentCouple) {
+      const [url] = useState(() => `https://qa.invalid/${currentCouple}/${viewerId}.jpg`);
+      return { url, refreshing: false, reportLoadFailure };
+    });
+    const attachment = { type: 'photo' as const, name: 'QA', urlUnavailable: 'permission' as const };
+    records = [{ ...records[0], attachments: [attachment] }];
+    const rendered = view();
+    const image = () => screen.getByRole('region', { name: '스토리' }).querySelector('img')!;
+    expect(useMediaAttachment).toHaveBeenCalledWith(attachment, 'couple-1', 'record-1', 'thumbnail');
+    expect(image()).toHaveAttribute('loading', 'lazy');
+    fireEvent.error(image());
+    expect(reportLoadFailure).toHaveBeenCalledTimes(1);
+    coupleId = 'couple-2';
+    rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
+    expect(image()).toHaveAttribute('src', 'https://qa.invalid/couple-2/me.jpg');
+    viewerId = 'next-viewer';
+    rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
+    expect(image()).toHaveAttribute('src', 'https://qa.invalid/couple-2/next-viewer.jpg');
+    sharedSyncStatus = 'unavailable';
+    rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
+    expect(screen.getByRole('region', { name: '스토리' }).querySelector('img')).toBeNull();
+  });
+
+  it('시간 레일은 날짜·시간·ID 오름차순이며 각 원본으로 연결된다', () => {
+    const base = records[0];
+    records = [
+      { ...base, id: 'z', time: '09:00:00' },
+      { ...base, id: 'a', time: '09:00:00' },
+      { ...base, id: 'prior', date: dateFromToday(-1), time: '23:00:00' },
+    ];
+    const rendered = view();
+    const links = () => within(screen.getByRole('region', { name: '스토리' })).getAllByRole('link');
+    expect(links().map((link) => link.getAttribute('href'))).toEqual([
+      '/record?record=prior', '/record?record=a', '/record?record=z',
+    ]);
+    expect(links()[0]).toHaveAccessibleName(expect.stringContaining(dateFromToday(-1)));
+    records = [...records].reverse();
+    rendered.rerender(<MemoryRouter><PaperHome /></MemoryRouter>);
+    expect(links().map((link) => link.getAttribute('href'))).toEqual([
+      '/record?record=prior', '/record?record=a', '/record?record=z',
+    ]);
+    fireEvent.click(links()[1]);
+    expect(acknowledgePartnerDay).not.toHaveBeenCalled();
+  });
+
   it('상대방의 오늘 surface에도 있는 공유 원본 기록을 홈에 그대로 표시한다', () => {
     records = [{
       id: 'partner-current',
@@ -353,6 +415,8 @@ describe('홈의 상대방 전용 7일 피드', () => {
     expect(screen.queryByText('내 기록')).not.toBeInTheDocument();
     expect(screen.queryByText('무관한 사용자 기록')).not.toBeInTheDocument();
     expect(screen.queryByText('이전 상대 기록')).not.toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: '스토리' })).getAllByRole('link')
+      .map((link) => link.getAttribute('href'))).toEqual(['/record?record=partner-current']);
   });
 
   it('상대방의 비공개 기록과 이 기기에서 읽을 수 없는 기록을 표시하지 않는다', () => {
@@ -380,6 +444,8 @@ describe('홈의 상대방 전용 7일 피드', () => {
     expect(screen.getByText('읽을 수 있는 공유 기록')).toBeInTheDocument();
     expect(screen.queryByText('상대 비공개 기록')).not.toBeInTheDocument();
     expect(screen.queryByText(/이 기기에서 아직 이 기록을 열 수 없어요/)).not.toBeInTheDocument();
+    const railLinks = within(screen.getByRole('region', { name: '스토리' })).getAllByRole('link');
+    expect(railLinks.map((link) => link.getAttribute('href'))).toEqual(['/record?record=readable']);
   });
 
   it('현재 상대의 신원이 확인되지 않으면 다른 작성자의 기록을 추측해 표시하지 않는다', () => {
@@ -476,6 +542,7 @@ describe('홈 포스트 읽기 순서', () => {
       ...records[0], id, log: id === 'first/id' ? '첫 순간' : '둘째 순간', attachments: [],
     }));
     view();
+    fireEvent.click(screen.getByRole('button', { name: '세로로 읽기' }));
 
     for (const record of records) {
       const article = screen.getByText(record.log).closest('article')!;

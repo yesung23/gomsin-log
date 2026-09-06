@@ -25,15 +25,19 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
-## 0. Current V5 control-tower checkpoint — 2026-09-05
+## 0. Current V5 control-tower checkpoint — 2026-09-06
 
-- **2026-09-06 PR #93 checkpoint (기존 작업 통합 중):** `codex/rc-v5-final-fixes`
-  `065592f`를 origin에 실제 push하고 master 대상 PR #93을 열었다. master merge는 아직 아니다.
-  첫 GitHub 실행에서 Vitest 6177 PASS / 3 FAIL / 3 SKIP, browser 188 PASS / 7 FAIL.
-  DB fresh-chain, Android, Capacitor sync, dependency audit, diff integrity는 통과했다.
-  Deno cold dependency 설치, Apple source 검사 목록, PG17 선택, 옛 entitlement/scanner 기대값을
-  수정 중이며 브라우저 실패는 별도로 재현한다. 아래 로컬 PASS를 이 GitHub 실패보다 최신
-  통합 판정으로 사용하지 않는다. 승인된 notebook Home은 아직 구현 전이다.
+- **2026-09-06 PR #93 통합 완료:** 원격 master는 `2d0c7f621bfe95aaa6b5e4ddc55b58a189a4ef89`.
+  PR head `13eb1b9`의 모든 GitHub 검사를 확인하고 merge했으며 원격 SHA를 재조회했다.
+  Vitest 363 files / 6188 PASS / 2 SKIP, browser 196 PASS; 타입·lint·build/CSP/assets,
+  PostgreSQL fresh-chain, Deno, iOS unsigned build, Android, sync, secret/audit 검사 PASS.
+  과거 CI 실패는 교정 이력이며 현재 통합 판정이 아니다. 이것은 코드 통합이지 RC/운영 배포 판정이 아니다.
+  같은 worktree의 `codex/notebook-home-v1`을 이 master에서 시작했다. 승인된 노트 Home 실제 구현은
+  Boyle Sol High가 로컬에 구현했다. 부모가 실제 402px 라이트/다크·320px 200% 화면을 확인했고,
+  부모 독립 113 unit / 25 browser 및 type/lint PASS 후 리뷰 지적을 교정했다.
+  교정 후 부모 115 unit / 영향 browser 2 PASS, P3 표시 정리 후 direct 10 PASS이며 scoped 리뷰 지적은 종결했다.
+  로컬 Home 시제품 source 통합 준비 상태다. 책 북마크 저장은 별도 미구현이며 전체 Home/RC 완료 아님.
+  사용자 미리보기 4174는 여전히 이전 QA 주소 빌드이며 실제 계정 로그인 환경이 아니다.
   운영 catalog 재조회: 계정삭제 v2 열과 media ledger/photo metadata/Apple custody 구조 부재.
   필요한 의존 체인과 기존 RPC 호환성, 백업 복원 rehearsal이 선행돼야 하므로 전체 migration
   replay와 운영 배포는 수행하지 않는다. Book Studio에는 별도 책 북마크 연계 요구를 전달했다.
@@ -42,7 +46,7 @@
   Ignored Build Step `Don't build anything` / `exit 0`로 저장·재조회 확인했다. 서버 호환성 준비 중
   기존 served artifact를 유지하기 위한 임시 조치이며, 준비 후 Automatic 복원이 필요하다.
   App Store Connect iOS 앱 **곰신로그 (`6809005110`, `app.gomsinlog`)** 생성·목록 확인 완료.
-  빌드 업로드/베타 초대/심사 제출은 하지 않았다. remote master는 여전히 `bd4a9f3`, DB의 최신
+  빌드 업로드/베타 초대/심사 제출은 하지 않았다. 이 조치 당시 remote master는 `bd4a9f3`였고, DB의 최신
   사진 함수·private tables 부재와 복구 가능한 제공업체 백업 없음이 live 재확인됐다.
   [배포 재개 증거 및 남은 gate](../control-tower/reports/codex/2026-09-06_deployment-resumed_codex.md).
 

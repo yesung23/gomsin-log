@@ -11,6 +11,22 @@
 
 ## 2026-09-06 — 배포 승인 수신·자동 공개 제어·App Store Connect 등록
 
+- **스크랩북 frozen DELTA 종결:** Pauli TerraMax 5hash/diff c61e836 일치, C/H/Medium actionable0; 부모 실행검증·실제4193 화면과 분리하여 기록. scopedDELTA PASS이며 앱전체/운영보안 PASS 아님. Now 제외 named7파일 source commit→freshCI 진행, master/배포 아직NOT APPLIED. [최종로컬gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
+- **스크랩북 실제 미리보기 반영:** 부모75unit/2fresh-browser/TS/scopedlint PASS, worker123unit/20browser와 구분. frozen5파일diff c61e836. 운영공개설정 release buildPASS를 별도immutable artifact로4193에 연결하고 기존로그인 유지 새로고침·스크랩/시간레일 직접확인. 실제계정사진업로드 없음, 사용자본문 보고서미포함. PauliMax DELTA 대기, 새source CI/merge/Production NOT APPLIED. [증거·hash·남은gate](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
+- **사용자 스크랩북 기준 재확인:** 기존 Home의 희미한 테이프·평평한 사진 영역·두 사람만 있는 스토리 레일을 부모 화면으로 재확인. 최신 명시승인에 따라 사진+글 통합 스크랩과 시간순 직접진입 레일로 Boyle 단일 구현 중. 부모 source 수정 없음, 보안/Story상태/DB/Book 변경 금지. 새 화면 아직 UNVERIFIED, REVIEW IMPACT DELTA 필요; 이전 CI로 완료 주장하지 않음. [현재 결정과 범위](../control-tower/reports/codex/2026-09-06_scrapbook-reference-correction_codex.md).
+
+- **PR94 sticky 회귀 검사 교정:** Boyle test 1파일만 수정; 320/390 실제 Y=7→0 정상 clamp 확인. 부모 diff 검토·fresh build 영향 browser2/2PASS(20.8s), scopedlint/diffcheckPASS; worker 관련7/7PASS와 구분. 앱/CSS·DB·Production 변경 없음. REVIEW IMPACT test-only DELTA, 새 exact-head CI 대기. Backup 연구 완료이나 실제 복원 미실행; FileVault ON/여유14GiB/Docker없음 확인. [상세](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).
+
+- **PR94 CI / 실제환경 후속:** ad57014 exact CI browser210PASS/2FAIL(초기header7px→sticky0px), 나머지gatePASS; Boyle 한정 재현/검사 교정 중. 부모 운영형식 공개키를 메모리로만 사용해 release buildPASS, 별도4193에서 실제Google provider표시 확인(동의/로그인 안함). 운영catalog의 media/photo함수·테이블 부재 재확인, schema변경NOT APPLIED. BackupArchitect 연결오류는 동일agentresume; 복원가능백업 아직미확인. REVIEW IMPACT test-only delta예정, 배포/merge보류. [증거](../control-tower/reports/codex/2026-09-06_notebook-ci-runtime-followup_codex.md).
+
+- **노트 Home scoped gate 종결:** Boyle 구현, Euclid TerraMax 독립 DELTA로 P1/P2 3건 closed; 마지막 P3는 parent가 실제 data attribute/CSS 경로 확인·direct10PASS로 종결. 교정 후 부모115unit/2영향browserPASS, 전 단계25browser/type/lintPASS의 범위 구분. Source commit 준비, Now 제외 named paths만 통합. REVIEW IMPACT scoped DELTA+trivial visual delta, 원격·DB·crypto·Book 변경 없음/Production NOT APPLIED. 다음 CI 및 실제환경/운영 gate; 책 북마크·실기기·AI성능 미완료. [상세](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
+- **노트 Home 로컬 구현 / 독립 검증:** Boyle sole writer, parent는 source 수정 없음. 사진 누락 fixture와 상단 여백, 320px/200% 통화 버튼 잘림을 실제 화면으로 발견·교정. 부모 113 unit/25 browser/type/scopedlint PASS. Euclid TerraMax 리뷰 P1 긴/짧은 기록 선택·P2 우클릭·P2 ARIA 상태는 근거 확인 후 좁은 교정 진행; 이전 PASS가 이 미검증 경계를 증명하지 않음. Product 최신 노트 승인, Business N/A, Engineering/Current/원장 확인/conflict NO. REVIEW IMPACT DELTA required; 미커밋·원격 NOT APPLIED. 4174가 이전 QA 주소 빌드인 원인도 확인. 다음 교정→fresh 검증→미리보기 환경/운영 gate. [증거](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
+- **master 통합 완료 / Home 시작:** PR93 head13eb1b9 전체CI(6188unit/2skip·196browser 및 기타 gate) 확인 후 merge, remote master2d0c7f6 재조회. 같은 worktree에서 codex/notebook-home-v1 시작·session-start/claim 확인. Boyle SolHigh soleHome writer 배정; parent app/test source 수정 없음. Product 최신 승인 이미지/V4·Engineering/Current/최신원장 확인, Business N/A. master APPLIED, 운영DB/배포 NOT APPLIED. 새Home 아직미완료. REVIEW IMPACT integration packaging; 다음 실제iPhone크기화면 검증. [상세](../control-tower/reports/codex/2026-09-06_master-integrated-notebook-start_codex.md).
+
 - Trip/OCR 독립 종결: Epicurus SolMax SCOPED LOCAL PASS/C0H0M0L0. 부모4hash일치, 검토는 source/test 정적이며 실행증거는 부모22unit/56browser/TS/lint로 구분. 전환/cleanup 일부 조합의 비차단 테스트 공백은 report에 명시. REVIEW IMPACT scoped DELTA PASS, fullapp/hosted 판정 아님. 다음 exact commit CI→master, 공개는 별도 운영 gate.
 
 - Trip/OCR 후속: `a5abeff` 기반 Noether TerraHigh 4파일 수정, 부모 전체diff·22unit·56browser·TS·scopedlint PASS. Epicurus SolMax 독립 DELTA pending. identity reset은 현재 snapshot/입력 초기화, same-scope refresh는 입력 보존. OCR cleanup은 결과를 막지 않도록 보완. Business N/A, 기존 Product/Engineering 방향 유지/conflict NO. 별도 실패-only/1일 CI artifact 준비. 실제 Linux 원인·새 CI/merge/배포 미검증; [상세와 hash](../control-tower/reports/codex/2026-09-06_trip-runtime-recovery_codex.md).

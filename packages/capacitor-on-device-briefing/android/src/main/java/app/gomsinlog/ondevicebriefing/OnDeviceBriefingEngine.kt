@@ -71,14 +71,14 @@ class OnDeviceBriefingException(val errorCode: BriefingErrorCode) : Exception(er
 
 object OnDeviceBriefing {
     const val MAX_CONTEXT_UTF8_BYTES = 4096
-    const val PROMPT_OVERHEAD_UTF8_BYTES = 512
+    const val PROMPT_OVERHEAD_UTF8_BYTES = 1024
     const val RESPONSE_RESERVE_UTF8_BYTES = 1024
     const val MAX_INPUT_TEXT_GRAPHEMES = 1000
     const val MAX_ITEMS = 64
     const val MAX_CANDIDATES_PER_ITEM = 32
     const val MAXIMUM_RESPONSE_TOKENS = 512
 
-    const val INSTRUCTIONS = "Group contiguous items into groups (prefer 2–4 items per group, singleton only when N=1). Choose one supplied candidate for every item. Return only groupOrdinal, itemOrdinal, and candidateOrdinal in JSON format: {\"version\":2,\"groups\":[{\"groupOrdinal\":0,\"choices\":[{\"itemOrdinal\":0,\"candidateOrdinal\":0}]}]}. Keep every item once and in order across groups. Never write markdown, commentary, or text outside the JSON object."
+    const val INSTRUCTIONS = "Group contiguous items into groups (prefer 2–4 items per group, singleton only when N=1). Choose exactly one supplied candidate for every item. Prefer a complete candidate that contains a concrete event, action, plan, place, object, or specific situation and is understandable without extra context. Do not treat emotional intensity as importance. Avoid generic candidates such as short introductions or vague statements when a more concrete supplied candidate exists. If candidates are otherwise equivalent, choose the earlier candidateOrdinal. Return only groupOrdinal, itemOrdinal, and candidateOrdinal in JSON format: {\"version\":2,\"groups\":[{\"groupOrdinal\":0,\"choices\":[{\"itemOrdinal\":0,\"candidateOrdinal\":0}]}]}. Keep every item once and in order across groups. Never write markdown, commentary, or text outside the JSON object, and never infer facts, emotions, health, intent, causes, advice, or relationship state."
 
     val ACTUAL_PROMPT_OVERHEAD_UTF8_BYTES = (INSTRUCTIONS + "\n\nItems JSON:\n").toByteArray(Charsets.UTF_8).size
 

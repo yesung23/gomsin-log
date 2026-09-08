@@ -191,7 +191,7 @@ describe('Android Partner Briefing native package contract', () => {
   it('declares the portable envelope and ordinal-only response contract', () => {
     for (const [name, value] of [
       ['MAX_CONTEXT_UTF8_BYTES', 4096],
-      ['PROMPT_OVERHEAD_UTF8_BYTES', 512],
+      ['PROMPT_OVERHEAD_UTF8_BYTES', 1024],
       ['RESPONSE_RESERVE_UTF8_BYTES', 1024],
       ['MAX_INPUT_TEXT_GRAPHEMES', 1000],
     ] as const) {

@@ -52,7 +52,7 @@ enum OnDeviceBriefing {
     /// The model instructions. Sent verbatim, and counted verbatim by
     /// `promptOverheadUtf8Bytes` below -- there is no second copy of this text.
     static let instructions = """
-    Group contiguous items into groups of 2–4; use a singleton only when the request contains exactly one item. Choose one supplied candidate for every item. Return only groupOrdinal, itemOrdinal, and candidateOrdinal. Keep every item once and in order across groups. Never write text.
+    Group contiguous items into groups of 2–4; use a singleton only when the request contains exactly one item. Choose exactly one supplied candidate for every item. Prefer a complete candidate that contains a concrete event, action, plan, place, object, or specific situation and is understandable without extra context. Do not treat emotional intensity as importance. Avoid generic candidates such as short introductions or vague statements when a more concrete supplied candidate exists. If candidates are otherwise equivalent, choose the earlier candidateOrdinal. Return only groupOrdinal, itemOrdinal, and candidateOrdinal. Keep every item once and in order across groups. Never write text or infer facts, emotions, health, intent, causes, advice, or relationship state.
     """
 
     /// The fixed text that precedes the items JSON in every prompt.

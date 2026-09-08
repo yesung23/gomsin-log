@@ -179,6 +179,7 @@ export function usePartnerBriefing(
 
   const [refined, setRefined] = useState<{
     inputKey: string;
+    inputRevision: number;
     briefing: PartnerBriefing;
   } | null>(null);
 
@@ -200,6 +201,13 @@ export function usePartnerBriefing(
 
   const currentInputKey = syncEval.inputKey;
   const currentStatus = syncEval.status;
+  const inputRevisionRef = useRef(0);
+  const previousInputKeyRef = useRef(currentInputKey);
+  if (previousInputKeyRef.current !== currentInputKey) {
+    previousInputKeyRef.current = currentInputKey;
+    inputRevisionRef.current += 1;
+  }
+  const currentInputRevision = inputRevisionRef.current;
 
   useEffect(() => {
     if (
@@ -236,6 +244,7 @@ export function usePartnerBriefing(
 
         setRefined({
           inputKey: currentInputKey,
+          inputRevision: currentInputRevision,
           briefing: result,
         });
       } catch {
@@ -252,6 +261,7 @@ export function usePartnerBriefing(
     enabled,
     currentStatus,
     currentInputKey,
+    currentInputRevision,
     provider,
     effectiveTimeoutMs,
     runner,
@@ -266,7 +276,9 @@ export function usePartnerBriefing(
   }
 
   const effectiveBriefing =
-    refined && refined.inputKey === syncEval.inputKey
+    refined
+      && refined.inputKey === syncEval.inputKey
+      && refined.inputRevision === currentInputRevision
       ? refined.briefing
       : syncEval.briefing;
 

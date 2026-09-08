@@ -77,12 +77,37 @@ export function buildBriefingExtractCandidates(
       const segmenter = new Intl.Segmenter(contentLocale, { granularity: 'sentence' });
       const rawSegments = Array.from(segmenter.segment(sourceText));
       const extracted: string[] = [];
+      const continuationStarts = [
+        '아니', '사실', '근데', '그런데', '하지만', '다만', '정정',
+        'no,', 'no ', 'actually', 'but ', 'however',
+      ] as const;
 
-      for (const seg of rawSegments) {
+      for (let index = 0; index < rawSegments.length; index += 1) {
+        const seg = rawSegments[index];
         const trimmed = seg.segment.trim();
-        if (trimmed.length > 0 && sourceText.includes(trimmed)) {
-          extracted.push(trimmed);
+        if (trimmed.length === 0 || !sourceText.includes(trimmed)) continue;
+
+        const lower = trimmed.toLocaleLowerCase();
+        const meaningDependsOnPrevious = continuationStarts.some((prefix) => lower.startsWith(prefix))
+          || /(?:ㅋㅋ+|ㅎㅎ+)\s*[.!?…]*$/u.test(trimmed);
+
+        if (meaningDependsOnPrevious && extracted.length > 0) {
+          const previous = extracted.pop()!;
+          const previousStart = sourceText.indexOf(previous);
+          const currentStart = sourceText.indexOf(trimmed, Math.max(0, previousStart + previous.length));
+          if (previousStart >= 0 && currentStart >= 0) {
+            const combined = sourceText
+              .slice(previousStart, currentStart + trimmed.length)
+              .trim();
+            if (combined.length > 0 && sourceText.includes(combined)) {
+              extracted.push(combined);
+              continue;
+            }
+          }
+          extracted.push(previous);
         }
+
+        extracted.push(trimmed);
       }
 
       if (extracted.length > 0) {
@@ -151,14 +176,61 @@ export function formatMediaItemText(
  * If text is present, extracts the first sentence candidate and formats attributed quote.
  * If text is empty/absent, formats media tally or neutral record notice.
  */
+const GENERIC_EXTRACT_PATTERNS = [
+  /^(오늘|아침|점심|저녁|밤|새벽)(은|는|도)?[.!?…]*$/u,
+  /^(그랬어|그랬어요|좋았어|좋았어요|힘들었어|힘들었어요|별로였어|별로였어요)[.!?…]*$/u,
+] as const;
+
+function deterministicCandidateScore(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return Number.NEGATIVE_INFINITY;
+
+  let score = 0;
+  const graphemeLikeLength = Array.from(trimmed).length;
+  score += Math.min(graphemeLikeLength, 80);
+
+  if (/[가-힣A-Za-z0-9]/u.test(trimmed)) score += 8;
+  if (/[.!?…]$/u.test(trimmed)) score += 4;
+  if (/\b\d{1,2}(:\d{2})?\b/u.test(trimmed) || /\d/u.test(trimmed)) score += 3;
+  if (/(갔|왔|먹|마셨|봤|만났|샀|했|했다|했어|했어요|갈|가려|오려|먹으|보러|학교|회사|집|카페|식당|빵집|병원|공원|친구|수업|회의|운동|산책|비|눈|버스|지하철|사진|영상|음성)/u.test(trimmed)) {
+    score += 12;
+  }
+  if (GENERIC_EXTRACT_PATTERNS.some((pattern) => pattern.test(trimmed))) score -= 30;
+  if (graphemeLikeLength < 8) score -= 12;
+
+  return score;
+}
+
+/**
+ * Picks one exact-source candidate for deterministic display without inventing text.
+ * Higher-information complete sentences are preferred; ties preserve source order.
+ */
+export function selectDeterministicBriefingCandidate(
+  candidates: readonly BriefingExtractCandidate[],
+): BriefingExtractCandidate | null {
+  let best: BriefingExtractCandidate | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
+  for (const candidate of candidates) {
+    const score = deterministicCandidateScore(candidate.text);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+
+  return best;
+}
+
 export function formatDeterministicBriefingItemText(
   event: Pick<BriefingModelSafeEvent, 'text' | 'mediaKinds'>,
   presentationLocale: BriefingLocale = DEFAULT_BRIEFING_LOCALE,
 ): string {
   if (typeof event.text === 'string' && event.text.trim().length > 0) {
     const candidates = buildBriefingExtractCandidates(event.text);
-    if (candidates.length > 0) {
-      return formatAttributedBriefingItemText(candidates[0].text, presentationLocale);
+    const selected = selectDeterministicBriefingCandidate(candidates);
+    if (selected) {
+      return formatAttributedBriefingItemText(selected.text, presentationLocale);
     }
   }
   return formatMediaItemText(event.mediaKinds, presentationLocale);

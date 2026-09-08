@@ -148,7 +148,7 @@ describe('iOS Partner Briefing native package', () => {
       // The old literal is now provably too small, which is the whole point.
       expect(staticPromptBytes).toBeGreaterThan(256);
       // Pinned so a prompt edit that changes the bucket is visible in review.
-      expect(advertised).toBe(320);
+      expect(advertised).toBe(832);
 
       // The envelope still leaves real room for payload.
       expect(advertised + 512).toBeLessThan(4096);

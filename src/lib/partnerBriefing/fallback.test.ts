@@ -21,6 +21,7 @@ import {
   formatRangeLabelFromDates,
   generateDeterministicPartnerBriefing,
   groupEventsIntoChronologicalRuns,
+  selectDeterministicBriefingCandidate,
   validateBriefingMappings,
 } from './fallback';
 
@@ -167,6 +168,54 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
           mediaKinds: ['photo'],
         }),
       ).toBe('사진 1장을 남겼어요.');
+    });
+
+    it('prefers a concrete exact-source sentence over a generic opening sentence', () => {
+      const source = '오늘 학교 갔어. 점심에 친구랑 마라탕 먹었는데 진짜 맛있었어. 집 오는 길에 비가 엄청 와서 다 젖었어.';
+      const candidates = buildBriefingExtractCandidates(source, 'ko');
+      const selected = selectDeterministicBriefingCandidate(candidates);
+
+      expect(selected).not.toBeNull();
+      expect(source.includes(selected!.text)).toBe(true);
+      expect(selected!.text).not.toBe('오늘 학교 갔어.');
+      expect(
+        formatDeterministicBriefingItemText({ text: source, mediaKinds: [] }),
+      ).not.toBe('“오늘 학교 갔어.”라고 기록했어요.');
+    });
+
+    it('preserves source order when equally informative candidates tie', () => {
+      const selected = selectDeterministicBriefingCandidate([
+        { candidateOrdinal: 0, text: '친구랑 카페 갔어.' },
+        { candidateOrdinal: 1, text: '친구랑 공원 갔어.' },
+      ]);
+      expect(selected?.candidateOrdinal).toBe(0);
+    });
+
+    it.each([
+      ['부정', '좋았어. 아니 사실 별로였어.'],
+      ['정정', '오늘 세 번 만났어. 아니 두 번이야.'],
+      ['반어/농담', '와 진짜 최고다. 비 맞고 우산도 잃어버렸네 ㅋㅋ'],
+    ])('%s continuation keeps the correcting context in one exact-source candidate', (_label, source) => {
+      const candidates = buildBriefingExtractCandidates(source, 'ko');
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0].text).toBe(source);
+      expect(formatDeterministicBriefingItemText({ text: source, mediaKinds: [] })).toContain(source);
+    });
+
+    it.each([
+      ['부정', '좋았어. 아니 사실 별로였어.'],
+      ['정정', '오늘 세 번 만났어. 아니 두 번이야.'],
+      ['조건', '시간 되면 갈 것 같아.'],
+      ['인용', '친구가 “헤어지고 싶다”고 말했다.'],
+      ['반어/농담', '와 진짜 최고다. 비 맞고 우산도 잃어버렸네 ㅋㅋ'],
+      ['한영 혼합', '오늘 meeting 끝나고 카페 갔어.'],
+      ['이모지/ZWJ', '저녁 먹고 산책했어 👩‍❤️‍👨.'],
+      ['줄바꿈', '오늘 수업 끝났어.\n집 오는 길에 비가 많이 왔어.'],
+    ])('%s corpus never invents text outside the source', (_label, source) => {
+      const rendered = formatDeterministicBriefingItemText({ text: source, mediaKinds: [] });
+      const quoted = rendered.match(/^“([\s\S]+)”라고 기록했어요\.$/u)?.[1];
+      expect(quoted).toBeDefined();
+      expect(source.includes(quoted!)).toBe(true);
     });
   });
 
@@ -884,8 +933,10 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
           expect(segmenterCalls).toContain(undefined);
           expect(segmenterCalls).not.toContain('ko');
           expect(segmenterCalls).not.toContain('en');
-          // Exact extract is preserved inside English attributed template
-          expect(formatted).toBe('They wrote: “오늘 아침 점호 끝났다.”');
+          // Selection may prefer a denser candidate, but it must remain an exact source substring.
+          const quoted = formatted.match(/^They wrote: “([\s\S]+)”$/u)?.[1];
+          expect(quoted).toBeDefined();
+          expect(koreanEvent.text.includes(quoted!)).toBe(true);
         } finally {
           Intl.Segmenter = originalSegmenter;
         }

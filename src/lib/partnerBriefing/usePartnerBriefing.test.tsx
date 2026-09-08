@@ -500,6 +500,39 @@ describe('usePartnerBriefing (Phase B1)', () => {
       expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_B']);
     });
 
+    it('does not resurrect an old refined A result after A → B → A source transitions', async () => {
+      const provider = new FakeBriefingProvider({ delayMs: 20 });
+      const recordA = makeValidRecord({ id: 'rec_A_cycle', log: '기록A 구체적인 첫 내용입니다.' });
+      const recordB = makeValidRecord({ id: 'rec_B_cycle', log: '기록B 구체적인 둘째 내용입니다.' });
+
+      const { result, rerender } = renderHook(
+        (props: UsePartnerBriefingInput) => usePartnerBriefing(props),
+        {
+          initialProps: makeDefaultInput({ surface: [recordA], provider }),
+        },
+      );
+
+      await waitFor(() => expect(result.current.briefing?.generation).toBe('on_device'));
+
+      act(() => {
+        rerender(makeDefaultInput({ surface: [recordB], provider }));
+      });
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_B_cycle']);
+
+      act(() => {
+        rerender(makeDefaultInput({ surface: [recordA], provider }));
+      });
+
+      // The old refined A result has the same semantic inputKey, but belongs to an older
+      // source epoch and must not reappear while the new A request is still pending.
+      expect(result.current.briefing?.generation).toBe('deterministic');
+      expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_A_cycle']);
+
+      await waitFor(() => expect(result.current.briefing?.generation).toBe('on_device'));
+      expect(result.current.briefing?.overview.sourceRecordIds).toEqual(['rec_A_cycle']);
+    });
+
     it('does not cause state updates after unmount', async () => {
       const provider = new FakeBriefingProvider({
         delayMs: 100,

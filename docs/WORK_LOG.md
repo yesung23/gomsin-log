@@ -10814,3 +10814,57 @@ web `<input type="file">` → out-of-process PHPicker라 옳고, `applesignin` �
 
 ### PRODUCTION
 - NOT APPLIED — local Git commits only
+
+## 2026-09-08 · Codex · Summary V2 unified Partner Briefing
+
+### PLAN POSITION
+- Phase: 상대 하루 요약/브리핑 제품 계약 통합 및 품질 고도화
+- Workstream: Story / PartnerBriefing / on-device refinement
+- Branch: `codex/summary-v2-unified-briefing`
+- Base master: `82979baa8e6f1a61bee0a7ff72c67b75b370a221`
+
+### DIRECTION CHECK
+- 현재 코드, 테스트, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/CURRENT_STATE.md`, `docs/V4_AS_BUILT.md`, 최근 control-tower 보고서를 감사했다.
+- `PRODUCT_V5_MASTER_DECISION.md`와 `gomsinlog-summary-v2.patch`는 현재 checkout에서 찾지 못했다.
+- legacy `briefing.ts`는 아직 RecordPage/감정/위젯 caller가 있어 삭제하지 않았다.
+- 제품 방향과 충돌 없음: AI 보조, 사실 중심, exact original, acknowledgement 보존, E2EE/서버 AI 금지 원칙을 유지했다.
+
+### IMPLEMENTED
+- `/story/partner`의 오늘/놓친 구간을 동일 `PartnerBriefing` deterministic 계약으로 통합했다. `VITE_PARTNER_BRIEFING_ENABLED`는 native refinement만 gate한다.
+- active Story caller에서 legacy `useOnDeviceDailySummary`를 제거하되 legacy 모듈/native package는 rollback용으로 유지했다.
+- deterministic extract를 candidate 0 고정에서 exact-source 정보밀도 점수 선택으로 고도화했다.
+- 부정/정정/반전 연결 문맥을 exact substring으로 묶어 앞 문장만 뽑아 의미가 뒤집히는 위험을 줄였다.
+- iOS Foundation Models / Android ML Kit GenAI prompt를 concrete candidate selection, emotion-intensity 비중요, 추론 금지 규칙으로 강화했다. 출력은 계속 ordinal-only다.
+- `usePartnerBriefing`에 source input revision을 추가해 A → B → A stale refinement resurrection을 막았다.
+- 한국어 의미 보존 및 Story/identity/provenance 회귀 테스트를 추가/갱신했다.
+
+### VERIFIED
+- `npm run typecheck` — PASS.
+- `npm run lint` — PASS.
+- focused PartnerBriefing/Story — 7 files / 245 tests PASS.
+- broad summary/briefing/story regression — 29 files / 736 tests PASS.
+- native bridge static-contract tests는 위 736개에 포함되어 iOS/Android 모두 PASS.
+- `git diff --check` — PASS (문서 closure 전 실행).
+
+### UNVERIFIED
+- exact revision iOS compile: `npm run build`가 isolated worktree의 `VITE_SUPABASE_URL` 부재로 먼저 중단되어 `cap sync ios`/xcodebuild까지 진행하지 못함.
+- exact revision Android compile: generated `android/capacitor-cordova-android-plugins/cordova.variables.gradle` 부재로 Gradle configuration에서 중단.
+- 실기기 iPhone/Android 모델 품질, latency, cancellation/background, heat, memory, 반복 실행은 이번 작업에서 미수행.
+
+### NOT APPLIED
+- DB migration/remote Supabase/E2EE protocol/server AI/AI persistence 없음.
+- legacy `briefing.ts`, `dailySummary`, on-device-summary package 삭제 없음.
+- production deploy/push/TestFlight/App Store/Google Play 변경 없음.
+- 기존 2–4 contiguous grouping을 기록량 기반 adaptive compression으로 재작성하지 않음; provenance/provider/verifier 회귀 위험을 별도 후속으로 분리.
+
+### REMAINING RISKS
+- deterministic scoring은 보수적 heuristic이므로 실제 한국어 corpus로 추가 tuning 필요.
+- marker 없는 미묘한 반어/정정은 native closed selector 또는 whole-source fallback 품질에 의존할 수 있음.
+- native prompt exact-revision compile 및 실기기 검증이 release gate로 남음.
+- legacy dailySummary 삭제는 별도 dead-code cleanup gate가 필요함.
+
+### REPORT
+- `control-tower/reports/codex/2026-09-08_summary-v2-unified-briefing_codex.md`
+
+### PRODUCTION
+- NOT APPLIED — isolated local worktree only.

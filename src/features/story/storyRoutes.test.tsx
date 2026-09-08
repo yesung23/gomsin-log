@@ -153,6 +153,7 @@ describe('/story/partner', () => {
     records = surface;
     open('/story/partner');
     await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     await userEvent.click(screen.getByTestId('story-acknowledge'));
     expect(acknowledge).toHaveBeenCalledTimes(1);
   });
@@ -161,6 +162,7 @@ describe('/story/partner', () => {
     surface = [record({ id: 'a' })];
     records = surface;
     open('/story/partner');
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     await userEvent.click(screen.getByRole('button', { name: '이따 이야기하기' }));
     await waitFor(() => expect(markTalkAbout).toHaveBeenCalledWith('a'));
   });
@@ -172,6 +174,7 @@ describe('/story/partner', () => {
     })];
     records = surface;
     open('/story/partner');
+    await userEvent.click(screen.getByRole('button', { name: '다음 순간' }));
     await userEvent.click(screen.getByRole('button', { name: '하이라이트에 추가' }));
     expect(mockNavigate).toHaveBeenCalledWith('/us?highlightRecord=photo-story');
   });
@@ -214,7 +217,7 @@ describe('/story/partner', () => {
       };
     }
 
-    it('기본 OFF에서는 기존 표지를 유지하고 브리핑을 넣지 않는다', () => {
+    it('기본 OFF에서도 deterministic 브리핑은 유지하고 네이티브 refinement만 호출하지 않는다', () => {
       const plugin = nativeBriefingPlugin();
       __setOnDeviceBriefingPluginForTests(plugin);
       surface = [record({ id: 'a' }), record({ id: 'b', time: '13:00', log: '점심' })];
@@ -222,9 +225,8 @@ describe('/story/partner', () => {
 
       open('/story/partner');
 
-      expect(screen.queryByTestId('partner-briefing-card')).toBeNull();
-      expect(screen.getByRole('button', { name: /오늘 시험 끝났어/ })).toBeTruthy();
-      expect(screen.getByRole('button', { name: /점심/ })).toBeTruthy();
+      expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
+      expect(screen.getByText('총 2개의 기록이 있습니다.')).toBeTruthy();
       expect(plugin.availability).not.toHaveBeenCalled();
     });
 

@@ -9,8 +9,6 @@ import { useOnlineStatus, OFFLINE_READONLY_MESSAGE } from '@/lib/useOnlineStatus
 import { recordProductEvent } from '@/lib/productEvents';
 import { projectStory } from '@/features/story/storyProjection';
 import { StoryViewer, type StoryMode } from '@/features/story/StoryViewer';
-import { applyRefinedCoverText } from '@/lib/dailySummary/rules';
-import { useOnDeviceDailySummary } from '@/lib/dailySummary/useOnDeviceDailySummary';
 import { usePartnerBriefing } from '@/lib/partnerBriefing/usePartnerBriefing';
 import { nativeOnDeviceBriefingProvider } from '@/lib/partnerBriefing/nativeOnDeviceBriefing';
 
@@ -58,7 +56,10 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     [viewerUserId, profile.role],
   );
   const briefingLocale = state.locale === 'en' ? 'en' : 'ko';
-  const partnerBriefingEnabled = mode === 'today'
+  // Partner Briefing is now the canonical compression contract for the partner story.
+  // The env flag only controls on-device refinement; deterministic briefing is always available.
+  const partnerBriefingEnabled = mode === 'today';
+  const partnerBriefingRefinementEnabled = partnerBriefingEnabled
     && import.meta.env.VITE_PARTNER_BRIEFING_ENABLED === 'true';
 
   /*
@@ -109,7 +110,7 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     coupleConnected: profile.couple.connected,
     coupleStatus: profile.couple.status,
     locale: briefingLocale,
-    provider: partnerBriefingEnabled ? nativeOnDeviceBriefingProvider : null,
+    provider: partnerBriefingRefinementEnabled ? nativeOnDeviceBriefingProvider : null,
   });
   const briefing = partnerBriefingResult.status === 'ready'
     ? partnerBriefingResult.briefing
@@ -139,34 +140,9 @@ function StoryRouteContent({ mode }: { mode: StoryMode }) {
     [records, todayStr, focusRecordId, mode, briefing],
   );
 
-  /*
-    다듬어진 표지 문장, 준비되면.
-
-    규칙 결과는 위의 `projection`에 이미 동기적으로 들어 있다. 이 훅은 `recordId → 문장`
-    덮어쓰기 지도만 돌려주고, 처음 렌더에서는 비어 있다. 상대의 오늘 표지가 아니거나
-    기능이 꺼져 있으면 계속 비어 있고, 화면은 규칙 결과 그대로다.
-  */
-  const refinedCoverText = useOnDeviceDailySummary({
-    enabled: !partnerBriefingEnabled,
-    mode,
-    records,
-    viewerUserId: viewer.userId,
-    partnerUserId: profile.couple.partnerUserId,
-    todayStr,
-    coupleConnected: profile.couple.connected,
-    coupleStatus: profile.couple.status,
-  });
-
-  /*
-    텍스트만 갈아 끼운다.
-
-    `applyRefinedCoverText`는 표지 줄의 `recordId`·`time`·`date`와 줄의 개수·순서를 손대지
-    않으므로, `?at=`이 여는 카드도 요약 줄이 가리키는 원본도 이 대체와 무관하다.
-  */
-  const cards = useMemo(
-    () => applyRefinedCoverText(projection.cards, refinedCoverText),
-    [projection.cards, refinedCoverText],
-  );
+  // Legacy dailySummary remains in the repository for compatibility tests and rollback,
+  // but the active partner-story caller now consumes the unified PartnerBriefing contract.
+  const cards = projection.cards;
 
   const initialIndex = briefing
     ? (focusRecordId ? projection.initialIndex + 1 : 0)

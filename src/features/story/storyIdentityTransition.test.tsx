@@ -159,7 +159,8 @@ describe('StoryRoute PartnerDay identity isolation across live unlink and relink
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('새 커플의 기록')).toBeInTheDocument();
+    expect(screen.getByTestId('partner-briefing-card')).toBeInTheDocument();
+    expect(screen.getByText('총 1개의 기록이 있습니다.')).toBeInTheDocument();
   });
 
   it("does not carry A's confirmed ids into B's window upon acknowledgement in StoryRoute", async () => {
@@ -179,9 +180,11 @@ describe('StoryRoute PartnerDay identity isolation across live unlink and relink
       </MemoryRouter>,
     );
 
-    expect(screen.getByText('B의 유일한 기록')).toBeInTheDocument();
+    expect(screen.getByTestId('partner-briefing-card')).toBeInTheDocument();
 
-    // Navigate to closing card and acknowledge
+    // Navigate through the source moment to closing card and acknowledge.
+    await user.click(screen.getByRole('button', { name: '다음 순간' }));
+    expect(screen.getByText('B의 유일한 기록')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '다음 순간' }));
     await user.click(screen.getByTestId('story-acknowledge'));
 
@@ -216,6 +219,8 @@ describe('StoryRoute PartnerDay identity isolation across live unlink and relink
         </Routes>
       </MemoryRouter>,
     );
+    expect(screen.getByTestId('partner-briefing-card')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '다음 순간' }));
     expect(screen.getByText('B의 기록')).toBeInTheDocument();
 
     // Switch back to A

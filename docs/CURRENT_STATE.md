@@ -30,10 +30,13 @@
 
 - `/story/partner`의 오늘/놓친 구간은 이제 같은 `PartnerBriefing` 제품 계약을 사용한다. `VITE_PARTNER_BRIEFING_ENABLED`는 브리핑 자체가 아니라 iOS/Android 온디바이스 refinement만 제어한다. flag가 꺼지거나 모델이 실패해도 deterministic exact-source briefing은 즉시 존재한다.
 - Story의 active caller에서 legacy `useOnDeviceDailySummary`가 제거됐다. `src/lib/dailySummary/**`와 `packages/capacitor-on-device-summary/**`는 rollback/호환성 검증을 위해 아직 삭제하지 않았다.
-- deterministic extract는 첫 문장 고정 대신 exact-source candidate를 점수화해 구체적인 사건·행동·계획·장소·사물이 드러나는 완전한 문장을 우선한다. 부정·정정·반전 문맥(`아니`, `사실`, `하지만` 등)은 앞 문장과 exact substring으로 보수적으로 묶어 의미 반전을 막는다.
+- deterministic extract는 첫 문장 고정 대신 exact-source candidate를 점수화해 구체적인 사건·행동·계획·장소·사물이 드러나는 완전한 문장을 우선한다. 문장 길이는 제한된 보조 신호만 쓰고, 긴 추상 감정 문장을 중요도로 취급하지 않는다. 부정·정정·반전 문맥(`아니`, `사실`, `하지만`, `정확히는` 등)은 **즉시 앞 source span**과 묶어 반복 문장이 있어도 오래된 동일 문장에 잘못 결합하지 않는다.
 - iOS Foundation Models와 Android ML Kit GenAI는 display text를 생성하지 않고 supplied candidate ordinal만 선택한다. prompt는 감정 강도·건강·의도·원인·관계 상태 추론을 금지한다.
 - `usePartnerBriefing`은 semantic input key와 별도로 input revision을 묶어 A → B → A source 전환에서 과거 A refinement가 다시 보이는 stale resurrection을 차단한다.
-- 2026-09-08 로컬 검증: summary/briefing/story 관련 Vitest 29 files / 736 tests PASS, `npm run typecheck` PASS, `npm run lint` PASS. iOS/Android native compile은 이 격리 worktree의 release 환경이 불완전해 UNVERIFIED: web build는 `VITE_SUPABASE_URL` 부재로 중단됐고, Android Gradle은 `capacitor-cordova-android-plugins/cordova.variables.gradle` 미생성으로 중단됐다. 실기기 품질/발열/메모리/latency는 이번 작업에서 수행하지 않았다.
+- 브리핑 첫 화면은 개수/날짜만 보여주지 않고 시간순 앞 3개의 exact-source part를 즉시 보여 준다. 이는 중요도 선택이 아니라 deterministic prefix이며 각 줄은 정확한 원본 record로 이동한다. 펼치면 기존 전체 날짜/시간대 계층으로 전환된다.
+- 기록 탭과 홈 위젯에서 아직 사용하는 `generateDailySummary`도 같은 closed-extractive 후보 선택을 재사용한다. 긴 일기 전체를 빠른 정리에 복제하지 않고, 4개 이상 기록에서는 시간순 exact-source 텍스트를 최대 3개까지 유지한다. 실제 attachment 개수를 세며 video도 포함한다. 과거 날짜에도 `오늘`이라고 쓰던 문구와 `hard` 태그를 `정신없음`으로 확장하던 opener를 제거했고, text/media/reaction이 모두 없는 유효 공유 기록에도 source-linked `기록을 남겼어요.` 항목을 유지한다. `오늘의 요약`은 conversation opener보다 실제 summary item을 우선 표시하며, 홈 `오늘의 브리핑`도 현재 화면에 보이는 emotion-flow 또는 summary item과 정확히 같은 record를 원본 이동 대상으로 사용한다.
+- 2026-09-08 1차 로컬 검증: summary/briefing/story 관련 Vitest 29 files / 736 tests PASS, `npm run typecheck` PASS, `npm run lint` PASS. iOS/Android native compile은 해당 격리 worktree의 release 환경이 불완전해 UNVERIFIED였다.
+- 2026-09-08 후속 품질 델타는 새 격리 worktree에 `node_modules`가 없어 full app validation을 재실행하지 못했다. 실제 실행 증거는 PartnerBriefing fallback Vitest **77 tests PASS**, 변경된 summary logic의 Node assertion probes PASS, 변경 UI/테스트 파일의 esbuild compile PASS, `git diff --check` PASS다. `scripts/agent/validate.sh app`의 typecheck/lint/test/build 실패는 모두 `tsc`/`eslint`/`vitest` executable 부재라는 환경 조건이며 현재 델타의 full suite 결과는 **UNVERIFIED**다. 실기기 품질/발열/메모리/latency 역시 미검증이다.
 
 ## 0A. Active working checkpoint — 2026-08-25
 

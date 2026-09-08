@@ -286,20 +286,28 @@ it leaves the deterministic exact-source result in place. If the PartnerBriefing
 corpus cannot be constructed because partner/couple identity is unavailable, the
 existing deterministic Story projection remains as the compatibility fallback.
 
-Partner Briefing provides a short overview, expandable day/period sections, and
-exact original links. Existing moment cards, exact navigation, closing card, and
-explicit acknowledgement remain unchanged. Generating, opening, scrolling, or
-following a briefing link never writes CONFIRMED. The former Story caller of
+Partner Briefing provides a factual count/range overview, then a collapsed
+10-second preview of at most the first three chronological source-bound parts.
+This preview is a deterministic prefix, not an importance ranking; every visible
+line opens its exact source record. `자세히 보기` replaces that preview with the
+full expandable day/period hierarchy, still progressively paged for large
+windows. Existing moment cards, exact navigation, closing card, and explicit
+acknowledgement remain unchanged. Generating, opening, scrolling, or following a
+briefing link never writes CONFIRMED. The former Story caller of
 `useOnDeviceDailySummary` has been removed; the `dailySummary` module remains in
 the repository for compatibility tests and rollback until a separate dead-code
 cleanup proves all remaining consumers and native registration safe to remove.
 
 Deterministic display candidate selection remains closed-extractive. It scores
 only supplied exact-source sentences and prefers more concrete, complete event /
-action / plan / place / object wording over short generic openings. Meaning-
-dependent correction/negation continuations such as `아니`, `사실`, `하지만`
-are conservatively kept with the preceding source sentence so extracting the
-first clause cannot reverse the written meaning. Ties preserve source order.
+action / plan / place / object wording over short generic openings. Raw length is
+only a capped completeness signal, so a verbose abstract emotion sentence cannot
+win merely because it is longer. Generic `하다` / `did` auxiliaries are not
+accepted as concrete-event evidence by themselves. Meaning-dependent correction /
+negation continuations such as `아니`, `사실`, `하지만`, `정확히는` are
+conservatively kept with the **immediately preceding source span** so repeated
+identical sentences cannot cause a correction to bind to an older duplicate.
+Ties preserve source order.
 
 Native refinement keeps the same ordinal-only boundary. iOS Foundation Models
 and Android ML Kit prompts may choose only supplied candidates and are instructed

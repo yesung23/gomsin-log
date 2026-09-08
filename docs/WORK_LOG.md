@@ -10868,3 +10868,106 @@ web `<input type="file">` → out-of-process PHPicker라 옳고, `applesignin` �
 
 ### PRODUCTION
 - NOT APPLIED — isolated local worktree only.
+
+## 2026-09-08 · Codex · Summary V2 quality audit and refinement
+
+### PLAN POSITION
+- Phase: 상대 하루 요약/브리핑 품질 고도화
+- Workstream: PartnerBriefing + active `generateDailySummary` callers
+- Step: 실제 출력 품질/원본 추적성/정정 문맥/홈·기록 요약 일관성 재감사 및 수정
+- Previous Gate: Summary V2 unified Partner Briefing @ `14e1c0c1425a314ef4afe39934cadacbad58d63f`
+- This Gate: targeted quality delta implemented; exact-branch full app suite remains environment-blocked
+
+### DIRECTION CHECK
+- Product source checked: `docs/V4_AS_BUILT.md`, current Story/Record/Home summary call paths
+- Business source checked / NOT APPLICABLE: `docs/BUSINESS_MEMORY_ROADMAP_V1.md` §7 — 사실 중심 요약, 시간순 정리, 중요 추억 자동 선정/숨은 감정 추론 금지
+- Engineering source checked: `AGENTS.md`, `CLAUDE.md`, `docs/skills/release-validation.md`
+- Current-state checked: `bash scripts/agent/session-start.sh`, repository code, `docs/CURRENT_STATE.md`
+- Latest relevant Work Log checked: 2026-09-08 Summary V2 unified Partner Briefing
+- MASTER PLAN version / 기준일: active V4 + PartnerBriefing unified summary contract / 2026-09-08
+- Does this task conflict with canonical direction? NO
+- If YES, what conflict: N/A
+
+### OWNERSHIP
+- Tool: ChatGPT DevSpace
+- Model: GPT-5.6 Sol
+- Role: primary implementer/verifier
+- PR: 없음
+- Branch: `codex/summary-v2-quality-refinement`
+- Base SHA: `14e1c0c1425a314ef4afe39934cadacbad58d63f`
+- Old HEAD: `14e1c0c1425a314ef4afe39934cadacbad58d63f`
+- New HEAD / Reviewed HEAD: commit 전 working tree; final commit SHA는 이후 Git 기록이 소유
+
+### CHANGED / REVIEWED
+- file: `src/lib/partnerBriefing/fallback.ts` + tests
+- function/component/migration: exact-source candidate extraction / deterministic candidate scoring
+- what changed/reviewed: correction continuation을 문자열 `indexOf`가 아니라 즉시 앞 source span과 결합; 길이 가중치 축소; concrete event signal 강화; generic `하다/did`를 concrete evidence에서 제외
+- why: 반복 문장 정정 오결합과 긴 추상 감정 문장의 우선 선택을 방지
+- file: `src/components/widgets/PartnerBriefingCard.tsx` + Story/UI tests
+- what changed/reviewed: collapsed 첫 화면에 시간순 exact-source part 최대 3개를 즉시 표시하고 각 줄 exact original 이동
+- why: 기존 10초 표면이 개수/기간만 말하고 실제 사건을 알려주지 못함
+- file: `src/lib/briefing.ts`, `RecordPage.tsx`, 관련 tests
+- what changed/reviewed: active legacy summary caller를 closed-extractive selector에 정렬; 긴 일기 전체 복제 제거; 4+ 기록에서 시간순 text 최대 3개; 실제 photo/video/voice attachment 개수; date-neutral/tag-faithful copy; empty valid record neutral item
+- why: Record/Home 경로가 아직 실제 사용자에게 노출되어 PartnerBriefing만 고쳐서는 summary 품질이 일관되지 않음
+- file: `PartnerEmotionWidgets.tsx`, `widgetComponents.tsx`, `summaryJumpTargets.test.ts`
+- what changed/reviewed: factual summary item을 conversation opener보다 우선; 현재 표시 headline과 exact-original target을 동일 source로 결합
+- why: “오늘의 요약”이 질문을 먼저 보여주거나 화면에 보이는 emotion flow와 다른 record를 여는 mismatch 수정
+- file: `docs/V4_AS_BUILT.md`, `docs/PARTNER_BRIEFING_ARCHITECTURE.md`, `docs/CURRENT_STATE.md`
+- what changed/reviewed: 실제 Summary V2 동작과 검증 경계를 현재 코드에 맞게 갱신
+
+### EXPLICITLY NOT CHANGED
+- crypto semantics: 변경 없음
+- DB/migration semantics: 변경 없음
+- product semantics: importance ranking/자동 중요 추억 선택 추가 없음; preview는 시간순 prefix
+- native provider/prompt: 이번 follow-up에서는 변경 없음
+- Production: remote Supabase/Vercel/TestFlight/App Store/Google Play 변경 없음
+
+### VERIFICATION
+- command: worktree-root minimal Vitest `src/lib/partnerBriefing/fallback.test.ts`
+- PASS / FAIL / UNVERIFIED: PASS — 77 tests
+- what it actually proves: exact-span correction, concrete-over-abstract selection, bilingual/exact-source fallback regressions
+- command: esbuild current-worktree `src/lib/briefing.ts` + Node assertions
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: concrete summary, actual attachment counts, neutral empty record, date-neutral hard/good opener, private/unreadable exclusion, item-first target, 4+ three-item output
+- command: esbuild current-worktree UI bundles (`PartnerBriefingCard`, `PartnerEmotionWidgets`, `widgetComponents`, `RecordPage`)
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: modified TS/TSX import/type syntax can bundle with the existing dependency tree; runtime UI behavior is not fully exercised
+- command: changed test-file esbuild compile
+- PASS / FAIL / UNVERIFIED: PASS
+- what it actually proves: changed test syntax/import bundling only; tests themselves were not executed by this step
+- command: `git diff --check`
+- PASS / FAIL / UNVERIFIED: PASS
+- command: `bash scripts/agent/validate.sh app`
+- PASS / FAIL / UNVERIFIED: UNVERIFIED for app gates — `git diff --check` PASS; typecheck/lint/test/build could not start because this isolated worktree has no `tsc`/`eslint`/`vitest` executables
+- what it actually proves: environment precondition is missing; this is not a code-test failure. Prior 29 files / 736 tests + typecheck/lint evidence belongs to the previous base and is not reused as fresh proof for this delta.
+
+### REVIEW IMPACT
+- DELTA — summary selection/presentation/navigation behavior changed; security/E2EE/DB semantics unchanged
+- earlier review freshness: prior Summary V2 logic review does not cover these new quality edits; targeted fresh verification above applies, full integration verification remains required
+
+### BLOCKERS
+- code: no known P0/P1 from current targeted audit
+- environment: isolated worktree lacks node_modules executables; exact-branch full typecheck/lint/Vitest/build unavailable
+- external/manual: physical iPhone/Android on-device quality, latency, heat, battery, cancellation/repeat runs UNVERIFIED
+
+### STOPPED AT
+- exact completed boundary: summary quality fixes + regression coverage + current-state docs; no merge/production mutation
+
+### REMAINING
+- full app suite/typecheck/lint/build on this exact branch with dependencies installed
+- real Korean/English user-corpus quality sampling for heuristic selector
+- physical iPhone Foundation Models / Android ML Kit validation
+- separate legacy `dailySummary`/native summary package cleanup only after active caller/dead-code gate
+
+### NEXT ACTION
+- next owner: integrator/verifier
+- tool/model: fresh dependency-enabled DevSpace/Codex; device QA separately
+- 기준 SHA: final local feature commit on `codex/summary-v2-quality-refinement`
+- exact next task: rerun release-validation app gate on exact branch, then review diff before any merge
+
+### DO NOT ADVANCE UNTIL
+- exact branch full app gate is green or any failures are triaged
+- physical device evidence before claiming on-device summary quality/release readiness
+
+### PRODUCTION
+- NOT APPLIED — isolated local feature branch only.

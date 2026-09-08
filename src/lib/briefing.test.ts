@@ -37,6 +37,30 @@ describe('briefing.ts', () => {
     expect(summary.opener?.recordIds).toEqual(['1']);
   });
 
+  it('keeps a neutral source-linked item when a valid shared record has no text, media, or reaction', () => {
+    const records: DailyRecord[] = [
+      {
+        id: 'empty-but-valid',
+        date: '2024-01-01',
+        time: '10:00',
+        authorRole: 'gomsin',
+        log: '',
+        isPrivate: false,
+        createdAt: '2024-01-01T10:00:00Z',
+      },
+    ];
+
+    const summary = generateDailySummary(records, '철수');
+    expect(summary.items).toEqual([
+      {
+        id: 'sum-record-empty-but-valid',
+        text: '기록을 남겼어요.',
+        recordIds: ['empty-but-valid'],
+        kind: 'moment',
+      },
+    ]);
+  });
+
   it('creates a grounded summary when there are at least two shared records', () => {
     const records: DailyRecord[] = [
       {
@@ -62,10 +86,12 @@ describe('briefing.ts', () => {
 
     const summary = generateDailySummary(records, '철수');
     expect(summary.items).toHaveLength(1);
-    expect(summary.items[0].text).toContain('철수');
+    expect(summary.items[0].text).toContain('오늘 아침 일이 많아서 정말 힘들었다.');
+    expect(summary.items[0].text).not.toContain('철수');
     expect(summary.items[0].recordIds).toEqual(['1']);
     expect(summary.opener).toBeDefined();
     expect(summary.opener?.recordIds).toEqual(['1']);
+    expect(summary.opener?.text).toBe('힘들었다고 남긴 순간, 무슨 일이 있었어?');
   });
 
   it('never uses private records in a daily summary, even when it is the only other record', () => {
@@ -109,6 +135,96 @@ describe('briefing.ts', () => {
    * only the substring "업무" did. The opener must never assert more than an
    * explicit tag already says.
    */
+  it('uses up to three chronological exact-source text items when 4+ records exist', () => {
+    const records: DailyRecord[] = Array.from({ length: 4 }, (_, index) => ({
+      id: `text-${index + 1}`,
+      date: '2024-01-01',
+      time: `${10 + index}:00`,
+      authorRole: 'gomsin' as const,
+      log: `기록 ${index + 1}에서 친구랑 카페에 갔어.`,
+      isPrivate: false,
+      createdAt: `2024-01-01T${10 + index}:00:00Z`,
+    }));
+
+    const summary = generateDailySummary(records, '철수');
+    expect(summary.items).toHaveLength(3);
+    expect(summary.items.map((item) => item.recordIds[0])).toEqual(['text-1', 'text-2', 'text-3']);
+    expect(summary.items.map((item) => item.text)).toEqual([
+      '“기록 1에서 친구랑 카페에 갔어.”라고 기록했어요.',
+      '“기록 2에서 친구랑 카페에 갔어.”라고 기록했어요.',
+      '“기록 3에서 친구랑 카페에 갔어.”라고 기록했어요.',
+    ]);
+  });
+
+  it('counts actual media attachments rather than records containing media', () => {
+    const records: DailyRecord[] = [
+      {
+        id: 'media-1',
+        date: '2024-01-01',
+        time: '10:00',
+        authorRole: 'gomsin',
+        log: '',
+        isPrivate: false,
+        attachments: [
+          { type: 'photo', name: 'a.jpg', url: 'a' },
+          { type: 'photo', name: 'b.jpg', url: 'b' },
+          { type: 'video', name: 'c.mp4', url: 'c' },
+        ],
+        createdAt: '2024-01-01T10:00:00Z',
+      },
+      {
+        id: 'media-2',
+        date: '2024-01-01',
+        time: '11:00',
+        authorRole: 'gomsin',
+        log: '',
+        isPrivate: false,
+        attachments: [{ type: 'voice', name: 'd.m4a', url: 'd' }],
+        createdAt: '2024-01-01T11:00:00Z',
+      },
+      {
+        id: 'plain',
+        date: '2024-01-01',
+        time: '12:00',
+        authorRole: 'gomsin',
+        log: '점심 먹었어.',
+        isPrivate: false,
+        createdAt: '2024-01-01T12:00:00Z',
+      },
+      {
+        id: 'plain-2',
+        date: '2024-01-01',
+        time: '13:00',
+        authorRole: 'gomsin',
+        log: '산책했어.',
+        isPrivate: false,
+        createdAt: '2024-01-01T13:00:00Z',
+      },
+    ];
+
+    const summary = generateDailySummary(records, '철수');
+    expect(summary.items.some((item) => item.text === '사진 2장, 동영상 1개, 음성 1개를 남겼어요.')).toBe(true);
+  });
+
+  it('uses date-neutral copy so archived-day summaries do not claim the records happened today', () => {
+    const records: DailyRecord[] = [
+      {
+        id: 'old-hard',
+        date: '2024-01-01',
+        time: '10:00',
+        authorRole: 'gomsin',
+        log: '시험이 끝났어.',
+        reaction: 'hard',
+        isPrivate: false,
+        createdAt: '2024-01-01T10:00:00Z',
+      },
+    ];
+
+    const summary = generateDailySummary(records, '철수');
+    expect(JSON.stringify(summary)).not.toContain('오늘');
+    expect(summary.opener?.text).toBe('힘들었다고 남긴 순간, 무슨 일이 있었어?');
+  });
+
   it('never invents a time of day or emotional state from a keyword in the log text', () => {
     const records: DailyRecord[] = [
       {

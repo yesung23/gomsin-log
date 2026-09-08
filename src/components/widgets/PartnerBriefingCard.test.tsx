@@ -65,9 +65,49 @@ describe('PartnerBriefingCard (Phase B2 Gate)', () => {
     expect(controlsId).toBeTruthy();
     expect(controlsId).toContain('details');
 
-    // Initial details absent
+    // Initial details stay collapsed, but the first chronological source-backed lines
+    // are visible immediately so the 10-second surface contains actual context.
     expect(screen.queryByTestId('partner-briefing-details')).toBeNull();
-    expect(screen.queryByText('“아침 먹었어”라고 기록했어요.')).toBeNull();
+    expect(screen.getByText('“아침 먹었어”라고 기록했어요.')).toBeTruthy();
+    expect(screen.getByText('사진 1장을 남겼어요.')).toBeTruthy();
+    expect(screen.getByText('“오늘 하루 수고했어”라고 기록했어요.')).toBeTruthy();
+  });
+
+  it('collapsed preview opens the exact source record and caps itself at three source parts', async () => {
+    const user = userEvent.setup();
+    const briefing = createMockBriefing({
+      sourceCount: 4,
+      overview: {
+        text: '총 4개의 기록이 있습니다.',
+        sourceRecordIds: ['rec-1', 'rec-2', 'rec-3', 'rec-4'],
+      },
+      days: [
+        {
+          date: '2026-08-26',
+          sections: [
+            {
+              period: 'morning',
+              items: [
+                { parts: [{ text: '첫 기록', sourceRecordId: 'rec-1' }] },
+                { parts: [{ text: '둘째 기록', sourceRecordId: 'rec-2' }] },
+                { parts: [{ text: '셋째 기록', sourceRecordId: 'rec-3' }] },
+                { parts: [{ text: '넷째 기록', sourceRecordId: 'rec-4' }] },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    render(<PartnerBriefingCard briefing={briefing} onOpenRecord={onOpenRecord} />);
+
+    expect(screen.getByText('첫 기록')).toBeTruthy();
+    expect(screen.getByText('둘째 기록')).toBeTruthy();
+    expect(screen.getByText('셋째 기록')).toBeTruthy();
+    expect(screen.queryByText('넷째 기록')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: /첫 기록/ }));
+    expect(onOpenRecord).toHaveBeenCalledWith('rec-1');
   });
 
   it('English singular/plural and copy', async () => {

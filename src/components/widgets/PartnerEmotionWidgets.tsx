@@ -146,8 +146,8 @@ export function PartnerEmotionSummaryWidget() {
     [todays, partnerName],
   );
 
-  const headline = summary.opener?.text
-    || summary.items[0]?.text
+  const headline = summary.items[0]?.text
+    || summary.opener?.text
     || (todays.length > 0 ? `${partnerName}이 오늘 ${todays.length}개의 순간을 공유했어요.` : null);
 
   return (

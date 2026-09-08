@@ -261,7 +261,10 @@ describe('/story/partner', () => {
       expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
       expect(screen.getByText('순간 8개')).toBeTruthy();
       expect(screen.getByText('1 / 10')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: /기록 1/ })).toBeNull();
+      expect(screen.getByTestId('partner-briefing-preview')).toBeTruthy();
+      expect(screen.getByRole('button', { name: /기록 1/ })).toBeTruthy();
+      expect(screen.getByRole('button', { name: /기록 3/ })).toBeTruthy();
+      expect(screen.queryByRole('button', { name: /기록 4/ })).toBeNull();
 
       await userEvent.click(screen.getByTestId('partner-briefing-expand'));
       expect(screen.getAllByRole('button', { name: '원본 보기' })).toHaveLength(8);
@@ -361,8 +364,9 @@ describe('/story/partner', () => {
         // 표지와 브리핑이 겹쳐서 두 장이 되지 않는다: 앞 장은 언제나 정확히 한 장이고,
         // 카드 수는 표지일 때와 같은 4다 -- 그래서 늦게 도착해도 위치가 밀리지 않는다.
         expect(screen.getByTestId('partner-briefing-card')).toBeTruthy();
-        // 표지는 물러났다: 첫 장에 표지의 점프 줄이 없다.
-        expect(screen.queryByRole('button', { name: /첫 기록/ })).toBeNull();
+        // 표지는 물러났고 브리핑 자체의 source-bound 10초 preview가 첫 장을 소유한다.
+        expect(screen.getByTestId('partner-briefing-preview')).toBeTruthy();
+        expect(screen.getByRole('button', { name: /첫 기록/ })).toBeTruthy();
         expect(screen.getByText('1 / 4')).toBeTruthy();
       });
     });

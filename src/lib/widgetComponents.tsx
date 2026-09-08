@@ -95,23 +95,26 @@ export const TodayBriefingWidget = () => {
 
   const emotionBriefing = generateEmotionFlowBriefing(partnerShared);
   const summary = generateDailySummary(partnerShared, partnerName);
+  const headline = emotionBriefing?.flowText
+    || summary.items[0]?.text
+    || summary.opener?.text
+    || `${partnerName}이 오늘 ${partnerShared.length}개의 순간을 공유했어요.`;
+  const headlineTarget = emotionBriefing?.recordId
+    ?? summaryTargetRecordId(summary)
+    ?? partnerShared[0]?.id;
 
   return (
     <WidgetCard
       title="오늘의 브리핑"
       onClick={() => {
-        // Land on the record the briefing is about, not just on the page.
-        const target = summaryTargetRecordId(summary) ?? partnerShared[0]?.id;
-        if (target) setHighlightedRecordId(target);
-        navigate(target ? `/record?record=${target}` : '/record');
+        // Land on the exact record represented by the text currently visible in the widget.
+        if (headlineTarget) setHighlightedRecordId(headlineTarget);
+        navigate(headlineTarget ? `/record?record=${headlineTarget}` : '/record');
       }}
     >
       {partnerShared.length > 0 ? (
         <p className="text-caption text-muted-foreground font-medium leading-relaxed break-keep">
-          {emotionBriefing?.flowText ||
-            summary.opener?.text ||
-            summary.items[0]?.text ||
-            `${partnerName}이 오늘 ${partnerShared.length}개의 순간을 공유했어요.`}
+          {headline}
         </p>
       ) : (
         <WidgetEmpty>

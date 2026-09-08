@@ -853,7 +853,7 @@ export function RecordPage() {
           )}
         </div>
 
-        {/* Day Summary Card (only if 2+ shared records) */}
+        {/* Day Summary Card — one valid shared record is enough; every row keeps exact-source navigation. */}
         {selectedDaySummary.items.length > 0 && (
           <div className="mb-3 rounded-surface bg-lilac/30 border border-lilac/50 px-3 py-2 space-y-1">
             <div className="flex items-center justify-between text-caption text-foreground">

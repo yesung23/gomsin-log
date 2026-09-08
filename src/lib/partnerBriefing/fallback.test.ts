@@ -191,6 +191,30 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       expect(selected?.candidateOrdinal).toBe(0);
     });
 
+    it('does not mistake a long abstract emotion sentence for a more informative concrete event', () => {
+      const source = '진짜 너무너무 힘들고 아무것도 하기 싫고 그냥 계속 답답하고 속상하고 복잡한 하루였어. 점심에는 친구랑 카페에 갔어.';
+      const candidates = buildBriefingExtractCandidates(source, 'ko');
+      const selected = selectDeterministicBriefingCandidate(candidates);
+
+      expect(selected?.text).toBe('점심에는 친구랑 카페에 갔어.');
+    });
+
+    it('uses the same concrete-over-abstract rule for English fallback', () => {
+      const source = 'I felt extremely overwhelmed and upset and confused and exhausted for most of the entire day. I met a friend at a cafe after lunch.';
+      const candidates = buildBriefingExtractCandidates(source, 'en');
+      const selected = selectDeterministicBriefingCandidate(candidates);
+
+      expect(selected?.text).toBe('I met a friend at a cafe after lunch.');
+    });
+
+    it('does not treat generic 하다/did auxiliaries inside emotion statements as concrete events', () => {
+      const source = '오늘 하루 종일 걱정했어. 저녁에 영화 봤어.';
+      const candidates = buildBriefingExtractCandidates(source, 'ko');
+      const selected = selectDeterministicBriefingCandidate(candidates);
+
+      expect(selected?.text).toBe('저녁에 영화 봤어.');
+    });
+
     it.each([
       ['부정', '좋았어. 아니 사실 별로였어.'],
       ['정정', '오늘 세 번 만났어. 아니 두 번이야.'],
@@ -200,6 +224,16 @@ describe('Partner Briefing Deterministic Fallback & Candidate Helpers (Gate A7.1
       expect(candidates).toHaveLength(1);
       expect(candidates[0].text).toBe(source);
       expect(formatDeterministicBriefingItemText({ text: source, mediaKinds: [] })).toContain(source);
+    });
+
+    it('combines a correction with the immediately preceding repeated sentence, not the first duplicate', () => {
+      const source = '좋았어. 좋았어. 아니 사실 별로였어.';
+      const candidates = buildBriefingExtractCandidates(source, 'ko');
+
+      expect(candidates).toEqual([
+        { candidateOrdinal: 0, text: '좋았어.' },
+        { candidateOrdinal: 1, text: '좋았어. 아니 사실 별로였어.' },
+      ]);
     });
 
     it.each([

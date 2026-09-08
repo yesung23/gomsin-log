@@ -1,10 +1,16 @@
 import type { DailyRecord, DailySummary, SummaryItem } from '@/types';
 import { isRecordContentAvailable } from '@/lib/recordAvailability';
 import { basicEmotionLabelOf } from '@/lib/basicEmotions';
+import {
+  buildBriefingExtractCandidates,
+  formatAttributedBriefingItemText,
+  formatMediaItemText,
+  selectDeterministicBriefingCandidate,
+} from '@/lib/partnerBriefing/fallback';
 
 export function generateDailySummary(
   records: DailyRecord[],
-  partnerName: string
+  _partnerName: string
 ): DailySummary {
   // Filter out private records, sort chronologically
   const sharedRecords = records
@@ -42,53 +48,74 @@ export function generateDailySummary(
 
   const items: SummaryItem[] = [];
 
-  // Find records with reactions or key media
+  // Find records with explicit reactions or key media.
   const hardRecord = sharedRecords.find((r) => r.reaction === 'hard');
   const goodRecord = sharedRecords.find((r) => r.reaction === 'good' || r.reaction === 'thought_of_you');
-  const photoRecords = sharedRecords.filter((r) => r.attachments?.some((a) => a.type === 'photo'));
-  const voiceRecords = sharedRecords.filter((r) => r.attachments?.some((a) => a.type === 'voice'));
   const textRecords = sharedRecords.filter((r) => r.log && r.log.trim());
+  const mediaRecords = sharedRecords.filter((r) =>
+    r.attachments?.some((a) => a.type === 'photo' || a.type === 'video' || a.type === 'voice'),
+  );
 
-  // 1. Mood item if present
+  // 1. Exact-source text first. The old path copied an entire log verbatim, which can turn
+  // a "quick summary" into a full diary entry. Reuse the same closed-extractive candidate
+  // selector as PartnerBriefing so the compact surface stays source-grounded and bounded.
+  for (const target of textRecords) {
+    const selected = selectDeterministicBriefingCandidate(
+      buildBriefingExtractCandidates(target.log || ''),
+    );
+    if (!selected) continue;
+    items.push({
+      id: `sum-text-${target.id}`,
+      text: formatAttributedBriefingItemText(selected.text, 'ko'),
+      recordIds: [target.id],
+      kind: 'moment',
+    });
+  }
+
+  // 2. Count actual media attachments, not records that happen to contain media.
+  if (mediaRecords.length > 0) {
+    const mediaKinds = sharedRecords.flatMap((record) =>
+      (record.attachments || [])
+        .map((attachment) => attachment.type)
+        .filter((type): type is 'photo' | 'video' | 'voice' =>
+          type === 'photo' || type === 'video' || type === 'voice',
+        ),
+    );
+    const mediaRecord = mediaRecords[0];
+    items.push({
+      id: `sum-media-${mediaRecord.id}`,
+      text: formatMediaItemText(mediaKinds, 'ko'),
+      recordIds: [mediaRecord.id],
+      kind: 'media',
+    });
+  }
+
+  // 3. Explicit user reaction is useful context, but it must not outrank the actual
+  // source text on a one-item quick summary and must not attribute a mixed timeline to
+  // `partnerName`. The wording states only the tag the author explicitly chose.
   if (hardRecord) {
     items.push({
       id: `sum-hard-${hardRecord.id}`,
-      text: `${partnerName}이가 오늘 다소 힘든 순간이 있었어요.`,
+      text: '힘들었다고 표시한 기록이 있어요.',
       recordIds: [hardRecord.id],
       kind: 'mood',
     });
   } else if (goodRecord) {
     items.push({
       id: `sum-good-${goodRecord.id}`,
-      text: `${partnerName}이가 오늘 기분 좋은 순간을 남겼어요.`,
+      text: '기분 좋은 순간으로 표시한 기록이 있어요.',
       recordIds: [goodRecord.id],
       kind: 'mood',
     });
   }
 
-  // 2. Key text item
-  if (textRecords.length > 0) {
-    const target = textRecords[0];
+  if (items.length === 0) {
+    const target = sharedRecords[0];
     items.push({
-      id: `sum-text-${target.id}`,
-      text: `"${target.log}"`,
+      id: `sum-record-${target.id}`,
+      text: '기록을 남겼어요.',
       recordIds: [target.id],
       kind: 'moment',
-    });
-  }
-
-  // 3. Media summary item
-  if (photoRecords.length > 0 || voiceRecords.length > 0) {
-    const mediaRecord = photoRecords[0] || voiceRecords[0];
-    const mediaTypes: string[] = [];
-    if (photoRecords.length > 0) mediaTypes.push(`사진 ${photoRecords.length}장`);
-    if (voiceRecords.length > 0) mediaTypes.push(`음성 ${voiceRecords.length}개`);
-
-    items.push({
-      id: `sum-media-${mediaRecord.id}`,
-      text: `오늘 타임라인에 ${mediaTypes.join(', ')} 기록이 등록되었어요.`,
-      recordIds: [mediaRecord.id],
-      kind: 'media',
     });
   }
 
@@ -110,14 +137,14 @@ export function generateDailySummary(
    * EXPLICIT tag the author chose, and neither one asserts a fact about the
    * content of the record beyond what the tag itself already says.
    */
-  let openerText = `오늘 제일 기억에 남는 순간이 언제였어?`;
+  let openerText = `제일 기억에 남는 순간이 언제였어?`;
   let openerRecordId = sharedRecords[sharedRecords.length - 1].id;
 
   if (hardRecord) {
-    openerText = `오늘 제일 정신없었던 순간이 언제였어? 고생했어!`;
+    openerText = `힘들었다고 남긴 순간, 무슨 일이 있었어?`;
     openerRecordId = hardRecord.id;
   } else if (goodRecord) {
-    openerText = `오늘 기분 좋은 일 있었다면서! 무슨 일이었어?`;
+    openerText = `좋았다고 남긴 순간, 무슨 일이 있었어?`;
     openerRecordId = goodRecord.id;
   }
 
@@ -140,13 +167,13 @@ export function generateDailySummary(
  * The record a summary is most about, for jumping to the original.
  *
  * README section 1 promises that tapping a summary lands on the original record.
- * `opener` is the headline these widgets actually display, so it is the first
- * choice; `items[0]` is what they fall back to when there is no opener, so it is
- * the fallback here too. Returns `undefined` when the summary describes no
+ * `items[0]` is the factual summary line these widgets now display first; `opener`
+ * is a conversation prompt and is only the fallback when there is no summary item.
+ * Returns `undefined` when the summary describes no
  * specific record, which is not a failure -- it means navigate without a target.
  */
 export function summaryTargetRecordId(summary: DailySummary): string | undefined {
-  return summary.opener?.recordIds[0] ?? summary.items[0]?.recordIds[0];
+  return summary.items[0]?.recordIds[0] ?? summary.opener?.recordIds[0];
 }
 
 export interface EmotionFlowBriefingResult {

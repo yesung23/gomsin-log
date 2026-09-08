@@ -30,14 +30,14 @@ function summary(overrides: Partial<DailySummary> = {}): DailySummary {
 }
 
 describe('summaryTargetRecordId picks what the widget is actually showing', () => {
-  it('prefers the opener, because that is the headline on screen', () => {
+  it('prefers the first factual summary item over the conversation opener', () => {
     expect(summaryTargetRecordId(summary({
       opener: item('open', ['rec-opener']),
       items: [item('a', ['rec-item'])],
-    }))).toBe('rec-opener');
+    }))).toBe('rec-item');
   });
 
-  it('falls back to the first item, which is what the widget falls back to', () => {
+  it('uses the first item when there is no opener', () => {
     expect(summaryTargetRecordId(summary({
       items: [item('a', ['rec-item']), item('b', ['rec-other'])],
     }))).toBe('rec-item');
@@ -50,10 +50,11 @@ describe('summaryTargetRecordId picks what the widget is actually showing', () =
 });
 
 describe('every home summary hands the record page a destination', () => {
-  it('오늘의 브리핑 targets the record it summarises', () => {
+  it('오늘의 브리핑 targets the exact content it is actually showing', () => {
     const source = read('src/lib/widgetComponents.tsx');
-    expect(source).toContain('const target = summaryTargetRecordId(summary) ?? partnerShared[0]?.id;');
-    expect(source).toContain('if (target) setHighlightedRecordId(target);');
+    expect(source).toContain('const headlineTarget = emotionBriefing?.recordId');
+    expect(source).toContain('?? summaryTargetRecordId(summary)');
+    expect(source).toContain('if (headlineTarget) setHighlightedRecordId(headlineTarget);');
   });
 
   it('오늘의 요약 targets the record it summarises', () => {

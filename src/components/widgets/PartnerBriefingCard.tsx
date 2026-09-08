@@ -54,6 +54,7 @@ const VIEW_ORIGINAL_LABELS: Record<BriefingLocale, string> = {
 };
 
 const GROUPS_PER_PAGE = 20;
+const COLLAPSED_PREVIEW_PARTS = 3;
 
 function formatShowMoreLabel(count: number, locale: BriefingLocale): string {
   return locale === 'en' ? `Show ${count} more` : `${count}개 더 보기`;
@@ -79,10 +80,18 @@ export function PartnerBriefingCard({
 
   const hasDays = briefing.days.length > 0;
   let totalGroupCount = 0;
+  const collapsedPreviewParts: Array<{ text: string; sourceRecordId: string }> = [];
 
   for (const day of briefing.days) {
     for (const section of day.sections) {
       totalGroupCount += section.items.length;
+      for (const item of section.items) {
+        for (const part of item.parts) {
+          if (collapsedPreviewParts.length < COLLAPSED_PREVIEW_PARTS) {
+            collapsedPreviewParts.push(part);
+          }
+        }
+      }
     }
   }
 
@@ -123,6 +132,35 @@ export function PartnerBriefingCard({
         <p className="text-body text-foreground break-keep">
           {briefing.overview.text}
         </p>
+      ) : null}
+
+      {/*
+        Collapsed 10-second preview.
+
+        The overview above is intentionally factual (count/range), so by itself it does not
+        tell the reader what actually happened. Show only the first three chronological,
+        source-bound parts here: this is deterministic progressive disclosure, not an
+        "importance" ranking, and every row still opens its exact original record.
+      */}
+      {!expanded && collapsedPreviewParts.length > 0 ? (
+        <ul data-testid="partner-briefing-preview" className="space-y-1">
+          {collapsedPreviewParts.map((part, index) => (
+            <li key={`${part.sourceRecordId}-${index}`}>
+              <button
+                type="button"
+                onClick={() => onOpenRecord(part.sourceRecordId)}
+                className="press-response-row flex w-full min-h-11 items-center gap-3 rounded-control px-1 text-left"
+              >
+                <span className="min-w-0 flex-1 text-body text-foreground break-keep">
+                  {part.text}
+                </span>
+                <span className="shrink-0 text-caption text-muted-foreground">
+                  {VIEW_ORIGINAL_LABELS[locale]}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
       {/* Expand / Collapse Control */}

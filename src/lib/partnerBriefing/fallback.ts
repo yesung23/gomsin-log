@@ -76,16 +76,23 @@ export function buildBriefingExtractCandidates(
     if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
       const segmenter = new Intl.Segmenter(contentLocale, { granularity: 'sentence' });
       const rawSegments = Array.from(segmenter.segment(sourceText));
-      const extracted: string[] = [];
+      const extracted: Array<{ start: number; end: number; text: string }> = [];
       const continuationStarts = [
-        '아니', '사실', '근데', '그런데', '하지만', '다만', '정정',
-        'no,', 'no ', 'actually', 'but ', 'however',
+        '아니', '아니야', '사실', '근데', '그런데', '하지만', '다만', '정정', '정확히는', '오히려',
+        'no,', 'no ', 'actually', 'but ', 'however', 'rather',
       ] as const;
 
       for (let index = 0; index < rawSegments.length; index += 1) {
         const seg = rawSegments[index];
-        const trimmed = seg.segment.trim();
-        if (trimmed.length === 0 || !sourceText.includes(trimmed)) continue;
+        const raw = seg.segment;
+        const trimmed = raw.trim();
+        if (trimmed.length === 0) continue;
+
+        const leadingWhitespaceLength = raw.length - raw.trimStart().length;
+        const start = seg.index + leadingWhitespaceLength;
+        const end = seg.index + raw.trimEnd().length;
+        const exactText = sourceText.slice(start, end);
+        if (exactText !== trimmed) continue;
 
         const lower = trimmed.toLocaleLowerCase();
         const meaningDependsOnPrevious = continuationStarts.some((prefix) => lower.startsWith(prefix))
@@ -93,25 +100,19 @@ export function buildBriefingExtractCandidates(
 
         if (meaningDependsOnPrevious && extracted.length > 0) {
           const previous = extracted.pop()!;
-          const previousStart = sourceText.indexOf(previous);
-          const currentStart = sourceText.indexOf(trimmed, Math.max(0, previousStart + previous.length));
-          if (previousStart >= 0 && currentStart >= 0) {
-            const combined = sourceText
-              .slice(previousStart, currentStart + trimmed.length)
-              .trim();
-            if (combined.length > 0 && sourceText.includes(combined)) {
-              extracted.push(combined);
-              continue;
-            }
+          const combined = sourceText.slice(previous.start, end);
+          if (combined.length > 0) {
+            extracted.push({ start: previous.start, end, text: combined });
+            continue;
           }
           extracted.push(previous);
         }
 
-        extracted.push(trimmed);
+        extracted.push({ start, end, text: exactText });
       }
 
       if (extracted.length > 0) {
-        return extracted.map((text, candidateOrdinal) => ({
+        return extracted.map(({ text }, candidateOrdinal) => ({
           candidateOrdinal,
           text,
         }));
@@ -181,20 +182,27 @@ const GENERIC_EXTRACT_PATTERNS = [
   /^(그랬어|그랬어요|좋았어|좋았어요|힘들었어|힘들었어요|별로였어|별로였어요)[.!?…]*$/u,
 ] as const;
 
+const CONCRETE_EVENT_PATTERN = /(갔|왔|먹|마셨|봤|만났|샀|가려고|갈 예정|먹으러|보러|학교|회사|집|카페|식당|빵집|병원|공원|친구|수업|회의|운동|산책|공부|과제|숙제|청소|요리|게임|영화|데이트|쇼핑|출근|퇴근|알바|시험|발표|비|눈|버스|지하철|사진|영상|음성|\b(?:went|came|ate|drank|saw|met|bought|going|school|work|home|cafe|restaurant|hospital|park|friend|class|meeting|workout|walk|study|homework|clean|cook|game|movie|date|shopping|shift|exam|presentation|rain|snow|bus|subway|photo|video|voice|breakfast|lunch|dinner)\b)/iu;
+const ABSTRACT_EMOTION_PATTERN = /(힘들|답답|속상|복잡|불안|걱정|슬프|우울|화나|짜증|기쁘|행복|좋았|별로|overwhelm|upset|confus|exhaust|anxious|worried|sad|angry|happy|frustrat)/iu;
+
 function deterministicCandidateScore(text: string): number {
   const trimmed = text.trim();
   if (trimmed.length === 0) return Number.NEGATIVE_INFINITY;
 
   let score = 0;
   const graphemeLikeLength = Array.from(trimmed).length;
-  score += Math.min(graphemeLikeLength, 80);
+  // Length is useful only as a weak completeness signal. Capping it low prevents a long,
+  // abstract emotion sentence from outranking a shorter concrete event simply by verbosity.
+  score += Math.min(graphemeLikeLength, 32);
 
   if (/[가-힣A-Za-z0-9]/u.test(trimmed)) score += 8;
   if (/[.!?…]$/u.test(trimmed)) score += 4;
   if (/\b\d{1,2}(:\d{2})?\b/u.test(trimmed) || /\d/u.test(trimmed)) score += 3;
-  if (/(갔|왔|먹|마셨|봤|만났|샀|했|했다|했어|했어요|갈|가려|오려|먹으|보러|학교|회사|집|카페|식당|빵집|병원|공원|친구|수업|회의|운동|산책|비|눈|버스|지하철|사진|영상|음성)/u.test(trimmed)) {
-    score += 12;
-  }
+
+  const hasConcreteEvent = CONCRETE_EVENT_PATTERN.test(trimmed);
+  if (hasConcreteEvent) score += 24;
+  if (!hasConcreteEvent && ABSTRACT_EMOTION_PATTERN.test(trimmed)) score -= 12;
+
   if (GENERIC_EXTRACT_PATTERNS.some((pattern) => pattern.test(trimmed))) score -= 30;
   if (graphemeLikeLength < 8) score -= 12;
 

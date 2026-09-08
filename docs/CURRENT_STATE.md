@@ -26,6 +26,15 @@
 | `BETA` | BLOCKS BETA |
 | `PROD` | BLOCKS PRODUCTION |
 
+## 0C. Unified Partner Briefing checkpoint — 2026-09-08
+
+- `/story/partner`의 오늘/놓친 구간은 이제 같은 `PartnerBriefing` 제품 계약을 사용한다. `VITE_PARTNER_BRIEFING_ENABLED`는 브리핑 자체가 아니라 iOS/Android 온디바이스 refinement만 제어한다. flag가 꺼지거나 모델이 실패해도 deterministic exact-source briefing은 즉시 존재한다.
+- Story의 active caller에서 legacy `useOnDeviceDailySummary`가 제거됐다. `src/lib/dailySummary/**`와 `packages/capacitor-on-device-summary/**`는 rollback/호환성 검증을 위해 아직 삭제하지 않았다.
+- deterministic extract는 첫 문장 고정 대신 exact-source candidate를 점수화해 구체적인 사건·행동·계획·장소·사물이 드러나는 완전한 문장을 우선한다. 부정·정정·반전 문맥(`아니`, `사실`, `하지만` 등)은 앞 문장과 exact substring으로 보수적으로 묶어 의미 반전을 막는다.
+- iOS Foundation Models와 Android ML Kit GenAI는 display text를 생성하지 않고 supplied candidate ordinal만 선택한다. prompt는 감정 강도·건강·의도·원인·관계 상태 추론을 금지한다.
+- `usePartnerBriefing`은 semantic input key와 별도로 input revision을 묶어 A → B → A source 전환에서 과거 A refinement가 다시 보이는 stale resurrection을 차단한다.
+- 2026-09-08 로컬 검증: summary/briefing/story 관련 Vitest 29 files / 736 tests PASS, `npm run typecheck` PASS, `npm run lint` PASS. iOS/Android native compile은 이 격리 worktree의 release 환경이 불완전해 UNVERIFIED: web build는 `VITE_SUPABASE_URL` 부재로 중단됐고, Android Gradle은 `capacitor-cordova-android-plugins/cordova.variables.gradle` 미생성으로 중단됐다. 실기기 품질/발열/메모리/latency는 이번 작업에서 수행하지 않았다.
+
 ## 0A. Active working checkpoint — 2026-08-25
 
 - The product owner explicitly moved `docs/PRODUCT_V3.md` to **legacy**. Do not use

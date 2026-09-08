@@ -269,27 +269,58 @@ The active path is:
 PaperHome -> /story/partner -> StoryRoute -> StoryViewer
 ```
 
-`PartnerDayTimelineWidget` is not the integration surface. With the new feature
-flag off, the current daily-summary cover remains. With the flag on, Partner
-Briefing is the first compression layer and the old cover is not rendered:
+`PartnerDayTimelineWidget` is not the integration surface. As of the unified
+summary-v2 migration, `PartnerBriefing` is the canonical compression contract for
+`/story/partner` regardless of whether native refinement is enabled:
 
 ```text
-flag OFF: old dailySummary cover -> moment cards -> closing
-flag ON:  Partner Briefing      -> moment cards -> closing
+PartnerDay OUTSTANDING surface
+  -> deterministic PartnerBriefing immediately
+  -> optional on-device refinement when VITE_PARTNER_BRIEFING_ENABLED=true
+  -> moment cards -> closing
 ```
+
+`VITE_PARTNER_BRIEFING_ENABLED` therefore gates only the native refinement
+provider. Turning it off must never remove the briefing or create an empty state;
+it leaves the deterministic exact-source result in place. If the PartnerBriefing
+corpus cannot be constructed because partner/couple identity is unavailable, the
+existing deterministic Story projection remains as the compatibility fallback.
 
 Partner Briefing provides a short overview, expandable day/period sections, and
 exact original links. Existing moment cards, exact navigation, closing card, and
 explicit acknowledgement remain unchanged. Generating, opening, scrolling, or
-following a briefing link never writes CONFIRMED.
+following a briefing link never writes CONFIRMED. The former Story caller of
+`useOnDeviceDailySummary` has been removed; the `dailySummary` module remains in
+the repository for compatibility tests and rollback until a separate dead-code
+cleanup proves all remaining consumers and native registration safe to remove.
+
+Deterministic display candidate selection remains closed-extractive. It scores
+only supplied exact-source sentences and prefers more concrete, complete event /
+action / plan / place / object wording over short generic openings. Meaning-
+dependent correction/negation continuations such as `아니`, `사실`, `하지만`
+are conservatively kept with the preceding source sentence so extracting the
+first clause cannot reverse the written meaning. Ties preserve source order.
+
+Native refinement keeps the same ordinal-only boundary. iOS Foundation Models
+and Android ML Kit prompts may choose only supplied candidates and are instructed
+to prefer concrete, context-independent candidates, ignore emotional intensity
+as an importance signal, and never infer facts, emotions, health, intent, cause,
+advice, or relationship state.
+
+The hook additionally maintains a monotonically changing input revision alongside
+the semantic input key. This closes the A -> B -> A stale-resurrection case: an
+old refined result for A cannot become current merely because the semantic key
+returns to A after a different source epoch.
 
 ## Migration and rollback
 
-No database migration, projection column, or server AI is required. The initial feature flag is
-default off. Rollback is disabling that flag, which restores the existing cover
-without changing records, receipts, or native keys. Legacy daily-summary removal
-is a separate cleanup gate after imports, call sites, tests, flags, native
-registration, and Story integration prove it dead.
+No database migration, projection column, server AI, receipt change, or E2EE
+protocol change is required. Rollback of native refinement is still the feature
+flag. Rolling back the canonical deterministic PartnerBriefing Story integration
+requires reverting the Story caller change; no records, receipts, or native keys
+need migration. Legacy daily-summary removal remains a separate cleanup gate
+after imports, call sites, tests, flags, native registration, and Story integration
+prove it dead.
 
 ## Phase gates
 
